@@ -1,5 +1,5 @@
 use crate::db::models::McpServer;
-use crate::db::DbState;
+use crate::db::{DbState, record_activity};
 use crate::mcp::config;
 use crate::mcp::health;
 use tauri::State;
@@ -95,6 +95,7 @@ pub fn toggle_mcp_server(id: String, enabled: bool, db: State<'_, DbState>) -> R
         "UPDATE mcp_servers SET status = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![status, chrono::Utc::now().to_rfc3339(), id],
     ).map_err(|e| e.to_string())?;
+    record_activity(&conn, &id, if enabled { "enable" } else { "disable" }, "success", None);
     Ok(())
 }
 
@@ -129,6 +130,8 @@ pub fn install_mcp_server(
          VALUES (?1, ?2, ?3, ?4, ?5, 'stdio', 'local', ?6, 'active', ?7, ?7)",
         rusqlite::params![name, name, command, args_json, env_json, config_path, now],
     ).map_err(|e| e.to_string())?;
+
+    record_activity(&conn, &name, "install", "success", None);
 
     Ok(McpServer {
         id: name.clone(),
@@ -168,6 +171,7 @@ pub fn uninstall_mcp_server(name: String, db: State<'_, DbState>) -> Result<(), 
 
     conn.execute("DELETE FROM mcp_servers WHERE id = ?1", rusqlite::params![name])
         .map_err(|e| e.to_string())?;
+    record_activity(&conn, &name, "uninstall", "success", None);
     Ok(())
 }
 
@@ -211,6 +215,8 @@ pub fn update_mcp_server_config(
         "UPDATE mcp_servers SET command = ?1, args = ?2, env = ?3, updated_at = ?4 WHERE id = ?5",
         rusqlite::params![command, args_json, env_json, now, name],
     ).map_err(|e| e.to_string())?;
+
+    record_activity(&conn, &name, "config_update", "success", None);
 
     Ok(())
 }
@@ -276,6 +282,13 @@ pub fn check_all_mcp_health(db: State<'_, DbState>) -> Result<Vec<health::Health
             health::check_server_health(id, name, cmd, args, env)
         })
         .collect();
+
+    // Log health check results
+    let conn2 = db.0.lock().map_err(|e| e.to_string())?;
+    for r in &results {
+        let status = if r.status == "healthy" { "success" } else { "error" };
+        record_activity(&conn2, &r.server_id, "health_check", status, r.latency_ms.map(|v| v as i64));
+    }
 
     Ok(results)
 }

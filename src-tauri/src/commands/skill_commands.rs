@@ -1,5 +1,5 @@
 use crate::db::models::{Plugin, Skill};
-use crate::db::DbState;
+use crate::db::{DbState, record_activity};
 use crate::skills::{scanner, tools, installer};
 use tauri::State;
 
@@ -115,8 +115,16 @@ pub fn install_skill_file(source: String, target_skills_dir: String) -> Result<S
 }
 
 #[tauri::command]
-pub fn uninstall_skill_file(path: String) -> Result<(), String> {
-    installer::uninstall_skill_file(&path)
+pub fn uninstall_skill_file(path: String, db: State<'_, DbState>) -> Result<(), String> {
+    let skill_name = std::path::Path::new(&path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    installer::uninstall_skill_file(&path)?;
+    if let Ok(conn) = db.0.lock() {
+        record_activity(&conn, &skill_name, "skill_uninstall", "success", None);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -131,10 +139,14 @@ pub fn write_skill_content(file_path: String, content: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn toggle_skill_file(file_path: String, enabled: bool) -> Result<String, String> {
+pub fn toggle_skill_file(file_path: String, enabled: bool, db: State<'_, DbState>) -> Result<String, String> {
+    let skill_name = std::path::Path::new(&file_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.clone());
     let disabled_suffix = ".disabled";
 
-    if enabled {
+    let result = if enabled {
         // Remove .disabled suffix
         if file_path.ends_with(disabled_suffix) {
             let new_path = &file_path[..file_path.len() - disabled_suffix.len()];
@@ -154,7 +166,11 @@ pub fn toggle_skill_file(file_path: String, enabled: bool) -> Result<String, Str
         } else {
             Ok(file_path) // Already disabled
         }
+    };
+    if let Ok(conn) = db.0.lock() {
+        record_activity(&conn, &skill_name, if enabled { "skill_enable" } else { "skill_disable" }, "success", None);
     }
+    result
 }
 
 #[tauri::command]

@@ -1,5 +1,5 @@
 use crate::db::models::McpServer;
-use crate::db::DbState;
+use crate::db::{DbState, record_activity};
 use crate::mcp::registry;
 use crate::skills::scanner;
 use std::collections::HashMap;
@@ -70,6 +70,8 @@ pub fn install_from_marketplace(
         rusqlite::params![name, name, command, args_json, env_json, now],
     ).map_err(|e| e.to_string())?;
 
+    record_activity(&conn, &name, "marketplace_install", "success", None);
+
     Ok(McpServer {
         id: name.clone(),
         name,
@@ -104,6 +106,7 @@ pub fn install_skill_from_marketplace(
     name: String,
     content: String,
     target_dir: Option<String>,
+    db: State<'_, DbState>,
 ) -> Result<String, String> {
     let skills_dir = if let Some(dir) = target_dir {
         std::path::PathBuf::from(dir)
@@ -121,6 +124,10 @@ pub fn install_skill_from_marketplace(
 
     crate::utils::atomic_write_string(&file_path, &content)
         .map_err(|e| format!("Failed to write skill file: {}", e))?;
+
+    if let Ok(conn) = db.0.lock() {
+        record_activity(&conn, &name, "skill_install", "success", None);
+    }
 
     Ok(file_path.to_string_lossy().to_string())
 }

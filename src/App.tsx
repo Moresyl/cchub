@@ -13,6 +13,7 @@ import ClaudeMd from "./pages/ClaudeMd";
 import Security from "./pages/Security";
 import Marketplace from "./pages/Marketplace";
 import Workspaces from "./pages/Workspaces";
+import Profiles from "./pages/Profiles";
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
               <Route path="/hooks" element={<Hooks />} />
               <Route path="/claude-md" element={<ClaudeMd />} />
               <Route path="/workspaces" element={<Workspaces />} />
+              <Route path="/profiles" element={<Profiles />} />
               <Route path="/updates" element={<Updates />} />
               <Route path="/security" element={<Security />} />
               <Route path="/settings" element={<Settings />} />

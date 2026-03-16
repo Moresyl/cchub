@@ -445,6 +445,27 @@ pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), S
     Ok(())
 }
 
+/// Open a native folder picker dialog and return the selected path
+#[tauri::command]
+pub async fn pick_folder() -> Result<Option<String>, String> {
+    let folder = rfd::AsyncFileDialog::new()
+        .set_title("Select folder")
+        .pick_folder()
+        .await;
+    Ok(folder.map(|f| f.path().to_string_lossy().to_string()))
+}
+
+/// Open a native file picker dialog and return the selected path
+#[tauri::command]
+pub async fn pick_file() -> Result<Option<String>, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Select file")
+        .add_filter("Config", &["json", "toml", "yaml", "yml"])
+        .pick_file()
+        .await;
+    Ok(file.map(|f| f.path().to_string_lossy().to_string()))
+}
+
 /// Read a tool's current config file content (for saving as profile snapshot)
 #[tauri::command]
 pub fn read_tool_config(tool_id: String) -> Result<String, String> {

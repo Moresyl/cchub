@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, CheckCircle, AlertCircle, Save, Trash2, Plus, Copy, Check } from "lucide-react";
+import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, CheckCircle, AlertCircle, Copy, Check } from "lucide-react";
 import { t, getLocale, setLocale, type Locale } from "../lib/i18n";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
 
@@ -12,7 +12,6 @@ interface AppUpdateState {
 }
 
 interface CustomPath { tool_id: string; config_dir: string | null; mcp_config_path: string | null; skills_dir: string | null; }
-interface ConfigProfile { id: string; name: string; tool_id: string; config_snapshot: string; created_at: string | null; updated_at: string | null; }
 interface DetectedTool { id: string; name: string; config_path: string; skills_dir: string; mcp_config_path: string; installed: boolean; install_command: string; install_url: string; }
 
 export default function Settings() {
@@ -27,10 +26,6 @@ export default function Settings() {
   const [updateObj, setUpdateObj] = useState<any>(null);
   const [tools, setTools] = useState<DetectedTool[]>([]);
   const [customPaths, setCustomPaths] = useState<CustomPath[]>([]);
-  const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
-  const [newProfileName, setNewProfileName] = useState("");
-  const [newProfileTool, setNewProfileTool] = useState("claude");
-  const [savingProfile, setSavingProfile] = useState(false);
   const [pathSaved, setPathSaved] = useState<string | null>(null);
   const i = t();
   const loc = getLocale();
@@ -39,14 +34,12 @@ export default function Settings() {
 
   async function loadToolsAndPaths() {
     try {
-      const [t, p, pr] = await Promise.all([
+      const [t, p] = await Promise.all([
         invoke<DetectedTool[]>("detect_tools"),
         invoke<CustomPath[]>("get_custom_paths"),
-        invoke<ConfigProfile[]>("get_config_profiles"),
       ]);
       setTools(t);
       setCustomPaths(p);
-      setProfiles(pr);
     } catch (e) { console.error(e); }
   }
 
@@ -226,11 +219,11 @@ export default function Settings() {
                     {pathSaved === tool.id && <Check size={14} style={{ color: "var(--success)" }} />}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span style={{ fontSize: 11, color: "var(--text-muted)", width: 80, flexShrink: 0 }}>MCP</span>
                       <input
                         className="input"
-                        style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: "4px 8px", height: 28 }}
+                        style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: "4px 8px", height: 28, flex: 1 }}
                         defaultValue={custom?.mcp_config_path || tool.mcp_config_path}
                         onBlur={async (e) => {
                           const val = e.target.value.trim();
@@ -241,12 +234,23 @@ export default function Settings() {
                           }
                         }}
                       />
+                      <button className="btn btn-ghost btn-icon-sm" title={loc === "zh" ? "选择文件" : "Pick file"}
+                        onClick={async () => {
+                          const picked = await invoke<string | null>("pick_file");
+                          if (picked) {
+                            await invoke("save_custom_path", { toolId: tool.id, configDir: custom?.config_dir || null, mcpConfigPath: picked, skillsDir: custom?.skills_dir || null });
+                            setPathSaved(tool.id); setTimeout(() => setPathSaved(null), 2000);
+                            loadToolsAndPaths();
+                          }
+                        }}>
+                        <FolderOpen size={12} />
+                      </button>
                     </div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span style={{ fontSize: 11, color: "var(--text-muted)", width: 80, flexShrink: 0 }}>Skills</span>
                       <input
                         className="input"
-                        style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: "4px 8px", height: 28 }}
+                        style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: "4px 8px", height: 28, flex: 1 }}
                         defaultValue={custom?.skills_dir || tool.skills_dir}
                         onBlur={async (e) => {
                           const val = e.target.value.trim();
@@ -257,6 +261,17 @@ export default function Settings() {
                           }
                         }}
                       />
+                      <button className="btn btn-ghost btn-icon-sm" title={loc === "zh" ? "选择文件夹" : "Pick folder"}
+                        onClick={async () => {
+                          const picked = await invoke<string | null>("pick_folder");
+                          if (picked) {
+                            await invoke("save_custom_path", { toolId: tool.id, configDir: custom?.config_dir || null, mcpConfigPath: custom?.mcp_config_path || null, skillsDir: picked });
+                            setPathSaved(tool.id); setTimeout(() => setPathSaved(null), 2000);
+                            loadToolsAndPaths();
+                          }
+                        }}>
+                        <FolderOpen size={12} />
+                      </button>
                     </div>
                   </div>
                   {!tool.installed && tool.install_command && (
@@ -271,95 +286,6 @@ export default function Settings() {
               );
             })}
           </div>
-        </div>
-
-        {/* Config Profiles */}
-        <div className="section-card">
-          <div className="section-card-title">
-            <RefreshCw size={17} style={{ color: "var(--text-secondary)" }} />
-            {loc === "zh" ? "配置切换" : "Config Profiles"}
-          </div>
-
-          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-            {loc === "zh" ? "保存当前工具配置为快照，随时切换恢复。" : "Save current tool config as a snapshot, switch anytime."}
-          </p>
-
-          {/* Create new profile */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <select
-              className="input"
-              style={{ width: 120, fontSize: 12, padding: "6px 8px" }}
-              value={newProfileTool}
-              onChange={(e) => setNewProfileTool(e.target.value)}
-            >
-              {tools.filter(t => t.installed).map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-            <input
-              className="input"
-              style={{ flex: 1, fontSize: 12 }}
-              placeholder={loc === "zh" ? "配置名称..." : "Profile name..."}
-              value={newProfileName}
-              onChange={(e) => setNewProfileName(e.target.value)}
-            />
-            <button
-              className="btn btn-primary btn-sm"
-              disabled={!newProfileName.trim() || savingProfile}
-              onClick={async () => {
-                setSavingProfile(true);
-                try {
-                  const snapshot = await invoke<string>("read_tool_config", { toolId: newProfileTool });
-                  await invoke("save_config_profile", { name: newProfileName, toolId: newProfileTool, configSnapshot: snapshot });
-                  setNewProfileName("");
-                  loadToolsAndPaths();
-                } catch (e) { console.error(e); alert(String(e)); }
-                finally { setSavingProfile(false); }
-              }}
-            >
-              <Plus size={13} />{loc === "zh" ? "保存" : "Save"}
-            </button>
-          </div>
-
-          {/* Profile list */}
-          {profiles.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: 16 }}>
-              {loc === "zh" ? "暂无保存的配置" : "No saved profiles"}
-            </p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {profiles.map((p) => (
-                <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 8, background: "var(--bg-input)" }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {p.tool_id} · {p.updated_at?.split("T")[0] || p.created_at?.split("T")[0] || ""}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn btn-xs btn-primary" onClick={async () => {
-                      if (confirm(loc === "zh" ? `确定切换到配置 "${p.name}"？将覆盖 ${p.tool_id} 的当前配置。` : `Switch to profile "${p.name}"? This will overwrite ${p.tool_id}'s current config.`)) {
-                        try {
-                          await invoke("apply_config_profile", { id: p.id });
-                          loadToolsAndPaths();
-                        } catch (e) { console.error(e); alert(String(e)); }
-                      }
-                    }}>
-                      <Save size={11} />{loc === "zh" ? "应用" : "Apply"}
-                    </button>
-                    <button className="btn btn-xs btn-danger-ghost" onClick={async () => {
-                      try {
-                        await invoke("delete_config_profile", { id: p.id });
-                        loadToolsAndPaths();
-                      } catch (e) { console.error(e); }
-                    }}>
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* App Update */}

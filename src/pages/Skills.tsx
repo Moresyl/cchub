@@ -162,15 +162,26 @@ export default function Skills() {
       const q = search.toLowerCase();
       if (!s.name.toLowerCase().includes(q) && !(s.description || "").toLowerCase().includes(q) && !(s.trigger_command || "").toLowerCase().includes(q)) return false;
     }
-    if (category === "skill") return !s.plugin_id;
-    if (category === "prompt") return (s.name + (s.description || "")).toLowerCase().includes("prompt");
-    if (category === "command") return !!s.trigger_command;
-    if (category === "plugin") return !!s.plugin_id;
-    return true;
+    switch (category) {
+      case "skill":
+        // 独立技能（非插件关联、非命令触发）
+        return !s.plugin_id && !s.trigger_command;
+      case "prompt":
+        // 提示词类：名字或描述含 prompt/提示/template/模板
+        return /prompt|提示|template|模板|指令|instruction/i.test(s.name + (s.description || "") + (s.trigger_command || ""));
+      case "command":
+        // 有触发命令的技能
+        return !!s.trigger_command;
+      case "plugin":
+        // 插件关联的技能
+        return !!s.plugin_id;
+      default:
+        return true; // "all"
+    }
   });
 
   const filteredPlugins = plugins.filter((p) => {
-    if (category === "skill" || category === "prompt" || category === "command") return false;
+    if (category !== "all" && category !== "plugin") return false;
     if (search) {
       const q = search.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !(p.description || "").toLowerCase().includes(q)) return false;
@@ -186,8 +197,8 @@ export default function Skills() {
 
   const catTabs: { key: SkillCategory; label: string; count: number }[] = [
     { key: "all", label: i.skills.categoryAll, count: skills.length + plugins.length },
-    { key: "skill", label: i.skills.categorySkills, count: skills.filter(s => !s.plugin_id).length },
-    { key: "prompt", label: i.skills.categoryPrompts, count: skills.filter(s => (s.name + (s.description || "")).toLowerCase().includes("prompt")).length },
+    { key: "skill", label: i.skills.categorySkills, count: skills.filter(s => !s.plugin_id && !s.trigger_command).length },
+    { key: "prompt", label: i.skills.categoryPrompts, count: skills.filter(s => /prompt|提示|template|模板|指令|instruction/i.test(s.name + (s.description || "") + (s.trigger_command || ""))).length },
     { key: "command", label: i.skills.categoryCommands, count: skills.filter(s => !!s.trigger_command).length },
     { key: "plugin", label: i.skills.categoryPlugins, count: plugins.length },
   ];

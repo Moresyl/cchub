@@ -99,6 +99,18 @@ export default function Skills() {
     }
   }
 
+  async function openEditSkill(skill: Skill) {
+    setSelectedSkill(skill);
+    if (skill.file_path) {
+      try {
+        const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
+        setSkillContent(content);
+        setEditContent(content);
+        setEditingSkill(true);
+      } catch (e) { console.error(e); }
+    }
+  }
+
   async function openExplorer() {
     const tool = tools.find((t) => t.id === activeTool);
     if (!tool) return;
@@ -361,6 +373,10 @@ export default function Skills() {
                             title={skill.file_path.endsWith(".disabled") ? (locale === "zh" ? "启用" : "Enable") : (locale === "zh" ? "禁用" : "Disable")} style={{ cursor: "pointer" }}>
                             <div className={`toggle toggle-sm ${skill.file_path.endsWith(".disabled") ? "off" : "on"}`}><div className="toggle-knob" /></div>
                           </div>
+                          <button className="btn btn-ghost btn-icon-sm" onClick={(e) => { e.stopPropagation(); openEditSkill(skill); }}
+                            title={locale === "zh" ? "编辑" : "Edit"}>
+                            <Edit3 size={13} />
+                          </button>
                           <button className="btn btn-danger-ghost btn-icon-sm" onClick={(e) => { e.stopPropagation(); handleDeleteSkill(skill); }}
                             title={locale === "zh" ? "删除" : "Delete"}>
                             <Trash2 size={14} />

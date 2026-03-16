@@ -1,6 +1,31 @@
 use serde::{Deserialize, Serialize};
 use crate::mcp::config;
 
+/// Build an HTTP client that respects proxy settings (env vars + system proxy)
+fn build_http_client() -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .user_agent("CCHub")
+        .timeout(std::time::Duration::from_secs(30));
+
+    // Check for proxy from env vars (set by our set_proxy command)
+    let proxy_url = std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("HTTP_PROXY"))
+        .or_else(|_| std::env::var("http_proxy"))
+        .ok();
+
+    if let Some(ref url) = proxy_url {
+        if !url.trim().is_empty() {
+            match reqwest::Proxy::all(url) {
+                Ok(proxy) => { builder = builder.proxy(proxy); }
+                Err(e) => { eprintln!("Invalid proxy URL '{}': {}", url, e); }
+            }
+        }
+    }
+
+    builder.build().map_err(|e| format!("Failed to build HTTP client: {}", e))
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RegistryEntry {
     pub id: String,
@@ -41,7 +66,9 @@ pub fn get_skills_registry() -> Vec<SkillRegistryEntry> {
 }
 
 pub async fn fetch_custom_source(url: &str) -> Result<Vec<SkillRegistryEntry>, String> {
-    let resp = reqwest::get(url)
+    let client = build_http_client()?;
+    let resp = client.get(url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch custom source: {}", e))?;
 
@@ -55,7 +82,7 @@ pub async fn fetch_custom_source(url: &str) -> Result<Vec<SkillRegistryEntry>, S
 
 /// Fetch skills from a GitHub repository by downloading ZIP and scanning for SKILL.md files
 pub async fn fetch_skills_from_github_repo(owner: &str, repo: &str, branch: &str) -> Result<Vec<SkillRegistryEntry>, String> {
-    let client = reqwest::Client::new();
+    let client = build_http_client()?;
     let mut all_skills = Vec::new();
 
     // Try branches in order: specified branch, main, master
@@ -99,8 +126,7 @@ pub async fn fetch_skills_from_github_repo(owner: &str, repo: &str, branch: &str
 
 async fn download_and_extract_zip(client: &reqwest::Client, url: &str, dest: &std::path::Path) -> Result<(), String> {
     let response = client.get(url)
-        .header("User-Agent", "CCHub")
-        .send().await.map_err(|e| e.to_string())?;
+        .send().await.map_err(|e| format!("Download failed: {}", e))?;
 
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
@@ -331,7 +357,9 @@ pub async fn search_npm_registry(query: &str) -> Result<Vec<RegistryEntry>, Stri
         query
     );
 
-    let resp = reqwest::get(&url)
+    let client = build_http_client()?;
+    let resp = client.get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch npm: {}", e))?;
 

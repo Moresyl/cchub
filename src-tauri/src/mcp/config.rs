@@ -35,6 +35,11 @@ fn get_claude_settings_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude").join("settings.json"))
 }
 
+/// Get Claude Code MCP config path (~/.claude.json - the actual MCP storage location)
+fn get_claude_mcp_json_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".claude.json"))
+}
+
 /// Get Claude Desktop config path (Windows)
 fn get_claude_desktop_config_path() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("Claude").join("claude_desktop_config.json"))
@@ -44,7 +49,14 @@ fn get_claude_desktop_config_path() -> Option<PathBuf> {
 pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
     let mut servers = Vec::new();
 
-    // 1. Scan ~/.claude/settings.json (Claude Code main config)
+    // 1. Scan ~/.claude.json (Claude Code primary MCP config)
+    if let Some(claude_mcp) = get_claude_mcp_json_path() {
+        if claude_mcp.exists() {
+            scan_wrapped_mcp_json(&claude_mcp, "local", &mut servers);
+        }
+    }
+
+    // 2. Scan ~/.claude/settings.json (Claude Code settings, may also contain mcpServers)
     if let Some(claude_settings) = get_claude_settings_path() {
         if claude_settings.exists() {
             scan_wrapped_mcp_json(&claude_settings, "local", &mut servers);
@@ -275,21 +287,28 @@ pub fn remove_mcp_server_from_config(name: &str, config_path: &str) -> Result<()
     Ok(())
 }
 
-/// Write MCP server config to Claude settings
+/// Write MCP server config to Claude settings (~/.claude.json)
 pub fn write_claude_mcp_server(name: &str, config: &McpServerConfig) -> Result<(), String> {
-    let path = dirs::home_dir()
-        .ok_or("Cannot find home directory")?
-        .join(".claude")
-        .join("settings.json");
+    // Prefer ~/.claude.json (primary MCP location), fallback to ~/.claude/settings.json
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let claude_json = home.join(".claude.json");
+    let path = if claude_json.exists() {
+        claude_json
+    } else {
+        home.join(".claude").join("settings.json")
+    };
     write_mcp_server_to_config(name, config, &path.to_string_lossy())
 }
 
 /// Remove MCP server from Claude settings
 pub fn remove_claude_mcp_server(name: &str) -> Result<(), String> {
-    let path = dirs::home_dir()
-        .ok_or("Cannot find home directory")?
-        .join(".claude")
-        .join("settings.json");
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let claude_json = home.join(".claude.json");
+    let path = if claude_json.exists() {
+        claude_json
+    } else {
+        home.join(".claude").join("settings.json")
+    };
     remove_mcp_server_from_config(name, &path.to_string_lossy())
 }
 

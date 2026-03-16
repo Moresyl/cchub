@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Trash2, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2 } from "lucide-react";
+import { RefreshCw, Trash2, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2, Wand2 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import CodeEditor from "../components/CodeEditor";
 
@@ -334,14 +334,20 @@ export default function McpServers() {
 
                   {/* Arguments */}
                   <div>
-                    <span className="field-label">{i.mcp.arguments}</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span className="field-label" style={{ marginBottom: 0 }}>{i.mcp.arguments}</span>
+                      {editing && (
+                        <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
+                          try { setEditArgs(JSON.stringify(JSON.parse(editArgs), null, 2)); } catch { /* ignore */ }
+                        }}><Wand2 size={12} /></button>
+                      )}
+                    </div>
                     {editing ? (
                       <CodeEditor
                         value={editArgs}
                         onChange={setEditArgs}
                         language="json"
-                        minHeight={120}
-                        placeholder='["arg1", "arg2"]'
+                        minHeight={100}
                       />
                     ) : (
                       <div className="code-block" style={{ maxHeight: 180, overflowY: "auto" }}>{formatJson(selected.args)}</div>
@@ -350,14 +356,20 @@ export default function McpServers() {
 
                   {/* Environment */}
                   <div>
-                    <span className="field-label">{i.mcp.environment}</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span className="field-label" style={{ marginBottom: 0 }}>{i.mcp.environment}</span>
+                      {editing && (
+                        <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
+                          try { setEditEnv(JSON.stringify(JSON.parse(editEnv), null, 2)); } catch { /* ignore */ }
+                        }}><Wand2 size={12} /></button>
+                      )}
+                    </div>
                     {editing ? (
                       <CodeEditor
                         value={editEnv}
                         onChange={setEditEnv}
                         language="json"
-                        minHeight={120}
-                        placeholder='{"KEY": "value"}'
+                        minHeight={100}
                       />
                     ) : (
                       <div className="code-block" style={{ maxHeight: 180, overflowY: "auto" }}>

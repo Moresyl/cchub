@@ -4,7 +4,6 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
   Store, Search, Download, CheckCircle, X, ExternalLink, Key, Check,
   Plug, Zap, Plus, Globe, Image, Languages, Tag, Edit3, Trash2, Save,
-  Database, Brain, Wrench, Monitor, FolderOpen, Cloud, Clock,
 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
@@ -26,29 +25,6 @@ interface SkillEntry {
 
 type MarketTab = "mcp" | "skills";
 
-const CATEGORY_STYLES: Record<string, { icon: typeof Plug; gradient: string }> = {
-  search: { icon: Search, gradient: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" },
-  database: { icon: Database, gradient: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)" },
-  ai: { icon: Brain, gradient: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)" },
-  "ai-ml": { icon: Brain, gradient: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)" },
-  "dev-tools": { icon: Wrench, gradient: "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)" },
-  development: { icon: Wrench, gradient: "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)" },
-  browser: { icon: Monitor, gradient: "linear-gradient(135deg, #fa709a 0%, #fee140 100%)" },
-  filesystem: { icon: FolderOpen, gradient: "linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)" },
-  cloud: { icon: Cloud, gradient: "linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)" },
-  productivity: { icon: Clock, gradient: "linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)" },
-  testing: { icon: Zap, gradient: "linear-gradient(135deg, #f6d365 0%, #fda085 100%)" },
-  documentation: { icon: Tag, gradient: "linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%)" },
-  devops: { icon: Cloud, gradient: "linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%)" },
-  security: { icon: Key, gradient: "linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%)" },
-  backend: { icon: Database, gradient: "linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%)" },
-};
-
-const DEFAULT_STYLE = { icon: Plug, gradient: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" };
-
-function getCategoryStyle(category: string) {
-  return CATEGORY_STYLES[category] || DEFAULT_STYLE;
-}
 type McpCategory = "all" | "search" | "database" | "ai" | "dev-tools" | "browser" | "filesystem" | "cloud" | "productivity";
 type SkillCategory = "all" | "installed" | "development" | "testing" | "documentation" | "devops" | "ai-ml" | "security" | "backend";
 
@@ -385,19 +361,8 @@ export default function Marketplace() {
                 const isInstalled = installedIds.has(entry.name) || installedIds.has(entry.id);
                 const isInstalling = installing === entry.id;
                 return (
-                  <div key={entry.id} className="card card-hover" style={{ padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                    {/* Category Header */}
-                    {(() => {
-                      const style = getCategoryStyle(entry.category);
-                      const Icon = style.icon;
-                      return (
-                        <div style={{ height: 80, background: style.gradient, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.9 }}>
-                          <Icon size={32} style={{ color: "rgba(255,255,255,0.85)" }} />
-                        </div>
-                      );
-                    })()}
-                    <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-                      <div>
+                  <div key={entry.id} className="card card-hover" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                           <span style={{ fontSize: 14, fontWeight: 600 }}>{entry.name}</span>
                           <span className="badge badge-muted" style={{ fontSize: 10 }}>{entry.category}</span>
@@ -432,7 +397,6 @@ export default function Marketplace() {
                         </button>
                       )}
                     </div>
-                    </div>
                   </div>
                 );
               })}
@@ -449,23 +413,10 @@ export default function Marketplace() {
                 const isInstalling = installing === skill.id;
                 const desc = showTranslation && locale === "zh" && skill.description_zh ? skill.description_zh : skill.description;
                 return (
-                  <div key={skill.id} className="card card-hover" style={{ padding: 0, display: "flex", flexDirection: "column", overflow: "hidden", cursor: "pointer" }}
+                  <div key={skill.id} className="card card-hover" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10, cursor: "pointer" }}
                     onClick={() => setPreviewSkill(skill)}>
-                    {/* Cover Image */}
-                    {showCovers && (
-                      skill.cover_url ? (
-                        <div style={{ height: 140, background: "var(--bg-elevated)", overflow: "hidden" }}>
-                          <img src={skill.cover_url} alt={skill.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        </div>
-                      ) : (
-                        <div style={{ height: 100, background: getCategoryStyle(skill.category).gradient, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.9 }}>
-                          {(() => { const Icon = getCategoryStyle(skill.category).icon; return <Icon size={28} style={{ color: "rgba(255,255,255,0.85)" }} />; })()}
-                        </div>
-                      )
-                    )}
-                    <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                           <span style={{ fontSize: 14, fontWeight: 600 }}>{skill.name}</span>
                           <span className="badge badge-muted" style={{ fontSize: 10 }}>{skill.category}</span>
                         </div>
@@ -514,7 +465,6 @@ export default function Marketplace() {
                           </button>
                         )}
                       </div>
-                    </div>
                   </div>
                 );
               })}

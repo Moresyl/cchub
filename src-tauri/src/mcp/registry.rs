@@ -55,11 +55,13 @@ pub struct SkillRegistryEntry {
     pub content: String,
 }
 
+#[allow(dead_code)]
 pub fn get_curated_registry() -> Vec<RegistryEntry> {
     let json = include_str!("registry_data.json");
     serde_json::from_str(json).unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub fn get_skills_registry() -> Vec<SkillRegistryEntry> {
     let json = include_str!("skills_registry_data.json");
     serde_json::from_str(json).unwrap_or_default()

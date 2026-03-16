@@ -108,6 +108,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             name TEXT NOT NULL,
             tool_id TEXT NOT NULL,
             config_snapshot TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            source_key TEXT,
             created_at TEXT,
             updated_at TEXT
         );
@@ -120,6 +122,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // Migration: add config_path column if not exists
     let _ = conn.execute_batch("ALTER TABLE mcp_servers ADD COLUMN config_path TEXT;");
+    let _ = conn.execute_batch("ALTER TABLE config_profiles ADD COLUMN source_type TEXT DEFAULT 'manual';");
+    let _ = conn.execute_batch("ALTER TABLE config_profiles ADD COLUMN source_key TEXT;");
 
     Ok(())
 }

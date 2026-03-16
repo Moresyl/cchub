@@ -133,6 +133,43 @@ pub fn copy_skill_between_tools(path: String, target_skills_dir: String) -> Resu
     installer::copy_skill_between_tools(&path, &target_skills_dir)
 }
 
+/// Remove a synced skill from a target tool's skills directory
+#[tauri::command]
+pub fn remove_synced_skill(skill_name: String, target_skills_dir: String) -> Result<(), String> {
+    let dir = std::path::Path::new(&target_skills_dir);
+    // Try to find and delete the skill file by name
+    if dir.exists() {
+        // Try exact filename
+        for ext in ["", ".md", ".disabled", ".md.disabled"] {
+            let path = dir.join(format!("{}{}", skill_name, ext));
+            if path.exists() {
+                if path.is_dir() {
+                    std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+                } else {
+                    std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+                }
+                return Ok(());
+            }
+        }
+        // Try scanning for files containing the skill name
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if fname.contains(&skill_name) {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let _ = std::fs::remove_dir_all(&path);
+                    } else {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    return Ok(());
+                }
+            }
+        }
+    }
+    Err(format!("Skill '{}' not found in {}", skill_name, target_skills_dir))
+}
+
 #[tauri::command]
 pub fn write_skill_content(file_path: String, content: String) -> Result<(), String> {
     crate::utils::atomic_write_string(std::path::Path::new(&file_path), &content)

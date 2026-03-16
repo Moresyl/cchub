@@ -55,6 +55,7 @@ pub fn run() {
             skill_commands::install_skill_file,
             skill_commands::uninstall_skill_file,
             skill_commands::copy_skill_between_tools,
+            skill_commands::remove_synced_skill,
             skill_commands::write_skill_content,
             skill_commands::toggle_skill_file,
             skill_commands::delete_plugin_dir,

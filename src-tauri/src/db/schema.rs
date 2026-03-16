@@ -95,6 +95,22 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             is_active INTEGER DEFAULT 0,
             created_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS custom_paths (
+            tool_id TEXT PRIMARY KEY,
+            config_dir TEXT,
+            mcp_config_path TEXT,
+            skills_dir TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS config_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            tool_id TEXT NOT NULL,
+            config_snapshot TEXT NOT NULL,
+            created_at TEXT,
+            updated_at TEXT
+        );
     ")?;
 
     // Migration: add config_path column if not exists

@@ -282,3 +282,186 @@ pub fn delete_workspace(id: String, db: State<'_, DbState>) -> Result<(), String
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+// ── Custom Paths ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomPath {
+    pub tool_id: String,
+    pub config_dir: Option<String>,
+    pub mcp_config_path: Option<String>,
+    pub skills_dir: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_custom_paths(db: State<'_, DbState>) -> Result<Vec<CustomPath>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT tool_id, config_dir, mcp_config_path, skills_dir FROM custom_paths")
+        .map_err(|e| e.to_string())?;
+
+    let paths = stmt
+        .query_map([], |row| {
+            Ok(CustomPath {
+                tool_id: row.get(0)?,
+                config_dir: row.get(1)?,
+                mcp_config_path: row.get(2)?,
+                skills_dir: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(paths)
+}
+
+#[tauri::command]
+pub fn save_custom_path(
+    tool_id: String,
+    config_dir: Option<String>,
+    mcp_config_path: Option<String>,
+    skills_dir: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO custom_paths (tool_id, config_dir, mcp_config_path, skills_dir) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![tool_id, config_dir, mcp_config_path, skills_dir],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_custom_path(tool_id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM custom_paths WHERE tool_id = ?1", rusqlite::params![tool_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Config Profiles ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigProfile {
+    pub id: String,
+    pub name: String,
+    pub tool_id: String,
+    pub config_snapshot: String,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_config_profiles(db: State<'_, DbState>) -> Result<Vec<ConfigProfile>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, tool_id, config_snapshot, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
+        .map_err(|e| e.to_string())?;
+
+    let profiles = stmt
+        .query_map([], |row| {
+            Ok(ConfigProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                tool_id: row.get(2)?,
+                config_snapshot: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(profiles)
+}
+
+#[tauri::command]
+pub fn save_config_profile(
+    name: String,
+    tool_id: String,
+    config_snapshot: String,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "INSERT INTO config_profiles (id, name, tool_id, config_snapshot, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        rusqlite::params![id, name, tool_id, config_snapshot, now],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let (tool_id, snapshot): (String, String) = conn
+        .query_row(
+            "SELECT tool_id, config_snapshot FROM config_profiles WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("Profile not found: {}", e))?;
+
+    // Determine target config path
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let config_path = match tool_id.as_str() {
+        "claude" => home.join(".claude").join("settings.json"),
+        "codex" => home.join(".codex").join("config.toml"),
+        "gemini" => home.join(".gemini").join("settings.json"),
+        "cursor" => home.join(".cursor").join("mcp.json"),
+        "windsurf" => home.join(".windsurf").join("mcp.json"),
+        "opencode" => home.join(".opencode").join("opencode.json"),
+        _ => return Err(format!("Unknown tool: {}", tool_id)),
+    };
+
+    // Ensure parent directory exists
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    crate::utils::atomic_write_string(&config_path, &snapshot).map_err(|e| e.to_string())?;
+
+    // Update timestamp
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE config_profiles SET updated_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, id],
+    ).map_err(|e| e.to_string())?;
+
+    crate::db::record_activity(&conn, &tool_id, "profile_switch", "success", None);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Read a tool's current config file content (for saving as profile snapshot)
+#[tauri::command]
+pub fn read_tool_config(tool_id: String) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let config_path = match tool_id.as_str() {
+        "claude" => home.join(".claude").join("settings.json"),
+        "codex" => home.join(".codex").join("config.toml"),
+        "gemini" => home.join(".gemini").join("settings.json"),
+        "cursor" => home.join(".cursor").join("mcp.json"),
+        "windsurf" => home.join(".windsurf").join("mcp.json"),
+        "opencode" => home.join(".opencode").join("opencode.json"),
+        _ => return Err(format!("Unknown tool: {}", tool_id)),
+    };
+
+    if !config_path.exists() {
+        return Err(format!("Config file not found: {}", config_path.display()));
+    }
+
+    std::fs::read_to_string(&config_path).map_err(|e| e.to_string())
+}

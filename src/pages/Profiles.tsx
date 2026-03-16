@@ -99,7 +99,7 @@ export default function Profiles() {
   const [draftApiKey, setDraftApiKey] = useState("");
   const [draftModel, setDraftModel] = useState("");
   const [draftAuthField, setDraftAuthField] = useState<ClaudeAuthField>("ANTHROPIC_AUTH_TOKEN");
-  const [filterTool, setFilterTool] = useState("");
+  const [filterTool, setFilterTool] = useState("claude");
   const [search, setSearch] = useState("");
   const [activeOnly, setActiveOnly] = useState(false);
   const locale = getLocale();
@@ -356,7 +356,7 @@ export default function Profiles() {
       </div>
 
       <div className="section-card" style={{ marginBottom: 18, padding: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
               {locale === "zh" ? "新增配置" : "New Configuration"}
@@ -374,24 +374,6 @@ export default function Profiles() {
             <Plus size={14} />
             {locale === "zh" ? "新增配置" : "New"}
           </button>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          {installedTools.map((tool) => {
-            const Icon = TOOL_ICONS[tool.id] || Monitor;
-            const selected = newTool === tool.id;
-            return (
-              <button
-                key={tool.id}
-                className={`btn btn-sm ${selected ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setNewTool(tool.id)}
-                style={{ gap: 6 }}
-              >
-                <Icon size={14} />
-                {tool.name}
-              </button>
-            );
-          })}
         </div>
       </div>
 

@@ -106,6 +106,8 @@ pub fn run() {
             extra_commands::apply_config_profile,
             extra_commands::delete_config_profile,
             extra_commands::read_tool_config,
+            extra_commands::pick_folder,
+            extra_commands::pick_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

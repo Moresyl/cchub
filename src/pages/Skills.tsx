@@ -9,6 +9,7 @@ import {
 import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
 import CodeEditor from "../components/CodeEditor";
+import { showToast } from "../components/Toast";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -529,23 +530,43 @@ export default function Skills() {
                       return (
                         <button
                           key={tool.id}
-                          className={`btn btn-xs ${isSynced ? "btn-ghost" : isCurrent ? "btn-ghost" : tool.installed ? "btn-secondary" : "btn-ghost"}`}
+                          className={`btn btn-xs ${isSynced ? "btn-primary" : isCurrent ? "btn-ghost" : tool.installed ? "btn-secondary" : "btn-ghost"}`}
                           style={{ gap: 5, opacity: tool.installed ? 1 : 0.4 }}
                           disabled={!tool.installed || isCurrent}
-                          title={!tool.installed ? (locale === "zh" ? "未安装" : "Not installed") : isCurrent ? (locale === "zh" ? "当前工具" : "Current tool") : ""}
+                          title={!tool.installed ? (locale === "zh" ? "未安装" : "Not installed") : isCurrent ? (locale === "zh" ? "当前工具" : "Current tool") : isSynced ? (locale === "zh" ? "点击取消同步" : "Click to unsync") : ""}
                           onClick={async () => {
-                            try {
-                              await invoke("copy_skill_between_tools", { path: selectedSkill.file_path, targetSkillsDir: tool.skills_dir });
-                              setSyncedSkills(prev => {
-                                const next = { ...prev };
-                                if (!next[selectedSkill.id]) next[selectedSkill.id] = new Set();
-                                next[selectedSkill.id] = new Set([...next[selectedSkill.id], tool.id]);
-                                return next;
-                              });
-                            } catch (e) { console.error(e); }
+                            if (isSynced) {
+                              // Unsync = delete from target tool
+                              try {
+                                const skillName = selectedSkill.file_path!.split(/[/\\]/).pop()?.replace(/\.md(\.disabled)?$/, "") || selectedSkill.name;
+                                await invoke("remove_synced_skill", { skillName, targetSkillsDir: tool.skills_dir });
+                                setSyncedSkills(prev => {
+                                  const next = { ...prev };
+                                  if (next[selectedSkill.id]) {
+                                    const s = new Set(next[selectedSkill.id]);
+                                    s.delete(tool.id);
+                                    next[selectedSkill.id] = s;
+                                  }
+                                  return next;
+                                });
+                                showToast("success", locale === "zh" ? `已从 ${tool.name} 移除` : `Removed from ${tool.name}`);
+                              } catch (e) { showToast("error", String(e)); }
+                            } else {
+                              // Sync = copy to target tool
+                              try {
+                                await invoke("copy_skill_between_tools", { path: selectedSkill.file_path, targetSkillsDir: tool.skills_dir });
+                                setSyncedSkills(prev => {
+                                  const next = { ...prev };
+                                  if (!next[selectedSkill.id]) next[selectedSkill.id] = new Set();
+                                  next[selectedSkill.id] = new Set([...next[selectedSkill.id], tool.id]);
+                                  return next;
+                                });
+                                showToast("success", locale === "zh" ? `已同步到 ${tool.name}` : `Synced to ${tool.name}`);
+                              } catch (e) { showToast("error", String(e)); }
+                            }
                           }}
                         >
-                          {isSynced ? <Check size={11} style={{ color: "var(--success)" }} /> : <Icon size={12} />}
+                          {isSynced ? <Check size={11} style={{ color: "#fff" }} /> : <Icon size={12} />}
                           {tool.name}
                         </button>
                       );

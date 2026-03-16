@@ -1,6 +1,7 @@
 use crate::db::DbState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,6 +353,51 @@ pub struct ConfigProfile {
     pub updated_at: Option<String>,
 }
 
+fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
+    match tool_id {
+        "claude" => Ok("settings.json"),
+        "codex" => Ok("config.toml"),
+        "gemini" => Ok("settings.json"),
+        "cursor" => Ok("mcp.json"),
+        "windsurf" => Ok("mcp.json"),
+        "opencode" => Ok("opencode.json"),
+        _ => Err(format!("Unknown tool: {}", tool_id)),
+    }
+}
+
+fn default_tool_config_path(home: &std::path::Path, tool_id: &str) -> Result<PathBuf, String> {
+    let file_name = tool_config_file_name(tool_id)?;
+    let dir = match tool_id {
+        "claude" => ".claude",
+        "codex" => ".codex",
+        "gemini" => ".gemini",
+        "cursor" => ".cursor",
+        "windsurf" => ".windsurf",
+        "opencode" => ".opencode",
+        _ => return Err(format!("Unknown tool: {}", tool_id)),
+    };
+    Ok(home.join(dir).join(file_name))
+}
+
+fn resolve_tool_config_path(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    let custom_dir: Option<String> = conn
+        .query_row(
+            "SELECT config_dir FROM custom_paths WHERE tool_id = ?1",
+            rusqlite::params![tool_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    if let Some(dir) = custom_dir.filter(|dir| !dir.trim().is_empty()) {
+        return Ok(PathBuf::from(dir).join(tool_config_file_name(tool_id)?));
+    }
+
+    default_tool_config_path(&home, tool_id)
+}
+
 #[tauri::command]
 pub fn get_config_profiles(db: State<'_, DbState>) -> Result<Vec<ConfigProfile>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -407,17 +453,7 @@ pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), St
         )
         .map_err(|e| format!("Profile not found: {}", e))?;
 
-    // Determine target config path
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let config_path = match tool_id.as_str() {
-        "claude" => home.join(".claude").join("settings.json"),
-        "codex" => home.join(".codex").join("config.toml"),
-        "gemini" => home.join(".gemini").join("settings.json"),
-        "cursor" => home.join(".cursor").join("mcp.json"),
-        "windsurf" => home.join(".windsurf").join("mcp.json"),
-        "opencode" => home.join(".opencode").join("opencode.json"),
-        _ => return Err(format!("Unknown tool: {}", tool_id)),
-    };
+    let config_path = resolve_tool_config_path(&conn, &tool_id)?;
 
     // Ensure parent directory exists
     if let Some(parent) = config_path.parent() {
@@ -443,6 +479,45 @@ pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), S
     conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, tool_id, config_snapshot, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
+        .map_err(|e| e.to_string())?;
+    let profiles: Vec<ConfigProfile> = stmt
+        .query_map([], |row| {
+            Ok(ConfigProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                tool_id: row.get(2)?,
+                config_snapshot: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    let mut active_ids = Vec::new();
+    let mut cache: HashMap<String, Option<String>> = HashMap::new();
+
+    for profile in profiles {
+        if !cache.contains_key(&profile.tool_id) {
+            let content = resolve_tool_config_path(&conn, &profile.tool_id)
+                .ok()
+                .and_then(|path| std::fs::read_to_string(path).ok());
+            cache.insert(profile.tool_id.clone(), content);
+        }
+
+        if cache.get(&profile.tool_id).and_then(|value| value.as_ref()) == Some(&profile.config_snapshot) {
+            active_ids.push(profile.id);
+        }
+    }
+
+    Ok(active_ids)
 }
 
 // ── Proxy Settings ──
@@ -499,17 +574,9 @@ pub async fn pick_file() -> Result<Option<String>, String> {
 
 /// Read a tool's current config file content (for saving as profile snapshot)
 #[tauri::command]
-pub fn read_tool_config(tool_id: String) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let config_path = match tool_id.as_str() {
-        "claude" => home.join(".claude").join("settings.json"),
-        "codex" => home.join(".codex").join("config.toml"),
-        "gemini" => home.join(".gemini").join("settings.json"),
-        "cursor" => home.join(".cursor").join("mcp.json"),
-        "windsurf" => home.join(".windsurf").join("mcp.json"),
-        "opencode" => home.join(".opencode").join("opencode.json"),
-        _ => return Err(format!("Unknown tool: {}", tool_id)),
-    };
+pub fn read_tool_config(tool_id: String, db: State<'_, DbState>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let config_path = resolve_tool_config_path(&conn, &tool_id)?;
 
     if !config_path.exists() {
         return Err(format!("Config file not found: {}", config_path.display()));

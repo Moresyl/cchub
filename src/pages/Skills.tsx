@@ -14,7 +14,7 @@ import remarkGfm from "remark-gfm";
 
 interface Skill {
   id: string; name: string; description: string | null;
-  plugin_id: string | null; trigger_command: string | null; file_path: string | null;
+  tool_id: string | null; plugin_id: string | null; trigger_command: string | null; file_path: string | null;
 }
 
 interface Plugin {
@@ -30,6 +30,20 @@ const TOOL_ICONS: Record<string, typeof Monitor> = {
   gemini: Sparkles,
   opencode: Globe,
 };
+
+const PROMPT_PATTERN = /prompt|提示|template|模板|指令|instruction/i;
+
+function isPromptSkill(skill: Skill) {
+  return !skill.plugin_id && PROMPT_PATTERN.test(`${skill.name} ${skill.description || ""} ${skill.trigger_command || ""}`);
+}
+
+function isCommandSkill(skill: Skill) {
+  return !skill.plugin_id && !isPromptSkill(skill) && !!skill.trigger_command;
+}
+
+function isStandaloneSkill(skill: Skill) {
+  return !skill.plugin_id && !isPromptSkill(skill) && !isCommandSkill(skill);
+}
 
 export default function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -156,31 +170,33 @@ export default function Skills() {
     } catch (e) { console.error(e); }
   }
 
-  // Filter skills
-  const filteredSkills = skills.filter((s) => {
+  const visibleSkills = skills.filter((skill) => {
+    if (skill.tool_id) return skill.tool_id === activeTool;
+    return activeTool === "claude";
+  });
+
+  const visiblePlugins = activeTool === "claude" ? plugins : [];
+
+  const filteredSkills = visibleSkills.filter((s) => {
     if (search) {
       const q = search.toLowerCase();
       if (!s.name.toLowerCase().includes(q) && !(s.description || "").toLowerCase().includes(q) && !(s.trigger_command || "").toLowerCase().includes(q)) return false;
     }
     switch (category) {
       case "skill":
-        // 独立技能（非插件关联、非命令触发）
-        return !s.plugin_id && !s.trigger_command;
+        return isStandaloneSkill(s);
       case "prompt":
-        // 提示词类：名字或描述含 prompt/提示/template/模板
-        return /prompt|提示|template|模板|指令|instruction/i.test(s.name + (s.description || "") + (s.trigger_command || ""));
+        return isPromptSkill(s);
       case "command":
-        // 有触发命令的技能
-        return !!s.trigger_command;
+        return isCommandSkill(s);
       case "plugin":
-        // 插件关联的技能
-        return !!s.plugin_id;
+        return false;
       default:
         return true; // "all"
     }
   });
 
-  const filteredPlugins = plugins.filter((p) => {
+  const filteredPlugins = visiblePlugins.filter((p) => {
     if (category !== "all" && category !== "plugin") return false;
     if (search) {
       const q = search.toLowerCase();
@@ -196,11 +212,11 @@ export default function Skills() {
   }
 
   const catTabs: { key: SkillCategory; label: string; count: number }[] = [
-    { key: "all", label: i.skills.categoryAll, count: skills.length + plugins.length },
-    { key: "skill", label: i.skills.categorySkills, count: skills.filter(s => !s.plugin_id && !s.trigger_command).length },
-    { key: "prompt", label: i.skills.categoryPrompts, count: skills.filter(s => /prompt|提示|template|模板|指令|instruction/i.test(s.name + (s.description || "") + (s.trigger_command || ""))).length },
-    { key: "command", label: i.skills.categoryCommands, count: skills.filter(s => !!s.trigger_command).length },
-    { key: "plugin", label: i.skills.categoryPlugins, count: plugins.length },
+    { key: "all", label: i.skills.categoryAll, count: visibleSkills.length + visiblePlugins.length },
+    { key: "skill", label: i.skills.categorySkills, count: visibleSkills.filter(isStandaloneSkill).length },
+    { key: "prompt", label: i.skills.categoryPrompts, count: visibleSkills.filter(isPromptSkill).length },
+    { key: "command", label: i.skills.categoryCommands, count: visibleSkills.filter(isCommandSkill).length },
+    { key: "plugin", label: i.skills.categoryPlugins, count: visiblePlugins.length },
   ];
 
   return (
@@ -210,7 +226,7 @@ export default function Skills() {
         <div>
           <h2 className="page-title">{i.skills.title}</h2>
           <p className="page-subtitle">
-            {tReplace(i.skills.totalSkills, { count: skills.length + plugins.length })}
+            {tReplace(i.skills.totalSkills, { count: visibleSkills.length + visiblePlugins.length })}
             {installedTools.length > 0 && ` · ${tReplace(i.skills.toolCount, { count: installedTools.length })}`}
           </p>
         </div>
@@ -232,7 +248,13 @@ export default function Skills() {
               <div key={tool.id} style={{ position: "relative" }}>
                 <button
                   className={`btn btn-sm ${isActive ? "btn-primary" : tool.installed ? "btn-secondary" : "btn-ghost"}`}
-                  onClick={() => tool.installed && setActiveTool(tool.id)}
+                  onClick={() => {
+                    if (!tool.installed) return;
+                    setActiveTool(tool.id);
+                    setSelectedSkill(null);
+                    setSkillContent(null);
+                    setEditingSkill(false);
+                  }}
                   style={{ gap: 6, opacity: tool.installed ? 1 : 0.5, cursor: tool.installed ? "pointer" : "default" }}
                   title={tool.installed ? tool.name : (locale === "zh" ? `${tool.name} 未安装` : `${tool.name} not installed`)}
                 >
@@ -402,10 +424,18 @@ export default function Skills() {
             <div className="card empty-state" style={{ flex: 1 }}>
               <div className="empty-icon"><Zap size={28} style={{ color: "var(--text-muted)" }} /></div>
               <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>
-                {search ? (locale === "zh" ? "未找到匹配结果" : "No results found") : i.skills.noSkills}
+                {search
+                  ? (locale === "zh" ? "未找到匹配结果" : "No results found")
+                  : category === "plugin"
+                    ? i.skills.noPlugins
+                    : i.skills.noSkills}
               </p>
               <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>
-                {search ? (locale === "zh" ? "尝试其他关键词" : "Try different keywords") : i.skills.noSkillsTip}
+                {search
+                  ? (locale === "zh" ? "尝试其他关键词" : "Try different keywords")
+                  : category === "plugin"
+                    ? i.skills.noPluginsTip
+                    : i.skills.noSkillsTip}
               </p>
             </div>
           )}

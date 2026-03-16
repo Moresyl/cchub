@@ -33,6 +33,7 @@ pub struct Skill {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub tool_id: Option<String>,
     pub plugin_id: Option<String>,
     pub trigger_command: Option<String>,
     pub file_path: Option<String>,

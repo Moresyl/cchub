@@ -21,6 +21,7 @@ pub fn get_skills(db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 description: row.get(2)?,
+                tool_id: None,
                 plugin_id: row.get(3)?,
                 trigger_command: row.get(4)?,
                 file_path: row.get(5)?,

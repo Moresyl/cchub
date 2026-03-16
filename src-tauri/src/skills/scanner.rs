@@ -1,3 +1,4 @@
+use super::tools::detect_tools;
 use crate::db::models::{Plugin, Skill};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -162,24 +163,25 @@ pub fn scan_local_skills() -> Vec<Skill> {
     // Scan skills within plugins
     if let Some(plugins_dir) = get_plugins_dir() {
         if plugins_dir.exists() {
-            scan_skills_in_dir(&plugins_dir, &mut skills, true);
+            scan_skills_in_dir(&plugins_dir, &mut skills, true, Some("claude"));
         }
     }
 
-    // Scan standalone skills
-    if let Some(skills_dir) = get_skills_dir() {
+    // Scan standalone skills for every detected tool
+    for tool in detect_tools().into_iter().filter(|tool| tool.installed) {
+        let skills_dir = PathBuf::from(&tool.skills_dir);
         if skills_dir.exists() {
-            scan_skills_in_dir(&skills_dir, &mut skills, false);
+            scan_skills_in_dir(&skills_dir, &mut skills, false, Some(tool.id.as_str()));
         }
     }
 
     skills
 }
 
-fn scan_skills_in_dir(dir: &PathBuf, skills: &mut Vec<Skill>, is_plugin_dir: bool) {
+fn scan_skills_in_dir(dir: &PathBuf, skills: &mut Vec<Skill>, is_plugin_dir: bool, tool_id: Option<&str>) {
     let walker = walkdir(dir, is_plugin_dir);
     for skill_file in walker {
-        if let Some(skill) = parse_skill_file(&skill_file, is_plugin_dir) {
+        if let Some(skill) = parse_skill_file(&skill_file, is_plugin_dir, tool_id) {
             skills.push(skill);
         }
     }
@@ -215,7 +217,7 @@ fn walk_recursive(dir: &PathBuf, results: &mut Vec<PathBuf>, max_depth: usize, c
     }
 }
 
-fn parse_skill_file(path: &PathBuf, is_plugin_dir: bool) -> Option<Skill> {
+fn parse_skill_file(path: &PathBuf, is_plugin_dir: bool, tool_id: Option<&str>) -> Option<Skill> {
     let content = std::fs::read_to_string(path).ok()?;
     let file_name = path.file_stem()?.to_string_lossy().to_string();
 
@@ -237,11 +239,12 @@ fn parse_skill_file(path: &PathBuf, is_plugin_dir: bool) -> Option<Skill> {
     };
 
     Some(Skill {
-        id: format!("{}:{}", plugin_id.as_deref().unwrap_or("standalone"), &file_name),
+        id: path.to_string_lossy().to_string(),
         name,
         description,
+        tool_id: tool_id.map(str::to_string),
         plugin_id,
-        trigger_command: trigger.or(Some(format!("/{}", file_name))),
+        trigger_command: trigger,
         file_path: Some(path.to_string_lossy().to_string()),
         version: None,
         installed_at: get_file_created_time(path),

@@ -49,14 +49,14 @@ function getEditorLanguage(profile: ConfigProfile): "json" | "toml" {
   return "json";
 }
 
-function getSnapshotHint(toolId: string, locale: string) {
+function getConfigHint(toolId: string, locale: string) {
   if (toolId === "codex") {
     return locale === "zh" ? "包含 auth.json 和 config.toml" : "Includes auth.json and config.toml";
   }
   if (toolId === "gemini") {
     return locale === "zh" ? "包含 .env 和 settings.json" : "Includes .env and settings.json";
   }
-  return locale === "zh" ? "完整配置快照" : "Full configuration snapshot";
+  return locale === "zh" ? "完整配置" : "Full configuration";
 }
 
 export default function Profiles() {
@@ -105,15 +105,15 @@ export default function Profiles() {
     if (!newName.trim() || saving) return;
     setSaving(true);
     try {
-      const snapshot = await invoke<string>("read_tool_config", { toolId: newTool });
+      const configContent = await invoke<string>("read_tool_config", { toolId: newTool });
       await invoke("save_config_profile", {
         name: newName.trim(),
         toolId: newTool,
-        configSnapshot: snapshot,
+        configSnapshot: configContent,
       });
       setNewName("");
       await load();
-      showToast("success", locale === "zh" ? "配置快照已保存" : "Configuration snapshot saved");
+      showToast("success", locale === "zh" ? "配置已保存" : "Configuration saved");
     } catch (e) {
       console.error(e);
       showToast("error", locale === "zh" ? `保存失败: ${e}` : `Save failed: ${e}`);
@@ -205,8 +205,8 @@ export default function Profiles() {
           <h2 className="page-title">{locale === "zh" ? "配置切换" : "Config Profiles"}</h2>
           <p className="page-subtitle">
             {locale === "zh"
-              ? `共 ${profiles.length} 个配置快照，当前命中 ${activeIds.length} 个`
-              : `${profiles.length} snapshots, ${activeIds.length} currently matched`}
+              ? `共 ${profiles.length} 个配置，当前命中 ${activeIds.length} 个`
+              : `${profiles.length} configurations, ${activeIds.length} currently matched`}
           </p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={() => void load()} style={{ gap: 6 }}>
@@ -219,7 +219,7 @@ export default function Profiles() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              {locale === "zh" ? "新增快照" : "New Snapshot"}
+              {locale === "zh" ? "新增配置" : "New Configuration"}
             </div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
               {locale === "zh" ? "保存当前工具的完整配置，后续一键切换。" : "Save the complete current configuration for quick switching."}
@@ -249,7 +249,7 @@ export default function Profiles() {
           <input
             className="input"
             style={{ flex: 1, minWidth: 240, fontSize: 13 }}
-            placeholder={locale === "zh" ? "配置名称，例如：生产环境、备用配置" : "Snapshot name, e.g. Production, Backup"}
+            placeholder={locale === "zh" ? "配置名称，例如：生产环境、备用配置" : "Configuration name, e.g. Production, Backup"}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
@@ -263,7 +263,7 @@ export default function Profiles() {
             style={{ gap: 6 }}
           >
             {saving ? <div className="spinner" style={{ width: 14, height: 14 }} /> : <Save size={14} />}
-            {locale === "zh" ? "保存快照" : "Save"}
+            {locale === "zh" ? "保存配置" : "Save"}
           </button>
         </div>
       </div>
@@ -326,12 +326,12 @@ export default function Profiles() {
                 <ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} />
               </div>
               <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>
-                {locale === "zh" ? "没有可显示的配置快照" : "No snapshots to display"}
+                {locale === "zh" ? "没有可显示的配置" : "No configurations to display"}
               </p>
               <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>
                 {locale === "zh"
                   ? "先保存一份当前配置，之后就可以在这里直接切换和删除。"
-                  : "Save a snapshot first, then switch or delete it here."}
+                  : "Save a configuration first, then switch or delete it here."}
               </p>
             </div>
           ) : (
@@ -368,7 +368,7 @@ export default function Profiles() {
                           )}
                         </div>
                         <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-                          {getSnapshotHint(profile.tool_id, locale)}
+                          {getConfigHint(profile.tool_id, locale)}
                         </div>
                         <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
                           {formatTime(profile.updated_at || profile.created_at)}
@@ -431,7 +431,7 @@ export default function Profiles() {
                     <span className="badge badge-muted">{(preview.config_snapshot.length / 1024).toFixed(1)} KB</span>
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 10 }}>
-                    {getSnapshotHint(preview.tool_id, locale)}
+                    {getConfigHint(preview.tool_id, locale)}
                   </div>
                 </div>
 
@@ -463,7 +463,7 @@ export default function Profiles() {
                   style={{ gap: 5 }}
                 >
                   <Trash2 size={13} />
-                  {locale === "zh" ? "删除此快照" : "Delete"}
+                  {locale === "zh" ? "删除此配置" : "Delete"}
                 </button>
               </div>
             </div>

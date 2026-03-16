@@ -2,7 +2,7 @@ use crate::db::DbState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpClient {
@@ -432,7 +432,10 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
                 return Err(format!("Config file not found: {}", env_path.display()));
             }
             let env_text = std::fs::read_to_string(&env_path).map_err(|e| e.to_string())?;
-            let env = crate::gemini_config::parse_env_file(&env_text);
+            let env: HashMap<String, String> = env_text.lines()
+                .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
+                .filter_map(|l| l.split_once('=').map(|(k,v)| (k.trim().to_string(), v.trim().to_string())))
+                .collect();
             let settings_path = dir.join("settings.json");
             let config = if settings_path.exists() {
                 serde_json::from_str::<serde_json::Value>(
@@ -489,7 +492,10 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
                         .iter()
                         .filter_map(|(key, value)| value.as_str().map(|v| (key.clone(), v.to_string())))
                         .collect();
-                    let env_text = crate::gemini_config::serialize_env_file(&env_map);
+                    let env_text = env_map.iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     let config_text = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
                     crate::utils::atomic_write_string(&env_path, &env_text).map_err(|e| e.to_string())?;
                     crate::utils::atomic_write_string(&settings_path, &config_text).map_err(|e| e.to_string())?;
@@ -624,32 +630,47 @@ pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<Strin
 
 // ── Proxy Settings ──
 
-/// Set HTTP/HTTPS proxy for all network requests
+/// Set HTTP/HTTPS proxy for all network requests (persisted to database)
 #[tauri::command]
-pub fn set_proxy(proxy_url: String) -> Result<(), String> {
+pub fn set_proxy(proxy_url: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+
     if proxy_url.trim().is_empty() {
-        // Clear proxy
         std::env::remove_var("HTTP_PROXY");
         std::env::remove_var("HTTPS_PROXY");
         std::env::remove_var("http_proxy");
         std::env::remove_var("https_proxy");
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', '')", [])
+            .map_err(|e| e.to_string())?;
     } else {
         let url = proxy_url.trim().to_string();
         std::env::set_var("HTTP_PROXY", &url);
         std::env::set_var("HTTPS_PROXY", &url);
         std::env::set_var("http_proxy", &url);
         std::env::set_var("https_proxy", &url);
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', ?1)", rusqlite::params![url])
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 /// Get current proxy setting
 #[tauri::command]
-pub fn get_proxy() -> String {
+pub fn get_proxy(db: State<'_, DbState>) -> String {
+    // Read from database first (persisted), fallback to env
+    if let Ok(conn) = db.0.lock() {
+        if let Ok(proxy) = conn.query_row(
+            "SELECT value FROM app_settings WHERE key = 'proxy_url'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            if !proxy.is_empty() {
+                return proxy;
+            }
+        }
+    }
     std::env::var("HTTPS_PROXY")
         .or_else(|_| std::env::var("https_proxy"))
-        .or_else(|_| std::env::var("HTTP_PROXY"))
-        .or_else(|_| std::env::var("http_proxy"))
         .unwrap_or_default()
 }
 
@@ -703,12 +724,60 @@ pub struct SkillFileBackup {
     pub content: String,
 }
 
-/// Collect all tool configs and skills into a single backup JSON
-#[tauri::command]
-pub async fn export_all_configs() -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let mut tools_backup: HashMap<String, ToolBackup> = HashMap::new();
+/// Generate SQL dump from database
+fn generate_sql_dump(conn: &rusqlite::Connection) -> String {
+    let mut sql_dump = String::new();
+    sql_dump.push_str("-- CCHub Database Backup\n");
+    sql_dump.push_str(&format!("-- Created: {}\n\n", chrono::Utc::now().to_rfc3339()));
 
+    let tables = ["mcp_servers", "plugins", "skills", "hooks", "activity_logs", "mcp_clients",
+                   "workspaces", "custom_paths", "config_profiles", "app_settings", "update_history", "metrics"];
+    for table in tables {
+        let query = format!("SELECT * FROM {}", table);
+        if let Ok(mut stmt) = conn.prepare(&query) {
+            let col_count = stmt.column_count();
+            let col_names: Vec<String> = (0..col_count).map(|i| stmt.column_name(i).unwrap_or("").to_string()).collect();
+
+            if let Ok(rows) = stmt.query_map([], |row| {
+                let mut vals = Vec::new();
+                for i in 0..col_count {
+                    let val: rusqlite::Result<String> = row.get(i);
+                    match val {
+                        Ok(s) => vals.push(format!("'{}'", s.replace('\'', "''"))),
+                        Err(_) => {
+                            let int_val: rusqlite::Result<i64> = row.get(i);
+                            match int_val {
+                                Ok(n) => vals.push(n.to_string()),
+                                Err(_) => vals.push("NULL".to_string()),
+                            }
+                        }
+                    }
+                }
+                Ok(vals)
+            }) {
+                for row in rows.flatten() {
+                    sql_dump.push_str(&format!("INSERT OR REPLACE INTO {} ({}) VALUES ({});\n",
+                        table, col_names.join(", "), row.join(", ")));
+                }
+            }
+        }
+    }
+    sql_dump
+}
+
+/// Export: database SQL dump + tool config files
+#[tauri::command]
+pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    // 1. SQL dump
+    let sql_dump = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        generate_sql_dump(&conn)
+    };
+
+    // 2. Collect tool config files
+    let mut tools_backup: HashMap<String, ToolBackup> = HashMap::new();
     let tool_configs: Vec<(&str, std::path::PathBuf, &str)> = vec![
         ("claude", home.join(".claude.json"), "skills"),
         ("claude-settings", home.join(".claude").join("settings.json"), "skills"),
@@ -722,12 +791,9 @@ pub async fn export_all_configs() -> Result<String, String> {
     for (tool_id, config_path, skills_subdir) in tool_configs {
         let config_content = if config_path.exists() {
             std::fs::read_to_string(&config_path).ok()
-        } else {
-            None
-        };
+        } else { None };
 
-        // Collect skills
-        let mut skills = Vec::new();
+        let mut skill_files = Vec::new();
         let skills_dir = config_path.parent().unwrap_or(&home).join(skills_subdir);
         if skills_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&skills_dir) {
@@ -736,40 +802,36 @@ pub async fn export_all_configs() -> Result<String, String> {
                     if path.is_file() {
                         if let Ok(content) = std::fs::read_to_string(&path) {
                             let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            skills.push(SkillFileBackup { name, content });
+                            skill_files.push(SkillFileBackup { name, content });
                         }
                     }
                 }
             }
         }
 
-        if config_content.is_some() || !skills.is_empty() {
+        if config_content.is_some() || !skill_files.is_empty() {
             tools_backup.insert(tool_id.to_string(), ToolBackup {
                 config_content,
                 config_path: config_path.to_string_lossy().to_string(),
-                skills,
+                skills: skill_files,
             });
         }
     }
 
-    let backup = BackupData {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        created_at: chrono::Utc::now().to_rfc3339(),
-        tools: tools_backup,
-    };
+    // 3. Combine into backup
+    let backup = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "sql_dump": sql_dump,
+        "tools": tools_backup,
+    });
+    let backup_json = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
 
-    serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())
-}
-
-/// Save backup JSON to a file chosen by user
-#[tauri::command]
-pub async fn save_backup_to_file() -> Result<String, String> {
-    let backup_json = export_all_configs().await?;
-
+    // 4. Save file dialog
     let file = rfd::AsyncFileDialog::new()
         .set_title("Save Backup")
         .set_file_name(&format!("cchub-backup-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")))
-        .add_filter("JSON", &["json"])
+        .add_filter("CCHub Backup", &["json"])
         .save_file()
         .await;
 
@@ -783,56 +845,72 @@ pub async fn save_backup_to_file() -> Result<String, String> {
     }
 }
 
-/// Load backup from a file chosen by user and restore all configs
+/// Import backup: restore database + tool configs
 #[tauri::command]
-pub async fn import_backup_from_file() -> Result<String, String> {
+pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, String> {
     let file = rfd::AsyncFileDialog::new()
         .set_title("Import Backup")
-        .add_filter("JSON", &["json"])
+        .add_filter("CCHub Backup", &["json"])
         .pick_file()
         .await;
 
     let file = file.ok_or("Cancelled")?;
     let content = std::fs::read_to_string(file.path()).map_err(|e| e.to_string())?;
-    let backup: BackupData = serde_json::from_str(&content).map_err(|e| format!("Invalid backup file: {}", e))?;
+    let backup: serde_json::Value = serde_json::from_str(&content).map_err(|e| format!("Invalid backup: {}", e))?;
 
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let mut restored_count = 0;
 
-    for (tool_id, tool_backup) in &backup.tools {
-        // Determine the actual config path
-        let config_path = match tool_id.as_str() {
-            "claude" => home.join(".claude.json"),
-            "claude-settings" => home.join(".claude").join("settings.json"),
-            "codex" => home.join(".codex").join("config.toml"),
-            "gemini" => home.join(".gemini").join("settings.json"),
-            "cursor" => home.join(".cursor").join("mcp.json"),
-            "windsurf" => home.join(".windsurf").join("mcp.json"),
-            "opencode" => home.join(".opencode").join("opencode.json"),
-            _ => continue,
-        };
-
-        // Restore config file
-        if let Some(ref config_content) = tool_backup.config_content {
-            if let Some(parent) = config_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+    // 1. Restore SQL dump
+    if let Some(sql_dump) = backup.get("sql_dump").and_then(|v| v.as_str()) {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        for line in sql_dump.lines() {
+            let line = line.trim();
+            if line.starts_with("INSERT") {
+                let _ = conn.execute_batch(line);
+                restored_count += 1;
             }
-            crate::utils::atomic_write_string(&config_path, config_content)
-                .map_err(|e| e.to_string())?;
-            restored_count += 1;
-        }
-
-        // Restore skills
-        if !tool_backup.skills.is_empty() {
-            let skills_dir = config_path.parent().unwrap_or(&home).join("skills");
-            let _ = std::fs::create_dir_all(&skills_dir);
-            for skill in &tool_backup.skills {
-                let skill_path = skills_dir.join(&skill.name);
-                let _ = crate::utils::atomic_write_string(&skill_path, &skill.content);
-            }
-            restored_count += tool_backup.skills.len();
         }
     }
 
-    Ok(format!("Restored {} items from backup ({})", restored_count, backup.created_at))
+    // 2. Restore tool configs
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    if let Some(tools) = backup.get("tools").and_then(|v| v.as_object()) {
+        for (tool_id, tool_backup) in tools {
+            let config_path = match tool_id.as_str() {
+                "claude" => home.join(".claude.json"),
+                "claude-settings" => home.join(".claude").join("settings.json"),
+                "codex" => home.join(".codex").join("config.toml"),
+                "gemini" => home.join(".gemini").join("settings.json"),
+                "cursor" => home.join(".cursor").join("mcp.json"),
+                "windsurf" => home.join(".windsurf").join("mcp.json"),
+                "opencode" => home.join(".opencode").join("opencode.json"),
+                _ => continue,
+            };
+
+            if let Some(config_content) = tool_backup.get("config_content").and_then(|v| v.as_str()) {
+                if let Some(parent) = config_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = crate::utils::atomic_write_string(&config_path, config_content);
+                restored_count += 1;
+            }
+
+            if let Some(skills) = tool_backup.get("skills").and_then(|v| v.as_array()) {
+                let skills_dir = config_path.parent().unwrap_or(&home).join("skills");
+                let _ = std::fs::create_dir_all(&skills_dir);
+                for skill in skills {
+                    if let (Some(name), Some(content)) = (
+                        skill.get("name").and_then(|v| v.as_str()),
+                        skill.get("content").and_then(|v| v.as_str()),
+                    ) {
+                        let _ = crate::utils::atomic_write_string(&skills_dir.join(name), content);
+                        restored_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    let created = backup.get("created_at").and_then(|v| v.as_str()).unwrap_or("unknown");
+    Ok(format!("Restored {} items from backup ({})", restored_count, created))
 }

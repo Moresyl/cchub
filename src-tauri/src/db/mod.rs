@@ -49,6 +49,21 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
     }
 
     schema::run_migrations(&conn)?;
+
+    // Restore proxy setting from database
+    if let Ok(proxy) = conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'proxy_url'",
+        [],
+        |row| row.get::<_, String>(0),
+    ) {
+        if !proxy.trim().is_empty() {
+            std::env::set_var("HTTP_PROXY", &proxy);
+            std::env::set_var("HTTPS_PROXY", &proxy);
+            std::env::set_var("http_proxy", &proxy);
+            std::env::set_var("https_proxy", &proxy);
+        }
+    }
+
     app_handle.manage(DbState(Mutex::new(conn)));
     Ok(())
 }

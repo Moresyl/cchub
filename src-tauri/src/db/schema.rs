@@ -111,6 +111,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             created_at TEXT,
             updated_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
     ")?;
 
     // Migration: add config_path column if not exists

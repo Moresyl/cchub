@@ -9,6 +9,21 @@ use tauri::Manager;
 
 pub struct DbState(pub Mutex<Connection>);
 
+/// Record an activity log entry
+pub fn record_activity(
+    conn: &Connection,
+    server_id: &str,
+    request_type: &str,
+    status: &str,
+    latency_ms: Option<i64>,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = conn.execute(
+        "INSERT INTO activity_logs (server_id, request_type, status, latency_ms, recorded_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![server_id, request_type, status, latency_ms, now],
+    );
+}
+
 pub fn get_db_path(app_handle: &AppHandle) -> PathBuf {
     let app_dir = app_handle
         .path()

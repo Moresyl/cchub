@@ -91,17 +91,17 @@ CCHub 会自动扫描以下位置的 MCP Server 配置：
 
 ### 路线图
 
-- [x] MCP Server 管理（扫描、启停、编辑、删除）
-- [x] Skills & Plugins 浏览
-- [x] Hooks 可视化
+- [x] MCP 服务管理（扫描、启停、编辑、删除）
+- [x] 技能与插件浏览
+- [x] 钩子可视化
 - [x] 版本更新检查
 - [x] 深色/浅色主题
 - [x] 中英文国际化
-- [x] 市场浏览器（一键安装 MCP Server / Skill）
+- [x] 市场浏览器（一键安装 MCP 服务 / 技能）
 - [x] CLAUDE.md 管理器
-- [x] MCP Server 健康监控
+- [x] MCP 服务健康监控
 - [x] 安全审计（权限扫描、变更检测）
-- [x] 自动更新 (Tauri Updater)
+- [x] 自动更新
 
 ---
 

@@ -23,16 +23,16 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
-            width: 36, height: 36, borderRadius: 6,
+            width: 28, height: 28, borderRadius: 4,
             background: "var(--text-primary)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "var(--bg-app)", fontSize: 13, fontWeight: 800,
+            color: "var(--bg-app)", fontSize: 11, fontWeight: 800,
           }}>CC</div>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>{i.app.name}</div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{i.app.subtitle}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>{i.app.name}</div>
+            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>{i.app.subtitle}</div>
           </div>
         </div>
       </div>
@@ -44,7 +44,7 @@ export default function Sidebar() {
             end={item.path === "/"}
             className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
           >
-            <item.icon size={18} />
+            <item.icon size={15} />
             <span>{i.nav[item.key]}</span>
           </NavLink>
         ))}

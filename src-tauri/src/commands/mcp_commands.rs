@@ -292,3 +292,33 @@ pub fn check_all_mcp_health(db: State<'_, DbState>) -> Result<Vec<health::Health
 
     Ok(results)
 }
+
+#[tauri::command]
+pub fn sync_mcp_server_to_tool(
+    server_name: String,
+    target_tool: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let (command, args_json, env_json): (String, String, String) = conn
+        .query_row(
+            "SELECT COALESCE(command,''), args, env FROM mcp_servers WHERE id = ?1",
+            rusqlite::params![server_name],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| format!("Server not found: {}", e))?;
+
+    let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
+    let env: std::collections::HashMap<String, String> = serde_json::from_str(&env_json).unwrap_or_default();
+
+    let mcp_config = config::McpServerConfig {
+        command: command.clone(),
+        args,
+        env,
+        transport_type: None,
+    };
+
+    config::sync_mcp_to_tool(&server_name, &mcp_config, &target_tool)?;
+    record_activity(&conn, &server_name, &format!("sync_to_{}", target_tool), "success", None);
+    Ok(())
+}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Trash2, Edit3, X, Save, Plug, Copy, Check, Activity, FileText } from "lucide-react";
+import { RefreshCw, Trash2, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import CodeEditor from "../components/CodeEditor";
 
@@ -28,6 +28,8 @@ export default function McpServers() {
   const [healthResults, setHealthResults] = useState<Record<string, HealthCheckResult>>({});
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [syncingTo, setSyncingTo] = useState<string | null>(null);
+  const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   const i = t();
 
   useEffect(() => { loadServers(); }, []);
@@ -95,6 +97,17 @@ export default function McpServers() {
       console.error(e);
       alert(getLocale() === "zh" ? "JSON 格式错误，请检查参数和环境变量" : "Invalid JSON format");
     }
+  }
+
+  async function syncToTool(toolId: string) {
+    if (!selected) return;
+    setSyncingTo(toolId);
+    try {
+      await invoke("sync_mcp_server_to_tool", { serverName: selected.name, targetTool: toolId });
+      setSyncSuccess(toolId);
+      setTimeout(() => setSyncSuccess(null), 2000);
+    } catch (e) { console.error(e); }
+    finally { setSyncingTo(null); }
   }
 
   function copyConfig() {
@@ -352,6 +365,30 @@ export default function McpServers() {
                       </div>
                     )}
                   </div>
+
+                  {/* Sync to other tools */}
+                  {!editing && (
+                    <div>
+                      <span className="field-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <Share2 size={12} />
+                        {getLocale() === "zh" ? "同步到其他工具" : "Sync to other tools"}
+                      </span>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {["claude", "codex", "gemini", "cursor", "windsurf", "opencode"].map((toolId) => (
+                          <button
+                            key={toolId}
+                            className="btn btn-xs btn-secondary"
+                            style={{ gap: 4, textTransform: "capitalize" }}
+                            disabled={syncingTo === toolId}
+                            onClick={() => syncToTool(toolId)}
+                          >
+                            {syncSuccess === toolId ? <Check size={11} style={{ color: "var(--success)" }} /> : syncingTo === toolId ? <div className="spinner" style={{ width: 11, height: 11 }} /> : <Share2 size={11} />}
+                            {toolId}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

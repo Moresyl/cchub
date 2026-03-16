@@ -365,8 +365,7 @@ fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
     }
 }
 
-fn default_tool_config_path(home: &std::path::Path, tool_id: &str) -> Result<PathBuf, String> {
-    let file_name = tool_config_file_name(tool_id)?;
+fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<PathBuf, String> {
     let dir = match tool_id {
         "claude" => ".claude",
         "codex" => ".codex",
@@ -376,10 +375,10 @@ fn default_tool_config_path(home: &std::path::Path, tool_id: &str) -> Result<Pat
         "opencode" => ".opencode",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     };
-    Ok(home.join(dir).join(file_name))
+    Ok(home.join(dir))
 }
 
-fn resolve_tool_config_path(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
+fn resolve_tool_config_dir(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
 
     let custom_dir: Option<String> = conn
@@ -392,10 +391,122 @@ fn resolve_tool_config_path(conn: &rusqlite::Connection, tool_id: &str) -> Resul
         .flatten();
 
     if let Some(dir) = custom_dir.filter(|dir| !dir.trim().is_empty()) {
-        return Ok(PathBuf::from(dir).join(tool_config_file_name(tool_id)?));
+        return Ok(PathBuf::from(dir));
     }
 
-    default_tool_config_path(&home, tool_id)
+    default_tool_config_dir(&home, tool_id)
+}
+
+fn resolve_tool_config_path(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
+    Ok(resolve_tool_config_dir(conn, tool_id)?.join(tool_config_file_name(tool_id)?))
+}
+
+fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<String, String> {
+    match tool_id {
+        "codex" => {
+            let dir = resolve_tool_config_dir(conn, tool_id)?;
+            let auth_path = dir.join("auth.json");
+            if !auth_path.exists() {
+                return Err(format!("Config file not found: {}", auth_path.display()));
+            }
+            let auth: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&auth_path).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            let config_path = dir.join("config.toml");
+            let config = if config_path.exists() {
+                std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?
+            } else {
+                String::new()
+            };
+            serde_json::to_string_pretty(&serde_json::json!({
+                "auth": auth,
+                "config": config,
+            }))
+            .map_err(|e| e.to_string())
+        }
+        "gemini" => {
+            let dir = resolve_tool_config_dir(conn, tool_id)?;
+            let env_path = dir.join(".env");
+            if !env_path.exists() {
+                return Err(format!("Config file not found: {}", env_path.display()));
+            }
+            let env_text = std::fs::read_to_string(&env_path).map_err(|e| e.to_string())?;
+            let env = crate::gemini_config::parse_env_file(&env_text);
+            let settings_path = dir.join("settings.json");
+            let config = if settings_path.exists() {
+                serde_json::from_str::<serde_json::Value>(
+                    &std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?
+            } else {
+                serde_json::json!({})
+            };
+            serde_json::to_string_pretty(&serde_json::json!({
+                "env": env,
+                "config": config,
+            }))
+            .map_err(|e| e.to_string())
+        }
+        _ => {
+            let config_path = resolve_tool_config_path(conn, tool_id)?;
+            if !config_path.exists() {
+                return Err(format!("Config file not found: {}", config_path.display()));
+            }
+            std::fs::read_to_string(&config_path).map_err(|e| e.to_string())
+        }
+    }
+}
+
+fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &str) -> Result<(), String> {
+    match tool_id {
+        "codex" => {
+            let dir = resolve_tool_config_dir(conn, tool_id)?;
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let auth_path = dir.join("auth.json");
+            let config_path = dir.join("config.toml");
+
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(snapshot) {
+                if let (Some(auth), Some(config)) = (value.get("auth"), value.get("config").and_then(|v| v.as_str())) {
+                    let auth_text = serde_json::to_string_pretty(auth).map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&auth_path, &auth_text).map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&config_path, config).map_err(|e| e.to_string())?;
+                    return Ok(());
+                }
+            }
+
+            crate::utils::atomic_write_string(&config_path, snapshot).map_err(|e| e.to_string())
+        }
+        "gemini" => {
+            let dir = resolve_tool_config_dir(conn, tool_id)?;
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let env_path = dir.join(".env");
+            let settings_path = dir.join("settings.json");
+
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(snapshot) {
+                if let (Some(env), Some(config)) = (value.get("env").and_then(|v| v.as_object()), value.get("config")) {
+                    let env_map: std::collections::HashMap<String, String> = env
+                        .iter()
+                        .filter_map(|(key, value)| value.as_str().map(|v| (key.clone(), v.to_string())))
+                        .collect();
+                    let env_text = crate::gemini_config::serialize_env_file(&env_map);
+                    let config_text = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&env_path, &env_text).map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&settings_path, &config_text).map_err(|e| e.to_string())?;
+                    return Ok(());
+                }
+            }
+
+            crate::utils::atomic_write_string(&settings_path, snapshot).map_err(|e| e.to_string())
+        }
+        _ => {
+            let config_path = resolve_tool_config_path(conn, tool_id)?;
+            if let Some(parent) = config_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            crate::utils::atomic_write_string(&config_path, snapshot).map_err(|e| e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -453,14 +564,7 @@ pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), St
         )
         .map_err(|e| format!("Profile not found: {}", e))?;
 
-    let config_path = resolve_tool_config_path(&conn, &tool_id)?;
-
-    // Ensure parent directory exists
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    crate::utils::atomic_write_string(&config_path, &snapshot).map_err(|e| e.to_string())?;
+    apply_tool_snapshot(&conn, &tool_id, &snapshot)?;
 
     // Update timestamp
     let now = chrono::Utc::now().to_rfc3339();
@@ -506,9 +610,7 @@ pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<Strin
 
     for profile in profiles {
         if !cache.contains_key(&profile.tool_id) {
-            let content = resolve_tool_config_path(&conn, &profile.tool_id)
-                .ok()
-                .and_then(|path| std::fs::read_to_string(path).ok());
+            let content = read_tool_snapshot(&conn, &profile.tool_id).ok();
             cache.insert(profile.tool_id.clone(), content);
         }
 
@@ -576,13 +678,7 @@ pub async fn pick_file() -> Result<Option<String>, String> {
 #[tauri::command]
 pub fn read_tool_config(tool_id: String, db: State<'_, DbState>) -> Result<String, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let config_path = resolve_tool_config_path(&conn, &tool_id)?;
-
-    if !config_path.exists() {
-        return Err(format!("Config file not found: {}", config_path.display()));
-    }
-
-    std::fs::read_to_string(&config_path).map_err(|e| e.to_string())
+    read_tool_snapshot(&conn, &tool_id)
 }
 
 // ── Backup / Export / Import ──

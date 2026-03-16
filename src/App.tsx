@@ -9,7 +9,6 @@ import Skills from "./pages/Skills";
 import Hooks from "./pages/Hooks";
 import Updates from "./pages/Updates";
 import Settings from "./pages/Settings";
-import ClaudeMd from "./pages/ClaudeMd";
 import Security from "./pages/Security";
 import Marketplace from "./pages/Marketplace";
 import Workspaces from "./pages/Workspaces";
@@ -33,7 +32,6 @@ function App() {
               <Route path="/skills" element={<Skills />} />
               <Route path="/marketplace" element={<Marketplace />} />
               <Route path="/hooks" element={<Hooks />} />
-              <Route path="/claude-md" element={<ClaudeMd />} />
               <Route path="/workspaces" element={<Workspaces />} />
               <Route path="/profiles" element={<Profiles />} />
               <Route path="/updates" element={<Updates />} />

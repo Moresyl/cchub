@@ -4,7 +4,7 @@ import {
   RefreshCw, Zap, Package, FileText, ExternalLink, Search,
   X, ChevronRight, FolderOpen, Monitor, Terminal,
   Code, Wind, Folder, File, ChevronDown,
-  Edit3, Trash2, Save,
+  Edit3, Trash2, Save, Sparkles, Globe,
 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, CategoryCounts, SkillCategory } from "../types/skills";
@@ -27,6 +27,8 @@ const TOOL_ICONS: Record<string, typeof Monitor> = {
   cursor: Code,
   windsurf: Wind,
   codex: Monitor,
+  gemini: Sparkles,
+  opencode: Globe,
 };
 
 export default function Skills() {
@@ -212,22 +214,34 @@ export default function Skills() {
       </div>
 
       {/* Tool Selector */}
-      {installedTools.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {installedTools.map((tool) => {
+      {tools.length > 0 && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {tools.map((tool) => {
             const Icon = TOOL_ICONS[tool.id] || Monitor;
+            const isActive = activeTool === tool.id;
             return (
-              <button
-                key={tool.id}
-                className={`btn btn-sm ${activeTool === tool.id ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setActiveTool(tool.id)}
-                style={{ gap: 6 }}
-              >
-                <Icon size={14} />
-                {tool.name}
-              </button>
+              <div key={tool.id} style={{ position: "relative" }}>
+                <button
+                  className={`btn btn-sm ${isActive ? "btn-primary" : tool.installed ? "btn-secondary" : "btn-ghost"}`}
+                  onClick={() => tool.installed && setActiveTool(tool.id)}
+                  style={{ gap: 6, opacity: tool.installed ? 1 : 0.5, cursor: tool.installed ? "pointer" : "default" }}
+                  title={tool.installed ? tool.name : (locale === "zh" ? `${tool.name} 未安装` : `${tool.name} not installed`)}
+                >
+                  <Icon size={14} />
+                  {tool.name}
+                  {!tool.installed && (
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0 }} />
+                  )}
+                </button>
+              </div>
             );
           })}
+          {/* Uninstalled tool hints */}
+          {tools.filter(t => !t.installed).length > 0 && (
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
+              {locale === "zh" ? "红点 = 未安装" : "red dot = not installed"}
+            </span>
+          )}
         </div>
       )}
 

@@ -2,7 +2,7 @@ use crate::db::DbState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tauri::{Manager, State};
+use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpClient {
@@ -349,6 +349,8 @@ pub struct ConfigProfile {
     pub name: String,
     pub tool_id: String,
     pub config_snapshot: String,
+    pub source_type: Option<String>,
+    pub source_key: Option<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }
@@ -394,11 +396,322 @@ fn resolve_tool_config_dir(conn: &rusqlite::Connection, tool_id: &str) -> Result
         return Ok(PathBuf::from(dir));
     }
 
+    let custom_config_path: Option<String> = conn
+        .query_row(
+            "SELECT mcp_config_path FROM custom_paths WHERE tool_id = ?1",
+            rusqlite::params![tool_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    if let Some(path) = custom_config_path.filter(|path| !path.trim().is_empty()) {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            return Ok(parent.to_path_buf());
+        }
+    }
+
     default_tool_config_dir(&home, tool_id)
 }
 
 fn resolve_tool_config_path(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
     Ok(resolve_tool_config_dir(conn, tool_id)?.join(tool_config_file_name(tool_id)?))
+}
+
+fn candidate_home_dirs() -> Vec<PathBuf> {
+    let mut homes = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        homes.push(home);
+    }
+
+    for key in ["USERPROFILE", "HOME"] {
+        if let Ok(value) = std::env::var(key) {
+            let path = PathBuf::from(value);
+            if !homes.iter().any(|item| item == &path) {
+                homes.push(path);
+            }
+        }
+    }
+
+    if let (Ok(drive), Ok(path)) = (std::env::var("HOMEDRIVE"), std::env::var("HOMEPATH")) {
+        let home = PathBuf::from(format!("{}{}", drive, path));
+        if !homes.iter().any(|item| item == &home) {
+            homes.push(home);
+        }
+    }
+
+    #[cfg(target_family = "unix")]
+    {
+        let mnt_root = PathBuf::from("/mnt");
+        if mnt_root.exists() {
+            if let Ok(drives) = std::fs::read_dir(&mnt_root) {
+                for drive in drives.flatten() {
+                    let users_dir = drive.path().join("Users");
+                    if !users_dir.exists() {
+                        continue;
+                    }
+                    if let Ok(users) = std::fs::read_dir(users_dir) {
+                        for user in users.flatten() {
+                            let home = user.path();
+                            if !homes.iter().any(|item| item == &home) {
+                                homes.push(home);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    homes
+}
+
+fn compatible_db_paths() -> Vec<PathBuf> {
+    let compat_dir = [".cc", "switch"].join("-");
+    let compat_db = ["cc", "switch.db"].join("-");
+
+    candidate_home_dirs()
+        .into_iter()
+        .map(|home| home.join(&compat_dir).join(&compat_db))
+        .filter(|path| path.exists())
+        .collect()
+}
+
+fn current_profile_setting_key(tool_id: &str) -> String {
+    format!("current_config_profile:{}", tool_id)
+}
+
+fn get_stored_current_profile_ids(conn: &rusqlite::Connection) -> Result<HashMap<String, String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM app_settings WHERE key LIKE 'current_config_profile:%'")
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+
+    let mut current = HashMap::new();
+    for row in rows {
+        let (key, value) = row.map_err(|e| e.to_string())?;
+        if let Some(tool_id) = key.strip_prefix("current_config_profile:") {
+            current.insert(tool_id.to_string(), value);
+        }
+    }
+
+    Ok(current)
+}
+
+fn get_compatible_current_profile_ids() -> Result<HashMap<String, String>, String> {
+    let mut current = HashMap::new();
+
+    for db_path in compatible_db_paths() {
+        let external = rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut stmt = external
+            .prepare(
+                "SELECT id, app_type
+                 FROM providers
+                 WHERE is_current = 1 AND app_type IN ('claude', 'codex', 'gemini')",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?;
+
+        for row in rows {
+            let (provider_id, tool_id) = row.map_err(|e| e.to_string())?;
+            current.insert(tool_id.clone(), format!("compat-{}-{}", tool_id, provider_id));
+        }
+    }
+
+    Ok(current)
+}
+
+fn normalize_external_profile_snapshot(tool_id: &str, settings_config: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(settings_config).ok()?;
+
+    match tool_id {
+        "claude" | "codex" | "gemini" => serde_json::to_string_pretty(&value).ok(),
+        _ => None,
+    }
+}
+
+fn upsert_synced_profile(
+    conn: &rusqlite::Connection,
+    id: &str,
+    name: &str,
+    tool_id: &str,
+    config_snapshot: &str,
+    source_type: &str,
+    source_key: Option<&str>,
+    now: &str,
+) -> Result<(), String> {
+    let existing_source_type: Option<String> = conn
+        .query_row(
+            "SELECT source_type FROM config_profiles WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if existing_source_type.as_deref() == Some("manual") {
+        return Ok(());
+    }
+
+    if existing_source_type.is_some() {
+        conn.execute(
+            "UPDATE config_profiles
+             SET name = ?1, tool_id = ?2, config_snapshot = ?3, source_type = ?4, source_key = ?5, updated_at = ?6
+             WHERE id = ?7",
+            rusqlite::params![name, tool_id, config_snapshot, source_type, source_key, now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "INSERT INTO config_profiles
+             (id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            rusqlite::params![id, name, tool_id, config_snapshot, source_type, source_key, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn sync_profiles_from_compatible_databases(
+    conn: &rusqlite::Connection,
+    now: &str,
+) -> Result<HashMap<String, usize>, String> {
+    let mut counts = HashMap::new();
+    let mut seen_ids = std::collections::HashSet::new();
+
+    for db_path in compatible_db_paths() {
+        let external = rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut stmt = external
+            .prepare(
+                "SELECT id, app_type, name, settings_config
+                 FROM providers
+                 WHERE app_type IN ('claude', 'codex', 'gemini')
+                 ORDER BY app_type, name",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+
+        for row in rows {
+            let (provider_id, tool_id, name, settings_config) = row.map_err(|e| e.to_string())?;
+            let Some(config_snapshot) = normalize_external_profile_snapshot(&tool_id, &settings_config) else {
+                continue;
+            };
+            let id = format!("compat-{}-{}", tool_id, provider_id);
+            let source_key = format!("{}#{}", db_path.display(), provider_id);
+
+            upsert_synced_profile(
+                conn,
+                &id,
+                &name,
+                &tool_id,
+                &config_snapshot,
+                "compatible",
+                Some(&source_key),
+                now,
+            )?;
+
+            *counts.entry(tool_id).or_insert(0) += 1;
+            seen_ids.insert(id);
+        }
+    }
+
+    let mut stale_stmt = conn
+        .prepare("SELECT id FROM config_profiles WHERE source_type = 'compatible'")
+        .map_err(|e| e.to_string())?;
+    let stale_ids: Vec<String> = stale_stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|row| row.ok())
+        .filter(|id: &String| !seen_ids.contains(id))
+        .collect();
+
+    for id in stale_ids {
+        conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(counts)
+}
+
+fn sync_live_profiles(
+    conn: &rusqlite::Connection,
+    imported_counts: &HashMap<String, usize>,
+    now: &str,
+) -> Result<(), String> {
+    for tool_id in ["claude", "codex", "gemini", "cursor", "windsurf", "opencode"] {
+        let id = format!("live-{}", tool_id);
+
+        if imported_counts.get(tool_id).copied().unwrap_or(0) > 0 {
+            conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
+                .map_err(|e| e.to_string())?;
+            continue;
+        }
+
+        match read_tool_snapshot(conn, tool_id) {
+            Ok(config_snapshot) => {
+                let name = format!("{} 当前配置", tool_id);
+                upsert_synced_profile(
+                    conn,
+                    &id,
+                    &name,
+                    tool_id,
+                    &config_snapshot,
+                    "live",
+                    Some(tool_id),
+                    now,
+                )?;
+            }
+            Err(_) => {
+                conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn config_contents_match(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+
+    match (
+        serde_json::from_str::<serde_json::Value>(left),
+        serde_json::from_str::<serde_json::Value>(right),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => left.trim() == right.trim(),
+    }
 }
 
 fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<String, String> {
@@ -546,10 +859,19 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
 }
 
 #[tauri::command]
+pub fn sync_config_profiles(db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let imported_counts = sync_profiles_from_compatible_databases(&conn, &now)?;
+    sync_live_profiles(&conn, &imported_counts, &now)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_config_profiles(db: State<'_, DbState>) -> Result<Vec<ConfigProfile>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, tool_id, config_snapshot, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
+        .prepare("SELECT id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
         .map_err(|e| e.to_string())?;
 
     let profiles = stmt
@@ -559,8 +881,10 @@ pub fn get_config_profiles(db: State<'_, DbState>) -> Result<Vec<ConfigProfile>,
                 name: row.get(1)?,
                 tool_id: row.get(2)?,
                 config_snapshot: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                source_type: row.get(4)?,
+                source_key: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -582,11 +906,28 @@ pub fn save_config_profile(
     let now = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO config_profiles (id, name, tool_id, config_snapshot, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        "INSERT INTO config_profiles (id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'manual', NULL, ?5, ?5)",
         rusqlite::params![id, name, tool_id, config_snapshot, now],
     ).map_err(|e| e.to_string())?;
 
     Ok(id)
+}
+
+#[tauri::command]
+pub fn update_config_profile(
+    id: String,
+    name: String,
+    config_snapshot: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE config_profiles SET name = ?1, config_snapshot = ?2, source_type = 'manual', source_key = NULL, updated_at = ?3 WHERE id = ?4",
+        rusqlite::params![name, config_snapshot, now, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -609,6 +950,11 @@ pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), St
         rusqlite::params![now, id],
     ).map_err(|e| e.to_string())?;
 
+    conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+        rusqlite::params![current_profile_setting_key(&tool_id), id],
+    ).map_err(|e| e.to_string())?;
+
     crate::db::record_activity(&conn, &tool_id, "profile_switch", "success", None);
     Ok(())
 }
@@ -616,8 +962,30 @@ pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), St
 #[tauri::command]
 pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let tool_id: Option<String> = conn
+        .query_row(
+            "SELECT tool_id FROM config_profiles WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .ok();
     conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
+
+    if let Some(tool_id) = tool_id {
+        let setting_key = current_profile_setting_key(&tool_id);
+        let stored_id: Option<String> = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                rusqlite::params![setting_key],
+                |row| row.get(0),
+            )
+            .ok();
+        if stored_id.as_deref() == Some(&id) {
+            conn.execute("DELETE FROM app_settings WHERE key = ?1", rusqlite::params![setting_key])
+                .map_err(|e| e.to_string())?;
+        }
+    }
     Ok(())
 }
 
@@ -625,7 +993,7 @@ pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), S
 pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<String>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, tool_id, config_snapshot, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
+        .prepare("SELECT id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
         .map_err(|e| e.to_string())?;
     let profiles: Vec<ConfigProfile> = stmt
         .query_map([], |row| {
@@ -634,24 +1002,55 @@ pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<Strin
                 name: row.get(1)?,
                 tool_id: row.get(2)?,
                 config_snapshot: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                source_type: row.get(4)?,
+                source_key: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
     let mut active_ids = Vec::new();
+    let stored_current = get_stored_current_profile_ids(&conn)?;
+    let compatible_current = get_compatible_current_profile_ids().unwrap_or_default();
     let mut cache: HashMap<String, Option<String>> = HashMap::new();
+    let mut resolved_tools = std::collections::HashSet::new();
+
+    for profile in &profiles {
+        if resolved_tools.contains(&profile.tool_id) {
+            continue;
+        }
+
+        let preferred_id = stored_current
+            .get(&profile.tool_id)
+            .or_else(|| compatible_current.get(&profile.tool_id));
+
+        if let Some(preferred_id) = preferred_id {
+            if profiles.iter().any(|item| item.tool_id == profile.tool_id && item.id == *preferred_id) {
+                active_ids.push(preferred_id.clone());
+                resolved_tools.insert(profile.tool_id.clone());
+            }
+        }
+    }
 
     for profile in profiles {
+        if resolved_tools.contains(&profile.tool_id) {
+            continue;
+        }
+
         if !cache.contains_key(&profile.tool_id) {
             let content = read_tool_snapshot(&conn, &profile.tool_id).ok();
             cache.insert(profile.tool_id.clone(), content);
         }
 
-        if cache.get(&profile.tool_id).and_then(|value| value.as_ref()) == Some(&profile.config_snapshot) {
+        if cache
+            .get(&profile.tool_id)
+            .and_then(|value| value.as_ref())
+            .is_some_and(|value| config_contents_match(value, &profile.config_snapshot))
+        {
             active_ids.push(profile.id);
+            resolved_tools.insert(profile.tool_id.clone());
         }
     }
 
@@ -725,7 +1124,7 @@ pub async fn pick_file() -> Result<Option<String>, String> {
     Ok(file.map(|f| f.path().to_string_lossy().to_string()))
 }
 
-/// Read a tool's current config file content (for saving as profile snapshot)
+/// Read a tool's current config file content
 #[tauri::command]
 pub fn read_tool_config(tool_id: String, db: State<'_, DbState>) -> Result<String, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -738,6 +1137,7 @@ pub fn read_tool_config(tool_id: String, db: State<'_, DbState>) -> Result<Strin
 pub struct BackupData {
     pub version: String,
     pub created_at: String,
+    pub sql_dump: String,
     pub tools: HashMap<String, ToolBackup>,
 }
 
@@ -849,12 +1249,12 @@ pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, Strin
     }
 
     // 3. Combine into backup
-    let backup = serde_json::json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "created_at": chrono::Utc::now().to_rfc3339(),
-        "sql_dump": sql_dump,
-        "tools": tools_backup,
-    });
+    let backup = BackupData {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        sql_dump,
+        tools: tools_backup,
+    };
     let backup_json = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
 
     // 4. Save file dialog
@@ -886,14 +1286,14 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
 
     let file = file.ok_or("Cancelled")?;
     let content = std::fs::read_to_string(file.path()).map_err(|e| e.to_string())?;
-    let backup: serde_json::Value = serde_json::from_str(&content).map_err(|e| format!("Invalid backup: {}", e))?;
+    let backup: BackupData = serde_json::from_str(&content).map_err(|e| format!("Invalid backup: {}", e))?;
 
     let mut restored_count = 0;
 
     // 1. Restore SQL dump
-    if let Some(sql_dump) = backup.get("sql_dump").and_then(|v| v.as_str()) {
+    if !backup.sql_dump.is_empty() {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        for line in sql_dump.lines() {
+        for line in backup.sql_dump.lines() {
             let line = line.trim();
             if line.starts_with("INSERT") {
                 let _ = conn.execute_batch(line);
@@ -904,9 +1304,8 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
 
     // 2. Restore tool configs
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    if let Some(tools) = backup.get("tools").and_then(|v| v.as_object()) {
-        for (tool_id, tool_backup) in tools {
-            let config_path = match tool_id.as_str() {
+    for (tool_id, tool_backup) in &backup.tools {
+        let config_path = match tool_id.as_str() {
                 "claude" => home.join(".claude.json"),
                 "claude-settings" => home.join(".claude").join("settings.json"),
                 "codex" => home.join(".codex").join("config.toml"),
@@ -915,32 +1314,25 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
                 "windsurf" => home.join(".windsurf").join("mcp.json"),
                 "opencode" => home.join(".opencode").join("opencode.json"),
                 _ => continue,
-            };
+        };
 
-            if let Some(config_content) = tool_backup.get("config_content").and_then(|v| v.as_str()) {
-                if let Some(parent) = config_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let _ = crate::utils::atomic_write_string(&config_path, config_content);
-                restored_count += 1;
+        if let Some(config_content) = &tool_backup.config_content {
+            if let Some(parent) = config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
+            let _ = crate::utils::atomic_write_string(&config_path, config_content);
+            restored_count += 1;
+        }
 
-            if let Some(skills) = tool_backup.get("skills").and_then(|v| v.as_array()) {
-                let skills_dir = config_path.parent().unwrap_or(&home).join("skills");
-                let _ = std::fs::create_dir_all(&skills_dir);
-                for skill in skills {
-                    if let (Some(name), Some(content)) = (
-                        skill.get("name").and_then(|v| v.as_str()),
-                        skill.get("content").and_then(|v| v.as_str()),
-                    ) {
-                        let _ = crate::utils::atomic_write_string(&skills_dir.join(name), content);
-                        restored_count += 1;
-                    }
-                }
+        if !tool_backup.skills.is_empty() {
+            let skills_dir = config_path.parent().unwrap_or(&home).join("skills");
+            let _ = std::fs::create_dir_all(&skills_dir);
+            for skill in &tool_backup.skills {
+                let _ = crate::utils::atomic_write_string(&skills_dir.join(&skill.name), &skill.content);
+                restored_count += 1;
             }
         }
     }
 
-    let created = backup.get("created_at").and_then(|v| v.as_str()).unwrap_or("unknown");
-    Ok(format!("Restored {} items from backup ({})", restored_count, created))
+    Ok(format!("Restored {} items from backup ({})", restored_count, backup.created_at))
 }

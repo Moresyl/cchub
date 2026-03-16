@@ -106,9 +106,11 @@ pub fn run() {
             extra_commands::save_custom_path,
             extra_commands::delete_custom_path,
             // Config profiles
+            extra_commands::sync_config_profiles,
             extra_commands::get_config_profiles,
             extra_commands::get_active_config_profile_ids,
             extra_commands::save_config_profile,
+            extra_commands::update_config_profile,
             extra_commands::apply_config_profile,
             extra_commands::delete_config_profile,
             extra_commands::read_tool_config,

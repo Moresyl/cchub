@@ -5,7 +5,6 @@ use std::path::Path;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Install a panic hook that logs crash details to ~/.cchub/crash.log
-/// Inspired by cc-switch's comprehensive crash reporting
 pub fn install_panic_hook() {
     // Enable backtrace capture
     if std::env::var("RUST_BACKTRACE").is_err() {

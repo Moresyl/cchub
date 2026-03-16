@@ -38,7 +38,7 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
     let db_exists = db_path.exists();
     let conn = Connection::open(&db_path)?;
 
-    // SQLite PRAGMA optimizations (inspired by cc-switch)
+    // SQLite PRAGMA optimizations for local desktop usage
     conn.execute_batch("PRAGMA journal_mode = WAL;")?;       // Write-Ahead Logging for better concurrency
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;        // Enforce foreign key constraints
     conn.execute_batch("PRAGMA busy_timeout = 5000;")?;      // Wait up to 5s on locked DB instead of failing immediately

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use toml_edit::DocumentMut;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct McpServerConfig {
@@ -68,6 +69,27 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
     if let Some(cursor_config) = get_cursor_config_path() {
         if cursor_config.exists() {
             scan_wrapped_mcp_json(&cursor_config, "cursor", &mut servers);
+        }
+    }
+
+    // 5. Scan Codex config.toml
+    if let Some(codex_config) = get_codex_config_path() {
+        if codex_config.exists() {
+            scan_codex_mcp_toml(&codex_config, &mut servers);
+        }
+    }
+
+    // 6. Scan Gemini settings.json
+    if let Some(gemini_config) = get_gemini_config_path() {
+        if gemini_config.exists() {
+            scan_wrapped_mcp_json(&gemini_config, "gemini", &mut servers);
+        }
+    }
+
+    // 7. Scan OpenCode opencode.json
+    if let Some(opencode_config) = get_opencode_config_path() {
+        if opencode_config.exists() {
+            scan_wrapped_mcp_json(&opencode_config, "opencode", &mut servers);
         }
     }
 
@@ -269,4 +291,164 @@ pub fn remove_claude_mcp_server(name: &str) -> Result<(), String> {
         .join(".claude")
         .join("settings.json");
     remove_mcp_server_from_config(name, &path.to_string_lossy())
+}
+
+// ── Tool config paths ──
+
+fn get_codex_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".codex").join("config.toml"))
+}
+
+fn get_gemini_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".gemini").join("settings.json"))
+}
+
+fn get_opencode_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".opencode").join("opencode.json"))
+}
+
+fn get_windsurf_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".windsurf").join("mcp.json"))
+}
+
+// ── Codex TOML scanning ──
+
+fn scan_codex_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let table: toml::Table = match toml::from_str(&content) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+
+    let config_path = path.to_string_lossy().to_string();
+
+    // Codex TOML uses [mcp_servers.name] sections
+    if let Some(mcp_servers) = table.get("mcp_servers").and_then(|v| v.as_table()) {
+        for (name, cfg) in mcp_servers {
+            let cfg_table = match cfg.as_table() {
+                Some(t) => t,
+                None => continue,
+            };
+
+            let command = match cfg_table.get("command").and_then(|v| v.as_str()) {
+                Some(c) => c.to_string(),
+                None => continue,
+            };
+
+            let args: Vec<String> = cfg_table
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+
+            let mut env = HashMap::new();
+            if let Some(env_table) = cfg_table.get("env").and_then(|v| v.as_table()) {
+                for (k, v) in env_table {
+                    if let Some(s) = v.as_str() {
+                        env.insert(k.clone(), s.to_string());
+                    }
+                }
+            }
+
+            servers.push(ScannedMcpServer {
+                name: name.clone(),
+                command,
+                args,
+                env,
+                transport: "stdio".to_string(),
+                source: "codex".to_string(),
+                config_path: config_path.clone(),
+            });
+        }
+    }
+}
+
+// ── Write MCP to different tools ──
+
+/// Write MCP server config to Codex config.toml
+pub fn write_mcp_to_codex(name: &str, config: &McpServerConfig) -> Result<(), String> {
+    let path = get_codex_config_path().ok_or("Cannot find Codex config path")?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let mut doc: DocumentMut = content.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+
+    // Ensure [mcp_servers] table exists
+    if doc.get("mcp_servers").is_none() {
+        doc["mcp_servers"] = toml_edit::table();
+    }
+
+    if let Some(mcp_servers) = doc["mcp_servers"].as_table_mut() {
+        mcp_servers[name] = toml_edit::table();
+        if let Some(server_table) = mcp_servers[name].as_table_mut() {
+            server_table["command"] = toml_edit::value(&config.command);
+
+            let mut args_arr = toml_edit::Array::new();
+            for arg in &config.args {
+                args_arr.push(arg.as_str());
+            }
+            server_table["args"] = toml_edit::value(args_arr);
+
+            if !config.env.is_empty() {
+                server_table["env"] = toml_edit::table();
+                if let Some(env_table) = server_table["env"].as_table_mut() {
+                    for (k, v) in &config.env {
+                        env_table[k.as_str()] = toml_edit::value(v.as_str());
+                    }
+                }
+            }
+        }
+    }
+
+    crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Write MCP server config to Gemini settings.json
+pub fn write_mcp_to_gemini(name: &str, config: &McpServerConfig) -> Result<(), String> {
+    let path = get_gemini_config_path().ok_or("Cannot find Gemini config path")?;
+    write_mcp_server_to_config(name, config, &path.to_string_lossy())
+}
+
+/// Write MCP server config to Cursor mcp.json
+pub fn write_mcp_to_cursor(name: &str, config: &McpServerConfig) -> Result<(), String> {
+    let path = get_cursor_config_path().ok_or("Cannot find Cursor config path")?;
+    write_mcp_server_to_config(name, config, &path.to_string_lossy())
+}
+
+/// Write MCP server config to Windsurf mcp.json
+pub fn write_mcp_to_windsurf(name: &str, config: &McpServerConfig) -> Result<(), String> {
+    let path = get_windsurf_config_path().ok_or("Cannot find Windsurf config path")?;
+    write_mcp_server_to_config(name, config, &path.to_string_lossy())
+}
+
+/// Write MCP server config to OpenCode opencode.json
+pub fn write_mcp_to_opencode(name: &str, config: &McpServerConfig) -> Result<(), String> {
+    let path = get_opencode_config_path().ok_or("Cannot find OpenCode config path")?;
+    write_mcp_server_to_config(name, config, &path.to_string_lossy())
+}
+
+/// Sync MCP server config to a target tool by tool ID
+pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> Result<(), String> {
+    match tool_id {
+        "claude" => write_claude_mcp_server(name, config),
+        "codex" => write_mcp_to_codex(name, config),
+        "gemini" => write_mcp_to_gemini(name, config),
+        "cursor" => write_mcp_to_cursor(name, config),
+        "windsurf" => write_mcp_to_windsurf(name, config),
+        "opencode" => write_mcp_to_opencode(name, config),
+        _ => Err(format!("Unknown tool: {}", tool_id)),
+    }
 }

@@ -40,6 +40,7 @@ pub fn run() {
             mcp_commands::toggle_mcp_server,
             mcp_commands::check_mcp_server_health,
             mcp_commands::check_all_mcp_health,
+            mcp_commands::sync_mcp_server_to_tool,
             // Skill commands
             skill_commands::scan_skills,
             skill_commands::get_skills,

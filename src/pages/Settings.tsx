@@ -4,13 +4,7 @@ import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, Check
 import { t, getLocale, setLocale, type Locale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
-
-interface AppUpdateState {
-  update_available: boolean;
-  latest_version: string | null;
-  body: string | null;
-  not_configured: boolean;
-}
+import { checkAppUpdate, installAppUpdate, type AppUpdateHandle, type AppUpdateResult } from "../lib/appUpdater";
 
 interface CustomPath { tool_id: string; config_dir: string | null; mcp_config_path: string | null; skills_dir: string | null; }
 interface DetectedTool { id: string; name: string; config_path: string; skills_dir: string; mcp_config_path: string; installed: boolean; install_command: string; install_url: string; }
@@ -20,11 +14,11 @@ export default function Settings() {
   const [theme, setThm] = useState<Theme>(getTheme());
   const [autoScan, setAutoScan] = useState(true);
   const [checkUpdates, setCheckUpdates] = useState(true);
-  const [appUpdate, setAppUpdate] = useState<AppUpdateState | null>(null);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateResult | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const [updateObj, setUpdateObj] = useState<any>(null);
+  const [updateHandle, setUpdateHandle] = useState<AppUpdateHandle | null>(null);
   const [tools, setTools] = useState<DetectedTool[]>([]);
   const [customPaths, setCustomPaths] = useState<CustomPath[]>([]);
   const [pathSaved, setPathSaved] = useState<string | null>(null);
@@ -68,50 +62,23 @@ export default function Settings() {
     setCheckingUpdate(true);
     setUpdateError(null);
     try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
-      if (update) {
-        setAppUpdate({
-          update_available: true,
-          latest_version: update.version,
-          body: update.body ?? null,
-          not_configured: false,
-        });
-        setUpdateObj(update);
-      } else {
-        setAppUpdate({
-          update_available: false,
-          latest_version: null,
-          body: null,
-          not_configured: false,
-        });
-        setUpdateObj(null);
-      }
+      const { result, handle } = await checkAppUpdate();
+      setAppUpdate(result);
+      setUpdateHandle(handle);
     } catch (e) {
-      const msg = String(e);
-      if (msg.includes("not configured") || msg.includes("pubkey")) {
-        setAppUpdate({
-          update_available: false,
-          latest_version: null,
-          body: null,
-          not_configured: true,
-        });
-      } else {
-        setUpdateError(msg);
-      }
+      setUpdateError(String(e));
+      setUpdateHandle(null);
     } finally {
       setCheckingUpdate(false);
     }
   }
 
   async function handleInstallUpdate() {
-    if (!updateObj) return;
+    if (!updateHandle) return;
     setInstalling(true);
     setUpdateError(null);
     try {
-      await updateObj.downloadAndInstall();
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
+      await installAppUpdate(updateHandle);
     } catch (e) {
       setUpdateError(String(e));
     } finally {
@@ -336,6 +303,13 @@ export default function Settings() {
                     {appUpdate.body && (
                       <p style={{ fontSize: 12, color: "var(--text-secondary)", whiteSpace: "pre-wrap" }}>{appUpdate.body}</p>
                     )}
+                    {!appUpdate.can_install && (
+                      <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        {loc === "zh"
+                          ? "已通过发布页检测到新版本。当前构建未提供在线安装清单，将打开下载页手动更新。"
+                          : "A newer release was found from GitHub. This build does not have an online install manifest, so the download page will be opened."}
+                      </p>
+                    )}
                     <button
                       className="btn btn-sm btn-primary"
                       onClick={handleInstallUpdate}
@@ -343,7 +317,11 @@ export default function Settings() {
                       style={{ alignSelf: "flex-start", gap: 6 }}
                     >
                       <Download size={14} />
-                      {installing ? i.settings.downloading : i.settings.installUpdate}
+                      {installing
+                        ? i.settings.downloading
+                        : appUpdate.can_install
+                          ? i.settings.installUpdate
+                          : (loc === "zh" ? "前往下载页" : "Open Downloads")}
                     </button>
                   </div>
                 ) : (

@@ -1,15 +1,15 @@
 import { useState, useEffect } from "react";
 import { Sun, Moon, ArrowUpCircle } from "lucide-react";
 import { getTheme, setTheme, type Theme } from "../../lib/theme";
+import { checkAppUpdate } from "../../lib/appUpdater";
 
 export default function Header() {
   const [appUpdateAvailable, setAppUpdateAvailable] = useState(false);
   const [currentTheme, setCurrentTheme] = useState<Theme>(getTheme());
 
   useEffect(() => {
-    import("@tauri-apps/plugin-updater")
-      .then(({ check }) => check())
-      .then((update) => setAppUpdateAvailable(!!update))
+    checkAppUpdate()
+      .then(({ result }) => setAppUpdateAvailable(result.update_available))
       .catch(() => {});
   }, []);
 

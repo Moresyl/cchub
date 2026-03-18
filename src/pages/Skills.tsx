@@ -10,6 +10,7 @@ import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
 import CodeEditor from "../components/CodeEditor";
 import { showToast } from "../components/Toast";
+import ConfirmDialog from "../components/ConfirmDialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -64,6 +65,7 @@ export default function Skills() {
   const [editingSkill, setEditingSkill] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [syncedSkills, setSyncedSkills] = useState<Record<string, Set<string>>>({});
+  const [pendingDelete, setPendingDelete] = useState<{ type: "skill"; item: Skill } | { type: "plugin"; item: Plugin } | null>(null);
   const i = t();
   const locale = getLocale();
 
@@ -153,7 +155,10 @@ export default function Skills() {
 
   async function handleDeleteSkill(skill: Skill) {
     if (!skill.file_path) return;
-    if (!window.confirm(locale === "zh" ? `确定删除技能 "${skill.name}"？` : `Delete skill "${skill.name}"?`)) return;
+    setPendingDelete({ type: "skill", item: skill });
+  }
+  async function doDeleteSkill(skill: Skill) {
+    if (!skill.file_path) return;
     try {
       await invoke("uninstall_skill_file", { path: skill.file_path });
       if (selectedSkill?.id === skill.id) {
@@ -175,7 +180,9 @@ export default function Skills() {
   }
 
   async function handleDeletePlugin(plugin: Plugin) {
-    if (!window.confirm(locale === "zh" ? `确定删除插件 "${plugin.name}"？此操作不可恢复。` : `Delete plugin "${plugin.name}"? This cannot be undone.`)) return;
+    setPendingDelete({ type: "plugin", item: plugin });
+  }
+  async function doDeletePlugin(plugin: Plugin) {
     try {
       await invoke("delete_plugin_dir", { pluginName: plugin.id });
       await invoke("uninstall_plugin", { pluginId: plugin.id });
@@ -699,6 +706,24 @@ export default function Skills() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        isOpen={!!pendingDelete}
+        title={pendingDelete?.type === "plugin"
+          ? (locale === "zh" ? "删除插件" : "Delete Plugin")
+          : (locale === "zh" ? "删除技能" : "Delete Skill")}
+        message={pendingDelete?.type === "plugin"
+          ? (locale === "zh" ? `确定删除插件「${pendingDelete?.item.name}」？此操作不可恢复。` : `Delete plugin "${pendingDelete?.item.name}"? This cannot be undone.`)
+          : (locale === "zh" ? `确定删除技能「${pendingDelete?.item.name}」？` : `Delete skill "${pendingDelete?.item.name}"?`)}
+        confirmText={locale === "zh" ? "删除" : "Delete"}
+        variant="destructive"
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          if (pendingDelete.type === "plugin") void doDeletePlugin(pendingDelete.item as Plugin);
+          else void doDeleteSkill(pendingDelete.item as Skill);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

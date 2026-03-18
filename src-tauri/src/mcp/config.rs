@@ -105,6 +105,13 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
         }
     }
 
+    // 8. Scan OpenClaw config.json
+    if let Some(openclaw_config) = get_openclaw_config_path() {
+        if openclaw_config.exists() {
+            scan_wrapped_mcp_json(&openclaw_config, "openclaw", &mut servers);
+        }
+    }
+
     // Deduplicate by name (keep first found)
     let mut seen = std::collections::HashSet::new();
     servers.retain(|s| seen.insert(s.name.clone()));
@@ -330,6 +337,10 @@ fn get_windsurf_config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".windsurf").join("mcp.json"))
 }
 
+fn get_openclaw_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".openclaw").join("config.json"))
+}
+
 // ── Codex TOML scanning ──
 
 fn scan_codex_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
@@ -459,6 +470,12 @@ pub fn write_mcp_to_opencode(name: &str, config: &McpServerConfig) -> Result<(),
     write_mcp_server_to_config(name, config, &path.to_string_lossy())
 }
 
+/// Write MCP server config to OpenClaw config.json
+pub fn write_mcp_to_openclaw(name: &str, config: &McpServerConfig) -> Result<(), String> {
+    let path = get_openclaw_config_path().ok_or("Cannot find OpenClaw config path")?;
+    write_mcp_server_to_config(name, config, &path.to_string_lossy())
+}
+
 /// Sync MCP server config to a target tool by tool ID
 pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> Result<(), String> {
     match tool_id {
@@ -468,6 +485,7 @@ pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> 
         "cursor" => write_mcp_to_cursor(name, config),
         "windsurf" => write_mcp_to_windsurf(name, config),
         "opencode" => write_mcp_to_opencode(name, config),
+        "openclaw" => write_mcp_to_openclaw(name, config),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }

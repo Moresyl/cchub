@@ -363,6 +363,7 @@ fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
         "cursor" => Ok("mcp.json"),
         "windsurf" => Ok("mcp.json"),
         "opencode" => Ok("opencode.json"),
+        "openclaw" => Ok("config.json"),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -375,6 +376,7 @@ fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<Path
         "cursor" => ".cursor",
         "windsurf" => ".windsurf",
         "opencode" => ".opencode",
+        "openclaw" => ".openclaw",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     };
     Ok(home.join(dir))
@@ -667,7 +669,7 @@ fn sync_live_profiles(
     imported_counts: &HashMap<String, usize>,
     now: &str,
 ) -> Result<(), String> {
-    for tool_id in ["claude", "codex", "gemini", "cursor", "windsurf", "opencode"] {
+    for tool_id in ["claude", "codex", "gemini", "cursor", "windsurf", "opencode", "openclaw"] {
         let id = format!("live-{}", tool_id);
 
         if imported_counts.get(tool_id).copied().unwrap_or(0) > 0 {
@@ -1216,8 +1218,8 @@ pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, Strin
         ("cursor", home.join(".cursor").join("mcp.json"), "skills"),
         ("windsurf", home.join(".windsurf").join("mcp.json"), "skills"),
         ("opencode", home.join(".opencode").join("opencode.json"), "skills"),
+        ("openclaw", home.join(".openclaw").join("config.json"), "skills"),
     ];
-
     for (tool_id, config_path, skills_subdir) in tool_configs {
         let config_content = if config_path.exists() {
             std::fs::read_to_string(&config_path).ok()
@@ -1313,6 +1315,7 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
                 "cursor" => home.join(".cursor").join("mcp.json"),
                 "windsurf" => home.join(".windsurf").join("mcp.json"),
                 "opencode" => home.join(".opencode").join("opencode.json"),
+                "openclaw" => home.join(".openclaw").join("config.json"),
                 _ => continue,
         };
 

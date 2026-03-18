@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Monitor, Plus, Trash2, X, Save, Shield } from "lucide-react";
 import { getLocale } from "../lib/i18n";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 interface McpClient {
   id: string;
@@ -27,6 +28,7 @@ export default function McpClients() {
   const [newConfigPath, setNewConfigPath] = useState("");
   const [editing, setEditing] = useState(false);
   const [editAccess, setEditAccess] = useState<Record<string, boolean>>({});
+  const [pendingDelete, setPendingDelete] = useState<McpClient | null>(null);
   const locale = getLocale();
 
   useEffect(() => { load(); }, []);
@@ -56,7 +58,9 @@ export default function McpClients() {
   }
 
   async function handleDelete(client: McpClient) {
-    if (!window.confirm(locale === "zh" ? `确定删除客户端 "${client.name}"？` : `Delete client "${client.name}"?`)) return;
+    setPendingDelete(client);
+  }
+  async function doDelete(client: McpClient) {
     try {
       await invoke("delete_mcp_client", { id: client.id });
       if (selected?.id === client.id) setSelected(null);
@@ -231,6 +235,15 @@ export default function McpClients() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        isOpen={!!pendingDelete}
+        title={locale === "zh" ? "删除客户端" : "Delete Client"}
+        message={locale === "zh" ? `确定删除客户端「${pendingDelete?.name}」？` : `Delete client "${pendingDelete?.name}"?`}
+        confirmText={locale === "zh" ? "删除" : "Delete"}
+        variant="destructive"
+        onConfirm={() => { if (pendingDelete) void doDelete(pendingDelete); setPendingDelete(null); }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

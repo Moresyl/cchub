@@ -1129,6 +1129,86 @@ pub fn read_tool_config(tool_id: String, db: State<'_, DbState>) -> Result<Strin
     read_tool_snapshot(&conn, &tool_id)
 }
 
+/// Get Claude Code permissions level (0=strict, 1=standard, 2=relaxed, 3=bypass)
+#[tauri::command]
+pub fn get_claude_permissions_level() -> Result<u32, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(".claude").join("settings.json");
+    if !path.exists() { return Ok(0); }
+
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let mode = settings.get("permissions")
+        .and_then(|p| p.get("defaultMode"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("");
+
+    if mode == "bypassPermissions" {
+        return Ok(3);
+    }
+
+    let allow = settings.get("permissions")
+        .and_then(|p| p.get("allow"))
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    if allow.iter().any(|s| *s == "Bash(*)") && allow.iter().any(|s| *s == "Write(*)") {
+        Ok(2)
+    } else if allow.iter().any(|s| *s == "Read(*)") {
+        Ok(1)
+    } else {
+        Ok(0)
+    }
+}
+
+/// Set Claude Code permissions level (0=strict, 1=standard, 2=relaxed, 3=bypass)
+#[tauri::command]
+pub fn set_claude_permissions_level(level: u32) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(".claude").join("settings.json");
+
+    let mut settings: serde_json::Value = if path.exists() {
+        let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).map_err(|e| e.to_string())?
+    } else {
+        serde_json::json!({})
+    };
+
+    let (allow, mode, skip_prompt): (Vec<&str>, &str, bool) = match level {
+        0 => (vec![], "normal", false),
+        1 => (vec![
+            "Read(*)", "Glob(*)", "Grep(*)", "WebSearch(*)",
+        ], "normal", false),
+        2 => (vec![
+            "Read(*)", "Write(*)", "Edit(*)", "Glob(*)", "Grep(*)",
+            "WebFetch(*)", "WebSearch(*)", "Agent(*)", "NotebookEdit(*)",
+        ], "normal", false),
+        3 => (vec![
+            "Bash(*)", "Read(*)", "Write(*)", "Edit(*)", "Glob(*)", "Grep(*)",
+            "WebFetch(*)", "WebSearch(*)", "Agent(*)", "NotebookEdit(*)",
+            "Skill(*)", "mcp__*",
+        ], "bypassPermissions", true),
+        _ => return Err("Invalid level".to_string()),
+    };
+
+    let allow_arr: Vec<serde_json::Value> = allow.iter().map(|s| serde_json::json!(s)).collect();
+    settings["permissions"] = serde_json::json!({
+        "allow": allow_arr,
+        "deny": [],
+        "defaultMode": mode,
+    });
+    settings["skipDangerousModePermissionPrompt"] = serde_json::json!(skip_prompt);
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ── Backup / Export / Import (.sql format) ──
 
 // Legacy JSON backup structs (for backward-compatible import)

@@ -179,6 +179,78 @@ export default function McpServers() {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.mcp.loading}</span></div>;
   }
 
+  // --- 编辑视图 ---
+  if (editing && selected) {
+    return (
+      <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <div className="page-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button className="btn btn-ghost btn-icon-sm" onClick={() => setEditing(false)} title={i.mcp.cancel}>
+              <X size={18} />
+            </button>
+            <div>
+              <h2 className="page-title">{selected.name}</h2>
+              <p className="page-subtitle">{getLocale() === "zh" ? "编辑 MCP 服务器配置" : "Edit MCP server configuration"}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, paddingBottom: 20 }}>
+          <div>
+            <span className="field-label">{i.mcp.command}</span>
+            <input
+              className="input"
+              style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+              value={editCommand}
+              onChange={(e) => setEditCommand(e.target.value)}
+              placeholder="npx, node, python..."
+            />
+          </div>
+
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span className="field-label" style={{ marginBottom: 0 }}>{i.mcp.arguments}</span>
+              <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
+                try { setEditArgs(JSON.stringify(JSON.parse(editArgs), null, 2)); } catch { /* ignore */ }
+              }}><Wand2 size={12} /></button>
+            </div>
+            <CodeEditor
+              value={editArgs}
+              onChange={setEditArgs}
+              language="json"
+              minHeight={160}
+            />
+          </div>
+
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span className="field-label" style={{ marginBottom: 0 }}>{i.mcp.environment}</span>
+              <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
+                try { setEditEnv(JSON.stringify(JSON.parse(editEnv), null, 2)); } catch { /* ignore */ }
+              }}><Wand2 size={12} /></button>
+            </div>
+            <CodeEditor
+              value={editEnv}
+              onChange={setEditEnv}
+              language="json"
+              minHeight={160}
+            />
+          </div>
+        </div>
+
+        <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}>
+            {i.mcp.cancel}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={handleSave} style={{ gap: 6 }}>
+            <Save size={14} />{i.mcp.save}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- 列表视图 ---
   return (
     <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
@@ -397,83 +469,6 @@ export default function McpServers() {
         </div>
       )}
 
-      {/* Full Screen Edit Modal */}
-      {editing && selected && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
-          onClick={() => setEditing(false)}
-        >
-          <div
-            className="section-card"
-            style={{ width: "90vw", maxWidth: 1000, height: "80vh", display: "flex", flexDirection: "column" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <Edit3 size={16} style={{ color: "var(--text-secondary)" }} />
-                <h3 style={{ fontSize: 15, fontWeight: 700 }}>{selected.name}</h3>
-                <span className="badge badge-muted">{getLocale() === "zh" ? "编辑模式" : "Editing"}</span>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}><X size={14} />{i.mcp.cancel}</button>
-                <button className="btn btn-primary btn-sm" onClick={handleSave}><Save size={14} />{i.mcp.save}</button>
-              </div>
-            </div>
-
-            {/* Modal Content */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20, overflowY: "auto", minHeight: 0 }}>
-              {/* Command */}
-              <div>
-                <span className="field-label">{i.mcp.command}</span>
-                <input
-                  className="input"
-                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
-                  value={editCommand}
-                  onChange={(e) => setEditCommand(e.target.value)}
-                  placeholder="npx, node, python..."
-                />
-              </div>
-
-              {/* Arguments */}
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span className="field-label" style={{ marginBottom: 0 }}>{i.mcp.arguments}</span>
-                  <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
-                    try { setEditArgs(JSON.stringify(JSON.parse(editArgs), null, 2)); } catch { /* ignore */ }
-                  }}><Wand2 size={12} /></button>
-                </div>
-                <div style={{ flex: 1, minHeight: 120 }}>
-                  <CodeEditor
-                    value={editArgs}
-                    onChange={setEditArgs}
-                    language="json"
-                    minHeight={120}
-                  />
-                </div>
-              </div>
-
-              {/* Environment */}
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span className="field-label" style={{ marginBottom: 0 }}>{i.mcp.environment}</span>
-                  <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
-                    try { setEditEnv(JSON.stringify(JSON.parse(editEnv), null, 2)); } catch { /* ignore */ }
-                  }}><Wand2 size={12} /></button>
-                </div>
-                <div style={{ flex: 1, minHeight: 120 }}>
-                  <CodeEditor
-                    value={editEnv}
-                    onChange={setEditEnv}
-                    language="json"
-                    minHeight={120}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       <ConfirmDialog
         isOpen={!!pendingDelete}
         title={i.mcp?.remove || "移除"}

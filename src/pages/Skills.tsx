@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw, Zap, Package, FileText, ExternalLink, Search,
   X, FolderOpen, Monitor, Terminal, Check,
-  Code, Wind, Folder, File, ChevronDown,
+  Folder, File, ChevronDown,
   Edit3, Trash2, Save, Sparkles, Globe,
 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
@@ -26,8 +26,6 @@ interface Plugin {
 
 const TOOL_ICONS: Record<string, typeof Monitor> = {
   claude: Terminal,
-  cursor: Code,
-  windsurf: Wind,
   codex: Monitor,
   gemini: Sparkles,
   opencode: Globe,
@@ -229,6 +227,99 @@ export default function Skills() {
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.skills.loading}</span></div>;
+  }
+
+  // --- 技能编辑视图 ---
+  if (editingSkill && selectedSkill) {
+    return (
+      <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <div className="page-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button className="btn btn-ghost btn-icon-sm" onClick={() => setEditingSkill(false)} title={locale === "zh" ? "返回" : "Back"}>
+              <X size={18} />
+            </button>
+            <div>
+              <h2 className="page-title">{selectedSkill.name}</h2>
+              <p className="page-subtitle">{locale === "zh" ? "编辑技能内容" : "Edit skill content"}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Markdown
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <CodeEditor
+                value={editContent}
+                onChange={setEditContent}
+                language="markdown"
+                minHeight={200}
+              />
+            </div>
+          </div>
+          <div style={{ width: 1, background: "var(--border-default)" }} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              {locale === "zh" ? "预览" : "Preview"}
+            </div>
+            <div className="markdown-preview" style={{ flex: 1, overflowY: "auto", fontSize: 13, lineHeight: 1.8, minHeight: 0 }}>
+              <Markdown remarkPlugins={[remarkGfm]}>{editContent}</Markdown>
+            </div>
+          </div>
+        </div>
+
+        <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setEditingSkill(false)}>
+            {locale === "zh" ? "取消" : "Cancel"}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={handleSaveSkill} style={{ gap: 6 }}>
+            <Save size={14} />{locale === "zh" ? "保存" : "Save"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- 文件浏览器视图 ---
+  if (showExplorer) {
+    return (
+      <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <div className="page-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowExplorer(false)} title={locale === "zh" ? "返回" : "Back"}>
+              <X size={18} />
+            </button>
+            <div>
+              <h2 className="page-title">{i.skills.explorerTitle}</h2>
+              <p className="page-subtitle">{locale === "zh" ? "浏览技能目录和文件" : "Browse skill directory and files"}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
+          <div style={{ width: 280, overflowY: "auto", borderRight: "1px solid var(--border-default)", paddingRight: 16 }}>
+            {folderTree ? (
+              <TreeNode node={folderTree} onSelect={previewExplorerFile} selectedPath={explorerFile} />
+            ) : (
+              <p style={{ fontSize: 13, color: "var(--text-muted)", padding: 20, textAlign: "center" }}>
+                {locale === "zh" ? "目录不存在" : "Directory not found"}
+              </p>
+            )}
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {explorerPreview ? (
+              <div className="code-block" style={{ height: "100%", fontSize: 11, lineHeight: 1.7 }}>{explorerPreview}</div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: 13 }}>
+                {i.skills.noPreview}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const catTabs: { key: SkillCategory; label: string; count: number }[] = [
@@ -610,102 +701,6 @@ export default function Skills() {
         )}
       </div>
 
-      {/* Explorer Modal */}
-      {showExplorer && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
-          onClick={() => setShowExplorer(false)}
-        >
-          <div
-            className="section-card"
-            style={{ width: 800, height: "70vh", display: "flex", flexDirection: "column" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <FolderOpen size={18} style={{ color: "var(--text-secondary)" }} />
-                <h3 style={{ fontSize: 15, fontWeight: 700 }}>{i.skills.explorerTitle}</h3>
-              </div>
-              <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowExplorer(false)}><X size={16} /></button>
-            </div>
-
-            <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
-              {/* Tree */}
-              <div style={{ width: 280, overflowY: "auto", borderRight: "1px solid var(--border-default)", paddingRight: 16 }}>
-                {folderTree ? (
-                  <TreeNode node={folderTree} onSelect={previewExplorerFile} selectedPath={explorerFile} />
-                ) : (
-                  <p style={{ fontSize: 13, color: "var(--text-muted)", padding: 20, textAlign: "center" }}>
-                    {locale === "zh" ? "目录不存在" : "Directory not found"}
-                  </p>
-                )}
-              </div>
-              {/* Preview */}
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                {explorerPreview ? (
-                  <div className="code-block" style={{ height: "100%", fontSize: 11, lineHeight: 1.7 }}>{explorerPreview}</div>
-                ) : (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: 13 }}>
-                    {i.skills.noPreview}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Markdown Editor Modal */}
-      {editingSkill && selectedSkill && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
-          onClick={() => setEditingSkill(false)}
-        >
-          <div
-            className="section-card"
-            style={{ width: "90vw", maxWidth: 1200, height: "80vh", display: "flex", flexDirection: "column" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <Edit3 size={16} style={{ color: "var(--text-secondary)" }} />
-                <h3 style={{ fontSize: 15, fontWeight: 700 }}>{selectedSkill.name}</h3>
-                <span className="badge badge-muted">{locale === "zh" ? "编辑模式" : "Editing"}</span>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => setEditingSkill(false)}><X size={14} />{locale === "zh" ? "取消" : "Cancel"}</button>
-                <button className="btn btn-primary btn-sm" onClick={handleSaveSkill}><Save size={14} />{locale === "zh" ? "保存" : "Save"}</button>
-              </div>
-            </div>
-            {/* Split panes */}
-            <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  Markdown
-                </div>
-                <div style={{ flex: 1, minHeight: 0 }}>
-                  <CodeEditor
-                    value={editContent}
-                    onChange={setEditContent}
-                    language="markdown"
-                    minHeight={200}
-                  />
-                </div>
-              </div>
-              <div style={{ width: 1, background: "var(--border-default)" }} />
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {locale === "zh" ? "预览" : "Preview"}
-                </div>
-                <div className="markdown-preview" style={{ flex: 1, overflowY: "auto", fontSize: 13, lineHeight: 1.8, minHeight: 0 }}>
-                  <Markdown remarkPlugins={[remarkGfm]}>{editContent}</Markdown>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
       <ConfirmDialog
         isOpen={!!pendingDelete}
         title={pendingDelete?.type === "plugin"

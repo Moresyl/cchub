@@ -360,8 +360,6 @@ fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
         "claude" => Ok("settings.json"),
         "codex" => Ok("config.toml"),
         "gemini" => Ok("settings.json"),
-        "cursor" => Ok("mcp.json"),
-        "windsurf" => Ok("mcp.json"),
         "opencode" => Ok("opencode.json"),
         "openclaw" => Ok("config.json"),
         _ => Err(format!("Unknown tool: {}", tool_id)),
@@ -373,8 +371,6 @@ fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<Path
         "claude" => ".claude",
         "codex" => ".codex",
         "gemini" => ".gemini",
-        "cursor" => ".cursor",
-        "windsurf" => ".windsurf",
         "opencode" => ".opencode",
         "openclaw" => ".openclaw",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
@@ -669,7 +665,7 @@ fn sync_live_profiles(
     imported_counts: &HashMap<String, usize>,
     now: &str,
 ) -> Result<(), String> {
-    for tool_id in ["claude", "codex", "gemini", "cursor", "windsurf", "opencode", "openclaw"] {
+    for tool_id in ["claude", "codex", "gemini", "opencode", "openclaw"] {
         let id = format!("live-{}", tool_id);
 
         if imported_counts.get(tool_id).copied().unwrap_or(0) > 0 {
@@ -1215,8 +1211,6 @@ pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, Strin
         ("claude-settings", home.join(".claude").join("settings.json"), "skills"),
         ("codex", home.join(".codex").join("config.toml"), "skills"),
         ("gemini", home.join(".gemini").join("settings.json"), "skills"),
-        ("cursor", home.join(".cursor").join("mcp.json"), "skills"),
-        ("windsurf", home.join(".windsurf").join("mcp.json"), "skills"),
         ("opencode", home.join(".opencode").join("opencode.json"), "skills"),
         ("openclaw", home.join(".openclaw").join("config.json"), "skills"),
     ];
@@ -1312,8 +1306,6 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
                 "claude-settings" => home.join(".claude").join("settings.json"),
                 "codex" => home.join(".codex").join("config.toml"),
                 "gemini" => home.join(".gemini").join("settings.json"),
-                "cursor" => home.join(".cursor").join("mcp.json"),
-                "windsurf" => home.join(".windsurf").join("mcp.json"),
                 "opencode" => home.join(".opencode").join("opencode.json"),
                 "openclaw" => home.join(".openclaw").join("config.json"),
                 _ => continue,

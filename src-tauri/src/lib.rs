@@ -116,6 +116,8 @@ pub fn run() {
             extra_commands::apply_config_profile,
             extra_commands::delete_config_profile,
             extra_commands::read_tool_config,
+            extra_commands::get_claude_permissions_level,
+            extra_commands::set_claude_permissions_level,
             extra_commands::pick_folder,
             extra_commands::pick_file,
             extra_commands::set_proxy,

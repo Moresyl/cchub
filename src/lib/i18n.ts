@@ -18,6 +18,7 @@ const zh = {
     updates: "更新中心",
     security: "安全审计",
     settings: "设置",
+    tools: "工具",
   },
   dashboard: {
     title: "概览",
@@ -231,6 +232,7 @@ const en: typeof zh = {
     updates: "Updates",
     security: "Security",
     settings: "Settings",
+    tools: "Tools",
   },
   dashboard: {
     title: "Overview",

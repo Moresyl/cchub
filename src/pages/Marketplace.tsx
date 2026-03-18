@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
   Store, Search, Download, CheckCircle, X, ExternalLink, Key, Check,
-  Plug, Zap, Plus, Globe, Languages, Tag, Edit3, Trash2, Save,
+  Plug, Zap, Plus, Globe, Tag, Edit3, Trash2, Save,
 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
@@ -50,7 +50,7 @@ export default function Marketplace() {
   const [installing, setInstalling] = useState<string | null>(null);
   const [showEnvModal, setShowEnvModal] = useState<RegistryEntry | null>(null);
   const [envValues, setEnvValues] = useState<Record<string, string>>({});
-  const [showTranslation, setShowTranslation] = useState(true);
+  const showTranslation = true;
   const [showCustomSource, setShowCustomSource] = useState(false);
   const [customUrl, setCustomUrl] = useState("");
   const [loadingCustom, setLoadingCustom] = useState(false);

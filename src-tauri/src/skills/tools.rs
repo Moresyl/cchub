@@ -84,6 +84,16 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         install_command: "go install github.com/opencode-ai/opencode@latest",
         install_url: "https://github.com/opencode-ai/opencode",
     },
+    ToolCandidate {
+        id: "openclaw",
+        name: "OpenClaw",
+        dir: ".openclaw",
+        config_file: "config.json",
+        mcp_config_file: "config.json",
+        skills_subdir: "skills",
+        install_command: "npm install -g @anthropic-ai/openclaw",
+        install_url: "https://github.com/anthropics/openclaw",
+    },
 ];
 
 /// Detect AI coding tools installed on the system

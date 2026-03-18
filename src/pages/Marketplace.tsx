@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
+import ConfirmDialog from "../components/ConfirmDialog";
 import CodeEditor from "../components/CodeEditor";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -51,6 +52,7 @@ export default function Marketplace() {
   const [previewSkill, setPreviewSkill] = useState<SkillEntry | null>(null);
   const [editingPreview, setEditingPreview] = useState(false);
   const [editContent, setEditContent] = useState("");
+  const [pendingUninstall, setPendingUninstall] = useState<SkillEntry | null>(null);
   const i = t();
   const locale = localStorage.getItem("cchub-locale") || "zh";
 
@@ -157,9 +159,10 @@ export default function Marketplace() {
   }
 
   async function handleUninstallSkill(skill: SkillEntry) {
-    if (!window.confirm(locale === "zh" ? `确定卸载技能 "${skill.name}"？` : `Uninstall skill "${skill.name}"?`)) return;
+    setPendingUninstall(skill);
+  }
+  async function doUninstallSkill(skill: SkillEntry) {
     try {
-      // Find the installed file path by scanning skills
       const skills = await invoke<{ name: string; file_path: string | null }[]>("scan_skills");
       const installed = skills.find(s => s.name.toLowerCase() === skill.name.toLowerCase() || s.name.toLowerCase() === skill.id.toLowerCase());
       if (installed?.file_path) {
@@ -742,6 +745,15 @@ export default function Marketplace() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        isOpen={!!pendingUninstall}
+        title={locale === "zh" ? "卸载技能" : "Uninstall Skill"}
+        message={locale === "zh" ? `确定卸载技能「${pendingUninstall?.name}」？` : `Uninstall skill "${pendingUninstall?.name}"?`}
+        confirmText={locale === "zh" ? "卸载" : "Uninstall"}
+        variant="destructive"
+        onConfirm={() => { if (pendingUninstall) void doUninstallSkill(pendingUninstall); setPendingUninstall(null); }}
+        onCancel={() => setPendingUninstall(null)}
+      />
     </div>
   );
 }

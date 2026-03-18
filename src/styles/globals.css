@@ -315,6 +315,13 @@ body {
 }
 .btn-danger-ghost:hover { background: var(--danger-subtle); color: var(--danger); }
 
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+.btn-danger:hover { background: color-mix(in srgb, var(--danger) 85%, #000); }
+
 /* ═══ Badges ═══ */
 
 .badge {
@@ -806,4 +813,51 @@ textarea.input {
   color: var(--text-primary);
   border-color: var(--border-strong);
   background: var(--bg-card-hover);
+}
+
+/* ═══ Confirm Dialog ═══ */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.confirm-dialog {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  padding: 24px;
+  width: 90vw;
+  max-width: 420px;
+}
+
+/* ═══ Card Actions Hover ═══ */
+
+.card-actions {
+  opacity: 0;
+  transform: translateX(8px);
+  transition: all 200ms ease;
+  pointer-events: none;
+}
+.card:hover .card-actions,
+.card:focus-within .card-actions {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* ═══ Sticky Footer Bar ═══ */
+
+.sticky-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-app);
+  border-top: 1px solid var(--border-default);
+  padding: 14px 0;
+  margin-top: auto;
+  z-index: 10;
 }

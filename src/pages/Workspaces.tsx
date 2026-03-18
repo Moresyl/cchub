@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Monitor, Plus, Trash2, Edit3, X, Check, FolderOpen } from "lucide-react";
 import { getLocale } from "../lib/i18n";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 interface Workspace {
   id: string;
@@ -22,6 +23,7 @@ export default function Workspaces() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
   const locale = getLocale();
 
   useEffect(() => { load(); }, []);
@@ -59,7 +61,9 @@ export default function Workspaces() {
 
   async function handleDelete(ws: Workspace) {
     if (ws.is_active) return;
-    if (!window.confirm(locale === "zh" ? `确定删除工作区 "${ws.name}"？` : `Delete workspace "${ws.name}"?`)) return;
+    setPendingDelete(ws);
+  }
+  async function doDelete(ws: Workspace) {
     try {
       await invoke("delete_workspace", { id: ws.id });
       await load();
@@ -184,6 +188,15 @@ export default function Workspaces() {
           </div>
         ))}
       </div>
+      <ConfirmDialog
+        isOpen={!!pendingDelete}
+        title={locale === "zh" ? "删除工作区" : "Delete Workspace"}
+        message={locale === "zh" ? `确定删除工作区「${pendingDelete?.name}」？` : `Delete workspace "${pendingDelete?.name}"?`}
+        confirmText={locale === "zh" ? "删除" : "Delete"}
+        variant="destructive"
+        onConfirm={() => { if (pendingDelete) void doDelete(pendingDelete); setPendingDelete(null); }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

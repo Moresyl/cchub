@@ -77,14 +77,7 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
         }
     }
 
-    // 4. Scan Cursor config
-    if let Some(cursor_config) = get_cursor_config_path() {
-        if cursor_config.exists() {
-            scan_wrapped_mcp_json(&cursor_config, "cursor", &mut servers);
-        }
-    }
-
-    // 5. Scan Codex config.toml
+    // 4. Scan Codex config.toml
     if let Some(codex_config) = get_codex_config_path() {
         if codex_config.exists() {
             scan_codex_mcp_toml(&codex_config, &mut servers);
@@ -117,10 +110,6 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
     servers.retain(|s| seen.insert(s.name.clone()));
 
     servers
-}
-
-fn get_cursor_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".cursor").join("mcp.json"))
 }
 
 /// Recursively scan a directory for .mcp.json files
@@ -333,10 +322,6 @@ fn get_opencode_config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".opencode").join("opencode.json"))
 }
 
-fn get_windsurf_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".windsurf").join("mcp.json"))
-}
-
 fn get_openclaw_config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".openclaw").join("config.json"))
 }
@@ -452,18 +437,6 @@ pub fn write_mcp_to_gemini(name: &str, config: &McpServerConfig) -> Result<(), S
     write_mcp_server_to_config(name, config, &path.to_string_lossy())
 }
 
-/// Write MCP server config to Cursor mcp.json
-pub fn write_mcp_to_cursor(name: &str, config: &McpServerConfig) -> Result<(), String> {
-    let path = get_cursor_config_path().ok_or("Cannot find Cursor config path")?;
-    write_mcp_server_to_config(name, config, &path.to_string_lossy())
-}
-
-/// Write MCP server config to Windsurf mcp.json
-pub fn write_mcp_to_windsurf(name: &str, config: &McpServerConfig) -> Result<(), String> {
-    let path = get_windsurf_config_path().ok_or("Cannot find Windsurf config path")?;
-    write_mcp_server_to_config(name, config, &path.to_string_lossy())
-}
-
 /// Write MCP server config to OpenCode opencode.json
 pub fn write_mcp_to_opencode(name: &str, config: &McpServerConfig) -> Result<(), String> {
     let path = get_opencode_config_path().ok_or("Cannot find OpenCode config path")?;
@@ -482,8 +455,6 @@ pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> 
         "claude" => write_claude_mcp_server(name, config),
         "codex" => write_mcp_to_codex(name, config),
         "gemini" => write_mcp_to_gemini(name, config),
-        "cursor" => write_mcp_to_cursor(name, config),
-        "windsurf" => write_mcp_to_windsurf(name, config),
         "opencode" => write_mcp_to_opencode(name, config),
         "openclaw" => write_mcp_to_openclaw(name, config),
         _ => Err(format!("Unknown tool: {}", tool_id)),

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw, Save, Trash2, Check, X, ArrowRightLeft,
-  Search, Terminal, Code, Monitor, Sparkles, Globe, Wind,
+  Search, Terminal, Code, Monitor, Sparkles, Globe,
   Edit3, Plus, Eye, EyeOff, Copy, Cat,
 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
@@ -41,8 +41,6 @@ const TOOL_ICONS: Record<string, typeof Monitor> = {
   claude: Terminal,
   codex: Code,
   gemini: Sparkles,
-  cursor: Monitor,
-  windsurf: Wind,
   opencode: Globe,
   openclaw: Cat,
 };
@@ -101,6 +99,50 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
     }
   } catch { /* ignore */ }
   return {};
+}
+
+/** Codex 配置分拆显示：auth.json + config.toml */
+function CodexRawConfigEditor({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  let authJson = "";
+  let configToml = "";
+  try {
+    const parsed = JSON.parse(value) as Record<string, any>;
+    authJson = JSON.stringify(parsed.auth || {}, null, 2);
+    configToml = typeof parsed.config === "string" ? parsed.config : "";
+  } catch {
+    // fallback: show raw
+    return <CodeEditor value={value} onChange={onChange} language="json" minHeight={240} />;
+  }
+
+  function rebuild(nextAuth: string, nextToml: string) {
+    try {
+      const auth = JSON.parse(nextAuth);
+      onChange(JSON.stringify({ auth, config: nextToml }, null, 2));
+    } catch { /* ignore invalid JSON */ }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <label className="field-label" style={{ marginBottom: 6 }}>auth.json</label>
+        <CodeEditor
+          value={authJson}
+          onChange={(v) => rebuild(v, configToml)}
+          language="json"
+          minHeight={80}
+        />
+      </div>
+      <div>
+        <label className="field-label" style={{ marginBottom: 6 }}>config.toml</label>
+        <CodeEditor
+          value={configToml}
+          onChange={(v) => rebuild(authJson, v)}
+          language="toml"
+          minHeight={200}
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function Profiles() {
@@ -506,7 +548,7 @@ export default function Profiles() {
                   }}
                   style={{ fontSize: 13 }}
                 >
-                  {installedTools.map((tool) => (
+                  {tools.map((tool) => (
                     <option key={tool.id} value={tool.id}>{tool.name}</option>
                   ))}
                 </select>
@@ -708,12 +750,16 @@ export default function Profiles() {
                     ? "上方表单字段会自动同步到此处，你也可以直接编辑原始配置。"
                     : "Form fields above are synced here. You can also edit the raw config directly."}
                 </div>
-                <CodeEditor
-                  value={draftContent}
-                  onChange={setDraftContent}
-                  language={getConfigLanguage(draftTool, draftContent)}
-                  minHeight={240}
-                />
+                {draftTool === "codex" ? (
+                  <CodexRawConfigEditor value={draftContent} onChange={setDraftContent} />
+                ) : (
+                  <CodeEditor
+                    value={draftContent}
+                    onChange={setDraftContent}
+                    language={getConfigLanguage(draftTool, draftContent)}
+                    minHeight={240}
+                  />
+                )}
               </div>
             </>
           )}

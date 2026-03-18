@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Terminal, Code, Monitor } from "lucide-react";
+import { Terminal, Code } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import type { DetectedTool } from "../types/skills";

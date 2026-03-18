@@ -1129,54 +1129,92 @@ pub fn read_tool_config(tool_id: String, db: State<'_, DbState>) -> Result<Strin
     read_tool_snapshot(&conn, &tool_id)
 }
 
-// ── Backup / Export / Import ──
+// ── Backup / Export / Import (.sql format) ──
 
+// Legacy JSON backup structs (for backward-compatible import)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackupData {
+struct LegacyBackupData {
     pub version: String,
     pub created_at: String,
     pub sql_dump: String,
-    pub tools: HashMap<String, ToolBackup>,
+    pub tools: HashMap<String, LegacyToolBackup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolBackup {
+struct LegacyToolBackup {
     pub config_content: Option<String>,
     pub config_path: String,
-    pub skills: Vec<SkillFileBackup>,
+    pub skills: Vec<LegacySkillFileBackup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillFileBackup {
+struct LegacySkillFileBackup {
     pub name: String,
     pub content: String,
 }
 
-/// Generate SQL dump from database
-fn generate_sql_dump(conn: &rusqlite::Connection) -> String {
-    let mut sql_dump = String::new();
-    sql_dump.push_str("-- CCHub Database Backup\n");
-    sql_dump.push_str(&format!("-- Created: {}\n\n", chrono::Utc::now().to_rfc3339()));
+/// Escape a string value for SQL: replace ' with ''
+fn sql_escape(s: &str) -> String {
+    s.replace('\'', "''")
+}
 
+/// Generate complete .sql backup content
+fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> String {
+    let mut sql = String::new();
+
+    // Header
+    sql.push_str("-- ═══════════════════════════════════════════════════════\n");
+    sql.push_str("-- CCHub Database Backup (.sql)\n");
+    sql.push_str(&format!("-- Version: {}\n", env!("CARGO_PKG_VERSION")));
+    sql.push_str(&format!("-- Created: {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+    sql.push_str("-- ═══════════════════════════════════════════════════════\n\n");
+
+    // Schema (CREATE TABLE IF NOT EXISTS)
+    sql.push_str("-- ── Schema ──\n\n");
+    sql.push_str(&crate::db::schema::get_schema_sql());
+    sql.push_str("\n");
+
+    // Backup metadata table
+    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_meta (key TEXT PRIMARY KEY, value TEXT);\n");
+    sql.push_str(&format!("INSERT OR REPLACE INTO _backup_meta VALUES ('version', '{}');\n", env!("CARGO_PKG_VERSION")));
+    sql.push_str(&format!("INSERT OR REPLACE INTO _backup_meta VALUES ('created_at', '{}');\n\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+
+    // Tool configs table
+    sql.push_str("CREATE TABLE IF NOT EXISTS _tool_configs (tool_id TEXT PRIMARY KEY, config_path TEXT, config_content TEXT);\n");
+
+    // Skill files table
+    sql.push_str("CREATE TABLE IF NOT EXISTS _skill_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT, name TEXT, content TEXT);\n\n");
+
+    // Data dump for all 12 business tables
+    sql.push_str("-- ── Data ──\n\n");
     let tables = ["mcp_servers", "plugins", "skills", "hooks", "activity_logs", "mcp_clients",
                    "workspaces", "custom_paths", "config_profiles", "app_settings", "update_history", "metrics"];
+
     for table in tables {
         let query = format!("SELECT * FROM {}", table);
         if let Ok(mut stmt) = conn.prepare(&query) {
             let col_count = stmt.column_count();
             let col_names: Vec<String> = (0..col_count).map(|i| stmt.column_name(i).unwrap_or("").to_string()).collect();
 
+            let mut has_rows = false;
             if let Ok(rows) = stmt.query_map([], |row| {
                 let mut vals = Vec::new();
                 for i in 0..col_count {
                     let val: rusqlite::Result<String> = row.get(i);
                     match val {
-                        Ok(s) => vals.push(format!("'{}'", s.replace('\'', "''"))),
+                        Ok(s) => vals.push(format!("'{}'", sql_escape(&s))),
                         Err(_) => {
                             let int_val: rusqlite::Result<i64> = row.get(i);
                             match int_val {
                                 Ok(n) => vals.push(n.to_string()),
-                                Err(_) => vals.push("NULL".to_string()),
+                                Err(_) => {
+                                    let float_val: rusqlite::Result<f64> = row.get(i);
+                                    match float_val {
+                                        Ok(f) => vals.push(f.to_string()),
+                                        Err(_) => vals.push("NULL".to_string()),
+                                    }
+                                }
                             }
                         }
                     }
@@ -1184,43 +1222,49 @@ fn generate_sql_dump(conn: &rusqlite::Connection) -> String {
                 Ok(vals)
             }) {
                 for row in rows.flatten() {
-                    sql_dump.push_str(&format!("INSERT OR REPLACE INTO {} ({}) VALUES ({});\n",
+                    if !has_rows {
+                        sql.push_str(&format!("-- Table: {}\n", table));
+                        has_rows = true;
+                    }
+                    sql.push_str(&format!("INSERT OR REPLACE INTO {} ({}) VALUES ({});\n",
                         table, col_names.join(", "), row.join(", ")));
                 }
             }
+            if has_rows {
+                sql.push('\n');
+            }
         }
     }
-    sql_dump
-}
 
-/// Export: database SQL dump + tool config files
-#[tauri::command]
-pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-
-    // 1. SQL dump
-    let sql_dump = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        generate_sql_dump(&conn)
-    };
-
-    // 2. Collect tool config files
-    let mut tools_backup: HashMap<String, ToolBackup> = HashMap::new();
-    let tool_configs: Vec<(&str, std::path::PathBuf, &str)> = vec![
-        ("claude", home.join(".claude.json"), "skills"),
-        ("claude-settings", home.join(".claude").join("settings.json"), "skills"),
-        ("codex", home.join(".codex").join("config.toml"), "skills"),
-        ("gemini", home.join(".gemini").join("settings.json"), "skills"),
-        ("opencode", home.join(".opencode").join("opencode.json"), "skills"),
-        ("openclaw", home.join(".openclaw").join("config.json"), "skills"),
+    // Tool config files
+    sql.push_str("-- ── Tool Configs ──\n\n");
+    let tool_configs: Vec<(&str, std::path::PathBuf)> = vec![
+        ("claude", home.join(".claude.json")),
+        ("claude-settings", home.join(".claude").join("settings.json")),
+        ("codex", home.join(".codex").join("config.toml")),
+        ("gemini", home.join(".gemini").join("settings.json")),
+        ("opencode", home.join(".opencode").join("opencode.json")),
+        ("openclaw", home.join(".openclaw").join("config.json")),
     ];
-    for (tool_id, config_path, skills_subdir) in tool_configs {
-        let config_content = if config_path.exists() {
-            std::fs::read_to_string(&config_path).ok()
-        } else { None };
 
-        let mut skill_files = Vec::new();
-        let skills_dir = config_path.parent().unwrap_or(&home).join(skills_subdir);
+    for (tool_id, config_path) in &tool_configs {
+        if config_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(config_path) {
+                sql.push_str(&format!(
+                    "INSERT OR REPLACE INTO _tool_configs VALUES ('{}', '{}', '{}');\n",
+                    tool_id,
+                    sql_escape(&config_path.to_string_lossy()),
+                    sql_escape(&content)
+                ));
+            }
+        }
+    }
+    sql.push('\n');
+
+    // Skill files
+    sql.push_str("-- ── Skill Files ──\n\n");
+    for (tool_id, config_path) in &tool_configs {
+        let skills_dir = config_path.parent().unwrap_or(home).join("skills");
         if skills_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&skills_dir) {
                 for entry in entries.flatten() {
@@ -1228,65 +1272,169 @@ pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, Strin
                     if path.is_file() {
                         if let Ok(content) = std::fs::read_to_string(&path) {
                             let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            skill_files.push(SkillFileBackup { name, content });
+                            sql.push_str(&format!(
+                                "INSERT INTO _skill_files (tool_id, name, content) VALUES ('{}', '{}', '{}');\n",
+                                tool_id, sql_escape(&name), sql_escape(&content)
+                            ));
                         }
                     }
                 }
             }
         }
-
-        if config_content.is_some() || !skill_files.is_empty() {
-            tools_backup.insert(tool_id.to_string(), ToolBackup {
-                config_content,
-                config_path: config_path.to_string_lossy().to_string(),
-                skills: skill_files,
-            });
-        }
     }
 
-    // 3. Combine into backup
-    let backup = BackupData {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        created_at: chrono::Utc::now().to_rfc3339(),
-        sql_dump,
-        tools: tools_backup,
-    };
-    let backup_json = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
+    sql.push_str("\n-- ── End of Backup ──\n");
+    sql
+}
 
-    // 4. Save file dialog
+/// Export: generate .sql backup file
+#[tauri::command]
+pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    let sql_content = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        generate_sql_backup(&conn, &home)
+    };
+
     let file = rfd::AsyncFileDialog::new()
-        .set_title("Save Backup")
-        .set_file_name(&format!("cchub-backup-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")))
-        .add_filter("CCHub Backup", &["json"])
+        .set_title("导出备份")
+        .set_file_name(&format!("cchub-backup-{}.sql", chrono::Local::now().format("%Y%m%d-%H%M%S")))
+        .add_filter("SQL Backup", &["sql"])
         .save_file()
         .await;
 
     match file {
         Some(f) => {
             let path = f.path();
-            std::fs::write(path, &backup_json).map_err(|e| e.to_string())?;
+            std::fs::write(path, &sql_content).map_err(|e| e.to_string())?;
             Ok(path.to_string_lossy().to_string())
         }
         None => Err("Cancelled".to_string()),
     }
 }
 
-/// Import backup: restore database + tool configs
+/// Import backup: supports .sql (new) and .json (legacy)
 #[tauri::command]
 pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, String> {
     let file = rfd::AsyncFileDialog::new()
-        .set_title("Import Backup")
-        .add_filter("CCHub Backup", &["json"])
+        .set_title("导入备份")
+        .add_filter("CCHub Backup", &["sql", "json"])
         .pick_file()
         .await;
 
     let file = file.ok_or("Cancelled")?;
-    let content = std::fs::read_to_string(file.path()).map_err(|e| e.to_string())?;
-    let backup: BackupData = serde_json::from_str(&content).map_err(|e| format!("Invalid backup: {}", e))?;
+    let file_path = file.path().to_path_buf();
+    let content = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
 
+    let is_json = file_path.extension()
+        .map(|ext| ext.to_string_lossy().to_lowercase() == "json")
+        .unwrap_or(false);
+
+    if is_json {
+        // Legacy JSON import
+        return import_legacy_json(&db, &content);
+    }
+
+    // .sql import
+    let mut restored_count = 0;
+    let mut tool_configs_restored = 0;
+    let mut skills_restored = 0;
+
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+
+        // Execute all SQL statements (CREATE TABLE + INSERT)
+        // Split by semicolons and execute each statement
+        for statement in content.split(";\n") {
+            let stmt = statement.trim();
+            if stmt.is_empty() || stmt.starts_with("--") {
+                continue;
+            }
+            let stmt_with_semi = format!("{};", stmt);
+            if conn.execute_batch(&stmt_with_semi).is_ok() {
+                if stmt.starts_with("INSERT") {
+                    restored_count += 1;
+                }
+            }
+        }
+
+        // Extract tool configs from _tool_configs table
+        if let Ok(mut stmt) = conn.prepare("SELECT tool_id, config_path, config_content FROM _tool_configs") {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            }) {
+                let home = dirs::home_dir().ok_or("Cannot find home directory").unwrap();
+                for row in rows.flatten() {
+                    let (tool_id, _config_path, config_content) = row;
+                    let target_path = match tool_id.as_str() {
+                        "claude" => home.join(".claude.json"),
+                        "claude-settings" => home.join(".claude").join("settings.json"),
+                        "codex" => home.join(".codex").join("config.toml"),
+                        "gemini" => home.join(".gemini").join("settings.json"),
+                        "opencode" => home.join(".opencode").join("opencode.json"),
+                        "openclaw" => home.join(".openclaw").join("config.json"),
+                        _ => continue,
+                    };
+                    if let Some(parent) = target_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if crate::utils::atomic_write_string(&target_path, &config_content).is_ok() {
+                        tool_configs_restored += 1;
+                    }
+                }
+            }
+        }
+
+        // Extract skill files from _skill_files table
+        if let Ok(mut stmt) = conn.prepare("SELECT tool_id, name, content FROM _skill_files") {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            }) {
+                let home = dirs::home_dir().ok_or("Cannot find home directory").unwrap();
+                for row in rows.flatten() {
+                    let (tool_id, name, file_content) = row;
+                    let base_dir = match tool_id.as_str() {
+                        "claude" | "claude-settings" => home.join(".claude"),
+                        "codex" => home.join(".codex"),
+                        "gemini" => home.join(".gemini"),
+                        "opencode" => home.join(".opencode"),
+                        "openclaw" => home.join(".openclaw"),
+                        _ => continue,
+                    };
+                    let skills_dir = base_dir.join("skills");
+                    let _ = std::fs::create_dir_all(&skills_dir);
+                    if crate::utils::atomic_write_string(&skills_dir.join(&name), &file_content).is_ok() {
+                        skills_restored += 1;
+                    }
+                }
+            }
+        }
+
+        // Clean up temporary backup tables from main DB
+        let _ = conn.execute_batch("DROP TABLE IF EXISTS _backup_meta;");
+        let _ = conn.execute_batch("DROP TABLE IF EXISTS _tool_configs;");
+        let _ = conn.execute_batch("DROP TABLE IF EXISTS _skill_files;");
+    }
+
+    Ok(format!("已恢复 {} 条数据记录, {} 个工具配置, {} 个技能文件",
+        restored_count - tool_configs_restored - skills_restored - 2, // subtract meta/config/skill inserts
+        tool_configs_restored, skills_restored))
+}
+
+/// Import legacy .json backup format
+fn import_legacy_json(db: &State<'_, DbState>, content: &str) -> Result<String, String> {
+    let backup: LegacyBackupData = serde_json::from_str(content).map_err(|e| format!("Invalid backup: {}", e))?;
     let mut restored_count = 0;
 
-    // 1. Restore SQL dump
     if !backup.sql_dump.is_empty() {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         for line in backup.sql_dump.lines() {
@@ -1298,17 +1446,16 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
         }
     }
 
-    // 2. Restore tool configs
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     for (tool_id, tool_backup) in &backup.tools {
         let config_path = match tool_id.as_str() {
-                "claude" => home.join(".claude.json"),
-                "claude-settings" => home.join(".claude").join("settings.json"),
-                "codex" => home.join(".codex").join("config.toml"),
-                "gemini" => home.join(".gemini").join("settings.json"),
-                "opencode" => home.join(".opencode").join("opencode.json"),
-                "openclaw" => home.join(".openclaw").join("config.json"),
-                _ => continue,
+            "claude" => home.join(".claude.json"),
+            "claude-settings" => home.join(".claude").join("settings.json"),
+            "codex" => home.join(".codex").join("config.toml"),
+            "gemini" => home.join(".gemini").join("settings.json"),
+            "opencode" => home.join(".opencode").join("opencode.json"),
+            "openclaw" => home.join(".openclaw").join("config.json"),
+            _ => continue,
         };
 
         if let Some(config_content) = &tool_backup.config_content {
@@ -1329,5 +1476,5 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
         }
     }
 
-    Ok(format!("Restored {} items from backup ({})", restored_count, backup.created_at))
+    Ok(format!("已从旧版备份恢复 {} 项 ({})", restored_count, backup.created_at))
 }

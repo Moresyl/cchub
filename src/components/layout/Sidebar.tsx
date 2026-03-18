@@ -47,9 +47,6 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <div className="sidebar-footer">
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{i.app.version}</span>
-      </div>
     </aside>
   );
 }

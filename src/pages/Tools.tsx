@@ -21,6 +21,8 @@ export default function Tools() {
   const [tab, setTab] = useState<ToolTab>("claude");
   const [permLevel, setPermLevel] = useState(0);
   const [autoUpdate, setAutoUpdate] = useState("latest");
+  const [claudeModel, setClaudeModel] = useState("");
+  const [toolSearch, setToolSearch] = useState(false);
   const [codexApproval, setCodexApproval] = useState("suggest");
   const [codexReasoning, setCodexReasoning] = useState("medium");
   const [codexDisableStorage, setCodexDisableStorage] = useState(false);
@@ -34,9 +36,11 @@ export default function Tools() {
   async function loadData() {
     setLoading(true);
     try {
-      const [level, channel, codexSettings, detectedTools] = await Promise.all([
+      const [level, channel, model, toolSearchEnabled, codexSettings, detectedTools] = await Promise.all([
         invoke<number>("get_claude_permissions_level").catch(() => 0),
         invoke<string>("get_claude_auto_update").catch(() => "latest"),
+        invoke<string>("get_claude_model").catch(() => ""),
+        invoke<boolean>("get_claude_tool_search").catch(() => false),
         invoke<{ approval_mode: string; reasoning_effort: string; disable_response_storage: boolean }>("get_codex_settings").catch(() => ({
           approval_mode: "suggest", reasoning_effort: "medium", disable_response_storage: false,
         })),
@@ -44,6 +48,8 @@ export default function Tools() {
       ]);
       setPermLevel(level);
       setAutoUpdate(channel);
+      setClaudeModel(model);
+      setToolSearch(toolSearchEnabled);
       setCodexApproval(codexSettings.approval_mode);
       setCodexReasoning(codexSettings.reasoning_effort);
       setCodexDisableStorage(codexSettings.disable_response_storage);
@@ -177,6 +183,41 @@ export default function Tools() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Model Selection */}
+            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{zh ? "模型选择" : "Model"}</h4>
+                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{zh ? "切换默认使用的模型" : "Switch default model"}</p>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[
+                  { value: "opus", label: "Opus" },
+                  { value: "sonnet", label: "Sonnet" },
+                  { value: "haiku", label: "Haiku" },
+                ].map(opt => (
+                  <button key={opt.value}
+                    className={`btn btn-xs ${claudeModel.includes(opt.value) ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => { setClaudeModel(opt.value); setClaudeSetting("set_claude_model", { model: opt.value }, () => {}); }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tool Search */}
+            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <h4 style={{ fontSize: 13, fontWeight: 700 }}>Tool Search</h4>
+                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{zh ? "启用工具搜索功能（实验性）" : "Enable tool search (experimental)"}</p>
+              </div>
+              <ToggleSwitch
+                value={toolSearch}
+                onChange={v => { setToolSearch(v); setClaudeSetting("set_claude_tool_search", { enabled: v }, () => {}); }}
+                labelOn={zh ? "已启用" : "Enabled"}
+                labelOff={zh ? "已关闭" : "Disabled"}
+              />
             </div>
           </div>
         )}

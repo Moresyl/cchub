@@ -1299,6 +1299,78 @@ pub fn set_codex_setting(key: String, value: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Get Claude Code model setting
+#[tauri::command]
+pub fn get_claude_model() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(".claude").join("settings.json");
+    if !path.exists() { return Ok("".to_string()); }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    Ok(settings.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string())
+}
+
+/// Set Claude Code model
+#[tauri::command]
+pub fn set_claude_model(model: String) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(".claude").join("settings.json");
+    let mut settings: serde_json::Value = if path.exists() {
+        let c = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&c).map_err(|e| e.to_string())?
+    } else { serde_json::json!({}) };
+    settings["model"] = serde_json::json!(model);
+    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Get Claude Code Tool Search (ENABLE_TOOL_SEARCH) status from settings.local.json
+#[tauri::command]
+pub fn get_claude_tool_search() -> Result<bool, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(".claude").join("settings.local.json");
+    if !path.exists() { return Ok(false); }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let enabled = settings.get("env")
+        .and_then(|e| e.get("ENABLE_TOOL_SEARCH"))
+        .and_then(|v| v.as_str())
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    Ok(enabled)
+}
+
+/// Set Claude Code Tool Search (ENABLE_TOOL_SEARCH) in settings.local.json
+#[tauri::command]
+pub fn set_claude_tool_search(enabled: bool) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(".claude").join("settings.local.json");
+
+    let mut settings: serde_json::Value = if path.exists() {
+        let c = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&c).unwrap_or(serde_json::json!({}))
+    } else { serde_json::json!({}) };
+
+    if settings.get("env").is_none() {
+        settings["env"] = serde_json::json!({});
+    }
+    if enabled {
+        settings["env"]["ENABLE_TOOL_SEARCH"] = serde_json::json!("true");
+    } else {
+        if let Some(env) = settings.get_mut("env").and_then(|e| e.as_object_mut()) {
+            env.remove("ENABLE_TOOL_SEARCH");
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // Legacy JSON backup structs (for backward-compatible import)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LegacyBackupData {

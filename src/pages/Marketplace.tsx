@@ -86,18 +86,35 @@ export default function Marketplace() {
       } catch { /* ignore */ }
 
       // Load installed skills
+      let localSkillEntries: SkillEntry[] = [];
       try {
-        const skills = await invoke<{ id: string; name: string }[]>("scan_skills");
+        const skills = await invoke<{ id: string; name: string; description: string | null; plugin_id: string | null; trigger_command: string | null }[]>("scan_skills");
         setInstalledSkills(new Set(skills.map(s => s.name.toLowerCase())));
+        localSkillEntries = skills.map(s => ({
+          id: `local-${s.name}`,
+          name: s.name,
+          description: s.description || (s.trigger_command ? `/${s.trigger_command}` : ""),
+          description_zh: null,
+          category: s.plugin_id ? "plugin" : "local",
+          author: s.plugin_id || null,
+          github_url: null,
+          cover_url: null,
+          tags: s.trigger_command ? [s.trigger_command] : [],
+          content: "",
+        }));
       } catch { /* ignore */ }
 
       // Load skills from SkillHub API (default source)
       try {
         const result = await invoke<{ skills: SkillEntry[]; total: number }>("get_skillhub_catalog", { page: 1, limit: 50, category: "" });
-        setSkillEntries(result.skills || []);
+        // Merge: local skills + market skills (dedup by name)
+        const marketSkills = result.skills || [];
+        const localNames = new Set(localSkillEntries.map(s => s.name.toLowerCase()));
+        const merged = [...localSkillEntries, ...marketSkills.filter(s => !localNames.has(s.name.toLowerCase()))];
+        setSkillEntries(merged);
       } catch (e) {
-        console.warn("SkillHub API failed, skills will be empty:", e);
-        setSkillEntries([]);
+        console.warn("SkillHub API failed, showing local skills only:", e);
+        setSkillEntries(localSkillEntries);
       }
 
       // Load npm MCP entries (page 0)
@@ -233,28 +250,13 @@ export default function Marketplace() {
   }
 
   const mcpCategories: { key: McpCategory; label: string }[] = [
-    { key: "all", label: locale === "zh" ? "全部" : "All" },
-    { key: "installed", label: locale === "zh" ? "已安装" : "Installed" },
-    { key: "search", label: locale === "zh" ? "搜索" : "Search" },
-    { key: "database", label: locale === "zh" ? "数据库" : "Database" },
-    { key: "ai", label: "AI" },
-    { key: "dev-tools", label: locale === "zh" ? "开发工具" : "Dev Tools" },
-    { key: "browser", label: locale === "zh" ? "浏览器" : "Browser" },
-    { key: "filesystem", label: locale === "zh" ? "文件系统" : "Filesystem" },
-    { key: "cloud", label: locale === "zh" ? "云服务" : "Cloud" },
-    { key: "productivity", label: locale === "zh" ? "效率" : "Productivity" },
+    { key: "all", label: `${locale === "zh" ? "全部" : "All"} (${entries.length})` },
+    { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${entries.filter(e => installedIds.has(e.name) || installedIds.has(e.id)).length})` },
   ];
 
   const skillCategories: { key: SkillCategory; label: string }[] = [
-    { key: "all", label: locale === "zh" ? "全部" : "All" },
-    { key: "installed", label: locale === "zh" ? "已安装" : "Installed" },
-    { key: "development", label: locale === "zh" ? "开发" : "Development" },
-    { key: "testing", label: locale === "zh" ? "测试" : "Testing" },
-    { key: "documentation", label: locale === "zh" ? "文档" : "Docs" },
-    { key: "devops", label: "DevOps" },
-    { key: "ai-ml", label: "AI/ML" },
-    { key: "security", label: locale === "zh" ? "安全" : "Security" },
-    { key: "backend", label: locale === "zh" ? "后端" : "Backend" },
+    { key: "all", label: `${locale === "zh" ? "全部" : "All"} (${skillEntries.length})` },
+    { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${skillEntries.filter(s => installedSkills.has(s.name.toLowerCase())).length})` },
   ];
 
   const filteredMcp = entries.filter(e => {
@@ -412,7 +414,7 @@ export default function Marketplace() {
                 );
               })}
             </div>
-            {mcpTotal > 50 && (
+            {mcpCategory !== "installed" && mcpTotal > 50 && (
               <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 12, padding: "20px 0" }}>
                 <button
                   className="btn btn-secondary btn-sm"

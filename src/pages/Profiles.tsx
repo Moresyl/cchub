@@ -15,6 +15,7 @@ import {
   supportsStructuredConfig,
   type ApiFormat,
   type ClaudeAuthField,
+  type OpenClawApiProtocol,
 } from "../lib/configProfiles";
 import { showToast } from "../components/Toast";
 import CodeEditor from "../components/CodeEditor";
@@ -97,6 +98,23 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
         model: modelMatch?.[1],
       };
     }
+    if (toolId === "openclaw") {
+      const models = Array.isArray(parsed.models) ? parsed.models : [];
+      const firstModel = models[0] as { id?: string } | undefined;
+      return {
+        baseUrl: parsed.baseUrl as string | undefined,
+        model: firstModel?.id,
+      };
+    }
+    if (toolId === "opencode") {
+      const options = (parsed.options || {}) as Record<string, string>;
+      const modelsObj = (parsed.models || {}) as Record<string, unknown>;
+      const firstModelId = Object.keys(modelsObj)[0];
+      return {
+        baseUrl: options.baseURL,
+        model: firstModelId,
+      };
+    }
   } catch { /* ignore */ }
   return {};
 }
@@ -169,6 +187,9 @@ export default function Profiles() {
   const [draftOpusModel, setDraftOpusModel] = useState("");
   const [draftAuthField, setDraftAuthField] = useState<ClaudeAuthField>("ANTHROPIC_AUTH_TOKEN");
   const [draftApiFormat, setDraftApiFormat] = useState<ApiFormat>("anthropic");
+  const [draftApiProtocol, setDraftApiProtocol] = useState<OpenClawApiProtocol>("openai-completions");
+  const [draftModelName, setDraftModelName] = useState("");
+  const [draftNpm, setDraftNpm] = useState("@ai-sdk/openai-compatible");
   const [filterTool, setFilterTool] = useState("claude");
   const [search, setSearch] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
@@ -213,6 +234,9 @@ export default function Profiles() {
     opusModel?: string;
     authField?: ClaudeAuthField;
     apiFormat?: ApiFormat;
+    apiProtocol?: OpenClawApiProtocol;
+    modelName?: string;
+    npm?: string;
   }) {
     const fields = {
       presetId: next.presetId ?? draftPresetId,
@@ -225,6 +249,9 @@ export default function Profiles() {
       opusModel: next.opusModel ?? draftOpusModel,
       authField: next.authField ?? draftAuthField,
       apiFormat: next.apiFormat ?? draftApiFormat,
+      apiProtocol: next.apiProtocol ?? draftApiProtocol,
+      modelName: next.modelName ?? draftModelName,
+      npm: next.npm ?? draftNpm,
     };
     setDraftPresetId(fields.presetId);
     setDraftBaseUrl(fields.baseUrl);
@@ -236,6 +263,9 @@ export default function Profiles() {
     setDraftOpusModel(fields.opusModel);
     setDraftAuthField(fields.authField);
     setDraftApiFormat(fields.apiFormat);
+    setDraftApiProtocol(fields.apiProtocol);
+    setDraftModelName(fields.modelName);
+    setDraftNpm(fields.npm);
     setDraftContent(buildStructuredConfig(toolId, fields));
   }
 
@@ -265,6 +295,9 @@ export default function Profiles() {
       setDraftSonnetModel(defaults.sonnetModel);
       setDraftOpusModel(defaults.opusModel);
       setDraftAuthField(defaults.authField);
+      setDraftApiProtocol(defaults.apiProtocol);
+      setDraftModelName(defaults.modelName);
+      setDraftNpm(defaults.npm);
       setDraftContent(buildStructuredConfig(selectedTool, defaults));
       setDraftLoading(false);
       return;
@@ -278,6 +311,9 @@ export default function Profiles() {
     setDraftSonnetModel("");
     setDraftOpusModel("");
     setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
+    setDraftApiProtocol("openai-completions");
+    setDraftModelName("");
+    setDraftNpm("@ai-sdk/openai-compatible");
     setDraftLoading(true);
     try {
       const configContent = await invoke<string>("read_tool_config", { toolId: selectedTool });
@@ -309,6 +345,9 @@ export default function Profiles() {
       setDraftOpusModel(parsed.opusModel);
       setDraftAuthField(parsed.authField);
       setDraftApiFormat(parsed.apiFormat);
+      setDraftApiProtocol(parsed.apiProtocol);
+      setDraftModelName(parsed.modelName);
+      setDraftNpm(parsed.npm);
     } else {
       setDraftPresetId("custom");
       setDraftBaseUrl("");
@@ -320,6 +359,9 @@ export default function Profiles() {
       setDraftOpusModel("");
       setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
       setDraftApiFormat("anthropic");
+      setDraftApiProtocol("openai-completions");
+      setDraftModelName("");
+      setDraftNpm("@ai-sdk/openai-compatible");
     }
     setDraftLoading(false);
   }
@@ -340,6 +382,9 @@ export default function Profiles() {
     setDraftOpusModel("");
     setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
     setDraftApiFormat("anthropic");
+    setDraftApiProtocol("openai-completions");
+    setDraftModelName("");
+    setDraftNpm("@ai-sdk/openai-compatible");
     setSaving(false);
     setShowApiKey(false);
   }
@@ -522,6 +567,9 @@ export default function Profiles() {
                       setDraftSonnetModel(defaults.sonnetModel);
                       setDraftOpusModel(defaults.opusModel);
                       setDraftAuthField(defaults.authField);
+                      setDraftApiProtocol(defaults.apiProtocol);
+                      setDraftModelName(defaults.modelName);
+                      setDraftNpm(defaults.npm);
                       setDraftContent(buildStructuredConfig(toolId, defaults));
                       setDraftLoading(false);
                     } else {
@@ -534,6 +582,9 @@ export default function Profiles() {
                       setDraftSonnetModel("");
                       setDraftOpusModel("");
                       setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
+                      setDraftApiProtocol("openai-completions");
+                      setDraftModelName("");
+                      setDraftNpm("@ai-sdk/openai-compatible");
                       setDraftContent("");
                       setDraftLoading(true);
                       try {
@@ -665,6 +716,35 @@ export default function Profiles() {
                       </div>
                     </div>
                   )}
+
+                  {draftTool === "openclaw" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <label className="field-label">{locale === "zh" ? "API 协议" : "API Protocol"}</label>
+                      <select
+                        className="input"
+                        value={draftApiProtocol}
+                        onChange={(e) => updateStructuredDraft(draftTool, { apiProtocol: e.target.value as OpenClawApiProtocol })}
+                        style={{ fontSize: 13 }}
+                      >
+                        <option value="openai-completions">OpenAI Completions</option>
+                        <option value="anthropic-messages">Anthropic Messages</option>
+                        <option value="google-generative-ai">Google Generative AI</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {draftTool === "opencode" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <label className="field-label">{locale === "zh" ? "NPM 包" : "NPM Package"}</label>
+                      <input
+                        className="input"
+                        value={draftNpm}
+                        onChange={(e) => updateStructuredDraft(draftTool, { npm: e.target.value })}
+                        placeholder="@ai-sdk/openai-compatible"
+                        style={{ fontSize: 13 }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -722,6 +802,29 @@ export default function Profiles() {
                         value={draftOpusModel}
                         onChange={(e) => updateStructuredDraft(draftTool, { opusModel: e.target.value })}
                         placeholder="claude-opus-4-5"
+                        style={{ fontSize: 13 }}
+                      />
+                    </div>
+                  </div>
+                ) : (draftTool === "openclaw" || draftTool === "opencode") ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <label className="field-label">{locale === "zh" ? "模型 ID" : "Model ID"}</label>
+                      <input
+                        className="input"
+                        value={draftModel}
+                        onChange={(e) => updateStructuredDraft(draftTool, { model: e.target.value })}
+                        placeholder={locale === "zh" ? "例如 deepseek-chat" : "e.g. deepseek-chat"}
+                        style={{ fontSize: 13 }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <label className="field-label">{locale === "zh" ? "模型显示名" : "Display Name"}</label>
+                      <input
+                        className="input"
+                        value={draftModelName}
+                        onChange={(e) => updateStructuredDraft(draftTool, { modelName: e.target.value })}
+                        placeholder={locale === "zh" ? "可选，默认同 ID" : "Optional, defaults to ID"}
                         style={{ fontSize: 13 }}
                       />
                     </div>

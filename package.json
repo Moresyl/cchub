@@ -4,9 +4,13 @@
   "version": "1.1.1",
   "type": "module",
   "scripts": {
+    "sync:version": "node scripts/sync-version.mjs",
+    "predev": "pnpm sync:version",
     "dev": "vite",
+    "prebuild": "pnpm sync:version",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "pretauri": "pnpm sync:version",
     "tauri": "tauri"
   },
   "dependencies": {

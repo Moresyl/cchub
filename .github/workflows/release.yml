@@ -41,6 +41,14 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'CCHub ${{ github.ref_name }}'
           releaseBody: |
+            ## 更新内容 / Highlights
+
+            - Claude 配置文件支持富文本编辑、禁用与删除操作
+            - 技能页面升级为 MDXEditor，统一编辑器交互和开关样式
+            - 新增配置文件编辑器，补齐相关后端命令支持
+            - 新增系统托盘支持，关闭窗口可最小化到托盘
+            - 刷新应用图标，并修复 OpenClaw 配置与编辑器主题显示问题
+
             ## 下载 / Download
 
             | 文件 | 说明 |

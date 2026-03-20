@@ -10,6 +10,11 @@ pub struct ClaudeMdFile {
     pub modified_at: Option<String>,
     pub content_preview: String,
     pub disabled: bool,
+    pub tool_id: String,
+    pub tool_name: String,
+    pub doc_name: String,
+    pub file_name: String,
+    pub scope: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -18,7 +23,38 @@ pub struct ClaudeMdTemplate {
     pub name: String,
     pub description: String,
     pub content: String,
+    pub tool_id: String,
+    pub tool_name: String,
+    pub file_name: String,
 }
+
+struct DocSpec {
+    tool_id: &'static str,
+    tool_name: &'static str,
+    hidden_dir: &'static str,
+    file_name: &'static str,
+}
+
+const DOC_SPECS: &[DocSpec] = &[
+    DocSpec {
+        tool_id: "claude",
+        tool_name: "Claude",
+        hidden_dir: ".claude",
+        file_name: "CLAUDE.md",
+    },
+    DocSpec {
+        tool_id: "codex",
+        tool_name: "Codex",
+        hidden_dir: ".codex",
+        file_name: "AGENTS.md",
+    },
+    DocSpec {
+        tool_id: "gemini",
+        tool_name: "Gemini",
+        hidden_dir: ".gemini",
+        file_name: "GEMINI.md",
+    },
+];
 
 pub fn scan_claude_md_files() -> Vec<ClaudeMdFile> {
     let mut results = Vec::new();
@@ -27,121 +63,39 @@ pub fn scan_claude_md_files() -> Vec<ClaudeMdFile> {
         None => return results,
     };
 
-    // Check global CLAUDE.md and CLAUDE.md.bak
-    for filename in &["CLAUDE.md", "CLAUDE.md.bak"] {
-        let global_claude_md = home.join(".claude").join(filename);
-        if global_claude_md.exists() {
-            if let Some(entry) = read_claude_md_entry(&global_claude_md, "Global (.claude)") {
-                results.push(entry);
+    for spec in DOC_SPECS {
+        for filename in [spec.file_name.to_string(), format!("{}.bak", spec.file_name)] {
+            let global_doc = home.join(spec.hidden_dir).join(&filename);
+            if global_doc.exists() {
+                if let Some(entry) = read_doc_entry(&global_doc, spec, &format!("Global ({})", spec.hidden_dir), "global") {
+                    results.push(entry);
+                }
             }
         }
     }
 
-    // Scan common project directories
-    let scan_dirs = vec![
-        home.clone(),
-        home.join("Documents"),
-        home.join("Projects"),
-        home.join("repos"),
-        home.join("code"),
-        home.join("dev"),
-        home.join("Desktop"),
-        home.join("workspace"),
-        home.join("src"),
-    ];
-
-    for dir in scan_dirs {
-        if dir.exists() && dir.is_dir() {
-            walk_for_claude_md(&dir, 0, 3, &mut results);
-        }
-    }
-
-    // Deduplicate by path
     results.sort_by(|a, b| a.path.cmp(&b.path));
     results.dedup_by(|a, b| a.path == b.path);
     results
 }
 
-fn walk_for_claude_md(dir: &Path, depth: usize, max_depth: usize, results: &mut Vec<ClaudeMdFile>) {
-    if depth > max_depth {
-        return;
-    }
-
-    // Check CLAUDE.md and CLAUDE.md.bak
-    for filename in &["CLAUDE.md", "CLAUDE.md.bak"] {
-        let claude_md_path = dir.join(filename);
-        if claude_md_path.exists() {
-            let project_name = dir
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| dir.to_string_lossy().to_string());
-            if let Some(entry) = read_claude_md_entry(&claude_md_path, &project_name) {
-                results.push(entry);
-            }
-        }
-    }
-
-    // Also check .claude/CLAUDE.md and .claude/CLAUDE.md.bak within projects
-    let claude_dir = dir.join(".claude");
-    for filename in &["CLAUDE.md", "CLAUDE.md.bak"] {
-        let nested_claude_md = claude_dir.join(filename);
-        if nested_claude_md.exists() {
-            let project_name = dir
-                .file_name()
-                .map(|n| format!("{} (.claude)", n.to_string_lossy()))
-                .unwrap_or_else(|| dir.to_string_lossy().to_string());
-            if let Some(entry) = read_claude_md_entry(&nested_claude_md, &project_name) {
-                results.push(entry);
-            }
-        }
-    }
-
-    if depth >= max_depth {
-        return;
-    }
-
-    // Skip common non-project directories
-    let skip_dirs = [
-        "node_modules", ".git", "target", "dist", "build", ".next",
-        "__pycache__", ".venv", "venv", ".tox", ".cache", ".npm",
-        "AppData", "Application Data", ".local", ".config",
-    ];
-
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                if !name.starts_with('.') || name == ".claude" {
-                    if !skip_dirs.contains(&name.as_str()) {
-                        walk_for_claude_md(&path, depth + 1, max_depth, results);
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn read_claude_md_entry(path: &Path, project_name: &str) -> Option<ClaudeMdFile> {
+fn read_doc_entry(path: &Path, spec: &DocSpec, project_name: &str, scope: &str) -> Option<ClaudeMdFile> {
     let metadata = fs::metadata(path).ok()?;
     let content = fs::read_to_string(path).ok()?;
-    let modified_at = metadata
-        .modified()
-        .ok()
-        .and_then(|t| {
-            let datetime: chrono::DateTime<chrono::Local> = t.into();
-            Some(datetime.format("%Y-%m-%d %H:%M").to_string())
-        });
+    let modified_at = metadata.modified().ok().map(|t| {
+        let datetime: chrono::DateTime<chrono::Local> = t.into();
+        datetime.format("%Y-%m-%d %H:%M").to_string()
+    });
 
     let preview = if content.len() > 200 {
-        // Find a valid UTF-8 char boundary at or before byte 200
         let end = content.floor_char_boundary(200);
         format!("{}...", &content[..end])
     } else {
         content.clone()
     };
 
-    let disabled = path.extension().map_or(false, |ext| ext == "bak");
+    let file_name = path.file_name()?.to_string_lossy().to_string();
+    let disabled = file_name.ends_with(".bak");
 
     Some(ClaudeMdFile {
         path: path.to_string_lossy().to_string(),
@@ -150,6 +104,11 @@ fn read_claude_md_entry(path: &Path, project_name: &str) -> Option<ClaudeMdFile>
         modified_at,
         content_preview: preview,
         disabled,
+        tool_id: spec.tool_id.to_string(),
+        tool_name: spec.tool_name.to_string(),
+        doc_name: spec.file_name.to_string(),
+        file_name,
+        scope: scope.to_string(),
     })
 }
 
@@ -158,7 +117,6 @@ pub fn read_claude_md(path: &str) -> Result<String, String> {
 }
 
 pub fn write_claude_md(path: &str, content: &str) -> Result<(), String> {
-    // Create parent directories if needed
     if let Some(parent) = Path::new(path).parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
@@ -166,129 +124,103 @@ pub fn write_claude_md(path: &str, content: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write {}: {}", path, e))
 }
 
-pub fn create_claude_md(dir_path: &str, content: &str) -> Result<String, String> {
-    let path = PathBuf::from(dir_path).join("CLAUDE.md");
+fn allowed_doc_name(file_name: &str) -> bool {
+    DOC_SPECS.iter().any(|spec| spec.file_name == file_name)
+}
+
+fn allowed_doc_or_backup(file_name: &str) -> bool {
+    allowed_doc_name(file_name)
+        || DOC_SPECS
+            .iter()
+            .any(|spec| format!("{}.bak", spec.file_name) == file_name)
+}
+
+pub fn create_instruction_doc(dir_path: &str, file_name: &str, content: &str) -> Result<String, String> {
+    if !allowed_doc_name(file_name) {
+        return Err(format!("Unsupported instruction document: {}", file_name));
+    }
+    let path = PathBuf::from(dir_path).join(file_name);
     if path.exists() {
-        return Err("CLAUDE.md already exists in this directory".to_string());
+        return Err(format!("{} already exists in this directory", file_name));
     }
     write_claude_md(&path.to_string_lossy(), content)?;
     Ok(path.to_string_lossy().to_string())
 }
 
+pub fn create_claude_md(dir_path: &str, content: &str) -> Result<String, String> {
+    create_instruction_doc(dir_path, "CLAUDE.md", content)
+}
+
+fn template_content(file_name: &str, stack_name: &str, commands: &str, style_notes: &str) -> String {
+    format!(
+        "# {file_name}\n\n## Project Overview\nThis is a {stack_name} project.\n\n## Development Commands\n```bash\n{commands}\n```\n\n## Code Style\n{style_notes}\n\n## Architecture\n<!-- Describe the project structure -->\n"
+    )
+}
+
 pub fn get_claude_md_templates() -> Vec<ClaudeMdTemplate> {
-    vec![
-        ClaudeMdTemplate {
-            id: "generic".to_string(),
-            name: "Generic Project".to_string(),
-            description: "A general-purpose CLAUDE.md template".to_string(),
-            content: r#"# CLAUDE.md
+    let mut templates = Vec::new();
+    for spec in DOC_SPECS {
+        templates.push(ClaudeMdTemplate {
+            id: format!("{}-generic", spec.tool_id),
+            name: format!("{} Generic", spec.tool_name),
+            description: format!("General {} instruction document", spec.file_name),
+            content: template_content(
+                spec.file_name,
+                "general",
+                "# Install dependencies\n# Start dev server\n# Run tests\n# Build for production",
+                "- Describe coding conventions\n- Note important repository rules\n- Add any agent-specific guidance",
+            ),
+            tool_id: spec.tool_id.to_string(),
+            tool_name: spec.tool_name.to_string(),
+            file_name: spec.file_name.to_string(),
+        });
 
-## Project Overview
-<!-- Describe what this project does -->
+        templates.push(ClaudeMdTemplate {
+            id: format!("{}-typescript", spec.tool_id),
+            name: format!("{} TypeScript", spec.tool_name),
+            description: format!("TypeScript/Node.js template for {}", spec.file_name),
+            content: template_content(
+                spec.file_name,
+                "TypeScript/Node.js",
+                "npm install          # Install dependencies\nnpm run dev          # Start dev server\nnpm run build        # Build for production\nnpm test             # Run tests\nnpm run lint         # Lint code",
+                "- Use TypeScript strict mode\n- Prefer const over let\n- Use async/await over raw promises\n- Follow ESLint and formatter rules",
+            ),
+            tool_id: spec.tool_id.to_string(),
+            tool_name: spec.tool_name.to_string(),
+            file_name: spec.file_name.to_string(),
+        });
 
-## Tech Stack
-<!-- List the main technologies used -->
+        templates.push(ClaudeMdTemplate {
+            id: format!("{}-rust", spec.tool_id),
+            name: format!("{} Rust", spec.tool_name),
+            description: format!("Rust/Cargo template for {}", spec.file_name),
+            content: template_content(
+                spec.file_name,
+                "Rust/Cargo",
+                "cargo build          # Build the project\ncargo test           # Run tests\ncargo run            # Run the project\ncargo clippy         # Lint\ncargo fmt            # Format code",
+                "- Follow Rust idioms and conventions\n- Use Result<T, E> for error handling\n- Prefer explicit module boundaries\n- Write doc comments for public APIs",
+            ),
+            tool_id: spec.tool_id.to_string(),
+            tool_name: spec.tool_name.to_string(),
+            file_name: spec.file_name.to_string(),
+        });
 
-## Development Commands
-```bash
-# Install dependencies
-# Run dev server
-# Run tests
-# Build for production
-```
-
-## Code Style
-<!-- Describe coding conventions -->
-
-## Important Notes
-<!-- Any special instructions for Claude -->
-"#.to_string(),
-        },
-        ClaudeMdTemplate {
-            id: "rust".to_string(),
-            name: "Rust Project".to_string(),
-            description: "Template for Rust/Cargo projects".to_string(),
-            content: r#"# CLAUDE.md
-
-## Project Overview
-This is a Rust project managed with Cargo.
-
-## Development Commands
-```bash
-cargo build          # Build the project
-cargo test           # Run tests
-cargo run            # Run the project
-cargo clippy         # Lint
-cargo fmt            # Format code
-```
-
-## Code Style
-- Follow Rust idioms and conventions
-- Use `Result<T, E>` for error handling
-- Prefer `impl Trait` over `dyn Trait` when possible
-- Write doc comments for public APIs
-
-## Architecture
-<!-- Describe the module structure -->
-"#.to_string(),
-        },
-        ClaudeMdTemplate {
-            id: "typescript".to_string(),
-            name: "TypeScript Project".to_string(),
-            description: "Template for TypeScript/Node.js projects".to_string(),
-            content: r#"# CLAUDE.md
-
-## Project Overview
-This is a TypeScript project.
-
-## Development Commands
-```bash
-npm install          # Install dependencies
-npm run dev          # Start dev server
-npm run build        # Build for production
-npm test             # Run tests
-npm run lint         # Lint code
-```
-
-## Code Style
-- Use TypeScript strict mode
-- Prefer `const` over `let`
-- Use async/await over raw promises
-- Follow ESLint configuration
-
-## Architecture
-<!-- Describe the project structure -->
-"#.to_string(),
-        },
-        ClaudeMdTemplate {
-            id: "python".to_string(),
-            name: "Python Project".to_string(),
-            description: "Template for Python projects".to_string(),
-            content: r#"# CLAUDE.md
-
-## Project Overview
-This is a Python project.
-
-## Development Commands
-```bash
-pip install -e .     # Install in dev mode
-pytest               # Run tests
-python -m mypy .     # Type check
-ruff check .         # Lint
-ruff format .        # Format
-```
-
-## Code Style
-- Follow PEP 8
-- Use type hints
-- Prefer dataclasses for data structures
-- Use virtual environments
-
-## Architecture
-<!-- Describe the package structure -->
-"#.to_string(),
-        },
-    ]
+        templates.push(ClaudeMdTemplate {
+            id: format!("{}-python", spec.tool_id),
+            name: format!("{} Python", spec.tool_name),
+            description: format!("Python template for {}", spec.file_name),
+            content: template_content(
+                spec.file_name,
+                "Python",
+                "pip install -e .     # Install in dev mode\npytest               # Run tests\npython -m mypy .     # Type check\nruff check .         # Lint\nruff format .        # Format",
+                "- Follow PEP 8\n- Use type hints\n- Prefer dataclasses for data structures\n- Use virtual environments",
+            ),
+            tool_id: spec.tool_id.to_string(),
+            tool_name: spec.tool_name.to_string(),
+            file_name: spec.file_name.to_string(),
+        });
+    }
+    templates
 }
 
 pub fn delete_claude_md(path: &str) -> Result<(), String> {
@@ -296,10 +228,12 @@ pub fn delete_claude_md(path: &str) -> Result<(), String> {
     if !p.exists() {
         return Err(format!("File not found: {}", path));
     }
-    // Only allow deleting CLAUDE.md or CLAUDE.md.bak files
-    let filename = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    if filename != "CLAUDE.md" && filename != "CLAUDE.md.bak" {
-        return Err("Can only delete CLAUDE.md or CLAUDE.md.bak files".to_string());
+    let filename = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !allowed_doc_or_backup(&filename) {
+        return Err("Can only delete supported instruction documents".to_string());
     }
     fs::remove_file(p).map_err(|e| format!("Failed to delete {}: {}", path, e))
 }
@@ -309,8 +243,12 @@ pub fn disable_claude_md(path: &str) -> Result<String, String> {
     if !p.exists() {
         return Err(format!("File not found: {}", path));
     }
-    if path.ends_with(".bak") {
-        return Err("File is already disabled".to_string());
+    let filename = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !allowed_doc_name(&filename) {
+        return Err("Unsupported instruction document".to_string());
     }
     let new_path = format!("{}.bak", path);
     fs::rename(p, &new_path).map_err(|e| format!("Failed to disable: {}", e))?;
@@ -322,8 +260,12 @@ pub fn enable_claude_md(path: &str) -> Result<String, String> {
     if !p.exists() {
         return Err(format!("File not found: {}", path));
     }
-    if !path.ends_with(".bak") {
-        return Err("File is not disabled".to_string());
+    let filename = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !allowed_doc_or_backup(&filename) || !path.ends_with(".bak") {
+        return Err("File is not a disabled instruction document".to_string());
     }
     let new_path = path.trim_end_matches(".bak").to_string();
     if Path::new(&new_path).exists() {

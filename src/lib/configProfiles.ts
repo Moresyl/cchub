@@ -1,6 +1,7 @@
-export type StructuredConfigTool = "claude" | "codex" | "gemini";
+export type StructuredConfigTool = "claude" | "codex" | "gemini" | "openclaw" | "opencode";
 export type ClaudeAuthField = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 export type ApiFormat = "anthropic" | "openai_chat" | "openai_responses";
+export type OpenClawApiProtocol = "openai-completions" | "anthropic-messages" | "google-generative-ai";
 
 export interface ConfigPreset {
   id: string;
@@ -10,6 +11,8 @@ export interface ConfigPreset {
   model: string;
   authField?: ClaudeAuthField;
   category?: string;
+  apiProtocol?: OpenClawApiProtocol;
+  npm?: string;
 }
 
 export interface StructuredDraftFields {
@@ -23,6 +26,9 @@ export interface StructuredDraftFields {
   opusModel: string;
   authField: ClaudeAuthField;
   apiFormat: ApiFormat;
+  apiProtocol: OpenClawApiProtocol;
+  modelName: string;
+  npm: string;
 }
 
 const PRESETS: Record<StructuredConfigTool, ConfigPreset[]> = {
@@ -54,6 +60,90 @@ const PRESETS: Record<StructuredConfigTool, ConfigPreset[]> = {
       model: "gemini-2.5-pro",
     },
   ],
+  openclaw: [
+    {
+      id: "openclaw-deepseek",
+      toolId: "openclaw",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com/v1",
+      model: "deepseek-chat",
+      apiProtocol: "openai-completions",
+    },
+    {
+      id: "openclaw-siliconflow",
+      toolId: "openclaw",
+      name: "SiliconFlow",
+      baseUrl: "https://api.siliconflow.cn/v1",
+      model: "",
+      apiProtocol: "openai-completions",
+    },
+    {
+      id: "openclaw-openrouter",
+      toolId: "openclaw",
+      name: "OpenRouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "",
+      apiProtocol: "openai-completions",
+    },
+    {
+      id: "openclaw-aihubmix",
+      toolId: "openclaw",
+      name: "AiHubMix",
+      baseUrl: "https://aihubmix.com",
+      model: "",
+      apiProtocol: "anthropic-messages",
+    },
+    {
+      id: "openclaw-custom",
+      toolId: "openclaw",
+      name: "自定义",
+      baseUrl: "",
+      model: "",
+      apiProtocol: "openai-completions",
+    },
+  ],
+  opencode: [
+    {
+      id: "opencode-deepseek",
+      toolId: "opencode",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com/v1",
+      model: "deepseek-chat",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    {
+      id: "opencode-siliconflow",
+      toolId: "opencode",
+      name: "SiliconFlow",
+      baseUrl: "https://api.siliconflow.cn/v1",
+      model: "",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    {
+      id: "opencode-openrouter",
+      toolId: "opencode",
+      name: "OpenRouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    {
+      id: "opencode-aihubmix",
+      toolId: "opencode",
+      name: "AiHubMix",
+      baseUrl: "https://aihubmix.com",
+      model: "",
+      npm: "@ai-sdk/anthropic",
+    },
+    {
+      id: "opencode-custom",
+      toolId: "opencode",
+      name: "自定义",
+      baseUrl: "",
+      model: "",
+      npm: "@ai-sdk/openai-compatible",
+    },
+  ],
 };
 
 function findTomlValue(content: string, key: string) {
@@ -62,7 +152,7 @@ function findTomlValue(content: string, key: string) {
 }
 
 export function supportsStructuredConfig(toolId: string): toolId is StructuredConfigTool {
-  return toolId === "claude" || toolId === "codex" || toolId === "gemini";
+  return toolId === "claude" || toolId === "codex" || toolId === "gemini" || toolId === "openclaw" || toolId === "opencode";
 }
 
 export function getConfigPresets(toolId: string): ConfigPreset[] {
@@ -90,6 +180,9 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
     opusModel: model,
     authField: preset?.authField || "ANTHROPIC_AUTH_TOKEN",
     apiFormat: "anthropic",
+    apiProtocol: preset?.apiProtocol || "openai-completions",
+    modelName: "",
+    npm: preset?.npm || "@ai-sdk/openai-compatible",
   };
 }
 
@@ -111,6 +204,9 @@ export function applyPresetToFields(
       opusModel: current?.opusModel || "",
       authField: current?.authField || "ANTHROPIC_AUTH_TOKEN",
       apiFormat: current?.apiFormat || "anthropic",
+      apiProtocol: current?.apiProtocol || "openai-completions",
+      modelName: current?.modelName || "",
+      npm: current?.npm || "@ai-sdk/openai-compatible",
     };
   }
 
@@ -125,6 +221,9 @@ export function applyPresetToFields(
     opusModel: preset.model,
     authField: preset.authField || current?.authField || "ANTHROPIC_AUTH_TOKEN",
     apiFormat: current?.apiFormat || "anthropic",
+    apiProtocol: preset.apiProtocol || current?.apiProtocol || "openai-completions",
+    modelName: current?.modelName || "",
+    npm: preset.npm || current?.npm || "@ai-sdk/openai-compatible",
   };
 }
 
@@ -185,6 +284,48 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     );
   }
 
+  if (toolId === "openclaw") {
+    const models: { id: string; name: string }[] = [];
+    if (fields.model.trim()) {
+      models.push({
+        id: fields.model.trim(),
+        name: fields.modelName.trim() || fields.model.trim(),
+      });
+    }
+    return JSON.stringify(
+      {
+        baseUrl: fields.baseUrl.trim(),
+        apiKey: fields.apiKey.trim(),
+        api: fields.apiProtocol || "openai-completions",
+        models,
+      },
+      null,
+      2,
+    );
+  }
+
+  if (toolId === "opencode") {
+    const models: Record<string, { name: string }> = {};
+    if (fields.model.trim()) {
+      models[fields.model.trim()] = {
+        name: fields.modelName.trim() || fields.model.trim(),
+      };
+    }
+    return JSON.stringify(
+      {
+        npm: fields.npm.trim() || "@ai-sdk/openai-compatible",
+        name: "custom",
+        options: {
+          baseURL: fields.baseUrl.trim(),
+          apiKey: fields.apiKey.trim(),
+        },
+        models,
+      },
+      null,
+      2,
+    );
+  }
+
   return JSON.stringify(
     {
       env: {
@@ -231,6 +372,38 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         apiKey: auth.OPENAI_API_KEY || "",
         baseUrl: findTomlValue(config, "base_url") || defaults.baseUrl,
         model: findTomlValue(config, "model") || defaults.model,
+      };
+    }
+
+    if (toolId === "openclaw") {
+      const baseUrl = (parsed.baseUrl as string) || "";
+      const apiKey = (parsed.apiKey as string) || "";
+      const api = (parsed.api as OpenClawApiProtocol) || "openai-completions";
+      const models = Array.isArray(parsed.models) ? parsed.models : [];
+      const firstModel = models[0] as { id?: string; name?: string } | undefined;
+      return {
+        ...defaults,
+        baseUrl,
+        apiKey,
+        model: firstModel?.id || "",
+        modelName: firstModel?.name || "",
+        apiProtocol: api,
+      };
+    }
+
+    if (toolId === "opencode") {
+      const npm = (parsed.npm as string) || "@ai-sdk/openai-compatible";
+      const options = (parsed.options || {}) as Record<string, string>;
+      const modelsObj = (parsed.models || {}) as Record<string, { name?: string }>;
+      const modelEntries = Object.entries(modelsObj);
+      const firstEntry = modelEntries[0];
+      return {
+        ...defaults,
+        npm,
+        baseUrl: options.baseURL || "",
+        apiKey: options.apiKey || "",
+        model: firstEntry?.[0] || "",
+        modelName: firstEntry?.[1]?.name || "",
       };
     }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, FileText, Save, RotateCcw, Plus, X, Check, Trash2, Ban, Power } from "lucide-react";
+import { RefreshCw, FileText, Save, RotateCcw, Plus, X, Check, Trash2, Pencil } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import CodeEditor from "../components/CodeEditor";
@@ -26,7 +26,7 @@ interface ClaudeMdTemplate {
 export default function ClaudeMd() {
   const [files, setFiles] = useState<ClaudeMdFile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<ClaudeMdFile | null>(null);
+  const [editingFile, setEditingFile] = useState<ClaudeMdFile | null>(null);
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [loadingContent, setLoadingContent] = useState(false);
@@ -36,6 +36,7 @@ export default function ClaudeMd() {
   const [showCreate, setShowCreate] = useState(false);
   const [newDirPath, setNewDirPath] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<ClaudeMdFile | null>(null);
+  const [togglingPath, setTogglingPath] = useState<string | null>(null);
   const i = t();
 
   useEffect(() => { load(); }, []);
@@ -53,10 +54,9 @@ export default function ClaudeMd() {
     finally { setLoading(false); }
   }
 
-  async function selectFile(file: ClaudeMdFile) {
-    setSelected(file);
+  async function openEditor(file: ClaudeMdFile) {
+    setEditingFile(file);
     setLoadingContent(true);
-    setShowCreate(false);
     try {
       const c = await invoke<string>("read_claude_md_content", { path: file.path });
       setContent(c);
@@ -69,11 +69,17 @@ export default function ClaudeMd() {
     finally { setLoadingContent(false); }
   }
 
+  function closeEditor() {
+    setEditingFile(null);
+    setContent("");
+    setOriginalContent("");
+  }
+
   async function handleSave() {
-    if (!selected) return;
+    if (!editingFile) return;
     setSaving(true);
     try {
-      await invoke("write_claude_md_content", { path: selected.path, content });
+      await invoke("write_claude_md_content", { path: editingFile.path, content });
       setOriginalContent(content);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -103,7 +109,7 @@ export default function ClaudeMd() {
         content_preview: template.content.slice(0, 200),
         disabled: false,
       };
-      selectFile(newFile);
+      openEditor(newFile);
     } catch (e: any) {
       showToast("error", e?.toString() || "Failed to create file");
     }
@@ -113,10 +119,8 @@ export default function ClaudeMd() {
     try {
       await invoke("delete_claude_md_file", { path: file.path });
       showToast("success", i.claudeMd.deleteSuccess);
-      if (selected?.path === file.path) {
-        setSelected(null);
-        setContent("");
-        setOriginalContent("");
+      if (editingFile?.path === file.path) {
+        closeEditor();
       }
       setConfirmDelete(null);
       await load();
@@ -125,30 +129,21 @@ export default function ClaudeMd() {
     }
   }
 
-  async function handleDisable(file: ClaudeMdFile) {
+  async function handleToggle(file: ClaudeMdFile) {
+    setTogglingPath(file.path);
     try {
-      const newPath = await invoke<string>("disable_claude_md_file", { path: file.path });
-      showToast("success", i.claudeMd.disableSuccess);
-      if (selected?.path === file.path) {
-        setSelected({ ...file, path: newPath, disabled: true });
+      if (file.disabled) {
+        await invoke<string>("enable_claude_md_file", { path: file.path });
+        showToast("success", i.claudeMd.enableSuccess);
+      } else {
+        await invoke<string>("disable_claude_md_file", { path: file.path });
+        showToast("success", i.claudeMd.disableSuccess);
       }
       await load();
     } catch (e: any) {
-      showToast("error", e?.toString() || "Failed to disable");
+      showToast("error", e?.toString() || "Failed to toggle");
     }
-  }
-
-  async function handleEnable(file: ClaudeMdFile) {
-    try {
-      const newPath = await invoke<string>("enable_claude_md_file", { path: file.path });
-      showToast("success", i.claudeMd.enableSuccess);
-      if (selected?.path === file.path) {
-        setSelected({ ...file, path: newPath, disabled: false });
-      }
-      await load();
-    } catch (e: any) {
-      showToast("error", e?.toString() || "Failed to enable");
-    }
+    finally { setTogglingPath(null); }
   }
 
   function formatSize(bytes: number): string {
@@ -182,7 +177,7 @@ export default function ClaudeMd() {
           <p className="page-subtitle">{i.claudeMd.subtitle.replace("{count}", String(files.length))}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => { setShowCreate(true); setSelected(null); }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowCreate(true)}>
             <Plus size={14} />{i.claudeMd.newFile}
           </button>
           <button className="btn btn-secondary btn-sm" onClick={load}>
@@ -201,15 +196,48 @@ export default function ClaudeMd() {
           </button>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 24, flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {/* New File Panel */}
+          {showCreate && (
+            <div className="section-card" style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700 }}>{i.claudeMd.newFile}</h3>
+                <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowCreate(false)}><X size={16} /></button>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <span className="field-label">{i.claudeMd.createIn}</span>
+                <input
+                  className="input"
+                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
+                  placeholder={locale === "zh" ? "输入项目目录路径" : "Enter project directory path"}
+                  value={newDirPath}
+                  onChange={(e) => setNewDirPath(e.target.value)}
+                />
+              </div>
+              <span className="field-label">{i.claudeMd.selectTemplate}</span>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+                {templates.map((tmpl) => (
+                  <div
+                    key={tmpl.id}
+                    className="card card-interactive"
+                    style={{ padding: "14px 18px" }}
+                    onClick={() => handleCreate(tmpl)}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tmpl.name}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{tmpl.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* File List */}
-          <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
             {files.map((file) => (
               <div
                 key={file.path}
-                className={`card card-interactive ${selected?.path === file.path ? "selected" : ""}`}
-                style={{ padding: "16px 20px", opacity: file.disabled ? 0.6 : 1 }}
-                onClick={() => selectFile(file)}
+                className="card"
+                style={{ padding: "16px 20px", opacity: file.disabled ? 0.55 : 1, transition: "opacity 0.2s" }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div className="icon-box" style={{ background: "var(--bg-elevated)", width: 36, height: 36, borderRadius: 6 }}>
@@ -225,29 +253,56 @@ export default function ClaudeMd() {
                           {i.claudeMd.disabled}
                         </span>
                       )}
+                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatSize(file.size_bytes)}</span>
+                      {file.modified_at && (
+                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{file.modified_at}</span>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {file.path}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                    {file.disabled ? (
-                      <button
-                        className="btn btn-ghost btn-icon-sm"
-                        title={i.claudeMd.enable}
-                        onClick={() => handleEnable(file)}
-                      >
-                        <Power size={14} style={{ color: "var(--success)" }} />
-                      </button>
-                    ) : (
-                      <button
-                        className="btn btn-ghost btn-icon-sm"
-                        title={i.claudeMd.disable}
-                        onClick={() => handleDisable(file)}
-                      >
-                        <Ban size={14} />
-                      </button>
-                    )}
+
+                  {/* Actions */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => openEditor(file)}
+                    >
+                      <Pencil size={13} />{i.common.edit}
+                    </button>
+
+                    {/* Switch toggle */}
+                    <button
+                      onClick={() => handleToggle(file)}
+                      disabled={togglingPath === file.path}
+                      title={file.disabled ? i.claudeMd.enable : i.claudeMd.disable}
+                      style={{
+                        position: "relative",
+                        width: 40,
+                        height: 22,
+                        borderRadius: 11,
+                        border: "none",
+                        cursor: togglingPath === file.path ? "wait" : "pointer",
+                        background: file.disabled ? "var(--border-strong)" : "var(--success)",
+                        transition: "background 0.2s",
+                        padding: 0,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{
+                        position: "absolute",
+                        top: 2,
+                        left: file.disabled ? 2 : 20,
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        transition: "left 0.2s",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                      }} />
+                    </button>
+
                     <button
                       className="btn btn-ghost btn-icon-sm"
                       title={i.claudeMd.delete}
@@ -257,139 +312,108 @@ export default function ClaudeMd() {
                     </button>
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatSize(file.size_bytes)}</span>
-                  {file.modified_at && (
-                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{file.modified_at}</span>
-                  )}
-                </div>
               </div>
             ))}
           </div>
+        </div>
+      )}
 
-          {/* Editor Panel */}
-          <div style={{ overflowY: "auto" }}>
-            {showCreate ? (
-              <div className="section-card" style={{ position: "sticky", top: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 700 }}>{i.claudeMd.newFile}</h3>
-                  <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowCreate(false)}><X size={16} /></button>
-                </div>
-
-                <div style={{ marginBottom: 16 }}>
-                  <span className="field-label">{i.claudeMd.createIn}</span>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      className="input"
-                      style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
-                      placeholder={locale === "zh" ? "输入项目目录路径" : "Enter project directory path"}
-                      value={newDirPath}
-                      onChange={(e) => setNewDirPath(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <span className="field-label">{i.claudeMd.selectTemplate}</span>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {templates.map((tmpl) => (
-                    <div
-                      key={tmpl.id}
-                      className="card card-interactive"
-                      style={{ padding: "14px 18px" }}
-                      onClick={() => handleCreate(tmpl)}
-                    >
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{tmpl.name}</div>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{tmpl.description}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : selected ? (
-              <div className="section-card" style={{ position: "sticky", top: 0 }}>
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <FileText size={18} style={{ color: "var(--text-secondary)" }} />
-                    <h3 style={{ fontSize: 16, fontWeight: 700 }}>{selected.project_name}</h3>
-                    {selected.disabled && (
-                      <span className="badge badge-muted" style={{ fontSize: 10 }}>{i.claudeMd.disabled}</span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {hasChanges && (
-                      <button className="btn btn-secondary btn-sm" onClick={handleRevert}>
-                        <RotateCcw size={14} />{i.claudeMd.revert}
-                      </button>
-                    )}
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={handleSave}
-                      disabled={!hasChanges || saving}
-                    >
-                      {saved ? <Check size={14} /> : <Save size={14} />}
-                      {saved ? (i.claudeMd.saved) : i.common.save}
-                    </button>
-                    <button className="btn btn-ghost btn-icon-sm" onClick={() => setSelected(null)}>
-                      <X size={16} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* File info */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                  <span className="badge badge-accent">{formatSize(selected.size_bytes)}</span>
-                  {selected.modified_at && (
-                    <span className="badge badge-muted">{selected.modified_at}</span>
-                  )}
-                  {hasChanges && (
-                    <span className="badge badge-warning">{locale === "zh" ? "未保存" : "Unsaved"}</span>
-                  )}
-                </div>
-
-                {/* Path */}
-                <div style={{ marginBottom: 16 }}>
-                  <span className="field-label">{locale === "zh" ? "文件路径" : "File Path"}</span>
-                  <div className="code-block" style={{ fontSize: 11 }}>{selected.path}</div>
-                </div>
-
-                {/* Editor */}
-                {loadingContent ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 40, justifyContent: "center" }}>
-                    <div className="spinner" style={{ width: 18, height: 18 }} />
-                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading...</span>
-                  </div>
-                ) : (
-                  <div>
-                    <span className="field-label">{i.claudeMd.content}</span>
-                    {isMarkdownFile(selected.path) ? (
-                      <Suspense fallback={
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 40, justifyContent: "center" }}>
-                          <div className="spinner" style={{ width: 18, height: 18 }} />
-                        </div>
-                      }>
-                        <MarkdownEditor
-                          value={content}
-                          onChange={setContent}
-                          minHeight={400}
-                        />
-                      </Suspense>
-                    ) : (
-                      <CodeEditor
-                        value={content}
-                        onChange={setContent}
-                        language="json"
-                        minHeight={400}
-                        maxHeight={600}
-                      />
-                    )}
-                  </div>
+      {/* Editor Modal */}
+      {editingFile && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "var(--bg-overlay)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          }}
+          onClick={closeEditor}
+        >
+          <div
+            className="card"
+            style={{
+              width: "90%", maxWidth: 960, height: "85vh",
+              display: "flex", flexDirection: "column",
+              padding: 0, overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "16px 24px",
+              borderBottom: "1px solid var(--border-default)",
+              flexShrink: 0,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+                <FileText size={18} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+                <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {editingFile.project_name}
+                </h3>
+                {editingFile.disabled && (
+                  <span className="badge badge-muted" style={{ fontSize: 10 }}>{i.claudeMd.disabled}</span>
+                )}
+                <span className="badge badge-accent" style={{ flexShrink: 0 }}>{formatSize(editingFile.size_bytes)}</span>
+                {hasChanges && (
+                  <span className="badge badge-warning" style={{ flexShrink: 0 }}>{locale === "zh" ? "未保存" : "Unsaved"}</span>
                 )}
               </div>
-            ) : (
-              <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220 }}>
-                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.claudeMd.selectFile}</p>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                {hasChanges && (
+                  <button className="btn btn-secondary btn-sm" onClick={handleRevert}>
+                    <RotateCcw size={14} />{i.claudeMd.revert}
+                  </button>
+                )}
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleSave}
+                  disabled={!hasChanges || saving}
+                >
+                  {saved ? <Check size={14} /> : <Save size={14} />}
+                  {saved ? i.claudeMd.saved : i.common.save}
+                </button>
+                <button className="btn btn-ghost btn-icon-sm" onClick={closeEditor}>
+                  <X size={16} />
+                </button>
               </div>
-            )}
+            </div>
+
+            {/* File Path */}
+            <div style={{ padding: "8px 24px", borderBottom: "1px solid var(--border-subtle)", flexShrink: 0 }}>
+              <div className="code-block" style={{ fontSize: 11, margin: 0 }}>{editingFile.path}</div>
+            </div>
+
+            {/* Editor Body */}
+            <div style={{ flex: 1, overflow: "auto", padding: "0 24px 24px" }}>
+              {loadingContent ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 40, justifyContent: "center" }}>
+                  <div className="spinner" style={{ width: 18, height: 18 }} />
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Loading...</span>
+                </div>
+              ) : (
+                <div style={{ paddingTop: 16 }}>
+                  {isMarkdownFile(editingFile.path) ? (
+                    <Suspense fallback={
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 40, justifyContent: "center" }}>
+                        <div className="spinner" style={{ width: 18, height: 18 }} />
+                      </div>
+                    }>
+                      <MarkdownEditor
+                        value={content}
+                        onChange={setContent}
+                        minHeight={400}
+                      />
+                    </Suspense>
+                  ) : (
+                    <CodeEditor
+                      value={content}
+                      onChange={setContent}
+                      language="json"
+                      minHeight={400}
+                      maxHeight={600}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -399,7 +423,7 @@ export default function ClaudeMd() {
         <div
           style={{
             position: "fixed", inset: 0, background: "var(--bg-overlay)",
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100,
           }}
           onClick={() => setConfirmDelete(null)}
         >

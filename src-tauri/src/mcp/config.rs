@@ -98,12 +98,7 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
         }
     }
 
-    // 8. Scan OpenClaw config.json
-    if let Some(openclaw_config) = get_openclaw_config_path() {
-        if openclaw_config.exists() {
-            scan_wrapped_mcp_json(&openclaw_config, "openclaw", &mut servers);
-        }
-    }
+    // 8. OpenClaw - MCP sync not yet supported, skip scanning
 
     // Deduplicate by name (keep first found)
     let mut seen = std::collections::HashSet::new();
@@ -322,10 +317,6 @@ fn get_opencode_config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".opencode").join("opencode.json"))
 }
 
-fn get_openclaw_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".openclaw").join("config.json"))
-}
-
 // ── Codex TOML scanning ──
 
 fn scan_codex_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
@@ -443,12 +434,6 @@ pub fn write_mcp_to_opencode(name: &str, config: &McpServerConfig) -> Result<(),
     write_mcp_server_to_config(name, config, &path.to_string_lossy())
 }
 
-/// Write MCP server config to OpenClaw config.json
-pub fn write_mcp_to_openclaw(name: &str, config: &McpServerConfig) -> Result<(), String> {
-    let path = get_openclaw_config_path().ok_or("Cannot find OpenClaw config path")?;
-    write_mcp_server_to_config(name, config, &path.to_string_lossy())
-}
-
 /// Sync MCP server config to a target tool by tool ID
 pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> Result<(), String> {
     match tool_id {
@@ -456,7 +441,7 @@ pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> 
         "codex" => write_mcp_to_codex(name, config),
         "gemini" => write_mcp_to_gemini(name, config),
         "opencode" => write_mcp_to_opencode(name, config),
-        "openclaw" => write_mcp_to_openclaw(name, config),
+        "openclaw" => Err("OpenClaw MCP sync is not yet supported".to_string()),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -499,15 +484,6 @@ pub fn remove_mcp_from_opencode(name: &str) -> Result<(), String> {
     remove_mcp_server_from_config(name, &path.to_string_lossy())
 }
 
-/// Remove MCP server from OpenClaw config.json
-pub fn remove_mcp_from_openclaw(name: &str) -> Result<(), String> {
-    let path = match get_openclaw_config_path() {
-        Some(p) if p.exists() => p,
-        _ => return Ok(()),
-    };
-    remove_mcp_server_from_config(name, &path.to_string_lossy())
-}
-
 /// Unsync MCP server from a target tool by tool ID
 pub fn unsync_mcp_from_tool(name: &str, tool_id: &str) -> Result<(), String> {
     match tool_id {
@@ -515,7 +491,7 @@ pub fn unsync_mcp_from_tool(name: &str, tool_id: &str) -> Result<(), String> {
         "codex" => remove_mcp_from_codex(name),
         "gemini" => remove_mcp_from_gemini(name),
         "opencode" => remove_mcp_from_opencode(name),
-        "openclaw" => remove_mcp_from_openclaw(name),
+        "openclaw" => Err("OpenClaw MCP sync is not yet supported".to_string()),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -579,10 +555,7 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
             let p = home.join(".opencode").join("opencode.json");
             check_server_in_json_config(name, &p)
         }
-        "openclaw" => {
-            let p = home.join(".openclaw").join("config.json");
-            check_server_in_json_config(name, &p)
-        }
+        "openclaw" => false, // OpenClaw MCP sync not yet supported
         _ => false,
     }
 }

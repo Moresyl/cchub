@@ -68,11 +68,11 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         id: "openclaw",
         name: "OpenClaw",
         dir: ".openclaw",
-        config_file: "config.json",
-        mcp_config_file: "config.json",
+        config_file: "openclaw.json",
+        mcp_config_file: "openclaw.json",
         skills_subdir: "skills",
-        install_command: "npm install -g @anthropic-ai/openclaw",
-        install_url: "https://github.com/anthropics/openclaw",
+        install_command: "npm install -g openclaw",
+        install_url: "https://github.com/openclaw-ai/openclaw",
     },
 ];
 

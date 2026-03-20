@@ -49,7 +49,7 @@ export default function McpServers() {
   async function loadTools() {
     try {
       const dt = await invoke<DetectedTool[]>("detect_tools");
-      setInstalledTools(dt.filter((t) => t.installed));
+      setInstalledTools(dt.filter((t) => t.installed && t.id !== "openclaw"));
     } catch (e) { console.error(e); }
   }
 

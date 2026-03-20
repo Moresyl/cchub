@@ -361,7 +361,7 @@ fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
         "codex" => Ok("config.toml"),
         "gemini" => Ok("settings.json"),
         "opencode" => Ok("opencode.json"),
-        "openclaw" => Ok("config.json"),
+        "openclaw" => Ok("openclaw.json"),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -1484,7 +1484,7 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
         ("codex", home.join(".codex").join("config.toml")),
         ("gemini", home.join(".gemini").join("settings.json")),
         ("opencode", home.join(".opencode").join("opencode.json")),
-        ("openclaw", home.join(".openclaw").join("config.json")),
+        ("openclaw", home.join(".openclaw").join("openclaw.json")),
     ];
 
     for (tool_id, config_path) in &tool_configs {
@@ -1617,7 +1617,7 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
                         "codex" => home.join(".codex").join("config.toml"),
                         "gemini" => home.join(".gemini").join("settings.json"),
                         "opencode" => home.join(".opencode").join("opencode.json"),
-                        "openclaw" => home.join(".openclaw").join("config.json"),
+                        "openclaw" => home.join(".openclaw").join("openclaw.json"),
                         _ => continue,
                     };
                     if let Some(parent) = target_path.parent() {
@@ -1694,7 +1694,7 @@ fn import_legacy_json(db: &State<'_, DbState>, content: &str) -> Result<String, 
             "codex" => home.join(".codex").join("config.toml"),
             "gemini" => home.join(".gemini").join("settings.json"),
             "opencode" => home.join(".opencode").join("opencode.json"),
-            "openclaw" => home.join(".openclaw").join("config.json"),
+            "openclaw" => home.join(".openclaw").join("openclaw.json"),
             _ => continue,
         };
 

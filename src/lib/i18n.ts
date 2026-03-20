@@ -2,7 +2,6 @@ const zh = {
   app: {
     name: "CCHub",
     subtitle: "AI 编程工具管理平台",
-    version: "v1.1.1",
   },
   nav: {
     dashboard: "仪表盘",
@@ -237,7 +236,6 @@ const en: typeof zh = {
   app: {
     name: "CCHub",
     subtitle: "AI Coding Tools Manager",
-    version: "v1.1.1",
   },
   nav: {
     dashboard: "Dashboard",

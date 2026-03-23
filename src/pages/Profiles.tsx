@@ -442,6 +442,10 @@ export default function Profiles() {
 
   async function doDelete(profile: ConfigProfile) {
     try {
+      if (profile.source_type !== "manual") {
+        showToast("error", locale === "zh" ? "当前配置/同步配置不支持删除" : "Live or synced profiles cannot be deleted");
+        return;
+      }
       await invoke("delete_config_profile", { id: profile.id });
       await load();
       showToast("success", locale === "zh" ? "配置已删除" : "Configuration deleted");

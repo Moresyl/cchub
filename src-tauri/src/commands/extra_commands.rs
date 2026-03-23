@@ -920,11 +920,33 @@ pub fn update_config_profile(
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
+    let tool_id: String = conn
+        .query_row(
+            "SELECT tool_id FROM config_profiles WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Profile not found: {}", e))?;
+
     conn.execute(
         "UPDATE config_profiles SET name = ?1, config_snapshot = ?2, source_type = 'manual', source_key = NULL, updated_at = ?3 WHERE id = ?4",
         rusqlite::params![name, config_snapshot, now, id],
     )
     .map_err(|e| e.to_string())?;
+
+    let setting_key = current_profile_setting_key(&tool_id);
+    let active_profile_id: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![setting_key],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if active_profile_id.as_deref() == Some(id.as_str()) {
+        apply_tool_snapshot(&conn, &tool_id, &config_snapshot)?;
+    }
+
     Ok(())
 }
 
@@ -960,30 +982,34 @@ pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), St
 #[tauri::command]
 pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let tool_id: Option<String> = conn
+    let (tool_id, source_type): (String, Option<String>) = conn
         .query_row(
-            "SELECT tool_id FROM config_profiles WHERE id = ?1",
-            rusqlite::params![id],
+            "SELECT tool_id, source_type FROM config_profiles WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("Profile not found: {}", e))?;
+
+    if source_type.as_deref() != Some("manual") {
+        return Err("Only manual profiles can be deleted".to_string());
+    }
+
+    conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![&id])
+        .map_err(|e| e.to_string())?;
+
+    let setting_key = current_profile_setting_key(&tool_id);
+    let stored_id: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![&setting_key],
             |row| row.get(0),
         )
         .ok();
-    conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
-        .map_err(|e| e.to_string())?;
-
-    if let Some(tool_id) = tool_id {
-        let setting_key = current_profile_setting_key(&tool_id);
-        let stored_id: Option<String> = conn
-            .query_row(
-                "SELECT value FROM app_settings WHERE key = ?1",
-                rusqlite::params![setting_key],
-                |row| row.get(0),
-            )
-            .ok();
-        if stored_id.as_deref() == Some(&id) {
-            conn.execute("DELETE FROM app_settings WHERE key = ?1", rusqlite::params![setting_key])
-                .map_err(|e| e.to_string())?;
-        }
+    if stored_id.as_deref() == Some(id.as_str()) {
+        conn.execute("DELETE FROM app_settings WHERE key = ?1", rusqlite::params![setting_key])
+            .map_err(|e| e.to_string())?;
     }
+
     Ok(())
 }
 

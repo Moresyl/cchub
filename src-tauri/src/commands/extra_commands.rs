@@ -1397,6 +1397,242 @@ pub fn set_claude_tool_search(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+// ── StatusLine (claude-hud) ──
+
+/// Check if claude-hud plugin is installed and return its status + config
+#[tauri::command]
+pub fn get_claude_hud_status() -> Result<serde_json::Value, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let cache_dir = home.join(".claude").join("plugins").join("cache").join("claude-hud").join("claude-hud");
+
+    // Find installed version by looking for dist/index.js
+    let mut installed = false;
+    let mut version = String::new();
+    let mut index_js_path = String::new();
+
+    if cache_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+            for entry in entries.flatten() {
+                let ver_dir = entry.path();
+                let candidate = ver_dir.join("dist").join("index.js");
+                if candidate.exists() {
+                    installed = true;
+                    version = entry.file_name().to_string_lossy().to_string();
+                    index_js_path = candidate.to_string_lossy().to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    // Check if statusLine is enabled in settings.json
+    let settings_path = home.join(".claude").join("settings.json");
+    let statusline_enabled = if settings_path.exists() {
+        let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
+        let settings: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+        settings.get("statusLine").and_then(|s| s.get("command")).and_then(|c| c.as_str()).is_some()
+    } else {
+        false
+    };
+
+    // Read claude-hud config
+    let hud_config_path = home.join(".claude").join("plugins").join("claude-hud").join("config.json");
+    let hud_config = if hud_config_path.exists() {
+        let content = std::fs::read_to_string(&hud_config_path).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    Ok(serde_json::json!({
+        "installed": installed,
+        "version": version,
+        "indexJsPath": index_js_path,
+        "statuslineEnabled": statusline_enabled,
+        "hudConfig": hud_config,
+    }))
+}
+
+/// Install claude-hud plugin by creating the necessary directory structure and downloading
+#[tauri::command]
+pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    // Create plugin directory structure
+    let version = "0.0.6";
+    let dist_dir = home.join(".claude").join("plugins").join("cache")
+        .join("claude-hud").join("claude-hud").join(version).join("dist");
+    std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
+
+    // Build HTTP client with proxy support
+    let proxy_url = get_proxy(db);
+    let client = if !proxy_url.is_empty() {
+        let proxy = reqwest::Proxy::all(&proxy_url)
+            .map_err(|e| format!("Invalid proxy: {}", e))?;
+        reqwest::Client::builder().proxy(proxy).build()
+            .map_err(|e| format!("Client build failed: {}", e))?
+    } else {
+        reqwest::Client::new()
+    };
+
+    // Try official npm registry first, fallback to China mirror
+    let registries = [
+        format!("https://registry.npmjs.org/claude-hud/-/claude-hud-{}.tgz", version),
+        format!("https://registry.npmmirror.com/claude-hud/-/claude-hud-{}.tgz", version),
+    ];
+
+    let mut bytes = None;
+    let mut last_err = String::new();
+    for url in &registries {
+        match client.get(url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.bytes().await {
+                    Ok(b) => { bytes = Some(b); break; }
+                    Err(e) => { last_err = format!("Read failed: {}", e); }
+                }
+            }
+            Ok(resp) => { last_err = format!("HTTP {} from {}", resp.status(), url); }
+            Err(e) => { last_err = format!("Download failed: {}", e); }
+        }
+    }
+    let bytes = bytes.ok_or(format!("All registries failed: {}", last_err))?;
+
+    // Extract tgz: decompress gzip then untar
+    let gz = flate2::read::GzDecoder::new(&bytes[..]);
+    let mut archive = tar::Archive::new(gz);
+    let entries = archive.entries().map_err(|e| format!("Tar read failed: {}", e))?;
+
+    for entry in entries {
+        let mut entry = entry.map_err(|e| format!("Tar entry error: {}", e))?;
+        let entry_path = entry.path().map_err(|e| format!("Path error: {}", e))?.to_path_buf();
+        let entry_str = entry_path.to_string_lossy().to_string();
+
+        // npm tarballs have files under package/dist/
+        if entry_str.starts_with("package/dist/") {
+            let relative = entry_str.strip_prefix("package/dist/").unwrap_or(&entry_str);
+            if relative.is_empty() { continue; }
+            let target = dist_dir.join(relative);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut file = std::fs::File::create(&target).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Verify index.js exists
+    let index_js = dist_dir.join("index.js");
+    if !index_js.exists() {
+        return Err("Installation failed: index.js not found after extraction".to_string());
+    }
+
+    // Create default hud config
+    let hud_config_dir = home.join(".claude").join("plugins").join("claude-hud");
+    std::fs::create_dir_all(&hud_config_dir).map_err(|e| e.to_string())?;
+    let hud_config_path = hud_config_dir.join("config.json");
+    if !hud_config_path.exists() {
+        let default_config = serde_json::json!({
+            "layout": "separators",
+            "pathLevels": 2,
+            "gitStatus": {
+                "enabled": true,
+                "showDirty": true,
+                "showAheadBehind": false,
+                "showFileStats": false
+            },
+            "display": {
+                "showModel": true,
+                "showContextBar": true,
+                "showConfigCounts": true,
+                "showDuration": true,
+                "showUsage": true,
+                "usageBarEnabled": true,
+                "showTokenBreakdown": true,
+                "showTools": true,
+                "showAgents": true,
+                "showTodos": true
+            }
+        });
+        let config_str = serde_json::to_string_pretty(&default_config).map_err(|e| e.to_string())?;
+        crate::utils::atomic_write_string(&hud_config_path, &config_str).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Enable or disable statusLine in settings.json
+#[tauri::command]
+pub fn set_claude_statusline(enabled: bool) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let path = home.join(".claude").join("settings.json");
+
+    let mut settings: serde_json::Value = if path.exists() {
+        let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).map_err(|e| e.to_string())?
+    } else {
+        serde_json::json!({})
+    };
+
+    if enabled {
+        // Find the index.js path
+        let cache_dir = home.join(".claude").join("plugins").join("cache").join("claude-hud").join("claude-hud");
+        let mut index_path = String::new();
+        if cache_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+                for entry in entries.flatten() {
+                    let candidate = entry.path().join("dist").join("index.js");
+                    if candidate.exists() {
+                        // Use ~ relative path for cross-platform compatibility
+                        let ver = entry.file_name().to_string_lossy().to_string();
+                        index_path = format!("~/.claude/plugins/cache/claude-hud/claude-hud/{}/dist/index.js", ver);
+                        break;
+                    }
+                }
+            }
+        }
+        if index_path.is_empty() {
+            return Err("claude-hud not installed".to_string());
+        }
+
+        settings["statusLine"] = serde_json::json!({
+            "type": "command",
+            "command": format!("node {}", index_path)
+        });
+
+        // Also enable the plugin
+        if settings.get("enabledPlugins").is_none() {
+            settings["enabledPlugins"] = serde_json::json!({});
+        }
+        settings["enabledPlugins"]["claude-hud@claude-hud"] = serde_json::json!(true);
+    } else {
+        if let Some(obj) = settings.as_object_mut() {
+            obj.remove("statusLine");
+        }
+        if let Some(plugins) = settings.get_mut("enabledPlugins").and_then(|p| p.as_object_mut()) {
+            plugins.remove("claude-hud@claude-hud");
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Update claude-hud config.json
+#[tauri::command]
+pub fn set_claude_hud_config(config: serde_json::Value) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let config_dir = home.join(".claude").join("plugins").join("claude-hud");
+    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    let config_path = config_dir.join("config.json");
+    let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(&config_path, &content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // Legacy JSON backup structs (for backward-compatible import)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LegacyBackupData {

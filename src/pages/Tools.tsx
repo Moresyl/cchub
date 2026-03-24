@@ -1,11 +1,49 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Terminal, Code } from "lucide-react";
+import { Terminal, Code, Download } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import type { DetectedTool } from "../types/skills";
 
 type ToolTab = "claude" | "codex";
+
+interface HudStatus {
+  installed: boolean;
+  version: string;
+  indexJsPath: string;
+  statuslineEnabled: boolean;
+  hudConfig: HudConfig;
+}
+
+interface HudConfig {
+  layout?: string;
+  pathLevels?: number;
+  gitStatus?: {
+    enabled?: boolean;
+    showDirty?: boolean;
+    showAheadBehind?: boolean;
+    showFileStats?: boolean;
+  };
+  display?: {
+    showModel?: boolean;
+    showContextBar?: boolean;
+    showConfigCounts?: boolean;
+    showDuration?: boolean;
+    showUsage?: boolean;
+    usageBarEnabled?: boolean;
+    showTokenBreakdown?: boolean;
+    showTools?: boolean;
+    showAgents?: boolean;
+    showTodos?: boolean;
+  };
+}
+
+const DEFAULT_HUD_CONFIG: HudConfig = {
+  layout: "separators",
+  pathLevels: 2,
+  gitStatus: { enabled: true, showDirty: true, showAheadBehind: false, showFileStats: false },
+  display: { showModel: true, showContextBar: true, showConfigCounts: true, showDuration: true, showUsage: true, usageBarEnabled: true, showTokenBreakdown: true, showTools: true, showAgents: true, showTodos: true },
+};
 
 const PERM_LEVELS = [
   { label_zh: "严格", label_en: "Strict", color: "#ef4444" },
@@ -28,6 +66,8 @@ export default function Tools() {
   const [codexDisableStorage, setCodexDisableStorage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tools, setTools] = useState<DetectedTool[]>([]);
+  const [hudStatus, setHudStatus] = useState<HudStatus | null>(null);
+  const [hudInstalling, setHudInstalling] = useState(false);
   const locale = getLocale();
   const zh = locale === "zh";
 
@@ -36,7 +76,7 @@ export default function Tools() {
   async function loadData() {
     setLoading(true);
     try {
-      const [level, channel, model, toolSearchEnabled, codexSettings, detectedTools] = await Promise.all([
+      const [level, channel, model, toolSearchEnabled, codexSettings, detectedTools, hud] = await Promise.all([
         invoke<number>("get_claude_permissions_level").catch(() => 0),
         invoke<string>("get_claude_auto_update").catch(() => "latest"),
         invoke<string>("get_claude_model").catch(() => ""),
@@ -45,6 +85,7 @@ export default function Tools() {
           approval_mode: "suggest", reasoning_effort: "medium", disable_response_storage: false,
         })),
         invoke<DetectedTool[]>("detect_tools").catch(() => []),
+        invoke<HudStatus>("get_claude_hud_status").catch(() => null),
       ]);
       setPermLevel(level);
       setAutoUpdate(channel);
@@ -54,6 +95,7 @@ export default function Tools() {
       setCodexReasoning(codexSettings.reasoning_effort);
       setCodexDisableStorage(codexSettings.disable_response_storage);
       setTools(detectedTools);
+      setHudStatus(hud);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }
@@ -73,11 +115,51 @@ export default function Tools() {
     } catch (e) { showToast("error", `${e}`); }
   }
 
+  async function handleInstallHud() {
+    setHudInstalling(true);
+    try {
+      await invoke("install_claude_hud");
+      const hud = await invoke<HudStatus>("get_claude_hud_status");
+      setHudStatus(hud);
+      showToast("success", zh ? "claude-hud 安装成功" : "claude-hud installed");
+    } catch (e) {
+      showToast("error", zh ? `安装失败: ${e}` : `Install failed: ${e}`);
+    } finally {
+      setHudInstalling(false);
+    }
+  }
+
+  async function toggleStatusLine(enabled: boolean) {
+    try {
+      await invoke("set_claude_statusline", { enabled });
+      const hud = await invoke<HudStatus>("get_claude_hud_status");
+      setHudStatus(hud);
+      showToast("success", zh ? "已更新" : "Updated");
+    } catch (e) { showToast("error", `${e}`); }
+  }
+
+  async function updateHudConfig(patch: Partial<HudConfig>) {
+    if (!hudStatus) return;
+    const current = hudStatus.hudConfig || DEFAULT_HUD_CONFIG;
+    const updated: HudConfig = {
+      ...current,
+      ...patch,
+      gitStatus: { ...current.gitStatus, ...patch.gitStatus },
+      display: { ...current.display, ...patch.display },
+    };
+    try {
+      await invoke("set_claude_hud_config", { config: updated });
+      setHudStatus({ ...hudStatus, hudConfig: updated });
+      showToast("success", zh ? "已更新" : "Updated");
+    } catch (e) { showToast("error", `${e}`); }
+  }
+
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{zh ? "加载中..." : "Loading..."}</span></div>;
   }
 
   const perm = PERM_LEVELS[permLevel] || PERM_LEVELS[0];
+  const hc = hudStatus?.hudConfig || DEFAULT_HUD_CONFIG;
 
   return (
     <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -218,6 +300,119 @@ export default function Tools() {
                 labelOn={zh ? "已启用" : "Enabled"}
                 labelOff={zh ? "已关闭" : "Disabled"}
               />
+            </div>
+
+            {/* StatusLine (claude-hud) */}
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: hudStatus?.installed ? 12 : 0 }}>
+                <div>
+                  <h4 style={{ fontSize: 13, fontWeight: 700 }}>StatusLine (claude-hud)</h4>
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                    {zh ? "终端底部实时状态栏" : "Real-time status bar at terminal bottom"}
+                    {hudStatus?.installed && hudStatus.version && (
+                      <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>v{hudStatus.version}</span>
+                    )}
+                  </p>
+                </div>
+                {!hudStatus?.installed ? (
+                  <button
+                    className="btn btn-primary btn-xs"
+                    onClick={() => void handleInstallHud()}
+                    disabled={hudInstalling}
+                    style={{ gap: 5 }}
+                  >
+                    {hudInstalling ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Download size={12} />}
+                    {zh ? "安装" : "Install"}
+                  </button>
+                ) : (
+                  <ToggleSwitch
+                    value={hudStatus.statuslineEnabled}
+                    onChange={v => void toggleStatusLine(v)}
+                    labelOn={zh ? "已启用" : "Enabled"}
+                    labelOff={zh ? "已关闭" : "Disabled"}
+                  />
+                )}
+              </div>
+
+              {hudStatus?.installed && (
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                  {/* Layout & Path */}
+                  <div style={{ display: "flex", gap: 16, marginBottom: 10, alignItems: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{zh ? "布局" : "Layout"}</span>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {(["default", "separators"] as const).map(layout => (
+                          <button key={layout}
+                            className={`btn btn-xs ${(hc.layout || "separators") === layout ? "btn-primary" : "btn-secondary"}`}
+                            onClick={() => void updateHudConfig({ layout })}
+                            style={{ fontSize: 11 }}
+                          >
+                            {layout === "default" ? (zh ? "紧凑" : "Compact") : (zh ? "分隔线" : "Separators")}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{zh ? "路径层级" : "Path Levels"}</span>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {[1, 2, 3].map(n => (
+                          <button key={n}
+                            className={`btn btn-xs ${(hc.pathLevels || 2) === n ? "btn-primary" : "btn-secondary"}`}
+                            onClick={() => void updateHudConfig({ pathLevels: n })}
+                            style={{ fontSize: 11, minWidth: 24 }}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Git Status */}
+                  <div style={{ marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Git Status</span>
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 6 }}>
+                      {([
+                        ["enabled", zh ? "显示分支" : "Branch", hc.gitStatus?.enabled],
+                        ["showDirty", zh ? "未提交标记" : "Dirty Mark", hc.gitStatus?.showDirty],
+                        ["showAheadBehind", zh ? "领先/落后" : "Ahead/Behind", hc.gitStatus?.showAheadBehind],
+                        ["showFileStats", zh ? "文件统计" : "File Stats", hc.gitStatus?.showFileStats],
+                      ] as [string, string, boolean | undefined][]).map(([key, label, value]) => (
+                        <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                          <input type="checkbox" checked={value !== false}
+                            onChange={e => void updateHudConfig({ gitStatus: { ...hc.gitStatus, [key]: e.target.checked } })} />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Display Options */}
+                  <div>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{zh ? "显示选项" : "Display"}</span>
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 6 }}>
+                      {([
+                        ["showModel", zh ? "模型名" : "Model", hc.display?.showModel],
+                        ["showContextBar", zh ? "上下文进度条" : "Context Bar", hc.display?.showContextBar],
+                        ["showConfigCounts", zh ? "配置计数" : "Config Counts", hc.display?.showConfigCounts],
+                        ["showDuration", zh ? "会话时长" : "Duration", hc.display?.showDuration],
+                        ["showUsage", zh ? "用量限制" : "Usage", hc.display?.showUsage],
+                        ["usageBarEnabled", zh ? "用量进度条" : "Usage Bar", hc.display?.usageBarEnabled],
+                        ["showTokenBreakdown", zh ? "Token 明细" : "Token Detail", hc.display?.showTokenBreakdown],
+                        ["showTools", zh ? "工具活动" : "Tools", hc.display?.showTools],
+                        ["showAgents", zh ? "Agent 活动" : "Agents", hc.display?.showAgents],
+                        ["showTodos", zh ? "Todo 进度" : "Todos", hc.display?.showTodos],
+                      ] as [string, string, boolean | undefined][]).map(([key, label, value]) => (
+                        <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                          <input type="checkbox" checked={value !== false}
+                            onChange={e => void updateHudConfig({ display: { ...hc.display, [key]: e.target.checked } })} />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

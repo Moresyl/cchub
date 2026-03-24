@@ -48,8 +48,6 @@ export interface ConfigPreset {
   requiresOAuth?: boolean;
   apiFormat?: ApiFormat;
   providerType?: PresetProviderType;
-  maxOutputTokens?: string;
-  disableNonEssentialTraffic?: boolean;
   codexWireApi?: CodexWireApi;
   codexReasoningEffort?: CodexReasoningEffort;
   openClawContextWindow?: string;
@@ -91,8 +89,10 @@ export interface StructuredDraftFields {
   templateValues: string;
   requiresOAuth: boolean;
   providerType: PresetProviderType | "";
-  maxOutputTokens: string;
-  disableNonEssentialTraffic: boolean;
+  hideAttribution: boolean;
+  effortHigh: boolean;
+  enableTeammates: boolean;
+  enableToolSearch: boolean;
   codexWireApi: CodexWireApi;
   codexReasoningEffort: CodexReasoningEffort;
   openClawContextWindow: string;
@@ -127,11 +127,11 @@ const PRESETS: Record<StructuredConfigTool, ConfigPreset[]> = {
     { id: "claude-kimi-coding", toolId: "claude", name: "Kimi For Coding", websiteUrl: "https://www.kimi.com/coding/docs/", category: "cn_official", badge: "国产", baseUrl: "https://api.kimi.com/coding/", model: "", authField: "ANTHROPIC_AUTH_TOKEN" },
     { id: "claude-stepfun", toolId: "claude", name: "StepFun", websiteUrl: "https://platform.stepfun.ai", apiKeyUrl: "https://platform.stepfun.ai/interface-key", category: "cn_official", badge: "国产", baseUrl: "https://api.stepfun.ai/v1", model: "step-3.5-flash", authField: "ANTHROPIC_AUTH_TOKEN", apiFormat: "openai_chat", endpointCandidates: ["https://api.stepfun.ai/v1"] },
     { id: "claude-modelscope", toolId: "claude", name: "ModelScope", websiteUrl: "https://modelscope.cn", category: "aggregator", badge: "聚合", baseUrl: "https://api-inference.modelscope.cn", model: "ZhipuAI/GLM-5", authField: "ANTHROPIC_AUTH_TOKEN" },
-    { id: "claude-minimax", toolId: "claude", name: "MiniMax", websiteUrl: "https://platform.minimaxi.com", apiKeyUrl: "https://platform.minimaxi.com/subscribe/coding-plan", category: "cn_official", badge: "国产", baseUrl: "https://api.minimaxi.com/anthropic", model: "MiniMax-M2.7", authField: "ANTHROPIC_AUTH_TOKEN", disableNonEssentialTraffic: true },
-    { id: "claude-minimax-en", toolId: "claude", name: "MiniMax en", websiteUrl: "https://platform.minimax.io", apiKeyUrl: "https://platform.minimax.io/subscribe/coding-plan", category: "cn_official", badge: "国产", baseUrl: "https://api.minimax.io/anthropic", model: "MiniMax-M2.7", authField: "ANTHROPIC_AUTH_TOKEN", disableNonEssentialTraffic: true },
+    { id: "claude-minimax", toolId: "claude", name: "MiniMax", websiteUrl: "https://platform.minimaxi.com", apiKeyUrl: "https://platform.minimaxi.com/subscribe/coding-plan", category: "cn_official", badge: "国产", baseUrl: "https://api.minimaxi.com/anthropic", model: "MiniMax-M2.7", authField: "ANTHROPIC_AUTH_TOKEN" },
+    { id: "claude-minimax-en", toolId: "claude", name: "MiniMax en", websiteUrl: "https://platform.minimax.io", apiKeyUrl: "https://platform.minimax.io/subscribe/coding-plan", category: "cn_official", badge: "国产", baseUrl: "https://api.minimax.io/anthropic", model: "MiniMax-M2.7", authField: "ANTHROPIC_AUTH_TOKEN" },
     { id: "claude-doubaoseed", toolId: "claude", name: "DouBaoSeed", websiteUrl: "https://www.volcengine.com/product/doubao", apiKeyUrl: "https://www.volcengine.com/product/doubao", category: "cn_official", badge: "国产", baseUrl: "https://ark.cn-beijing.volces.com/api/coding", model: "doubao-seed-2-0-code-preview-latest", authField: "ANTHROPIC_AUTH_TOKEN" },
     { id: "claude-bailing", toolId: "claude", name: "BaiLing", websiteUrl: "https://alipaytbox.yuque.com/sxs0ba/ling/get_started", category: "cn_official", badge: "国产", baseUrl: "https://api.tbox.cn/api/anthropic", model: "Ling-2.5-1T", authField: "ANTHROPIC_AUTH_TOKEN" },
-    { id: "claude-longcat", toolId: "claude", name: "Longcat", websiteUrl: "https://longcat.chat/platform", apiKeyUrl: "https://longcat.chat/platform/api_keys", category: "cn_official", badge: "国产", baseUrl: "https://api.longcat.chat/anthropic", model: "LongCat-Flash-Chat", authField: "ANTHROPIC_AUTH_TOKEN", maxOutputTokens: "6000", disableNonEssentialTraffic: true },
+    { id: "claude-longcat", toolId: "claude", name: "Longcat", websiteUrl: "https://longcat.chat/platform", apiKeyUrl: "https://longcat.chat/platform/api_keys", category: "cn_official", badge: "国产", baseUrl: "https://api.longcat.chat/anthropic", model: "LongCat-Flash-Chat", authField: "ANTHROPIC_AUTH_TOKEN" },
     { id: "claude-xiaomi-mimo", toolId: "claude", name: "Xiaomi MiMo", websiteUrl: "https://platform.xiaomimimo.com", apiKeyUrl: "https://platform.xiaomimimo.com/#/console/api-keys", category: "cn_official", badge: "国产", baseUrl: "https://api.xiaomimimo.com/anthropic", model: "mimo-v2-pro", authField: "ANTHROPIC_AUTH_TOKEN" },
     // === 聚合 ===
     { id: "claude-aihubmix", toolId: "claude", name: "AiHubMix", websiteUrl: "https://aihubmix.com", apiKeyUrl: "https://aihubmix.com", category: "aggregator", badge: "聚合", baseUrl: "https://aihubmix.com", model: "", authField: "ANTHROPIC_API_KEY", endpointCandidates: ["https://aihubmix.com", "https://api.aihubmix.com"] },
@@ -308,8 +308,10 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
     templateValues: stringifyTemplateValues(preset?.templateValues),
     requiresOAuth: preset?.requiresOAuth || false,
     providerType: preset?.providerType || "",
-    maxOutputTokens: preset?.maxOutputTokens || "",
-    disableNonEssentialTraffic: preset?.disableNonEssentialTraffic || false,
+    hideAttribution: false,
+    effortHigh: false,
+    enableTeammates: false,
+    enableToolSearch: false,
     codexWireApi: preset?.codexWireApi || "responses",
     codexReasoningEffort: preset?.codexReasoningEffort || "high",
     openClawContextWindow: preset?.openClawContextWindow || "",
@@ -360,8 +362,10 @@ export function applyPresetToFields(
       templateValues: current?.templateValues || "",
       requiresOAuth: current?.requiresOAuth || false,
       providerType: current?.providerType || "",
-      maxOutputTokens: current?.maxOutputTokens || "",
-      disableNonEssentialTraffic: current?.disableNonEssentialTraffic || false,
+      hideAttribution: current?.hideAttribution || false,
+      effortHigh: current?.effortHigh || false,
+      enableTeammates: current?.enableTeammates || false,
+      enableToolSearch: current?.enableToolSearch || false,
       codexWireApi: current?.codexWireApi || "responses",
       codexReasoningEffort: current?.codexReasoningEffort || "high",
       openClawContextWindow: current?.openClawContextWindow || "",
@@ -404,8 +408,10 @@ export function applyPresetToFields(
     templateValues: stringifyTemplateValues(preset.templateValues) || current?.templateValues || "",
     requiresOAuth: preset.requiresOAuth || false,
     providerType: preset.providerType || current?.providerType || "",
-    maxOutputTokens: preset.maxOutputTokens || current?.maxOutputTokens || "",
-    disableNonEssentialTraffic: preset.disableNonEssentialTraffic || false,
+    hideAttribution: current?.hideAttribution || false,
+    effortHigh: current?.effortHigh || false,
+    enableTeammates: current?.enableTeammates || false,
+    enableToolSearch: current?.enableToolSearch || false,
     codexWireApi: preset.codexWireApi || current?.codexWireApi || defaults.codexWireApi,
     codexReasoningEffort: preset.codexReasoningEffort || current?.codexReasoningEffort || defaults.codexReasoningEffort,
     openClawContextWindow: preset.openClawContextWindow || current?.openClawContextWindow || "",
@@ -454,14 +460,15 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     if (fields.apiFormat && fields.apiFormat !== "anthropic") {
       env.ANTHROPIC_API_FORMAT = fields.apiFormat;
     }
-    if (fields.maxOutputTokens.trim()) {
-      env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = fields.maxOutputTokens.trim();
+    if (fields.enableTeammates) {
+      env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
     }
-    if (fields.disableNonEssentialTraffic) {
-      env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = 1;
+    if (fields.enableToolSearch) {
+      env.ENABLE_TOOL_SEARCH = "true";
     }
-    return JSON.stringify({
+    const result: Record<string, any> = {
       env,
+      includeCoAuthoredBy: false,
       metadata: {
         category: fields.category,
         websiteUrl: fields.websiteUrl,
@@ -471,7 +478,14 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
         requiresOAuth: fields.requiresOAuth,
         providerType: fields.providerType || undefined,
       },
-    }, null, 2);
+    };
+    if (fields.hideAttribution) {
+      result.attribution = { commit: "", pr: "" };
+    }
+    if (fields.effortHigh) {
+      result.effortLevel = "high";
+    }
+    return JSON.stringify(result, null, 2);
   }
 
   if (toolId === "codex") {
@@ -656,6 +670,10 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         opusModel: env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL || defaults.model,
         authField,
         apiFormat,
+        hideAttribution: parsed.attribution?.commit === "" && parsed.attribution?.pr === "",
+        effortHigh: parsed.effortLevel === "high",
+        enableTeammates: env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === "1" || env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS as any === 1,
+        enableToolSearch: env.ENABLE_TOOL_SEARCH === "true" || env.ENABLE_TOOL_SEARCH === "1",
         websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
         category: metadata.category || defaults.category,
@@ -663,8 +681,6 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         templateValues: stringifyTemplateValues(metadata.templateValues),
         requiresOAuth: Boolean(metadata.requiresOAuth),
         providerType: metadata.providerType || defaults.providerType,
-        maxOutputTokens: env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || "",
-        disableNonEssentialTraffic: parseBooleanLike(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC),
       };
     }
 

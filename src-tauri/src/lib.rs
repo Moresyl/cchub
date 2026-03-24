@@ -8,6 +8,7 @@ mod claude_md;
 mod updater;
 mod security;
 mod utils;
+mod workflows;
 
 use commands::mcp_commands;
 use commands::skill_commands;
@@ -18,6 +19,7 @@ use commands::security_commands;
 use commands::marketplace_commands;
 use commands::extra_commands;
 use commands::config_files_commands;
+use commands::workflow_commands;
 
 use tauri::{
     Manager,
@@ -209,6 +211,14 @@ pub fn run() {
             extra_commands::get_proxy,
             extra_commands::save_backup_to_file,
             extra_commands::import_backup_from_file,
+            // Workflow commands
+            workflow_commands::scan_workflows,
+            workflow_commands::get_workflow_templates,
+            workflow_commands::install_workflow,
+            workflow_commands::read_workflow_content,
+            workflow_commands::write_workflow_content,
+            workflow_commands::delete_workflow,
+            workflow_commands::toggle_workflow,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

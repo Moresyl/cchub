@@ -92,7 +92,6 @@ export interface StructuredDraftFields {
   hideAttribution: boolean;
   effortHigh: boolean;
   enableTeammates: boolean;
-  enableToolSearch: boolean;
   codexWireApi: CodexWireApi;
   codexReasoningEffort: CodexReasoningEffort;
   openClawContextWindow: string;
@@ -311,7 +310,6 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
     hideAttribution: false,
     effortHigh: false,
     enableTeammates: false,
-    enableToolSearch: false,
     codexWireApi: preset?.codexWireApi || "responses",
     codexReasoningEffort: preset?.codexReasoningEffort || "high",
     openClawContextWindow: preset?.openClawContextWindow || "",
@@ -365,7 +363,6 @@ export function applyPresetToFields(
       hideAttribution: current?.hideAttribution || false,
       effortHigh: current?.effortHigh || false,
       enableTeammates: current?.enableTeammates || false,
-      enableToolSearch: current?.enableToolSearch || false,
       codexWireApi: current?.codexWireApi || "responses",
       codexReasoningEffort: current?.codexReasoningEffort || "high",
       openClawContextWindow: current?.openClawContextWindow || "",
@@ -411,7 +408,6 @@ export function applyPresetToFields(
     hideAttribution: current?.hideAttribution || false,
     effortHigh: current?.effortHigh || false,
     enableTeammates: current?.enableTeammates || false,
-    enableToolSearch: current?.enableToolSearch || false,
     codexWireApi: preset.codexWireApi || current?.codexWireApi || defaults.codexWireApi,
     codexReasoningEffort: preset.codexReasoningEffort || current?.codexReasoningEffort || defaults.codexReasoningEffort,
     openClawContextWindow: preset.openClawContextWindow || current?.openClawContextWindow || "",
@@ -462,9 +458,6 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     }
     if (fields.enableTeammates) {
       env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
-    }
-    if (fields.enableToolSearch) {
-      env.ENABLE_TOOL_SEARCH = "true";
     }
     const result: Record<string, any> = {
       env,
@@ -673,7 +666,6 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         hideAttribution: parsed.attribution?.commit === "" && parsed.attribution?.pr === "",
         effortHigh: parsed.effortLevel === "high",
         enableTeammates: env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === "1" || env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS as any === 1,
-        enableToolSearch: env.ENABLE_TOOL_SEARCH === "true" || env.ENABLE_TOOL_SEARCH === "1",
         websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
         category: metadata.category || defaults.category,

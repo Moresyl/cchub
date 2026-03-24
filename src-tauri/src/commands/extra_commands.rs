@@ -707,7 +707,14 @@ fn config_contents_match(left: &str, right: &str) -> bool {
         serde_json::from_str::<serde_json::Value>(left),
         serde_json::from_str::<serde_json::Value>(right),
     ) {
-        (Ok(a), Ok(b)) => a == b,
+        (Ok(mut a), Ok(mut b)) => {
+            // Strip metadata keys used for claude profile splitting
+            for key in &["__claude_json_keys__", "__settings_json_keys__"] {
+                a.as_object_mut().map(|o| o.remove(*key));
+                b.as_object_mut().map(|o| o.remove(*key));
+            }
+            a == b
+        }
         _ => left.trim() == right.trim(),
     }
 }

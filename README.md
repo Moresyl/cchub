@@ -39,13 +39,21 @@ The Claude Code ecosystem is growing rapidly, but management is fragmented: manu
 ## Features
 
 - **MCP Server Management** — Auto-scan installed MCP Servers (Claude Code, Claude Desktop, Cursor). Enable/disable, edit config, delete.
-- **Skills & Plugins** — Browse installed Skills and Plugins with trigger commands, descriptions, and file paths.
+- **MCP Server Marketplace** — Built-in registry with categorized MCP servers, one-click install with env config, custom source support.
+- **MCP Server Health Monitoring** — Command existence check, process spawn test, latency measurement.
+- **Skills & Plugins** — Browse installed Skills and Plugins with trigger commands, descriptions, and file paths. MDXEditor rich-text editing.
+- **Workflows Management** — 12 built-in workflow templates (Code Review, TDD, Bug Diagnosis, Refactoring, Security Audit, etc.). One-click install to Claude / Codex / Gemini / OpenCode / OpenClaw, Markdown editing, enable/disable toggle.
 - **Hooks Management** — Visualize all Hooks with event types, matchers, and commands.
-- **Config Profiles** — Switch between different configurations for Claude Code, Codex, Gemini CLI. Structured editing with presets, auto-scan local configs.
-- **CLAUDE.md Manager** — Visual editor for CLAUDE.md project instructions.
+- **Config Profiles** — Switch between different configurations for Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw. Structured editing with presets, auto-scan local configs.
+- **CLAUDE.md Manager** — Visual editor for CLAUDE.md project instructions with templates.
+- **Tools Page** — Claude Code permission slider (4 levels), StatusLine (claude-hud) install/config/toggle, Codex settings.
+- **StatusLine (claude-hud)** — One-click install, proxy support, China mirror fallback, display configuration.
+- **Security Audit** — Permission scanning for env secrets, shell execution risks, npx auto-install risks.
+- **Backup & Restore** — Export all configs as SQL, import with legacy JSON support.
+- **Auto Update** — Built-in update checker with Tauri native updater + GitHub Releases fallback.
 - **Dark / Light Theme** — Glassmorphism UI with theme switching.
 - **i18n** — Chinese (default) and English.
-- **Auto Update** — Built-in update checker with one-click install.
+- **System Tray** — Minimize to tray on close.
 
 ## Download
 
@@ -54,8 +62,10 @@ The Claude Code ecosystem is growing rapidly, but management is fragmented: manu
 | [Setup EXE](https://github.com/Moresl/cchub/releases/latest) | **Recommended** — NSIS installer with shortcuts and auto-update |
 | [MSI](https://github.com/Moresl/cchub/releases/latest) | Windows Installer format for enterprise deployment |
 | [Portable](https://github.com/Moresl/cchub/releases/latest) | No install needed — double-click and run |
+| [macOS DMG](https://github.com/Moresl/cchub/releases/latest) | Apple Silicon & Intel |
+| [Linux](https://github.com/Moresl/cchub/releases/latest) | deb / AppImage / RPM |
 
-**Requirements:** Windows 10/11 (x64). No additional runtime needed.
+**Requirements:** Windows 10/11 (x64), macOS 10.15+, Linux (WebKit2GTK required).
 
 ## Tech Stack
 
@@ -106,18 +116,24 @@ CCHub auto-scans MCP Server configs from:
 ## Roadmap
 
 - [x] MCP Server management (scan, toggle, edit, delete)
-- [x] Skills & Plugins browser
+- [x] MCP Server marketplace (registry, one-click install, custom sources)
+- [x] MCP Server health monitoring (command check, spawn test, latency)
+- [x] Skills & Plugins browser (MDXEditor, cross-tool sync)
+- [x] Workflows management (12 templates, Markdown editing, enable/disable)
 - [x] Hooks visualization
-- [x] Config Profiles (switch configurations)
-- [x] CLAUDE.md manager
-- [x] MCP Server health monitoring
-- [x] Security audit (permission scanning, change detection)
-- [x] Auto-update (Tauri Updater)
+- [x] Config Profiles (structured editor, multi-tool switching)
+- [x] CLAUDE.md manager (editor, templates, toggle)
+- [x] Tools page (permissions, StatusLine, Codex settings)
+- [x] StatusLine (claude-hud) integration (install, config, proxy, China mirror)
+- [x] Security audit (permission scanning, risk detection)
+- [x] Backup & restore (SQL export/import)
+- [x] Auto-update (Tauri Updater + GitHub fallback)
 - [x] Dark / Light theme
 - [x] i18n (Chinese + English)
-- [ ] macOS / Linux support
-- [ ] MCP Server marketplace
-- [ ] Backup & restore
+- [x] macOS / Linux support (CI multi-platform builds)
+- [x] System tray (minimize on close)
+- [ ] Config change detection (security audit over time)
+- [ ] Hooks editor (create/edit hooks from UI)
 
 ---
 

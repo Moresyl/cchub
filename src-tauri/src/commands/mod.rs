@@ -7,3 +7,4 @@ pub mod security_commands;
 pub mod marketplace_commands;
 pub mod extra_commands;
 pub mod config_files_commands;
+pub mod workflow_commands;

@@ -6,6 +6,7 @@ import McpServers from "./pages/McpServers";
 import McpClients from "./pages/McpClients";
 import Logs from "./pages/Logs";
 import Skills from "./pages/Skills";
+import Workflows from "./pages/Workflows";
 import Hooks from "./pages/Hooks";
 import Settings from "./pages/Settings";
 import Security from "./pages/Security";
@@ -32,6 +33,7 @@ function App() {
               <Route path="/mcp-clients" element={<McpClients />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/skills" element={<Skills />} />
+              <Route path="/workflows" element={<Workflows />} />
               <Route path="/marketplace" element={<Marketplace />} />
               <Route path="/hooks" element={<Hooks />} />
               <Route path="/workspaces" element={<Workspaces />} />

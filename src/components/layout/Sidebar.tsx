@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen } from "lucide-react";
+import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch } from "lucide-react";
 import { t } from "../../lib/i18n";
 import { useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
@@ -10,6 +10,7 @@ const navItems = [
   { path: "/mcp-clients", key: "mcpClients" as const, icon: Monitor },
   { path: "/logs", key: "logs" as const, icon: Activity },
   { path: "/skills", key: "skills" as const, icon: Zap },
+  { path: "/workflows", key: "workflows" as const, icon: GitBranch },
   { path: "/marketplace", key: "marketplace" as const, icon: Store },
   { path: "/hooks", key: "hooks" as const, icon: Webhook },
   { path: "/workspaces", key: "workspaces" as const, icon: Layers },

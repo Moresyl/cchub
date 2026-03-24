@@ -256,7 +256,6 @@ export default function Profiles() {
   const [draftHideAttribution, setDraftHideAttribution] = useState(false);
   const [draftEffortHigh, setDraftEffortHigh] = useState(false);
   const [draftEnableTeammates, setDraftEnableTeammates] = useState(false);
-  const [draftEnableToolSearch, setDraftEnableToolSearch] = useState(false);
   const [draftCodexWireApi, setDraftCodexWireApi] = useState<CodexWireApi>("responses");
   const [draftCodexReasoningEffort, setDraftCodexReasoningEffort] = useState<CodexReasoningEffort>("high");
   const [draftOpenClawContextWindow, setDraftOpenClawContextWindow] = useState("");
@@ -333,7 +332,6 @@ export default function Profiles() {
     setDraftHideAttribution(fields.hideAttribution);
     setDraftEffortHigh(fields.effortHigh);
     setDraftEnableTeammates(fields.enableTeammates);
-    setDraftEnableToolSearch(fields.enableToolSearch);
     setDraftCodexWireApi(fields.codexWireApi);
     setDraftCodexReasoningEffort(fields.codexReasoningEffort);
     setDraftOpenClawContextWindow(fields.openClawContextWindow);
@@ -379,7 +377,6 @@ export default function Profiles() {
       hideAttribution: next.hideAttribution ?? draftHideAttribution,
       effortHigh: next.effortHigh ?? draftEffortHigh,
       enableTeammates: next.enableTeammates ?? draftEnableTeammates,
-      enableToolSearch: next.enableToolSearch ?? draftEnableToolSearch,
       codexWireApi: next.codexWireApi ?? draftCodexWireApi,
       codexReasoningEffort: next.codexReasoningEffort ?? draftCodexReasoningEffort,
       openClawContextWindow: next.openClawContextWindow ?? draftOpenClawContextWindow,
@@ -733,34 +730,14 @@ export default function Profiles() {
                   </Field>
 
                   {draftTool === "claude" && (
-                    <>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                        <Field label={locale === "zh" ? "认证字段 (默认 AUTH_TOKEN)" : "Auth Field (default AUTH_TOKEN)"}>
-                          <SelectField value={draftAuthField} onChange={(value) => updateStructuredDraft(draftTool, { authField: value as ClaudeAuthField })} options={["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]} />
-                        </Field>
-                        <Field label={locale === "zh" ? "API 格式 (默认 anthropic)" : "API Format (default anthropic)"}>
-                          <SelectField value={draftApiFormat} onChange={(value) => updateStructuredDraft(draftTool, { apiFormat: value as ApiFormat })} options={["anthropic", "openai_chat", "openai_responses"]} />
-                        </Field>
-                      </div>
-                      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                          <input type="checkbox" checked={draftHideAttribution} onChange={(e) => updateStructuredDraft(draftTool, { hideAttribution: e.target.checked })} />
-                          {locale === "zh" ? "隐藏 AI 署名" : "Hide AI Attribution"}
-                        </label>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                          <input type="checkbox" checked={draftEffortHigh} onChange={(e) => updateStructuredDraft(draftTool, { effortHigh: e.target.checked })} />
-                          {locale === "zh" ? "高强度思考" : "High Effort Thinking"}
-                        </label>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                          <input type="checkbox" checked={draftEnableTeammates} onChange={(e) => updateStructuredDraft(draftTool, { enableTeammates: e.target.checked })} />
-                          {locale === "zh" ? "Teammates 模式" : "Teammates Mode"}
-                        </label>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                          <input type="checkbox" checked={draftEnableToolSearch} onChange={(e) => updateStructuredDraft(draftTool, { enableToolSearch: e.target.checked })} />
-                          {locale === "zh" ? "启用 Tool Search" : "Enable Tool Search"}
-                        </label>
-                      </div>
-                    </>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      <Field label={locale === "zh" ? "认证字段 (默认 AUTH_TOKEN)" : "Auth Field (default AUTH_TOKEN)"}>
+                        <SelectField value={draftAuthField} onChange={(value) => updateStructuredDraft(draftTool, { authField: value as ClaudeAuthField })} options={["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]} />
+                      </Field>
+                      <Field label={locale === "zh" ? "API 格式 (默认 anthropic)" : "API Format (default anthropic)"}>
+                        <SelectField value={draftApiFormat} onChange={(value) => updateStructuredDraft(draftTool, { apiFormat: value as ApiFormat })} options={["anthropic", "openai_chat", "openai_responses"]} />
+                      </Field>
+                    </div>
                   )}
 
                   {draftTool === "codex" && (
@@ -830,6 +807,22 @@ export default function Profiles() {
 
               <div>
                 <SectionTitle>{locale === "zh" ? "原始配置" : "Raw Configuration"}</SectionTitle>
+                {draftTool === "claude" && (
+                  <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 12 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                      <input type="checkbox" checked={draftHideAttribution} onChange={(e) => updateStructuredDraft(draftTool, { hideAttribution: e.target.checked })} />
+                      {locale === "zh" ? "隐藏 AI 署名" : "Hide AI Attribution"}
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                      <input type="checkbox" checked={draftEffortHigh} onChange={(e) => updateStructuredDraft(draftTool, { effortHigh: e.target.checked })} />
+                      {locale === "zh" ? "高强度思考" : "High Effort Thinking"}
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                      <input type="checkbox" checked={draftEnableTeammates} onChange={(e) => updateStructuredDraft(draftTool, { enableTeammates: e.target.checked })} />
+                      {locale === "zh" ? "Teammates 模式" : "Teammates Mode"}
+                    </label>
+                  </div>
+                )}
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                   {locale === "zh" ? "上方表单字段会自动同步到此处，你也可以直接编辑原始配置。" : "Form fields above are synced here. You can also edit the raw config directly."}
                 </div>

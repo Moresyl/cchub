@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Sun, Moon, ArrowUpCircle } from "lucide-react";
+import { Sun, Moon, ArrowUpCircle, Github } from "lucide-react";
+import { open } from "@tauri-apps/plugin-shell";
 import { getTheme, setTheme, type Theme } from "../../lib/theme";
 import { checkAppUpdate } from "../../lib/appUpdater";
 
@@ -21,6 +22,14 @@ export default function Header() {
 
   return (
     <header className="topbar">
+      <button
+        className="theme-btn"
+        title="GitHub"
+        onClick={() => open("https://github.com/Moresl/cchub")}
+      >
+        <Github size={16} />
+      </button>
+
       <button className="theme-btn" onClick={toggleTheme} title="Toggle theme">
         {currentTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
       </button>

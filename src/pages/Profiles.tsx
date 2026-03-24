@@ -256,8 +256,6 @@ export default function Profiles() {
   const [draftHideAttribution, setDraftHideAttribution] = useState(false);
   const [draftEffortHigh, setDraftEffortHigh] = useState(false);
   const [draftEnableTeammates, setDraftEnableTeammates] = useState(false);
-  const [draftEnableStatusLine, setDraftEnableStatusLine] = useState(false);
-  const [draftEnableBypassPermissions, setDraftEnableBypassPermissions] = useState(false);
   const [draftCodexWireApi, setDraftCodexWireApi] = useState<CodexWireApi>("responses");
   const [draftCodexReasoningEffort, setDraftCodexReasoningEffort] = useState<CodexReasoningEffort>("high");
   const [draftOpenClawContextWindow, setDraftOpenClawContextWindow] = useState("");
@@ -334,8 +332,6 @@ export default function Profiles() {
     setDraftHideAttribution(fields.hideAttribution);
     setDraftEffortHigh(fields.effortHigh);
     setDraftEnableTeammates(fields.enableTeammates);
-    setDraftEnableStatusLine(fields.enableStatusLine);
-    setDraftEnableBypassPermissions(fields.enableBypassPermissions);
     setDraftCodexWireApi(fields.codexWireApi);
     setDraftCodexReasoningEffort(fields.codexReasoningEffort);
     setDraftOpenClawContextWindow(fields.openClawContextWindow);
@@ -381,8 +377,6 @@ export default function Profiles() {
       hideAttribution: next.hideAttribution ?? draftHideAttribution,
       effortHigh: next.effortHigh ?? draftEffortHigh,
       enableTeammates: next.enableTeammates ?? draftEnableTeammates,
-      enableStatusLine: next.enableStatusLine ?? draftEnableStatusLine,
-      enableBypassPermissions: next.enableBypassPermissions ?? draftEnableBypassPermissions,
       codexWireApi: next.codexWireApi ?? draftCodexWireApi,
       codexReasoningEffort: next.codexReasoningEffort ?? draftCodexReasoningEffort,
       openClawContextWindow: next.openClawContextWindow ?? draftOpenClawContextWindow,
@@ -826,14 +820,6 @@ export default function Profiles() {
                     <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                       <input type="checkbox" checked={draftEnableTeammates} onChange={(e) => updateStructuredDraft(draftTool, { enableTeammates: e.target.checked })} />
                       {locale === "zh" ? "Teammates 模式" : "Teammates Mode"}
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                      <input type="checkbox" checked={draftEnableStatusLine} onChange={(e) => updateStructuredDraft(draftTool, { enableStatusLine: e.target.checked })} />
-                      {locale === "zh" ? "StatusLine (claude-hud)" : "StatusLine (claude-hud)"}
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                      <input type="checkbox" checked={draftEnableBypassPermissions} onChange={(e) => updateStructuredDraft(draftTool, { enableBypassPermissions: e.target.checked })} />
-                      {locale === "zh" ? "跳过权限确认" : "Bypass Permissions"}
                     </label>
                   </div>
                 )}

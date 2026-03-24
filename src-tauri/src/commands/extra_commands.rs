@@ -766,30 +766,36 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
             let home = dirs::home_dir().ok_or("Cannot find home directory")?;
             let claude_json = home.join(".claude.json");
             let settings_json = home.join(".claude").join("settings.json");
-            let mut combined = serde_json::Map::new();
-            if claude_json.exists() {
-                if let Ok(content) = std::fs::read_to_string(&claude_json) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(obj) = val.as_object() {
-                            for (k, v) in obj { combined.insert(k.clone(), v.clone()); }
-                        }
-                    }
-                }
-            }
-            if settings_json.exists() {
-                if let Ok(content) = std::fs::read_to_string(&settings_json) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(obj) = val.as_object() {
-                            for (k, v) in obj {
-                                if !combined.contains_key(k) { combined.insert(k.clone(), v.clone()); }
-                            }
-                        }
-                    }
-                }
-            }
-            if combined.is_empty() {
+
+            let claude_json_obj: serde_json::Map<String, serde_json::Value> = if claude_json.exists() {
+                std::fs::read_to_string(&claude_json).ok()
+                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default()
+            } else { serde_json::Map::new() };
+
+            let settings_json_obj: serde_json::Map<String, serde_json::Value> = if settings_json.exists() {
+                std::fs::read_to_string(&settings_json).ok()
+                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default()
+            } else { serde_json::Map::new() };
+
+            if claude_json_obj.is_empty() && settings_json_obj.is_empty() {
                 return Err("No Claude config found".to_string());
             }
+
+            // Store both sources separately so apply can split them back
+            let claude_json_keys: Vec<String> = claude_json_obj.keys().cloned().collect();
+            let settings_json_keys: Vec<String> = settings_json_obj.keys().cloned().collect();
+
+            let mut combined = claude_json_obj;
+            for (k, v) in settings_json_obj {
+                if !combined.contains_key(&k) { combined.insert(k, v); }
+            }
+            combined.insert("__claude_json_keys__".to_string(), serde_json::json!(claude_json_keys));
+            combined.insert("__settings_json_keys__".to_string(), serde_json::json!(settings_json_keys));
+
             serde_json::to_string_pretty(&serde_json::Value::Object(combined)).map_err(|e| e.to_string())
         }
         _ => {
@@ -845,6 +851,103 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
             }
 
             crate::utils::atomic_write_string(&settings_path, snapshot).map_err(|e| e.to_string())
+        }
+        "claude" => {
+            let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+            let claude_json_path = home.join(".claude.json");
+            let settings_json_path = home.join(".claude").join("settings.json");
+
+            let snap: serde_json::Value = serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
+            let snap_obj = snap.as_object().ok_or("Invalid claude snapshot")?;
+
+            // Determine which keys belong to which file
+            let claude_json_keys: std::collections::HashSet<String> = snap_obj
+                .get("__claude_json_keys__")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let settings_json_keys: std::collections::HashSet<String> = snap_obj
+                .get("__settings_json_keys__")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+
+            // Keys that should be preserved in settings.json during profile switch
+            let preserve_keys: std::collections::HashSet<&str> = [
+                "statusLine", "enabledPlugins", "mcpServers", "env",
+            ].iter().copied().collect();
+
+            // Split snapshot fields back to their original files
+            let mut claude_data = serde_json::Map::new();
+            let mut settings_data = serde_json::Map::new();
+
+            for (k, v) in snap_obj {
+                if k == "__claude_json_keys__" || k == "__settings_json_keys__" {
+                    continue;
+                }
+                if !claude_json_keys.is_empty() || !settings_json_keys.is_empty() {
+                    // We have source metadata — use it
+                    if claude_json_keys.contains(k) {
+                        claude_data.insert(k.clone(), v.clone());
+                    }
+                    if settings_json_keys.contains(k) {
+                        settings_data.insert(k.clone(), v.clone());
+                    }
+                    // Key in neither list (shouldn't happen) — try settings
+                    if !claude_json_keys.contains(k) && !settings_json_keys.contains(k) {
+                        settings_data.insert(k.clone(), v.clone());
+                    }
+                } else {
+                    // Legacy snapshot without metadata — use known-settings heuristic
+                    let settings_known = [
+                        "permissions", "skipDangerousModePermissionPrompt",
+                        "alwaysThinkingEnabled", "attribution", "autoUpdatesChannel",
+                        "statusLine", "enabledPlugins", "mcpServers", "env",
+                    ];
+                    if settings_known.contains(&k.as_str()) {
+                        settings_data.insert(k.clone(), v.clone());
+                    } else {
+                        claude_data.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+
+            // Write .claude.json — merge with existing
+            if !claude_data.is_empty() {
+                let mut existing: serde_json::Map<String, serde_json::Value> = if claude_json_path.exists() {
+                    std::fs::read_to_string(&claude_json_path).ok()
+                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                        .and_then(|v| v.as_object().cloned())
+                        .unwrap_or_default()
+                } else { serde_json::Map::new() };
+                for (k, v) in claude_data {
+                    existing.insert(k, v);
+                }
+                let text = serde_json::to_string_pretty(&serde_json::Value::Object(existing)).map_err(|e| e.to_string())?;
+                crate::utils::atomic_write_string(&claude_json_path, &text).map_err(|e| e.to_string())?;
+            }
+
+            // Write settings.json — merge, preserving protected keys
+            {
+                let mut existing: serde_json::Map<String, serde_json::Value> = if settings_json_path.exists() {
+                    std::fs::read_to_string(&settings_json_path).ok()
+                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                        .and_then(|v| v.as_object().cloned())
+                        .unwrap_or_default()
+                } else { serde_json::Map::new() };
+                for (k, v) in settings_data {
+                    if preserve_keys.contains(k.as_str()) {
+                        // Don't overwrite preserved keys — keep current value
+                        continue;
+                    }
+                    existing.insert(k, v);
+                }
+                std::fs::create_dir_all(settings_json_path.parent().unwrap()).map_err(|e| e.to_string())?;
+                let text = serde_json::to_string_pretty(&serde_json::Value::Object(existing)).map_err(|e| e.to_string())?;
+                crate::utils::atomic_write_string(&settings_json_path, &text).map_err(|e| e.to_string())?;
+            }
+
+            Ok(())
         }
         _ => {
             let config_path = resolve_tool_config_path(conn, tool_id)?;

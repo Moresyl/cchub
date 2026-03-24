@@ -43,11 +43,11 @@ jobs:
           releaseBody: |
             ## 更新内容 / Highlights
 
-            - Claude 配置文件支持富文本编辑、禁用与删除操作
-            - 技能页面升级为 MDXEditor，统一编辑器交互和开关样式
-            - 新增配置文件编辑器，补齐相关后端命令支持
-            - 新增系统托盘支持，关闭窗口可最小化到托盘
-            - 刷新应用图标，并修复 OpenClaw 配置与编辑器主题显示问题
+            - 新增工作流管理页面，内置 12 个热门工作流模板，支持一键安装、编辑和启用/禁用
+            - StatusLine (claude-hud) 管理移至工具页，支持安装、配置和代理下载
+            - Claude 配置新增 StatusLine 开关和跳过权限确认开关
+            - 修复配置切换时 StatusLine 和权限设置丢失的问题
+            - 优化配置切换体验
 
             ## 下载 / Download
 
@@ -55,6 +55,7 @@ jobs:
             |------|------|
             | `CCHub_*_x64-setup.exe` | Windows NSIS 安装包 |
             | `CCHub_*_x64_en-US.msi` | Windows MSI 安装包 |
+            | `CCHub_*_x64_portable.exe` | Windows 便携版 |
             | `CCHub_*_aarch64.dmg` | macOS Apple Silicon |
             | `CCHub_*_x64.dmg` | macOS Intel |
             | `CCHub_*_amd64.deb` | Linux deb 包 |

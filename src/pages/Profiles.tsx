@@ -72,7 +72,6 @@ const OPENCODE_NPM_OPTIONS: OpenCodeNpmPackage[] = [
 const CODEX_REASONING_OPTIONS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
 const CODEX_WIRE_API_OPTIONS: CodexWireApi[] = ["responses", "chat"];
 const THINKING_LEVEL_OPTIONS: OpenCodeThinkingLevel[] = ["minimal", "low", "medium", "high"];
-const EFFORT_OPTIONS: OpenCodeReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
 function formatTime(value: string | null) {
   if (!value) return "";
@@ -209,17 +208,6 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input className="input" style={{ fontSize: 13, ...(props.style || {}) }} {...props} />;
 }
 
-function TextArea({ value, onChange, placeholder, minHeight = 88 }: { value: string; onChange: (value: string) => void; placeholder?: string; minHeight?: number }) {
-  return (
-    <textarea
-      className="input"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      style={{ fontSize: 13, minHeight, resize: "vertical" }}
-    />
-  );
-}
 
 function SelectField({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[] }) {
   return (
@@ -288,7 +276,7 @@ export default function Profiles() {
   const [filterTool, setFilterTool] = useState("claude");
   const [search, setSearch] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+
   const [confirmAction, setConfirmAction] = useState<{ type: string; profile: ConfigProfile } | null>(null);
   const locale = getLocale();
 
@@ -690,7 +678,7 @@ export default function Profiles() {
                             apiKey: draftApiKey,
                           });
                           updateStructuredDraft(draftTool, next);
-                          setShowAdvanced(false);
+
                         }}
                         style={{ gap: 4 }}
                       >
@@ -788,110 +776,6 @@ export default function Profiles() {
                     </div>
                   )}
 
-                  <div>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setShowAdvanced(!showAdvanced)}
-                      style={{ fontSize: 12, gap: 4, color: "var(--text-muted)" }}
-                    >
-                      {showAdvanced ? "▼" : "▶"} {locale === "zh" ? "高级设置" : "Advanced Settings"}
-                    </button>
-                    {showAdvanced && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12, paddingLeft: 4 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                          <Field label={locale === "zh" ? "官网地址" : "Website URL"}>
-                            <TextInput value={draftWebsiteUrl} onChange={(e) => updateStructuredDraft(draftTool, { websiteUrl: e.target.value })} placeholder="https://example.com" />
-                          </Field>
-                          <Field label={locale === "zh" ? "获取 Key 地址" : "API Key URL"}>
-                            <TextInput value={draftApiKeyUrl} onChange={(e) => updateStructuredDraft(draftTool, { apiKeyUrl: e.target.value })} placeholder="https://example.com/keys" />
-                          </Field>
-                        </div>
-
-                        <Field label={locale === "zh" ? "候选端点" : "Endpoint Candidates"}>
-                          <TextArea value={draftEndpointCandidates} onChange={(value) => updateStructuredDraft(draftTool, { endpointCandidates: value })} placeholder={locale === "zh" ? "每行一个 URL" : "One URL per line"} />
-                        </Field>
-
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                          <Field label={locale === "zh" ? "分类" : "Category"}>
-                            <TextInput value={draftCategory} onChange={(e) => updateStructuredDraft(draftTool, { category: e.target.value })} placeholder="official / custom / aggregator" />
-                          </Field>
-                          <Field label={locale === "zh" ? "Provider 类型" : "Provider Type"}>
-                            <select className="input" value={draftProviderType} onChange={(e) => updateStructuredDraft(draftTool, { providerType: e.target.value as PresetProviderType | "" })} style={{ fontSize: 13 }}>
-                              <option value="">{locale === "zh" ? "无" : "None"}</option>
-                              <option value="github_copilot">github_copilot</option>
-                              <option value="google_oauth">google_oauth</option>
-                            </select>
-                          </Field>
-                        </div>
-
-                        <Field label={locale === "zh" ? "模板变量 JSON" : "Template Values JSON"}>
-                          <TextArea value={draftTemplateValues} onChange={(value) => updateStructuredDraft(draftTool, { templateValues: value })} placeholder='{"REGION":{"label":"区域","placeholder":"cn"}}' minHeight={80} />
-                        </Field>
-
-                        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                            <input type="checkbox" checked={draftRequiresOAuth} onChange={(e) => updateStructuredDraft(draftTool, { requiresOAuth: e.target.checked })} />
-                            {locale === "zh" ? "使用 OAuth" : "Use OAuth"}
-                          </label>
-                          {draftTool === "claude" && (
-                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                              <input type="checkbox" checked={draftDisableNonEssentialTraffic} onChange={(e) => updateStructuredDraft(draftTool, { disableNonEssentialTraffic: e.target.checked })} />
-                              {locale === "zh" ? "关闭非必要流量" : "Disable nonessential traffic"}
-                            </label>
-                          )}
-                          {draftTool === "opencode" && (
-                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                              <input type="checkbox" checked={draftOpenCodeIncludeThoughts} onChange={(e) => updateStructuredDraft(draftTool, { openCodeIncludeThoughts: e.target.checked })} />
-                              {locale === "zh" ? "包含扩展思考" : "Include thoughts"}
-                            </label>
-                          )}
-                        </div>
-
-                        {draftTool === "openclaw" && (
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                            <Field label="Context Window">
-                              <TextInput value={draftOpenClawContextWindow} onChange={(e) => updateStructuredDraft(draftTool, { openClawContextWindow: e.target.value })} placeholder="64000" />
-                            </Field>
-                            <Field label={locale === "zh" ? "输入成本" : "Input Cost"}>
-                              <TextInput value={draftOpenClawCostInput} onChange={(e) => updateStructuredDraft(draftTool, { openClawCostInput: e.target.value })} placeholder="0.0005" />
-                            </Field>
-                            <Field label={locale === "zh" ? "输出成本" : "Output Cost"}>
-                              <TextInput value={draftOpenClawCostOutput} onChange={(e) => updateStructuredDraft(draftTool, { openClawCostOutput: e.target.value })} placeholder="0.002" />
-                            </Field>
-                            <Field label={locale === "zh" ? "建议主模型" : "Suggested Primary"}>
-                              <TextInput value={draftSuggestedPrimaryModel} onChange={(e) => updateStructuredDraft(draftTool, { suggestedPrimaryModel: e.target.value })} placeholder="deepseek/deepseek-chat" />
-                            </Field>
-                            <Field label={locale === "zh" ? "建议回退模型" : "Suggested Fallbacks"}>
-                              <TextInput value={draftSuggestedFallbackModels} onChange={(e) => updateStructuredDraft(draftTool, { suggestedFallbackModels: e.target.value })} placeholder="model-a, model-b" />
-                            </Field>
-                          </div>
-                        )}
-
-                        {draftTool === "opencode" && (
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                            <Field label="Variant Name">
-                              <TextInput value={draftOpenCodeVariantName} onChange={(e) => updateStructuredDraft(draftTool, { openCodeVariantName: e.target.value })} placeholder="high" />
-                            </Field>
-                            <Field label="Thinking Budget">
-                              <TextInput value={draftOpenCodeThinkingBudget} onChange={(e) => updateStructuredDraft(draftTool, { openCodeThinkingBudget: e.target.value })} placeholder="5000" />
-                            </Field>
-                            <Field label="Reasoning Effort">
-                              <select className="input" value={draftOpenCodeReasoningEffort} onChange={(e) => updateStructuredDraft(draftTool, { openCodeReasoningEffort: e.target.value as OpenCodeReasoningEffort | "" })} style={{ fontSize: 13 }}>
-                                <option value="">{locale === "zh" ? "无" : "None"}</option>
-                                {EFFORT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                              </select>
-                            </Field>
-                            <Field label="Effort">
-                              <select className="input" value={draftOpenCodeEffort} onChange={(e) => updateStructuredDraft(draftTool, { openCodeEffort: e.target.value as OpenCodeReasoningEffort | "" })} style={{ fontSize: 13 }}>
-                                <option value="">{locale === "zh" ? "无" : "None"}</option>
-                                {EFFORT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                              </select>
-                            </Field>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
 

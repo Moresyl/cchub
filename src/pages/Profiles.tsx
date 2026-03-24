@@ -15,7 +15,14 @@ import {
   supportsStructuredConfig,
   type ApiFormat,
   type ClaudeAuthField,
+  type CodexReasoningEffort,
+  type CodexWireApi,
   type OpenClawApiProtocol,
+  type OpenCodeNpmPackage,
+  type OpenCodeReasoningEffort,
+  type OpenCodeThinkingLevel,
+  type PresetProviderType,
+  type StructuredDraftFields,
 } from "../lib/configProfiles";
 import { showToast } from "../components/Toast";
 import CodeEditor from "../components/CodeEditor";
@@ -46,6 +53,27 @@ const TOOL_ICONS: Record<string, typeof Monitor> = {
   openclaw: Cat,
 };
 
+const OPENCLAW_PROTOCOL_OPTIONS: OpenClawApiProtocol[] = [
+  "openai-completions",
+  "openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+  "bedrock-converse-stream",
+];
+
+const OPENCODE_NPM_OPTIONS: OpenCodeNpmPackage[] = [
+  "@ai-sdk/openai",
+  "@ai-sdk/openai-compatible",
+  "@ai-sdk/anthropic",
+  "@ai-sdk/amazon-bedrock",
+  "@ai-sdk/google",
+];
+
+const CODEX_REASONING_OPTIONS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+const CODEX_WIRE_API_OPTIONS: CodexWireApi[] = ["responses", "chat"];
+const THINKING_LEVEL_OPTIONS: OpenCodeThinkingLevel[] = ["minimal", "low", "medium", "high"];
+const EFFORT_OPTIONS: OpenCodeReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
+
 function formatTime(value: string | null) {
   if (!value) return "";
   return value.replace("T", " ").slice(0, 19);
@@ -71,7 +99,6 @@ function getConfigLanguage(toolId: string, content: string): "json" | "toml" {
   return "json";
 }
 
-/** 从配置快照中提取摘要信息用于卡片展示 */
 function extractConfigSummary(toolId: string, content: string): { baseUrl?: string; model?: string } {
   try {
     const parsed = JSON.parse(content) as Record<string, any>;
@@ -119,7 +146,6 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
   return {};
 }
 
-/** Codex 配置分拆显示：auth.json + config.toml */
 function CodexRawConfigEditor({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   let authJson = "";
   let configToml = "";
@@ -128,14 +154,13 @@ function CodexRawConfigEditor({ value, onChange }: { value: string; onChange: (v
     authJson = JSON.stringify(parsed.auth || {}, null, 2);
     configToml = typeof parsed.config === "string" ? parsed.config : "";
   } catch {
-    // fallback: show raw
     return <CodeEditor value={value} onChange={onChange} language="json" minHeight={240} />;
   }
 
   function rebuild(nextAuth: string, nextToml: string) {
     try {
       const auth = JSON.parse(nextAuth);
-      onChange(JSON.stringify({ auth, config: nextToml }, null, 2));
+      onChange(JSON.stringify({ ...JSON.parse(value), auth, config: nextToml }, null, 2));
     } catch { /* ignore invalid JSON */ }
   }
 
@@ -160,6 +185,49 @@ function CodexRawConfigEditor({ value, onChange }: { value: string; onChange: (v
         />
       </div>
     </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+      {children}
+    </h3>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label className="field-label">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input className="input" style={{ fontSize: 13, ...(props.style || {}) }} {...props} />;
+}
+
+function TextArea({ value, onChange, placeholder, minHeight = 88 }: { value: string; onChange: (value: string) => void; placeholder?: string; minHeight?: number }) {
+  return (
+    <textarea
+      className="input"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={{ fontSize: 13, minHeight, resize: "vertical" }}
+    />
+  );
+}
+
+function SelectField({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[] }) {
+  return (
+    <select className="input" value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13 }}>
+      {options.map((option) => (
+        <option key={option} value={option}>{option}</option>
+      ))}
+    </select>
   );
 }
 
@@ -189,10 +257,38 @@ export default function Profiles() {
   const [draftApiFormat, setDraftApiFormat] = useState<ApiFormat>("anthropic");
   const [draftApiProtocol, setDraftApiProtocol] = useState<OpenClawApiProtocol>("openai-completions");
   const [draftModelName, setDraftModelName] = useState("");
-  const [draftNpm, setDraftNpm] = useState("@ai-sdk/openai-compatible");
+  const [draftNpm, setDraftNpm] = useState<OpenCodeNpmPackage>("@ai-sdk/openai-compatible");
+  const [draftWebsiteUrl, setDraftWebsiteUrl] = useState("");
+  const [draftApiKeyUrl, setDraftApiKeyUrl] = useState("");
+  const [draftCategory, setDraftCategory] = useState("");
+  const [draftEndpointCandidates, setDraftEndpointCandidates] = useState("");
+  const [draftTemplateValues, setDraftTemplateValues] = useState("");
+  const [draftRequiresOAuth, setDraftRequiresOAuth] = useState(false);
+  const [draftProviderType, setDraftProviderType] = useState<PresetProviderType | "">("");
+  const [draftMaxOutputTokens, setDraftMaxOutputTokens] = useState("");
+  const [draftDisableNonEssentialTraffic, setDraftDisableNonEssentialTraffic] = useState(false);
+  const [draftCodexWireApi, setDraftCodexWireApi] = useState<CodexWireApi>("responses");
+  const [draftCodexReasoningEffort, setDraftCodexReasoningEffort] = useState<CodexReasoningEffort>("high");
+  const [draftOpenClawContextWindow, setDraftOpenClawContextWindow] = useState("");
+  const [draftOpenClawCostInput, setDraftOpenClawCostInput] = useState("");
+  const [draftOpenClawCostOutput, setDraftOpenClawCostOutput] = useState("");
+  const [draftSuggestedPrimaryModel, setDraftSuggestedPrimaryModel] = useState("");
+  const [draftSuggestedFallbackModels, setDraftSuggestedFallbackModels] = useState("");
+  const [draftModelCatalogAlias, setDraftModelCatalogAlias] = useState("");
+  const [draftOpenCodeContextLimit, setDraftOpenCodeContextLimit] = useState("");
+  const [draftOpenCodeOutputLimit, setDraftOpenCodeOutputLimit] = useState("");
+  const [draftOpenCodeInputModalities, setDraftOpenCodeInputModalities] = useState("");
+  const [draftOpenCodeOutputModalities, setDraftOpenCodeOutputModalities] = useState("");
+  const [draftOpenCodeVariantName, setDraftOpenCodeVariantName] = useState("");
+  const [draftOpenCodeIncludeThoughts, setDraftOpenCodeIncludeThoughts] = useState(false);
+  const [draftOpenCodeThinkingBudget, setDraftOpenCodeThinkingBudget] = useState("");
+  const [draftOpenCodeThinkingLevel, setDraftOpenCodeThinkingLevel] = useState<OpenCodeThinkingLevel | "">("");
+  const [draftOpenCodeReasoningEffort, setDraftOpenCodeReasoningEffort] = useState<OpenCodeReasoningEffort | "">("");
+  const [draftOpenCodeEffort, setDraftOpenCodeEffort] = useState<OpenCodeReasoningEffort | "">("");
   const [filterTool, setFilterTool] = useState("claude");
   const [search, setSearch] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: string; profile: ConfigProfile } | null>(null);
   const locale = getLocale();
 
@@ -223,36 +319,7 @@ export default function Profiles() {
     }
   }
 
-  function updateStructuredDraft(toolId: string, next: {
-    presetId?: string;
-    baseUrl?: string;
-    apiKey?: string;
-    model?: string;
-    reasoningModel?: string;
-    haikuModel?: string;
-    sonnetModel?: string;
-    opusModel?: string;
-    authField?: ClaudeAuthField;
-    apiFormat?: ApiFormat;
-    apiProtocol?: OpenClawApiProtocol;
-    modelName?: string;
-    npm?: string;
-  }) {
-    const fields = {
-      presetId: next.presetId ?? draftPresetId,
-      baseUrl: next.baseUrl ?? draftBaseUrl,
-      apiKey: next.apiKey ?? draftApiKey,
-      model: next.model ?? draftModel,
-      reasoningModel: next.reasoningModel ?? draftReasoningModel,
-      haikuModel: next.haikuModel ?? draftHaikuModel,
-      sonnetModel: next.sonnetModel ?? draftSonnetModel,
-      opusModel: next.opusModel ?? draftOpusModel,
-      authField: next.authField ?? draftAuthField,
-      apiFormat: next.apiFormat ?? draftApiFormat,
-      apiProtocol: next.apiProtocol ?? draftApiProtocol,
-      modelName: next.modelName ?? draftModelName,
-      npm: next.npm ?? draftNpm,
-    };
+  function setDraftFields(fields: StructuredDraftFields) {
     setDraftPresetId(fields.presetId);
     setDraftBaseUrl(fields.baseUrl);
     setDraftApiKey(fields.apiKey);
@@ -266,7 +333,91 @@ export default function Profiles() {
     setDraftApiProtocol(fields.apiProtocol);
     setDraftModelName(fields.modelName);
     setDraftNpm(fields.npm);
+    setDraftWebsiteUrl(fields.websiteUrl);
+    setDraftApiKeyUrl(fields.apiKeyUrl);
+    setDraftCategory(fields.category);
+    setDraftEndpointCandidates(fields.endpointCandidates);
+    setDraftTemplateValues(fields.templateValues);
+    setDraftRequiresOAuth(fields.requiresOAuth);
+    setDraftProviderType(fields.providerType);
+    setDraftMaxOutputTokens(fields.maxOutputTokens);
+    setDraftDisableNonEssentialTraffic(fields.disableNonEssentialTraffic);
+    setDraftCodexWireApi(fields.codexWireApi);
+    setDraftCodexReasoningEffort(fields.codexReasoningEffort);
+    setDraftOpenClawContextWindow(fields.openClawContextWindow);
+    setDraftOpenClawCostInput(fields.openClawCostInput);
+    setDraftOpenClawCostOutput(fields.openClawCostOutput);
+    setDraftSuggestedPrimaryModel(fields.suggestedPrimaryModel);
+    setDraftSuggestedFallbackModels(fields.suggestedFallbackModels);
+    setDraftModelCatalogAlias(fields.modelCatalogAlias);
+    setDraftOpenCodeContextLimit(fields.openCodeContextLimit);
+    setDraftOpenCodeOutputLimit(fields.openCodeOutputLimit);
+    setDraftOpenCodeInputModalities(fields.openCodeInputModalities);
+    setDraftOpenCodeOutputModalities(fields.openCodeOutputModalities);
+    setDraftOpenCodeVariantName(fields.openCodeVariantName);
+    setDraftOpenCodeIncludeThoughts(fields.openCodeIncludeThoughts);
+    setDraftOpenCodeThinkingBudget(fields.openCodeThinkingBudget);
+    setDraftOpenCodeThinkingLevel(fields.openCodeThinkingLevel);
+    setDraftOpenCodeReasoningEffort(fields.openCodeReasoningEffort);
+    setDraftOpenCodeEffort(fields.openCodeEffort);
+  }
+
+  function buildCurrentFields(next: Partial<StructuredDraftFields> = {}): StructuredDraftFields {
+    return {
+      presetId: next.presetId ?? draftPresetId,
+      baseUrl: next.baseUrl ?? draftBaseUrl,
+      apiKey: next.apiKey ?? draftApiKey,
+      model: next.model ?? draftModel,
+      reasoningModel: next.reasoningModel ?? draftReasoningModel,
+      haikuModel: next.haikuModel ?? draftHaikuModel,
+      sonnetModel: next.sonnetModel ?? draftSonnetModel,
+      opusModel: next.opusModel ?? draftOpusModel,
+      authField: next.authField ?? draftAuthField,
+      apiFormat: next.apiFormat ?? draftApiFormat,
+      apiProtocol: next.apiProtocol ?? draftApiProtocol,
+      modelName: next.modelName ?? draftModelName,
+      npm: next.npm ?? draftNpm,
+      websiteUrl: next.websiteUrl ?? draftWebsiteUrl,
+      apiKeyUrl: next.apiKeyUrl ?? draftApiKeyUrl,
+      category: next.category ?? draftCategory,
+      endpointCandidates: next.endpointCandidates ?? draftEndpointCandidates,
+      templateValues: next.templateValues ?? draftTemplateValues,
+      requiresOAuth: next.requiresOAuth ?? draftRequiresOAuth,
+      providerType: next.providerType ?? draftProviderType,
+      maxOutputTokens: next.maxOutputTokens ?? draftMaxOutputTokens,
+      disableNonEssentialTraffic: next.disableNonEssentialTraffic ?? draftDisableNonEssentialTraffic,
+      codexWireApi: next.codexWireApi ?? draftCodexWireApi,
+      codexReasoningEffort: next.codexReasoningEffort ?? draftCodexReasoningEffort,
+      openClawContextWindow: next.openClawContextWindow ?? draftOpenClawContextWindow,
+      openClawCostInput: next.openClawCostInput ?? draftOpenClawCostInput,
+      openClawCostOutput: next.openClawCostOutput ?? draftOpenClawCostOutput,
+      suggestedPrimaryModel: next.suggestedPrimaryModel ?? draftSuggestedPrimaryModel,
+      suggestedFallbackModels: next.suggestedFallbackModels ?? draftSuggestedFallbackModels,
+      modelCatalogAlias: next.modelCatalogAlias ?? draftModelCatalogAlias,
+      openCodeContextLimit: next.openCodeContextLimit ?? draftOpenCodeContextLimit,
+      openCodeOutputLimit: next.openCodeOutputLimit ?? draftOpenCodeOutputLimit,
+      openCodeInputModalities: next.openCodeInputModalities ?? draftOpenCodeInputModalities,
+      openCodeOutputModalities: next.openCodeOutputModalities ?? draftOpenCodeOutputModalities,
+      openCodeVariantName: next.openCodeVariantName ?? draftOpenCodeVariantName,
+      openCodeIncludeThoughts: next.openCodeIncludeThoughts ?? draftOpenCodeIncludeThoughts,
+      openCodeThinkingBudget: next.openCodeThinkingBudget ?? draftOpenCodeThinkingBudget,
+      openCodeThinkingLevel: next.openCodeThinkingLevel ?? draftOpenCodeThinkingLevel,
+      openCodeReasoningEffort: next.openCodeReasoningEffort ?? draftOpenCodeReasoningEffort,
+      openCodeEffort: next.openCodeEffort ?? draftOpenCodeEffort,
+    };
+  }
+
+  function updateStructuredDraft(toolId: string, next: Partial<StructuredDraftFields>) {
+    const fields = buildCurrentFields(next);
+    setDraftFields(fields);
     setDraftContent(buildStructuredConfig(toolId, fields));
+  }
+
+  function resetStructuredDraft(toolId: string) {
+    const defaults = createDefaultStructuredFields(toolId);
+    setDraftFields(defaults);
+    setDraftContent(buildStructuredConfig(toolId, defaults));
+    setDraftLoading(false);
   }
 
   async function openCreateModal(toolId?: string) {
@@ -285,35 +436,10 @@ export default function Profiles() {
     setShowApiKey(false);
     setDraftApiFormat("anthropic");
     if (supportsStructuredConfig(selectedTool)) {
-      const defaults = createDefaultStructuredFields(selectedTool);
-      setDraftPresetId(defaults.presetId);
-      setDraftBaseUrl(defaults.baseUrl);
-      setDraftApiKey(defaults.apiKey);
-      setDraftModel(defaults.model);
-      setDraftReasoningModel(defaults.reasoningModel);
-      setDraftHaikuModel(defaults.haikuModel);
-      setDraftSonnetModel(defaults.sonnetModel);
-      setDraftOpusModel(defaults.opusModel);
-      setDraftAuthField(defaults.authField);
-      setDraftApiProtocol(defaults.apiProtocol);
-      setDraftModelName(defaults.modelName);
-      setDraftNpm(defaults.npm);
-      setDraftContent(buildStructuredConfig(selectedTool, defaults));
-      setDraftLoading(false);
+      resetStructuredDraft(selectedTool);
       return;
     }
-    setDraftPresetId("custom");
-    setDraftBaseUrl("");
-    setDraftApiKey("");
-    setDraftModel("");
-    setDraftReasoningModel("");
-    setDraftHaikuModel("");
-    setDraftSonnetModel("");
-    setDraftOpusModel("");
-    setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
-    setDraftApiProtocol("openai-completions");
-    setDraftModelName("");
-    setDraftNpm("@ai-sdk/openai-compatible");
+    setDraftContent("");
     setDraftLoading(true);
     try {
       const configContent = await invoke<string>("read_tool_config", { toolId: selectedTool });
@@ -335,33 +461,9 @@ export default function Profiles() {
     setShowApiKey(false);
     if (supportsStructuredConfig(profile.tool_id)) {
       const parsed = parseStructuredConfig(profile.tool_id, profile.config_snapshot);
-      setDraftPresetId(parsed.presetId);
-      setDraftBaseUrl(parsed.baseUrl);
-      setDraftApiKey(parsed.apiKey);
-      setDraftModel(parsed.model);
-      setDraftReasoningModel(parsed.reasoningModel);
-      setDraftHaikuModel(parsed.haikuModel);
-      setDraftSonnetModel(parsed.sonnetModel);
-      setDraftOpusModel(parsed.opusModel);
-      setDraftAuthField(parsed.authField);
-      setDraftApiFormat(parsed.apiFormat);
-      setDraftApiProtocol(parsed.apiProtocol);
-      setDraftModelName(parsed.modelName);
-      setDraftNpm(parsed.npm);
+      setDraftFields(parsed);
     } else {
-      setDraftPresetId("custom");
-      setDraftBaseUrl("");
-      setDraftApiKey("");
-      setDraftModel("");
-      setDraftReasoningModel("");
-      setDraftHaikuModel("");
-      setDraftSonnetModel("");
-      setDraftOpusModel("");
-      setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
-      setDraftApiFormat("anthropic");
-      setDraftApiProtocol("openai-completions");
-      setDraftModelName("");
-      setDraftNpm("@ai-sdk/openai-compatible");
+      resetStructuredDraft("claude");
     }
     setDraftLoading(false);
   }
@@ -372,19 +474,7 @@ export default function Profiles() {
     setDraftName("");
     setDraftContent("");
     setDraftLoading(false);
-    setDraftPresetId("custom");
-    setDraftBaseUrl("");
-    setDraftApiKey("");
-    setDraftModel("");
-    setDraftReasoningModel("");
-    setDraftHaikuModel("");
-    setDraftSonnetModel("");
-    setDraftOpusModel("");
-    setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
-    setDraftApiFormat("anthropic");
-    setDraftApiProtocol("openai-completions");
-    setDraftModelName("");
-    setDraftNpm("@ai-sdk/openai-compatible");
+    setDraftFields(createDefaultStructuredFields("claude"));
     setSaving(false);
     setShowApiKey(false);
   }
@@ -518,7 +608,6 @@ export default function Profiles() {
   const isEditing = showCreateModal || !!editingProfile;
   const isStructured = supportsStructuredConfig(draftTool);
 
-  // --- 编辑 / 新增视图 ---
   if (isEditing) {
     return (
       <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -529,28 +618,20 @@ export default function Profiles() {
             </button>
             <div>
               <h2 className="page-title">
-                {editingProfile
-                  ? (locale === "zh" ? "编辑配置" : "Edit Configuration")
-                  : (locale === "zh" ? "新增配置" : "New Configuration")}
+                {editingProfile ? (locale === "zh" ? "编辑配置" : "Edit Configuration") : (locale === "zh" ? "新增配置" : "New Configuration")}
               </h2>
               <p className="page-subtitle">
-                {editingProfile
-                  ? (locale === "zh" ? "修改配置名称和参数" : "Update configuration name and parameters")
-                  : (locale === "zh" ? "创建一个新的工具配置" : "Create a new tool configuration")}
+                {editingProfile ? (locale === "zh" ? "修改配置名称和参数" : "Update configuration name and parameters") : (locale === "zh" ? "创建一个新的工具配置" : "Create a new tool configuration")}
               </p>
             </div>
           </div>
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, paddingBottom: 20 }}>
-          {/* 基本信息 */}
           <div>
-            <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              {locale === "zh" ? "基本信息" : "Basic Info"}
-            </h3>
+            <SectionTitle>{locale === "zh" ? "基本信息" : "Basic Info"}</SectionTitle>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label className="field-label">{locale === "zh" ? "工具" : "Tool"}</label>
+              <Field label={locale === "zh" ? "工具" : "Tool"}>
                 <select
                   className="input"
                   value={draftTool}
@@ -561,34 +642,8 @@ export default function Profiles() {
                     setNewTool(toolId);
                     setDraftApiFormat("anthropic");
                     if (supportsStructuredConfig(toolId)) {
-                      const defaults = createDefaultStructuredFields(toolId);
-                      setDraftPresetId(defaults.presetId);
-                      setDraftBaseUrl(defaults.baseUrl);
-                      setDraftApiKey(defaults.apiKey);
-                      setDraftModel(defaults.model);
-                      setDraftReasoningModel(defaults.reasoningModel);
-                      setDraftHaikuModel(defaults.haikuModel);
-                      setDraftSonnetModel(defaults.sonnetModel);
-                      setDraftOpusModel(defaults.opusModel);
-                      setDraftAuthField(defaults.authField);
-                      setDraftApiProtocol(defaults.apiProtocol);
-                      setDraftModelName(defaults.modelName);
-                      setDraftNpm(defaults.npm);
-                      setDraftContent(buildStructuredConfig(toolId, defaults));
-                      setDraftLoading(false);
+                      resetStructuredDraft(toolId);
                     } else {
-                      setDraftPresetId("custom");
-                      setDraftBaseUrl("");
-                      setDraftApiKey("");
-                      setDraftModel("");
-                      setDraftReasoningModel("");
-                      setDraftHaikuModel("");
-                      setDraftSonnetModel("");
-                      setDraftOpusModel("");
-                      setDraftAuthField("ANTHROPIC_AUTH_TOKEN");
-                      setDraftApiProtocol("openai-completions");
-                      setDraftModelName("");
-                      setDraftNpm("@ai-sdk/openai-compatible");
                       setDraftContent("");
                       setDraftLoading(true);
                       try {
@@ -607,29 +662,22 @@ export default function Profiles() {
                     <option key={tool.id} value={tool.id}>{tool.name}</option>
                   ))}
                 </select>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label className="field-label">{locale === "zh" ? "配置名称" : "Name"}</label>
-                <input
-                  className="input"
+              </Field>
+              <Field label={locale === "zh" ? "配置名称" : "Name"}>
+                <TextInput
                   placeholder={locale === "zh" ? "例如：官方 API、中转服务" : "e.g. Official API, Proxy Service"}
                   value={draftName}
                   onChange={(e) => setDraftName(e.target.value)}
-                  style={{ fontSize: 13 }}
                   autoFocus
                 />
-              </div>
+              </Field>
             </div>
           </div>
 
-          {/* 结构化表单 */}
           {isStructured && (
             <>
-              {/* 预设选择 */}
               <div>
-                <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {locale === "zh" ? "预设模板" : "Preset"}
-                </h3>
+                <SectionTitle>{locale === "zh" ? "预设模板" : "Preset"}</SectionTitle>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {presetCategories.flatMap((group) =>
                     group.presets.map((preset) => (
@@ -638,245 +686,258 @@ export default function Profiles() {
                         className={`btn btn-sm ${draftPresetId === preset.id ? "btn-primary" : "btn-secondary"}`}
                         onClick={() => {
                           const next = applyPresetToFields(draftTool, preset.id, {
+                            ...buildCurrentFields(),
                             apiKey: draftApiKey,
-                            authField: draftAuthField,
-                            apiFormat: draftApiFormat,
                           });
                           updateStructuredDraft(draftTool, next);
+                          setShowAdvanced(false);
                         }}
+                        style={{ gap: 4 }}
                       >
                         {preset.name}
+                        {preset.badge && (
+                          <span style={{ fontSize: 10, opacity: 0.7, fontWeight: 400 }}>({preset.badge})</span>
+                        )}
                       </button>
-                    ))
+                    )),
                   )}
                 </div>
               </div>
 
-              {/* 连接配置 */}
               <div>
-                <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {locale === "zh" ? "连接配置" : "Connection"}
-                </h3>
+                <SectionTitle>{locale === "zh" ? "连接配置" : "Connection"}</SectionTitle>
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <label className="field-label">API Key</label>
-                    <div style={{ position: "relative" }}>
-                      <input
-                        className="input"
-                        type={showApiKey ? "text" : "password"}
-                        value={draftApiKey}
-                        onChange={(e) => updateStructuredDraft(draftTool, { apiKey: e.target.value })}
-                        placeholder={locale === "zh" ? "填写 API Key" : "Enter API Key"}
-                        style={{ fontSize: 13, paddingRight: 40 }}
-                      />
-                      <button
-                        className="btn btn-ghost btn-icon-sm"
-                        style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        type="button"
-                      >
-                        {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
+                  {draftRequiresOAuth && (
+                    <div className="card" style={{ padding: 12, fontSize: 12, color: "var(--text-muted)" }}>
+                      {locale === "zh" ? "当前预设使用 OAuth 模式，无需填写 API Key。" : "This preset uses OAuth mode and does not require an API key."}
                     </div>
-                  </div>
+                  )}
+                  {!draftRequiresOAuth && (
+                    <Field label="API Key">
+                      <div style={{ position: "relative" }}>
+                        <TextInput
+                          type={showApiKey ? "text" : "password"}
+                          value={draftApiKey}
+                          onChange={(e) => updateStructuredDraft(draftTool, { apiKey: e.target.value })}
+                          placeholder={locale === "zh" ? "填写 API Key" : "Enter API Key"}
+                          style={{ paddingRight: 40 }}
+                        />
+                        <button
+                          className="btn btn-ghost btn-icon-sm"
+                          style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          type="button"
+                        >
+                          {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                    </Field>
+                  )}
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <label className="field-label">{locale === "zh" ? "接口地址" : "Base URL"}</label>
-                    <input
-                      className="input"
-                      value={draftBaseUrl}
-                      onChange={(e) => updateStructuredDraft(draftTool, { baseUrl: e.target.value })}
-                      placeholder="https://api.example.com"
-                      style={{ fontSize: 13 }}
-                    />
-                  </div>
+                  <Field label={locale === "zh" ? "接口地址" : "Base URL"}>
+                    <TextInput value={draftBaseUrl} onChange={(e) => updateStructuredDraft(draftTool, { baseUrl: e.target.value })} placeholder="https://api.example.com" />
+                  </Field>
 
                   {draftTool === "claude" && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                      <Field label={locale === "zh" ? "认证字段" : "Auth Field"}>
+                        <SelectField value={draftAuthField} onChange={(value) => updateStructuredDraft(draftTool, { authField: value as ClaudeAuthField })} options={["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]} />
+                      </Field>
+                      <Field label={locale === "zh" ? "API 格式" : "API Format"}>
+                        <SelectField value={draftApiFormat} onChange={(value) => updateStructuredDraft(draftTool, { apiFormat: value as ApiFormat })} options={["anthropic", "openai_chat", "openai_responses"]} />
+                      </Field>
+                      <Field label={locale === "zh" ? "最大输出 Token" : "Max Output Tokens"}>
+                        <TextInput value={draftMaxOutputTokens} onChange={(e) => updateStructuredDraft(draftTool, { maxOutputTokens: e.target.value })} placeholder="6000" />
+                      </Field>
+                    </div>
+                  )}
+
+                  {draftTool === "codex" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <label className="field-label">{locale === "zh" ? "认证字段" : "Auth Field"}</label>
-                        <select
-                          className="input"
-                          value={draftAuthField}
-                          onChange={(e) => updateStructuredDraft(draftTool, { authField: e.target.value as ClaudeAuthField })}
-                          style={{ fontSize: 13 }}
-                        >
-                          <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN</option>
-                          <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
-                        </select>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <label className="field-label">{locale === "zh" ? "API 格式" : "API Format"}</label>
-                        <select
-                          className="input"
-                          value={draftApiFormat}
-                          onChange={(e) => updateStructuredDraft(draftTool, { apiFormat: e.target.value as ApiFormat })}
-                          style={{ fontSize: 13 }}
-                        >
-                          <option value="anthropic">Anthropic Messages</option>
-                          <option value="openai_chat">OpenAI Chat Completions</option>
-                          <option value="openai_responses">OpenAI Responses API</option>
-                        </select>
-                      </div>
+                      <Field label={locale === "zh" ? "推理强度" : "Reasoning Effort"}>
+                        <SelectField value={draftCodexReasoningEffort} onChange={(value) => updateStructuredDraft(draftTool, { codexReasoningEffort: value as CodexReasoningEffort })} options={CODEX_REASONING_OPTIONS} />
+                      </Field>
+                      <Field label={locale === "zh" ? "Wire API" : "Wire API"}>
+                        <SelectField value={draftCodexWireApi} onChange={(value) => updateStructuredDraft(draftTool, { codexWireApi: value as CodexWireApi })} options={CODEX_WIRE_API_OPTIONS} />
+                      </Field>
                     </div>
                   )}
 
                   {draftTool === "openclaw" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "API 协议" : "API Protocol"}</label>
-                      <select
-                        className="input"
-                        value={draftApiProtocol}
-                        onChange={(e) => updateStructuredDraft(draftTool, { apiProtocol: e.target.value as OpenClawApiProtocol })}
-                        style={{ fontSize: 13 }}
-                      >
-                        <option value="openai-completions">OpenAI Completions</option>
-                        <option value="anthropic-messages">Anthropic Messages</option>
-                        <option value="google-generative-ai">Google Generative AI</option>
-                      </select>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      <Field label={locale === "zh" ? "API 协议" : "API Protocol"}>
+                        <SelectField value={draftApiProtocol} onChange={(value) => updateStructuredDraft(draftTool, { apiProtocol: value as OpenClawApiProtocol })} options={OPENCLAW_PROTOCOL_OPTIONS} />
+                      </Field>
+                      <Field label={locale === "zh" ? "模型别名" : "Model Alias"}>
+                        <TextInput value={draftModelCatalogAlias} onChange={(e) => updateStructuredDraft(draftTool, { modelCatalogAlias: e.target.value })} placeholder="DeepSeek" />
+                      </Field>
                     </div>
                   )}
 
                   {draftTool === "opencode" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "NPM 包" : "NPM Package"}</label>
-                      <input
-                        className="input"
-                        value={draftNpm}
-                        onChange={(e) => updateStructuredDraft(draftTool, { npm: e.target.value })}
-                        placeholder="@ai-sdk/openai-compatible"
-                        style={{ fontSize: 13 }}
-                      />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      <Field label={locale === "zh" ? "NPM 包" : "NPM Package"}>
+                        <SelectField value={draftNpm} onChange={(value) => updateStructuredDraft(draftTool, { npm: value as OpenCodeNpmPackage })} options={OPENCODE_NPM_OPTIONS} />
+                      </Field>
+                      <Field label={locale === "zh" ? "Thinking Level" : "Thinking Level"}>
+                        <select className="input" value={draftOpenCodeThinkingLevel} onChange={(e) => updateStructuredDraft(draftTool, { openCodeThinkingLevel: e.target.value as OpenCodeThinkingLevel | "" })} style={{ fontSize: 13 }}>
+                          <option value="">{locale === "zh" ? "无" : "None"}</option>
+                          {THINKING_LEVEL_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                      </Field>
                     </div>
                   )}
+
+                  <div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setShowAdvanced(!showAdvanced)}
+                      style={{ fontSize: 12, gap: 4, color: "var(--text-muted)" }}
+                    >
+                      {showAdvanced ? "▼" : "▶"} {locale === "zh" ? "高级设置" : "Advanced Settings"}
+                    </button>
+                    {showAdvanced && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12, paddingLeft: 4 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          <Field label={locale === "zh" ? "官网地址" : "Website URL"}>
+                            <TextInput value={draftWebsiteUrl} onChange={(e) => updateStructuredDraft(draftTool, { websiteUrl: e.target.value })} placeholder="https://example.com" />
+                          </Field>
+                          <Field label={locale === "zh" ? "获取 Key 地址" : "API Key URL"}>
+                            <TextInput value={draftApiKeyUrl} onChange={(e) => updateStructuredDraft(draftTool, { apiKeyUrl: e.target.value })} placeholder="https://example.com/keys" />
+                          </Field>
+                        </div>
+
+                        <Field label={locale === "zh" ? "候选端点" : "Endpoint Candidates"}>
+                          <TextArea value={draftEndpointCandidates} onChange={(value) => updateStructuredDraft(draftTool, { endpointCandidates: value })} placeholder={locale === "zh" ? "每行一个 URL" : "One URL per line"} />
+                        </Field>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          <Field label={locale === "zh" ? "分类" : "Category"}>
+                            <TextInput value={draftCategory} onChange={(e) => updateStructuredDraft(draftTool, { category: e.target.value })} placeholder="official / custom / aggregator" />
+                          </Field>
+                          <Field label={locale === "zh" ? "Provider 类型" : "Provider Type"}>
+                            <select className="input" value={draftProviderType} onChange={(e) => updateStructuredDraft(draftTool, { providerType: e.target.value as PresetProviderType | "" })} style={{ fontSize: 13 }}>
+                              <option value="">{locale === "zh" ? "无" : "None"}</option>
+                              <option value="github_copilot">github_copilot</option>
+                              <option value="google_oauth">google_oauth</option>
+                            </select>
+                          </Field>
+                        </div>
+
+                        <Field label={locale === "zh" ? "模板变量 JSON" : "Template Values JSON"}>
+                          <TextArea value={draftTemplateValues} onChange={(value) => updateStructuredDraft(draftTool, { templateValues: value })} placeholder='{"REGION":{"label":"区域","placeholder":"cn"}}' minHeight={80} />
+                        </Field>
+
+                        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                            <input type="checkbox" checked={draftRequiresOAuth} onChange={(e) => updateStructuredDraft(draftTool, { requiresOAuth: e.target.checked })} />
+                            {locale === "zh" ? "使用 OAuth" : "Use OAuth"}
+                          </label>
+                          {draftTool === "claude" && (
+                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                              <input type="checkbox" checked={draftDisableNonEssentialTraffic} onChange={(e) => updateStructuredDraft(draftTool, { disableNonEssentialTraffic: e.target.checked })} />
+                              {locale === "zh" ? "关闭非必要流量" : "Disable nonessential traffic"}
+                            </label>
+                          )}
+                          {draftTool === "opencode" && (
+                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                              <input type="checkbox" checked={draftOpenCodeIncludeThoughts} onChange={(e) => updateStructuredDraft(draftTool, { openCodeIncludeThoughts: e.target.checked })} />
+                              {locale === "zh" ? "包含扩展思考" : "Include thoughts"}
+                            </label>
+                          )}
+                        </div>
+
+                        {draftTool === "openclaw" && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                            <Field label="Context Window">
+                              <TextInput value={draftOpenClawContextWindow} onChange={(e) => updateStructuredDraft(draftTool, { openClawContextWindow: e.target.value })} placeholder="64000" />
+                            </Field>
+                            <Field label={locale === "zh" ? "输入成本" : "Input Cost"}>
+                              <TextInput value={draftOpenClawCostInput} onChange={(e) => updateStructuredDraft(draftTool, { openClawCostInput: e.target.value })} placeholder="0.0005" />
+                            </Field>
+                            <Field label={locale === "zh" ? "输出成本" : "Output Cost"}>
+                              <TextInput value={draftOpenClawCostOutput} onChange={(e) => updateStructuredDraft(draftTool, { openClawCostOutput: e.target.value })} placeholder="0.002" />
+                            </Field>
+                            <Field label={locale === "zh" ? "建议主模型" : "Suggested Primary"}>
+                              <TextInput value={draftSuggestedPrimaryModel} onChange={(e) => updateStructuredDraft(draftTool, { suggestedPrimaryModel: e.target.value })} placeholder="deepseek/deepseek-chat" />
+                            </Field>
+                            <Field label={locale === "zh" ? "建议回退模型" : "Suggested Fallbacks"}>
+                              <TextInput value={draftSuggestedFallbackModels} onChange={(e) => updateStructuredDraft(draftTool, { suggestedFallbackModels: e.target.value })} placeholder="model-a, model-b" />
+                            </Field>
+                          </div>
+                        )}
+
+                        {draftTool === "opencode" && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                            <Field label="Variant Name">
+                              <TextInput value={draftOpenCodeVariantName} onChange={(e) => updateStructuredDraft(draftTool, { openCodeVariantName: e.target.value })} placeholder="high" />
+                            </Field>
+                            <Field label="Thinking Budget">
+                              <TextInput value={draftOpenCodeThinkingBudget} onChange={(e) => updateStructuredDraft(draftTool, { openCodeThinkingBudget: e.target.value })} placeholder="5000" />
+                            </Field>
+                            <Field label="Reasoning Effort">
+                              <select className="input" value={draftOpenCodeReasoningEffort} onChange={(e) => updateStructuredDraft(draftTool, { openCodeReasoningEffort: e.target.value as OpenCodeReasoningEffort | "" })} style={{ fontSize: 13 }}>
+                                <option value="">{locale === "zh" ? "无" : "None"}</option>
+                                {EFFORT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                              </select>
+                            </Field>
+                            <Field label="Effort">
+                              <select className="input" value={draftOpenCodeEffort} onChange={(e) => updateStructuredDraft(draftTool, { openCodeEffort: e.target.value as OpenCodeReasoningEffort | "" })} style={{ fontSize: 13 }}>
+                                <option value="">{locale === "zh" ? "无" : "None"}</option>
+                                {EFFORT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                              </select>
+                            </Field>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* 模型配置 */}
               <div>
-                <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {locale === "zh" ? "模型配置" : "Models"}
-                </h3>
+                <SectionTitle>{locale === "zh" ? "模型配置" : "Models"}</SectionTitle>
                 {draftTool === "claude" ? (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "主模型" : "Main Model"}</label>
-                      <input
-                        className="input"
-                        value={draftModel}
-                        onChange={(e) => updateStructuredDraft(draftTool, { model: e.target.value })}
-                        placeholder="claude-sonnet-4-5"
-                        style={{ fontSize: 13 }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "推理模型" : "Reasoning Model"}</label>
-                      <input
-                        className="input"
-                        value={draftReasoningModel}
-                        onChange={(e) => updateStructuredDraft(draftTool, { reasoningModel: e.target.value })}
-                        placeholder="claude-sonnet-4-5"
-                        style={{ fontSize: 13 }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "Haiku 默认模型" : "Default Haiku"}</label>
-                      <input
-                        className="input"
-                        value={draftHaikuModel}
-                        onChange={(e) => updateStructuredDraft(draftTool, { haikuModel: e.target.value })}
-                        placeholder="claude-haiku-3-5"
-                        style={{ fontSize: 13 }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "Sonnet 默认模型" : "Default Sonnet"}</label>
-                      <input
-                        className="input"
-                        value={draftSonnetModel}
-                        onChange={(e) => updateStructuredDraft(draftTool, { sonnetModel: e.target.value })}
-                        placeholder="claude-sonnet-4-5"
-                        style={{ fontSize: 13 }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "Opus 默认模型" : "Default Opus"}</label>
-                      <input
-                        className="input"
-                        value={draftOpusModel}
-                        onChange={(e) => updateStructuredDraft(draftTool, { opusModel: e.target.value })}
-                        placeholder="claude-opus-4-5"
-                        style={{ fontSize: 13 }}
-                      />
-                    </div>
-                  </div>
-                ) : (draftTool === "openclaw" || draftTool === "opencode") ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "模型 ID" : "Model ID"}</label>
-                      <input
-                        className="input"
-                        value={draftModel}
-                        onChange={(e) => updateStructuredDraft(draftTool, { model: e.target.value })}
-                        placeholder={locale === "zh" ? "例如 deepseek-chat" : "e.g. deepseek-chat"}
-                        style={{ fontSize: 13 }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="field-label">{locale === "zh" ? "模型显示名" : "Display Name"}</label>
-                      <input
-                        className="input"
-                        value={draftModelName}
-                        onChange={(e) => updateStructuredDraft(draftTool, { modelName: e.target.value })}
-                        placeholder={locale === "zh" ? "可选，默认同 ID" : "Optional, defaults to ID"}
-                        style={{ fontSize: 13 }}
-                      />
-                    </div>
+                    <Field label={locale === "zh" ? "主模型" : "Main Model"}><TextInput value={draftModel} onChange={(e) => updateStructuredDraft(draftTool, { model: e.target.value })} placeholder="claude-sonnet-4-5" /></Field>
+                    <Field label={locale === "zh" ? "推理模型" : "Reasoning Model"}><TextInput value={draftReasoningModel} onChange={(e) => updateStructuredDraft(draftTool, { reasoningModel: e.target.value })} placeholder="claude-sonnet-4-5" /></Field>
+                    <Field label={locale === "zh" ? "Haiku 默认模型" : "Default Haiku"}><TextInput value={draftHaikuModel} onChange={(e) => updateStructuredDraft(draftTool, { haikuModel: e.target.value })} placeholder="claude-haiku-3-5" /></Field>
+                    <Field label={locale === "zh" ? "Sonnet 默认模型" : "Default Sonnet"}><TextInput value={draftSonnetModel} onChange={(e) => updateStructuredDraft(draftTool, { sonnetModel: e.target.value })} placeholder="claude-sonnet-4-5" /></Field>
+                    <Field label={locale === "zh" ? "Opus 默认模型" : "Default Opus"}><TextInput value={draftOpusModel} onChange={(e) => updateStructuredDraft(draftTool, { opusModel: e.target.value })} placeholder="claude-opus-4-5" /></Field>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <label className="field-label">{locale === "zh" ? "模型" : "Model"}</label>
-                    <input
-                      className="input"
-                      value={draftModel}
-                      onChange={(e) => updateStructuredDraft(draftTool, { model: e.target.value })}
-                      placeholder={locale === "zh" ? "模型名称" : "Model name"}
-                      style={{ fontSize: 13 }}
-                    />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                    <Field label={locale === "zh" ? "模型 ID" : "Model ID"}><TextInput value={draftModel} onChange={(e) => updateStructuredDraft(draftTool, { model: e.target.value })} placeholder={locale === "zh" ? "例如 deepseek-chat" : "e.g. deepseek-chat"} /></Field>
+                    <Field label={locale === "zh" ? "模型显示名" : "Display Name"}><TextInput value={draftModelName} onChange={(e) => updateStructuredDraft(draftTool, { modelName: e.target.value })} placeholder={locale === "zh" ? "可选，默认同 ID" : "Optional, defaults to ID"} /></Field>
+                    {draftTool === "opencode" && (
+                      <>
+                        <Field label={locale === "zh" ? "Context Limit" : "Context Limit"}><TextInput value={draftOpenCodeContextLimit} onChange={(e) => updateStructuredDraft(draftTool, { openCodeContextLimit: e.target.value })} placeholder="400000" /></Field>
+                        <Field label={locale === "zh" ? "Output Limit" : "Output Limit"}><TextInput value={draftOpenCodeOutputLimit} onChange={(e) => updateStructuredDraft(draftTool, { openCodeOutputLimit: e.target.value })} placeholder="128000" /></Field>
+                        <Field label={locale === "zh" ? "输入模态" : "Input Modalities"}><TextInput value={draftOpenCodeInputModalities} onChange={(e) => updateStructuredDraft(draftTool, { openCodeInputModalities: e.target.value })} placeholder="text,image,pdf" /></Field>
+                        <Field label={locale === "zh" ? "输出模态" : "Output Modalities"}><TextInput value={draftOpenCodeOutputModalities} onChange={(e) => updateStructuredDraft(draftTool, { openCodeOutputModalities: e.target.value })} placeholder="text" /></Field>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* 原始配置 */}
               <div>
-                <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {locale === "zh" ? "原始配置" : "Raw Configuration"}
-                </h3>
+                <SectionTitle>{locale === "zh" ? "原始配置" : "Raw Configuration"}</SectionTitle>
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-                  {locale === "zh"
-                    ? "上方表单字段会自动同步到此处，你也可以直接编辑原始配置。"
-                    : "Form fields above are synced here. You can also edit the raw config directly."}
+                  {locale === "zh" ? "上方表单字段会自动同步到此处，你也可以直接编辑原始配置。" : "Form fields above are synced here. You can also edit the raw config directly."}
                 </div>
                 {draftTool === "codex" ? (
                   <CodexRawConfigEditor value={draftContent} onChange={setDraftContent} />
                 ) : (
-                  <CodeEditor
-                    value={draftContent}
-                    onChange={setDraftContent}
-                    language={getConfigLanguage(draftTool, draftContent)}
-                    minHeight={240}
-                  />
+                  <CodeEditor value={draftContent} onChange={setDraftContent} language={getConfigLanguage(draftTool, draftContent)} minHeight={240} />
                 )}
               </div>
             </>
           )}
 
-          {/* 非结构化工具：直接显示编辑器 */}
           {!isStructured && (
             <div>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                {locale === "zh" ? "配置内容" : "Configuration"}
-              </h3>
+              <SectionTitle>{locale === "zh" ? "配置内容" : "Configuration"}</SectionTitle>
               <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
                 {locale === "zh" ? "直接编辑完整配置内容。" : "Edit the full configuration directly."}
               </div>
@@ -885,27 +946,15 @@ export default function Profiles() {
                   <div className="spinner" />
                 </div>
               ) : (
-                <CodeEditor
-                  value={draftContent}
-                  onChange={setDraftContent}
-                  language={getConfigLanguage(draftTool, draftContent)}
-                  minHeight={300}
-                />
+                <CodeEditor value={draftContent} onChange={setDraftContent} language={getConfigLanguage(draftTool, draftContent)} minHeight={300} />
               )}
             </div>
           )}
         </div>
 
         <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={closeModal}>
-            {locale === "zh" ? "取消" : "Cancel"}
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => void handleSaveModal()}
-            disabled={!draftName.trim() || saving}
-            style={{ gap: 6 }}
-          >
+          <button className="btn btn-secondary btn-sm" onClick={closeModal}>{locale === "zh" ? "取消" : "Cancel"}</button>
+          <button className="btn btn-primary btn-sm" onClick={() => void handleSaveModal()} disabled={!draftName.trim() || saving} style={{ gap: 6 }}>
             {saving ? <div className="spinner" style={{ width: 14, height: 14 }} /> : <Save size={14} />}
             {locale === "zh" ? "保存" : "Save"}
           </button>
@@ -914,16 +963,13 @@ export default function Profiles() {
     );
   }
 
-  // --- 列表视图 ---
   return (
     <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
           <h2 className="page-title">{locale === "zh" ? "配置切换" : "Config Profiles"}</h2>
           <p className="page-subtitle">
-            {locale === "zh"
-              ? `共 ${profiles.length} 个配置，当前生效 ${activeIds.length} 个`
-              : `${profiles.length} profiles, ${activeIds.length} active`}
+            {locale === "zh" ? `共 ${profiles.length} 个配置，当前生效 ${activeIds.length} 个` : `${profiles.length} profiles, ${activeIds.length} active`}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -931,12 +977,7 @@ export default function Profiles() {
             <RefreshCw size={14} />
             {locale === "zh" ? "刷新" : "Refresh"}
           </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => void openCreateModal()}
-            disabled={installedTools.length === 0}
-            style={{ gap: 6 }}
-          >
+          <button className="btn btn-primary btn-sm" onClick={() => void openCreateModal()} disabled={installedTools.length === 0} style={{ gap: 6 }}>
             <Plus size={14} />
             {locale === "zh" ? "新增" : "New"}
           </button>
@@ -945,23 +986,10 @@ export default function Profiles() {
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 360 }}>
-          <Search
-            size={14}
-            style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }}
-          />
-          <input
-            className="input"
-            style={{ paddingLeft: 36 }}
-            placeholder={locale === "zh" ? "搜索配置..." : "Search..."}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+          <input className="input" style={{ paddingLeft: 36 }} placeholder={locale === "zh" ? "搜索配置..." : "Search..."} value={search} onChange={(e) => setSearch(e.target.value)} />
           {search && (
-            <button
-              className="btn btn-ghost btn-icon-sm"
-              style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
-              onClick={() => setSearch("")}
-            >
+            <button className="btn btn-ghost btn-icon-sm" style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }} onClick={() => setSearch("")}>
               <X size={14} />
             </button>
           )}
@@ -983,16 +1011,10 @@ export default function Profiles() {
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
         {filteredProfiles.length === 0 ? (
           <div className="card empty-state" style={{ flex: 1 }}>
-            <div className="empty-icon">
-              <ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} />
-            </div>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>
-              {locale === "zh" ? "没有可显示的配置" : "No configurations to display"}
-            </p>
+            <div className="empty-icon"><ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} /></div>
+            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>{locale === "zh" ? "没有可显示的配置" : "No configurations to display"}</p>
             <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>
-              {locale === "zh"
-                ? "点击右上角「新增」保存一份当前配置，之后就可以在这里一键切换。"
-                : "Click \"New\" to save a configuration, then switch here."}
+              {locale === "zh" ? "点击右上角「新增」保存一份当前配置，之后就可以在这里一键切换。" : "Click \"New\" to save a configuration, then switch here."}
             </p>
           </div>
         ) : (
@@ -1012,74 +1034,29 @@ export default function Profiles() {
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1, alignItems: "center" }}>
-                    <div className="icon-box" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }}>
-                      <Icon size={16} />
-                    </div>
+                    <div className="icon-box" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }}><Icon size={16} /></div>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 14, fontWeight: 600 }}>{profile.name}</span>
-                        <span className="badge badge-muted" style={{ textTransform: "capitalize", fontSize: 10 }}>
-                          {profile.tool_id}
-                        </span>
-                        {isActive && (
-                          <span className="badge badge-success" style={{ fontSize: 10 }}>
-                            {locale === "zh" ? "当前生效" : "Active"}
-                          </span>
-                        )}
+                        <span className="badge badge-muted" style={{ textTransform: "capitalize", fontSize: 10 }}>{profile.tool_id}</span>
+                        {isActive && <span className="badge badge-success" style={{ fontSize: 10 }}>{locale === "zh" ? "当前生效" : "Active"}</span>}
                       </div>
                       <div style={{ display: "flex", gap: 16, marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                        {summary.baseUrl && (
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
-                            {summary.baseUrl}
-                          </span>
-                        )}
-                        {summary.model && (
-                          <span style={{ flexShrink: 0 }}>{summary.model}</span>
-                        )}
-                        {!summary.baseUrl && !summary.model && (
-                          <span>{formatTime(profile.updated_at || profile.created_at)}</span>
-                        )}
+                        {summary.baseUrl && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{summary.baseUrl}</span>}
+                        {summary.model && <span style={{ flexShrink: 0 }}>{summary.model}</span>}
+                        {!summary.baseUrl && !summary.model && <span>{formatTime(profile.updated_at || profile.created_at)}</span>}
                       </div>
                     </div>
                   </div>
 
                   <div className="card-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                    <button
-                      className={`btn btn-xs ${isActive ? "btn-secondary" : "btn-primary"}`}
-                      onClick={() => void handleApply(profile)}
-                      disabled={applying === profile.id}
-                      style={{ gap: 5 }}
-                    >
-                      {applying === profile.id ? (
-                        <div className="spinner" style={{ width: 11, height: 11 }} />
-                      ) : isActive ? (
-                        <Check size={11} />
-                      ) : (
-                        <ArrowRightLeft size={11} />
-                      )}
+                    <button className={`btn btn-xs ${isActive ? "btn-secondary" : "btn-primary"}`} onClick={() => void handleApply(profile)} disabled={applying === profile.id} style={{ gap: 5 }}>
+                      {applying === profile.id ? <div className="spinner" style={{ width: 11, height: 11 }} /> : isActive ? <Check size={11} /> : <ArrowRightLeft size={11} />}
                       {locale === "zh" ? (isActive ? "已生效" : "切换") : (isActive ? "Active" : "Apply")}
                     </button>
-                    <button
-                      className="btn btn-ghost btn-icon-sm"
-                      onClick={() => void handleDuplicate(profile)}
-                      title={locale === "zh" ? "复制" : "Duplicate"}
-                    >
-                      <Copy size={14} />
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-icon-sm"
-                      onClick={() => openEditModal(profile)}
-                      title={locale === "zh" ? "编辑" : "Edit"}
-                    >
-                      <Edit3 size={14} />
-                    </button>
-                    <button
-                      className="btn btn-danger-ghost btn-icon-sm"
-                      onClick={() => void handleDelete(profile)}
-                      title={locale === "zh" ? "删除" : "Delete"}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <button className="btn btn-ghost btn-icon-sm" onClick={() => void handleDuplicate(profile)} title={locale === "zh" ? "复制" : "Duplicate"}><Copy size={14} /></button>
+                    <button className="btn btn-ghost btn-icon-sm" onClick={() => openEditModal(profile)} title={locale === "zh" ? "编辑" : "Edit"}><Edit3 size={14} /></button>
+                    <button className="btn btn-danger-ghost btn-icon-sm" onClick={() => void handleDelete(profile)} title={locale === "zh" ? "删除" : "Delete"}><Trash2 size={14} /></button>
                   </div>
                 </div>
               </div>

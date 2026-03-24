@@ -92,6 +92,8 @@ export interface StructuredDraftFields {
   hideAttribution: boolean;
   effortHigh: boolean;
   enableTeammates: boolean;
+  enableStatusLine: boolean;
+  enableBypassPermissions: boolean;
   codexWireApi: CodexWireApi;
   codexReasoningEffort: CodexReasoningEffort;
   openClawContextWindow: string;
@@ -310,6 +312,8 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
     hideAttribution: false,
     effortHigh: false,
     enableTeammates: false,
+    enableStatusLine: false,
+    enableBypassPermissions: false,
     codexWireApi: preset?.codexWireApi || "responses",
     codexReasoningEffort: preset?.codexReasoningEffort || "high",
     openClawContextWindow: preset?.openClawContextWindow || "",
@@ -363,6 +367,8 @@ export function applyPresetToFields(
       hideAttribution: current?.hideAttribution || false,
       effortHigh: current?.effortHigh || false,
       enableTeammates: current?.enableTeammates || false,
+      enableStatusLine: current?.enableStatusLine || false,
+      enableBypassPermissions: current?.enableBypassPermissions || false,
       codexWireApi: current?.codexWireApi || "responses",
       codexReasoningEffort: current?.codexReasoningEffort || "high",
       openClawContextWindow: current?.openClawContextWindow || "",
@@ -408,6 +414,8 @@ export function applyPresetToFields(
     hideAttribution: current?.hideAttribution || false,
     effortHigh: current?.effortHigh || false,
     enableTeammates: current?.enableTeammates || false,
+    enableStatusLine: current?.enableStatusLine || false,
+    enableBypassPermissions: current?.enableBypassPermissions || false,
     codexWireApi: preset.codexWireApi || current?.codexWireApi || defaults.codexWireApi,
     codexReasoningEffort: preset.codexReasoningEffort || current?.codexReasoningEffort || defaults.codexReasoningEffort,
     openClawContextWindow: preset.openClawContextWindow || current?.openClawContextWindow || "",
@@ -477,6 +485,34 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     }
     if (fields.effortHigh) {
       result.effortLevel = "high";
+    }
+    if (fields.enableStatusLine) {
+      result.enabledPlugins = { "claude-hud@claude-hud": true };
+      result.statusLine = {
+        type: "command",
+        command: "node ~/.claude/plugins/cache/claude-hud/claude-hud/0.0.6/dist/index.js",
+      };
+    }
+    if (fields.enableBypassPermissions) {
+      result.skipDangerousModePermissionPrompt = true;
+      result.permissions = {
+        defaultMode: "bypassPermissions",
+        allow: [
+          "Bash(git:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)",
+          "Bash(python:*)", "Bash(pip:*)", "Bash(gh:*)", "Bash(ls:*)",
+          "Bash(cat:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)",
+          "Bash(head:*)", "Bash(tail:*)", "Bash(echo:*)", "Bash(pwd)",
+          "Bash(which:*)", "Bash(grep:*)", "Bash(curl:*)", "Bash(docker:*)",
+          "WebSearch", "WebFetch(*)",
+          "mcp__context7__*", "mcp__chrome-devtools__*",
+        ],
+        deny: [
+          "Bash(rm -rf /)", "Bash(rm -rf /*)",
+          "Bash(rm -rf ~)", "Bash(rm -rf ~/*)",
+          "Bash(format:*)", "Bash(shutdown:*)", "Bash(reboot:*)",
+          "Bash(mkfs:*)", "Bash(dd if=/dev/zero:*)",
+        ],
+      };
     }
     return JSON.stringify(result, null, 2);
   }
@@ -666,6 +702,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         hideAttribution: parsed.attribution?.commit === "" && parsed.attribution?.pr === "",
         effortHigh: parsed.effortLevel === "high",
         enableTeammates: env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === "1" || env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS as any === 1,
+        enableStatusLine: Boolean(parsed.statusLine?.command),
+        enableBypassPermissions: parsed.permissions?.defaultMode === "bypassPermissions",
         websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
         category: metadata.category || defaults.category,

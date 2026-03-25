@@ -247,6 +247,11 @@ const zh = {
     installUpdate: "安装更新",
     updateNotConfigured: "更新服务未配置",
     updateFailed: "更新失败",
+    skillSyncMethod: "Skill 同步方式",
+    skillSyncDesc: "选择技能文件的同步策略",
+    skillSyncSymlink: "软连接",
+    skillSyncCopy: "文件复制",
+    skillSyncSymlinkHint: "软连接节省磁盘空间并支持实时同步。注意：Windows 可能需要管理员权限或开启开发者模式",
   },
   common: {
     na: "无",
@@ -510,6 +515,11 @@ const en: typeof zh = {
     installUpdate: "Install Update",
     updateNotConfigured: "Updater not configured",
     updateFailed: "Update failed",
+    skillSyncMethod: "Skill Sync Method",
+    skillSyncDesc: "Choose file sync strategy for skills",
+    skillSyncSymlink: "Symlink",
+    skillSyncCopy: "File Copy",
+    skillSyncSymlinkHint: "Symlinks save disk space and stay in sync. Note: Windows may require admin privileges or Developer Mode enabled",
   },
   common: {
     na: "N/A",

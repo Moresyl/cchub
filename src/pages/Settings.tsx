@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, CheckCircle, AlertCircle, Copy, Check, Upload, Archive, Wifi } from "lucide-react";
+import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, CheckCircle, AlertCircle, Copy, Check, Upload, Archive, Wifi, Link2 } from "lucide-react";
 import { t, getLocale, setLocale, type Locale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
@@ -26,16 +26,32 @@ export default function Settings() {
   const [pathSaved, setPathSaved] = useState<string | null>(null);
   const [proxyUrl, setProxyUrl] = useState("");
   const [proxySaved, setProxySaved] = useState(false);
+  const [skillSyncMethod, setSkillSyncMethod] = useState<"symlink" | "copy">("copy");
   const i = t();
   const loc = getLocale();
 
-  useEffect(() => { loadToolsAndPaths(); loadProxy(); getVersion().then(v => setAppVersion("v" + v)).catch(() => {}); }, []);
+  useEffect(() => { loadToolsAndPaths(); loadProxy(); loadSkillSyncMethod(); getVersion().then(v => setAppVersion("v" + v)).catch(() => {}); }, []);
 
   async function loadProxy() {
     try {
       const proxy = await invoke<string>("get_proxy");
       setProxyUrl(proxy);
     } catch { /* ignore */ }
+  }
+
+  async function loadSkillSyncMethod() {
+    try {
+      const method = await invoke<string>("get_skill_sync_method");
+      if (method === "symlink" || method === "copy") setSkillSyncMethod(method);
+    } catch { /* ignore */ }
+  }
+
+  async function handleSyncMethodChange(method: "symlink" | "copy") {
+    try {
+      await invoke("set_skill_sync_method", { method });
+      setSkillSyncMethod(method);
+      showToast("success", loc === "zh" ? "已保存" : "Saved");
+    } catch (e) { showToast("error", String(e)); }
   }
 
   async function loadToolsAndPaths() {
@@ -173,6 +189,34 @@ export default function Settings() {
                 <div className="toggle-knob" />
               </button>
             </div>
+
+            <div className="divider" />
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Link2 size={15} style={{ color: "var(--text-secondary)" }} />
+                  <p style={{ fontSize: 14, fontWeight: 500 }}>{i.settings.skillSyncMethod}</p>
+                </div>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{i.settings.skillSyncDesc}</p>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(["symlink", "copy"] as const).map((m) => (
+                  <button
+                    key={m}
+                    className={`btn btn-sm ${skillSyncMethod === m ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => handleSyncMethodChange(m)}
+                  >
+                    {m === "symlink" ? i.settings.skillSyncSymlink : i.settings.skillSyncCopy}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {skillSyncMethod === "symlink" && (
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: -8 }}>
+                {i.settings.skillSyncSymlinkHint}
+              </p>
+            )}
           </div>
         </div>
 

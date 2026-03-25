@@ -111,8 +111,9 @@ pub fn get_skill_categories(_db: State<'_, DbState>) -> Result<scanner::Category
 }
 
 #[tauri::command]
-pub fn install_skill_file(source: String, target_skills_dir: String) -> Result<String, String> {
-    installer::install_skill_file(&source, &target_skills_dir)
+pub fn install_skill_file(source: String, target_skills_dir: String, method: Option<String>) -> Result<String, String> {
+    let m = method.as_deref().unwrap_or("copy");
+    installer::install_skill_file(&source, &target_skills_dir, m)
 }
 
 #[tauri::command]
@@ -129,8 +130,9 @@ pub fn uninstall_skill_file(path: String, db: State<'_, DbState>) -> Result<(), 
 }
 
 #[tauri::command]
-pub fn copy_skill_between_tools(path: String, target_skills_dir: String) -> Result<String, String> {
-    installer::copy_skill_between_tools(&path, &target_skills_dir)
+pub fn copy_skill_between_tools(path: String, target_skills_dir: String, method: Option<String>) -> Result<String, String> {
+    let m = method.as_deref().unwrap_or("copy");
+    installer::copy_skill_between_tools(&path, &target_skills_dir, m)
 }
 
 /// Remove a synced skill from a target tool's skills directory
@@ -219,5 +221,32 @@ pub fn delete_plugin_dir(plugin_name: String) -> Result<(), String> {
         std::fs::remove_dir_all(&plugin_path)
             .map_err(|e| format!("Failed to delete plugin directory: {}", e))?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_skill_sync_method(db: State<'_, DbState>) -> String {
+    if let Ok(conn) = db.0.lock() {
+        if let Ok(val) = conn.query_row(
+            "SELECT value FROM app_settings WHERE key = 'skill_sync_method'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            if !val.is_empty() {
+                return val;
+            }
+        }
+    }
+    "copy".to_string()
+}
+
+#[tauri::command]
+pub fn set_skill_sync_method(method: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('skill_sync_method', ?1)",
+        rusqlite::params![method],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }

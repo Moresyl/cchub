@@ -128,6 +128,8 @@ pub fn run() {
             skill_commands::write_skill_content,
             skill_commands::toggle_skill_file,
             skill_commands::delete_plugin_dir,
+            skill_commands::get_skill_sync_method,
+            skill_commands::set_skill_sync_method,
             // Hook commands
             hook_commands::scan_hooks,
             hook_commands::get_hooks,

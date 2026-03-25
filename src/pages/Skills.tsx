@@ -65,6 +65,7 @@ export default function Skills() {
   const [editContent, setEditContent] = useState("");
   const [syncedSkills, setSyncedSkills] = useState<Record<string, Set<string>>>({});
   const [pendingDelete, setPendingDelete] = useState<{ type: "skill"; item: Skill } | { type: "plugin"; item: Plugin } | null>(null);
+  const [skillSyncMethod, setSkillSyncMethod] = useState<string>("copy");
   const i = t();
   const locale = getLocale();
 
@@ -73,14 +74,16 @@ export default function Skills() {
   async function load() {
     setLoading(true);
     try {
-      const [sk, pl, dt] = await Promise.all([
+      const [sk, pl, dt, syncMethod] = await Promise.all([
         invoke<Skill[]>("scan_skills"),
         invoke<Plugin[]>("get_plugins"),
         invoke<DetectedTool[]>("detect_tools"),
+        invoke<string>("get_skill_sync_method").catch(() => "copy"),
       ]);
       setSkills(sk);
       setPlugins(pl);
       setTools(dt);
+      setSkillSyncMethod(syncMethod);
       // Auto-select first installed tool
       const firstInstalled = dt.find((t) => t.installed);
       if (firstInstalled) setActiveTool(firstInstalled.id);
@@ -710,7 +713,7 @@ export default function Skills() {
                             } else {
                               // Sync = copy to target tool
                               try {
-                                await invoke("copy_skill_between_tools", { path: selectedSkill.file_path, targetSkillsDir: tool.skills_dir });
+                                await invoke("copy_skill_between_tools", { path: selectedSkill.file_path, targetSkillsDir: tool.skills_dir, method: skillSyncMethod });
                                 setSyncedSkills(prev => {
                                   const next = { ...prev };
                                   if (!next[selectedSkill.id]) next[selectedSkill.id] = new Set();

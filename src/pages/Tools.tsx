@@ -228,11 +228,11 @@ export default function Tools() {
               </div>
             </div>
 
-            {/* Skip Dangerous Confirm */}
+            {/* Bypass Permissions */}
             <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{zh ? "跳过危险确认" : "Skip Danger Prompt"}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{zh ? "全权限模式免确认" : "No confirmation for bypass mode"}</p>
+                <h4 style={{ fontSize: 13, fontWeight: 700 }}>Bypass Permissions</h4>
+                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{zh ? "跳过所有权限确认，全自动执行" : "Skip all permission prompts, fully autonomous"}</p>
               </div>
               <ToggleSwitch
                 value={permLevel === 3}
@@ -241,8 +241,8 @@ export default function Tools() {
                   setPermLevel(newLevel);
                   setClaudeSetting("set_claude_permissions_level", { level: newLevel }, () => {});
                 }}
-                labelOn={zh ? "已跳过" : "Skipped"}
-                labelOff={zh ? "需确认" : "Required"}
+                labelOn="ON"
+                labelOff="OFF"
               />
             </div>
 

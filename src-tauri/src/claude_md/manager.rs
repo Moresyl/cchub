@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use rusqlite::Connection;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClaudeMdFile {
@@ -54,9 +56,76 @@ const DOC_SPECS: &[DocSpec] = &[
         hidden_dir: ".gemini",
         file_name: "GEMINI.md",
     },
+    DocSpec {
+        tool_id: "opencode",
+        tool_name: "OpenCode",
+        hidden_dir: ".opencode",
+        file_name: "AGENTS.md",
+    },
+    DocSpec {
+        tool_id: "openclaw",
+        tool_name: "OpenClaw",
+        hidden_dir: ".openclaw",
+        file_name: "AGENTS.md",
+    },
 ];
 
-pub fn scan_claude_md_files() -> Vec<ClaudeMdFile> {
+fn discover_project_roots(conn: &Connection) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut push_root = |raw_path: String| {
+        let trimmed = raw_path.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let key = trimmed.replace('\\', "/");
+        if !seen.insert(key) {
+            return;
+        }
+
+        let path = PathBuf::from(trimmed);
+        if path.exists() {
+            roots.push(path);
+        }
+    };
+
+    if let Ok(mut stmt) = conn.prepare("SELECT base_path FROM workspaces WHERE base_path IS NOT NULL AND trim(base_path) != ''") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                push_root(row);
+            }
+        }
+    }
+
+    if let Ok(mut stmt) = conn.prepare("SELECT project_path FROM hooks WHERE project_path IS NOT NULL AND trim(project_path) != ''") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                push_root(row);
+            }
+        }
+    }
+
+    let known_roots: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'known_project_roots'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(raw) = known_roots {
+        if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
+            for path in paths {
+                push_root(path);
+            }
+        }
+    }
+
+    roots
+}
+
+pub fn scan_claude_md_files(conn: &Connection) -> Vec<ClaudeMdFile> {
     let mut results = Vec::new();
     let home = match dirs::home_dir() {
         Some(h) => h,
@@ -69,6 +138,24 @@ pub fn scan_claude_md_files() -> Vec<ClaudeMdFile> {
             if global_doc.exists() {
                 if let Some(entry) = read_doc_entry(&global_doc, spec, &format!("Global ({})", spec.hidden_dir), "global") {
                     results.push(entry);
+                }
+            }
+        }
+    }
+
+    for project_root in discover_project_roots(conn) {
+        let project_name = project_root
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| project_root.to_string_lossy().to_string());
+
+        for spec in DOC_SPECS {
+            for filename in [spec.file_name.to_string(), format!("{}.bak", spec.file_name)] {
+                let project_doc = project_root.join(&filename);
+                if project_doc.exists() {
+                    if let Some(entry) = read_doc_entry(&project_doc, spec, &project_name, "project") {
+                        results.push(entry);
+                    }
                 }
             }
         }

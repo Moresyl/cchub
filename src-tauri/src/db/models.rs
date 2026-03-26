@@ -49,6 +49,8 @@ pub struct Hook {
     pub command: String,
     pub scope: String,
     pub project_path: Option<String>,
+    pub source_event: Option<String>,
+    pub source_index: Option<usize>,
     pub enabled: bool,
     pub timeout: Option<u64>,
 }

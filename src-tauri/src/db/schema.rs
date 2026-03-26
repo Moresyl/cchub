@@ -119,6 +119,13 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS imported_project_files (
+    project_root TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    content_base64 TEXT NOT NULL,
+    PRIMARY KEY (project_root, relative_path)
+);
 "#.to_string()
 }
 

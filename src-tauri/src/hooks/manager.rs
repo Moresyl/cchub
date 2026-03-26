@@ -1,5 +1,7 @@
 use crate::db::models::Hook;
 use crate::utils::atomic_write_string;
+use rusqlite::Connection;
+use std::collections::HashSet;
 
 /// Read hooks from a settings.json file at the given path
 fn read_hooks_from_file(path: &std::path::Path, scope: &str, project_path: Option<&str>) -> Vec<Hook> {
@@ -35,12 +37,20 @@ fn read_hooks_from_file(path: &std::path::Path, scope: &str, project_path: Optio
                         }
 
                         hooks.push(Hook {
-                            id: format!("{}-{}", event, i),
+                            id: format!(
+                                "{}::{}::{}::{}",
+                                scope,
+                                project_path.unwrap_or("global"),
+                                event,
+                                i
+                            ),
                             event: event.clone(),
                             matcher,
                             command,
                             scope: scope.to_string(),
                             project_path: project_path.map(String::from),
+                            source_event: Some(event.clone()),
+                            source_index: Some(i),
                             enabled: true,
                             timeout,
                         });
@@ -53,18 +63,89 @@ fn read_hooks_from_file(path: &std::path::Path, scope: &str, project_path: Optio
     hooks
 }
 
-/// Read hooks from global ~/.claude/settings.json
-pub fn read_hooks_from_settings() -> Vec<Hook> {
-    let path = match dirs::home_dir() {
-        Some(h) => h.join(".claude").join("settings.json"),
-        None => return Vec::new(),
+fn discover_project_roots(conn: &Connection) -> Vec<String> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut push_root = |path: String| {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let key = trimmed.replace('\\', "/");
+        if seen.insert(key) {
+            roots.push(trimmed.to_string());
+        }
     };
 
-    if !path.exists() {
-        return Vec::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT base_path FROM workspaces WHERE base_path IS NOT NULL AND trim(base_path) != ''") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                push_root(row);
+            }
+        }
     }
 
-    read_hooks_from_file(&path, "global", None)
+    if let Ok(mut stmt) = conn.prepare("SELECT project_path FROM hooks WHERE project_path IS NOT NULL AND trim(project_path) != ''") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                push_root(row);
+            }
+        }
+    }
+
+    let known_roots: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'known_project_roots'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(raw) = known_roots {
+        if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
+            for path in paths {
+                push_root(path);
+            }
+        }
+    }
+
+    roots
+}
+
+/// Read hooks from global and project ~/.claude/settings.json files.
+pub fn read_hooks_from_settings(conn: &Connection) -> Vec<Hook> {
+    let mut hooks = Vec::new();
+
+    let path = match dirs::home_dir() {
+        Some(h) => h.join(".claude").join("settings.json"),
+        None => return hooks,
+    };
+
+    if path.exists() {
+        hooks.extend(read_hooks_from_file(&path, "global", None));
+    }
+
+    for project_root in discover_project_roots(conn) {
+        let project_settings = std::path::PathBuf::from(&project_root)
+            .join(".claude")
+            .join("settings.json");
+        if project_settings.exists() {
+            hooks.extend(read_hooks_from_file(
+                &project_settings,
+                "project",
+                Some(&project_root),
+            ));
+        }
+    }
+
+    hooks.sort_by(|left, right| {
+        left.scope
+            .cmp(&right.scope)
+            .then(left.project_path.cmp(&right.project_path))
+            .then(left.event.cmp(&right.event))
+            .then(left.source_index.cmp(&right.source_index))
+    });
+    hooks
 }
 
 /// Get the settings.json path for a given scope

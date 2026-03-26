@@ -1,9 +1,12 @@
 use crate::claude_md::manager;
+use crate::db::DbState;
 use tauri::command;
+use tauri::State;
 
 #[command]
-pub fn scan_claude_md() -> Result<Vec<manager::ClaudeMdFile>, String> {
-    Ok(manager::scan_claude_md_files())
+pub fn scan_claude_md(db: State<'_, DbState>) -> Result<Vec<manager::ClaudeMdFile>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(manager::scan_claude_md_files(&conn))
 }
 
 #[command]
@@ -24,6 +27,15 @@ pub fn get_claude_md_templates() -> Result<Vec<manager::ClaudeMdTemplate>, Strin
 #[command]
 pub fn create_new_claude_md(dir_path: String, content: String) -> Result<String, String> {
     manager::create_claude_md(&dir_path, &content)
+}
+
+#[command]
+pub fn create_instruction_doc_file(
+    dir_path: String,
+    file_name: String,
+    content: String,
+) -> Result<String, String> {
+    manager::create_instruction_doc(&dir_path, &file_name, &content)
 }
 
 #[command]

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, CheckCircle, AlertCircle, Copy, Check, Upload, Archive, Wifi, Link2 } from "lucide-react";
 import { t, getLocale, setLocale, type Locale } from "../lib/i18n";
@@ -103,6 +103,21 @@ export default function Settings() {
   const [repairingAll, setRepairingAll] = useState(false);
   const [rescanningAll, setRescanningAll] = useState(false);
   const [refreshingMigrationHealth, setRefreshingMigrationHealth] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
+  const [importingBackup, setImportingBackup] = useState(false);
+  const [migrationPanelsOpen, setMigrationPanelsOpen] = useState({
+    summary: false,
+    pending: false,
+    health: false,
+    auth: false,
+  });
+  const migrationPanelsInitialized = useRef(false);
+  const migrationPanelRefs = {
+    summary: useRef<HTMLDetailsElement | null>(null),
+    pending: useRef<HTMLDetailsElement | null>(null),
+    health: useRef<HTMLDetailsElement | null>(null),
+    auth: useRef<HTMLDetailsElement | null>(null),
+  };
   const i = t();
   const loc = getLocale();
 
@@ -132,14 +147,7 @@ export default function Settings() {
   async function loadPendingProjectRoots() {
     try {
       const roots = await invoke<PendingImportedProjectRoot[]>("get_pending_imported_project_roots");
-      setPendingProjectRoots(roots);
-      setRemapTargets((current) => {
-        const next: Record<string, string> = {};
-        for (const item of roots) {
-          next[item.project_root] = current[item.project_root] || "";
-        }
-        return next;
-      });
+      applyPendingProjectRoots(roots);
     } catch { /* ignore */ }
   }
 
@@ -180,6 +188,42 @@ export default function Settings() {
     ]);
   }
 
+  function applyPendingProjectRoots(roots: PendingImportedProjectRoot[]) {
+    setPendingProjectRoots(roots);
+    setRemapTargets((current) => {
+      const next: Record<string, string> = {};
+      for (const item of roots) {
+        next[item.project_root] = current[item.project_root] || "";
+      }
+      return next;
+    });
+  }
+
+  async function fetchMigrationStatusCounts() {
+    const [roots, reports] = await Promise.all([
+      invoke<PendingImportedProjectRoot[]>("get_pending_imported_project_roots"),
+      invoke<ToolEnvironmentReport[]>("get_tool_environment_report"),
+    ]);
+    applyPendingProjectRoots(roots);
+    setToolReports(reports);
+    return {
+      pendingRoots: roots.length,
+      healthIssues: reports.filter(hasToolHealthIssue).length,
+      authGaps: reports.filter((report) => !!report.manual_setup_kind).length,
+    };
+  }
+
+  function toggleMigrationPanel(panel: keyof typeof migrationPanelsOpen, open: boolean) {
+    setMigrationPanelsOpen((current) => ({ ...current, [panel]: open }));
+  }
+
+  function focusMigrationPanel(panel: keyof typeof migrationPanelsOpen) {
+    setMigrationPanelsOpen((current) => ({ ...current, [panel]: true }));
+    window.setTimeout(() => {
+      migrationPanelRefs[panel].current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }
+
   async function runBootstrapForTool(toolId: string, toolName: string) {
     setBootstrappingToolId(toolId);
     try {
@@ -201,30 +245,48 @@ export default function Settings() {
     }
   }
 
-  async function openInSystem(target: string) {
+  async function openInSystemWithLabel(target: string, label: string) {
     try {
       await invoke("open_in_system", { target });
+    } catch (e) {
+      showToast(
+        "error",
+        `${i.settings.openFailed.replace("{label}", label)}: ${String(e)}`
+      );
+    }
+  }
+
+  async function copyText(value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast("success", i.settings.copied.replace("{label}", label));
     } catch (e) {
       showToast("error", String(e));
     }
   }
 
   async function handleExportBackup() {
+    setExportingBackup(true);
     try {
       const path = await invoke<string>("save_backup_to_file");
       showToast("success", loc === "zh" ? `备份已保存到: ${path}` : `Backup saved to: ${path}`);
     } catch (e) {
       if (String(e) !== "Cancelled") showToast("error", String(e));
+    } finally {
+      setExportingBackup(false);
     }
   }
 
   async function handleImportBackup() {
+    setImportingBackup(true);
     try {
       const msg = await invoke<string>("import_backup_from_file");
       await refreshMigrationState();
       showToast("success", msg);
     } catch (e) {
       if (String(e) !== "Cancelled") showToast("error", String(e));
+    } finally {
+      setImportingBackup(false);
     }
   }
 
@@ -255,12 +317,16 @@ export default function Settings() {
       const result = await invoke<RepairAllResult>("repair_all_migration_issues");
       setLastRescan(result.rescan);
       await refreshMigrationState();
+      const status = await fetchMigrationStatusCounts();
       showToast(
         "success",
         i.settings.pendingImportsRepairAllSuccess
           .replace("{roots}", String(result.remapped_roots))
           .replace("{files}", String(result.restored_project_files))
           .replace("{tools}", String(result.bootstrapped_tools))
+          .replace("{pending}", String(status.pendingRoots))
+          .replace("{issues}", String(status.healthIssues))
+          .replace("{auth}", String(status.authGaps))
       );
     } catch (e) {
       showToast("error", String(e));
@@ -274,12 +340,15 @@ export default function Settings() {
     try {
       const result = await invoke<AutoRemapImportedProjectRootsResult>("auto_remap_imported_project_roots");
       await refreshMigrationState();
+      const status = await fetchMigrationStatusCounts();
       showToast(
         "success",
         i.settings.pendingImportsAutoMatchSuccess
           .replace("{roots}", String(result.remapped_roots))
           .replace("{files}", String(result.restored_files))
           .replace("{skipped}", String(result.skipped_roots))
+          .replace("{pending}", String(status.pendingRoots))
+          .replace("{issues}", String(status.healthIssues))
       );
     } catch (e) {
       showToast("error", String(e));
@@ -358,6 +427,18 @@ export default function Settings() {
   const manualSetupReports = toolReports.filter((report) => !!report.manual_setup_kind);
   const pendingProjectFiles = pendingProjectRoots.reduce((sum, item) => sum + item.file_count, 0);
   const migrationReady = pendingProjectRoots.length === 0 && toolHealthIssues.length === 0 && manualSetupReports.length === 0;
+
+  useEffect(() => {
+    if (migrationPanelsInitialized.current) return;
+    if (tools.length === 0 && !lastImportSummary && pendingProjectRoots.length === 0 && toolReports.length === 0) return;
+    setMigrationPanelsOpen({
+      summary: !!lastImportSummary,
+      pending: pendingProjectRoots.length > 0,
+      health: toolHealthIssues.length > 0,
+      auth: manualSetupReports.length > 0,
+    });
+    migrationPanelsInitialized.current = true;
+  }, [lastImportSummary, manualSetupReports.length, pendingProjectRoots.length, toolHealthIssues.length, toolReports.length, tools.length]);
 
   return (
     <div className="animate-in">
@@ -555,7 +636,11 @@ export default function Settings() {
                   {!tool.installed && tool.install_command && (
                     <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
                       <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{tool.install_command}</code>
-                      <button className="btn btn-ghost btn-icon-sm" onClick={() => navigator.clipboard.writeText(tool.install_command)} title="Copy">
+                      <button
+                        className="btn btn-ghost btn-icon-sm"
+                        onClick={() => copyText(tool.install_command, loc === "zh" ? `${tool.name} 安装命令` : `${tool.name} install command`)}
+                        title="Copy"
+                      >
                         <Copy size={11} />
                       </button>
                     </div>
@@ -577,26 +662,48 @@ export default function Settings() {
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
             {[
-              [i.settings.pendingImports, pendingProjectRoots.length],
-              [i.settings.importSummaryPending, pendingProjectFiles],
-              [i.settings.migrationHealth, toolHealthIssues.length],
-              [i.settings.authGuide, manualSetupReports.length],
-            ].map(([label, value]) => (
-              <div key={String(label)} style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-input)" }}>
+              ["pending", i.settings.pendingImports, pendingProjectRoots.length],
+              ["summary", i.settings.importSummaryPending, pendingProjectFiles],
+              ["health", i.settings.migrationHealth, toolHealthIssues.length],
+              ["auth", i.settings.authGuide, manualSetupReports.length],
+            ].map(([panel, label, value]) => (
+              <button
+                key={String(label)}
+                type="button"
+                onClick={() => focusMigrationPanel(panel as keyof typeof migrationPanelsOpen)}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-color)",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>{label}</div>
                 <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>{value}</div>
-              </div>
+              </button>
             ))}
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-            <button className="btn btn-primary btn-sm" style={{ gap: 6 }} onClick={handleExportBackup}>
-              <Download size={14} />
-              {loc === "zh" ? "导出 SQL 备份" : "Export SQL Backup"}
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ gap: 6 }}
+              onClick={handleExportBackup}
+              disabled={exportingBackup}
+            >
+              <Download size={14} className={exportingBackup ? "spin" : ""} />
+              {exportingBackup ? i.settings.migrationExporting : i.settings.migrationExport}
             </button>
-            <button className="btn btn-secondary btn-sm" style={{ gap: 6 }} onClick={handleImportBackup}>
-              <Upload size={14} />
-              {loc === "zh" ? "导入 SQL 备份" : "Import SQL Backup"}
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ gap: 6 }}
+              onClick={handleImportBackup}
+              disabled={importingBackup}
+            >
+              <Upload size={14} className={importingBackup ? "spin" : ""} />
+              {importingBackup ? i.settings.migrationImporting : i.settings.migrationImport}
             </button>
             <button
               className="btn btn-secondary btn-sm"
@@ -605,7 +712,7 @@ export default function Settings() {
               onClick={handleRepairAll}
             >
               <RefreshCw size={14} className={repairingAll ? "spin" : ""} />
-              {i.settings.pendingImportsRepairAll}
+              {repairingAll ? i.settings.pendingImportsRepairingAll : i.settings.pendingImportsRepairAll}
             </button>
             <button
               className="btn btn-secondary btn-sm"
@@ -614,7 +721,7 @@ export default function Settings() {
               onClick={handleFullRescan}
             >
               <RefreshCw size={14} className={rescanningAll ? "spin" : ""} />
-              {i.settings.fullRescan}
+              {rescanningAll ? i.settings.fullRescanning : i.settings.fullRescan}
             </button>
           </div>
 
@@ -627,7 +734,12 @@ export default function Settings() {
             <div />
           )}
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16 }}>
-            <details open={!!lastImportSummary} style={{ borderRadius: 10, background: "var(--bg-input)" }}>
+            <details
+              ref={migrationPanelRefs.summary}
+              open={migrationPanelsOpen.summary}
+              onToggle={(event) => toggleMigrationPanel("summary", event.currentTarget.open)}
+              style={{ borderRadius: 10, background: "var(--bg-input)" }}
+            >
               <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
                 {i.settings.importSummary}
               </summary>
@@ -659,7 +771,10 @@ export default function Settings() {
                       <button
                         className="btn btn-secondary btn-sm"
                         type="button"
-                        onClick={() => openInSystem(lastImportSummary.safety_backup_path)}
+                        onClick={() => openInSystemWithLabel(
+                          lastImportSummary.safety_backup_path,
+                          loc === "zh" ? "安全备份路径" : "safety backup path"
+                        )}
                         style={{ gap: 6 }}
                       >
                         <FolderOpen size={14} />
@@ -696,7 +811,12 @@ export default function Settings() {
               </div>
             </details>
 
-            <details open={pendingProjectRoots.length > 0} style={{ borderRadius: 10, background: "var(--bg-input)" }}>
+            <details
+              ref={migrationPanelRefs.pending}
+              open={migrationPanelsOpen.pending}
+              onToggle={(event) => toggleMigrationPanel("pending", event.currentTarget.open)}
+              style={{ borderRadius: 10, background: "var(--bg-input)" }}
+            >
               <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
                 {i.settings.pendingImports}
               </summary>
@@ -713,7 +833,7 @@ export default function Settings() {
                     onClick={handleAutoMatchPending}
                   >
                     <RefreshCw size={14} className={autoMatchingPending ? "spin" : ""} />
-                    {i.settings.pendingImportsAutoMatch}
+                    {autoMatchingPending ? i.settings.pendingImportsAutoMatching : i.settings.pendingImportsAutoMatch}
                   </button>
                 </div>
                 {pendingProjectRoots.length === 0 ? (
@@ -775,7 +895,12 @@ export default function Settings() {
                                 targetPath,
                               });
                               await refreshMigrationState();
-                              showToast("success", i.settings.pendingImportsSuccess.replace("{count}", String(restored)));
+                              showToast(
+                                "success",
+                                i.settings.pendingImportsSuccess
+                                  .replace("{count}", String(restored))
+                                  .replace("{target}", targetPath)
+                              );
                             } catch (e) {
                               showToast("error", String(e));
                             } finally {
@@ -792,7 +917,12 @@ export default function Settings() {
               </div>
             </details>
 
-            <details open={toolHealthIssues.length > 0} style={{ borderRadius: 10, background: "var(--bg-input)" }}>
+            <details
+              ref={migrationPanelRefs.health}
+              open={migrationPanelsOpen.health}
+              onToggle={(event) => toggleMigrationPanel("health", event.currentTarget.open)}
+              style={{ borderRadius: 10, background: "var(--bg-input)" }}
+            >
               <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
                 {i.settings.migrationHealth}
               </summary>
@@ -848,7 +978,10 @@ export default function Settings() {
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                               <button
                                 className="btn btn-ghost btn-sm"
-                                onClick={() => navigator.clipboard.writeText(tool.install_command)}
+                                onClick={() => copyText(
+                                  tool.install_command,
+                                  loc === "zh" ? `${report.tool_name} 安装命令` : `${report.tool_name} install command`
+                                )}
                                 style={{ gap: 6 }}
                               >
                                 <Copy size={12} />
@@ -860,8 +993,8 @@ export default function Settings() {
                                 disabled={bootstrappingToolId === report.tool_id}
                                 style={{ gap: 6 }}
                               >
-                                <FolderOpen size={12} />
-                                {i.settings.migrationHealthBootstrap}
+                                <FolderOpen size={12} className={bootstrappingToolId === report.tool_id ? "spin" : ""} />
+                                {bootstrappingToolId === report.tool_id ? i.settings.migrationHealthBootstrapping : i.settings.migrationHealthBootstrap}
                               </button>
                             </div>
                           )}
@@ -872,8 +1005,8 @@ export default function Settings() {
                               disabled={bootstrappingToolId === report.tool_id}
                               style={{ gap: 6 }}
                             >
-                              <FolderOpen size={12} />
-                              {i.settings.migrationHealthBootstrap}
+                              <FolderOpen size={12} className={bootstrappingToolId === report.tool_id ? "spin" : ""} />
+                              {bootstrappingToolId === report.tool_id ? i.settings.migrationHealthBootstrapping : i.settings.migrationHealthBootstrap}
                             </button>
                           )}
                         </div>
@@ -931,7 +1064,12 @@ export default function Settings() {
               </div>
             </details>
 
-            <details open={manualSetupReports.length > 0} style={{ borderRadius: 10, background: "var(--bg-input)" }}>
+            <details
+              ref={migrationPanelRefs.auth}
+              open={migrationPanelsOpen.auth}
+              onToggle={(event) => toggleMigrationPanel("auth", event.currentTarget.open)}
+              style={{ borderRadius: 10, background: "var(--bg-input)" }}
+            >
               <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
                 {i.settings.authGuide}
               </summary>
@@ -979,7 +1117,10 @@ export default function Settings() {
                           {report.manual_setup_command && (
                             <button
                               className="btn btn-secondary btn-sm"
-                              onClick={() => navigator.clipboard.writeText(report.manual_setup_command || "")}
+                              onClick={() => copyText(
+                                report.manual_setup_command || "",
+                                loc === "zh" ? `${report.tool_name} 认证命令` : `${report.tool_name} auth command`
+                              )}
                               style={{ gap: 6 }}
                             >
                               <Copy size={12} />
@@ -989,7 +1130,10 @@ export default function Settings() {
                           {report.manual_setup_path && (
                             <button
                               className="btn btn-secondary btn-sm"
-                              onClick={() => navigator.clipboard.writeText(report.manual_setup_path || "")}
+                              onClick={() => copyText(
+                                report.manual_setup_path || "",
+                                loc === "zh" ? `${report.tool_name} 路径` : `${report.tool_name} path`
+                              )}
                               style={{ gap: 6 }}
                             >
                               <Copy size={12} />
@@ -999,7 +1143,10 @@ export default function Settings() {
                           {report.manual_setup_path && (
                             <button
                               className="btn btn-secondary btn-sm"
-                              onClick={() => openInSystem(report.manual_setup_path || "")}
+                              onClick={() => openInSystemWithLabel(
+                                report.manual_setup_path || "",
+                                loc === "zh" ? `${report.tool_name} 路径` : `${report.tool_name} path`
+                              )}
                               style={{ gap: 6 }}
                             >
                               <FolderOpen size={12} />
@@ -1009,7 +1156,10 @@ export default function Settings() {
                           {tool?.install_url && (
                             <button
                               className="btn btn-secondary btn-sm"
-                              onClick={() => openInSystem(tool.install_url)}
+                              onClick={() => openInSystemWithLabel(
+                                tool.install_url,
+                                loc === "zh" ? `${report.tool_name} 说明页` : `${report.tool_name} docs`
+                              )}
                               style={{ gap: 6 }}
                             >
                               <Link2 size={12} />

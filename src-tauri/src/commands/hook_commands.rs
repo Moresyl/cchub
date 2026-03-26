@@ -25,6 +25,7 @@ pub fn get_hooks(db: State<'_, DbState>) -> Result<Vec<Hook>, String> {
                 scope: row.get(4)?,
                 project_path: row.get(5)?,
                 enabled: row.get(6)?,
+                timeout: None,
             })
         })
         .map_err(|e| e.to_string())?
@@ -59,6 +60,7 @@ pub fn create_hook(
         scope,
         project_path,
         enabled: true,
+        timeout: None,
     })
 }
 
@@ -99,4 +101,40 @@ pub fn delete_hook(id: String, db: State<'_, DbState>) -> Result<(), String> {
     conn.execute("DELETE FROM hooks WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn save_hook_to_settings(
+    event: String,
+    matcher: Option<String>,
+    command: String,
+    timeout: Option<u64>,
+    scope: String,
+    project_path: Option<String>,
+    edit_index: Option<usize>,
+) -> Result<(), String> {
+    manager::save_hook_to_settings(
+        &event,
+        matcher.as_deref(),
+        &command,
+        timeout,
+        &scope,
+        project_path.as_deref(),
+        edit_index,
+    )
+}
+
+#[tauri::command]
+pub fn delete_hook_from_settings(
+    event: String,
+    index: usize,
+    scope: String,
+    project_path: Option<String>,
+) -> Result<(), String> {
+    manager::delete_hook_from_settings(
+        &event,
+        index,
+        &scope,
+        project_path.as_deref(),
+    )
 }

@@ -50,6 +50,7 @@ pub struct Hook {
     pub scope: String,
     pub project_path: Option<String>,
     pub enabled: bool,
+    pub timeout: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

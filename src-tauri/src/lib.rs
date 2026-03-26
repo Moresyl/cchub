@@ -110,6 +110,8 @@ pub fn run() {
             mcp_commands::sync_mcp_server_to_tool,
             mcp_commands::unsync_mcp_server_from_tool,
             mcp_commands::check_mcp_server_in_tools,
+            mcp_commands::check_runtime_dependencies,
+            mcp_commands::import_mcp_servers_from_file,
             // Skill commands
             skill_commands::scan_skills,
             skill_commands::get_skills,
@@ -130,12 +132,15 @@ pub fn run() {
             skill_commands::delete_plugin_dir,
             skill_commands::get_skill_sync_method,
             skill_commands::set_skill_sync_method,
+            skill_commands::import_skill_file,
             // Hook commands
             hook_commands::scan_hooks,
             hook_commands::get_hooks,
             hook_commands::create_hook,
             hook_commands::update_hook,
             hook_commands::delete_hook,
+            hook_commands::save_hook_to_settings,
+            hook_commands::delete_hook_from_settings,
             // Update commands
             update_commands::check_updates,
             update_commands::get_update_history,
@@ -213,6 +218,8 @@ pub fn run() {
             extra_commands::get_proxy,
             extra_commands::save_backup_to_file,
             extra_commands::import_backup_from_file,
+            extra_commands::export_config_json,
+            extra_commands::import_config_json,
             // Workflow commands
             workflow_commands::scan_workflows,
             workflow_commands::get_workflow_templates,
@@ -221,6 +228,7 @@ pub fn run() {
             workflow_commands::write_workflow_content,
             workflow_commands::delete_workflow,
             workflow_commands::toggle_workflow,
+            workflow_commands::import_workflow_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

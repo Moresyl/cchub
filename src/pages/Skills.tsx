@@ -4,7 +4,7 @@ import {
   RefreshCw, Zap, Package, FileText, ExternalLink, Search,
   X, FolderOpen, Monitor, Terminal, Check,
   Folder, File, ChevronDown,
-  Edit3, Trash2, Save, Sparkles, Globe, ArrowLeft, RotateCcw,
+  Edit3, Trash2, Save, Sparkles, Globe, ArrowLeft, RotateCcw, Upload,
 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
@@ -89,6 +89,19 @@ export default function Skills() {
       if (firstInstalled) setActiveTool(firstInstalled.id);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
+  }
+
+  async function handleImportSkill() {
+    const tool = tools.find((t) => t.id === activeTool);
+    if (!tool?.skills_dir) return;
+    try {
+      await invoke<string>("import_skill_file", { targetSkillsDir: tool.skills_dir, method: skillSyncMethod });
+      showToast("success", i.skills.importSuccess);
+      await load();
+    } catch (e) {
+      const msg = String(e);
+      if (msg !== "Cancelled") showToast("error", msg);
+    }
   }
 
   async function viewSkill(skill: Skill) {
@@ -355,6 +368,9 @@ export default function Skills() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={handleImportSkill} style={{ gap: 6 }}>
+            <Upload size={14} />{i.skills.importSkill}
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={openExplorer} style={{ gap: 6 }}>
             <FolderOpen size={14} />{i.skills.explore}
           </button>

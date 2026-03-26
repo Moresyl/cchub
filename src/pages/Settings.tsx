@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, CheckCircle, AlertCircle, Copy, Check, Upload, Archive, Wifi, Link2 } from "lucide-react";
+import { Globe, FolderOpen, Info, Palette, Sun, Moon, Download, RefreshCw, CheckCircle, AlertCircle, Copy, Check, Upload, Archive, Wifi, Link2, FileJson } from "lucide-react";
 import { t, getLocale, setLocale, type Locale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
@@ -476,6 +476,43 @@ export default function Settings() {
                 }
               }}>
               <Upload size={14} />{loc === "zh" ? "导入备份" : "Import Backup"}
+            </button>
+          </div>
+
+          {/* Lightweight JSON config export/import */}
+          <div className="divider" style={{ margin: "16px 0" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <FileJson size={15} style={{ color: "var(--text-secondary)" }} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{loc === "zh" ? "轻量配置导出" : "Lightweight Config Export"}</span>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
+            {loc === "zh"
+              ? "仅导出工具配置文件和配置预设，JSON 格式可读性强，适合跨设备快速迁移。"
+              : "Export only tool config files and profiles in readable JSON. Great for quick migration."}
+          </p>
+          <div style={{ display: "flex", gap: 12 }}>
+            <button className="btn btn-primary btn-sm" style={{ gap: 6 }}
+              onClick={async () => {
+                try {
+                  const path = await invoke<string>("export_config_json");
+                  showToast("success", loc === "zh" ? `配置已导出到: ${path}` : `Config exported to: ${path}`);
+                } catch (e) {
+                  if (String(e) !== "Cancelled") showToast("error", String(e));
+                }
+              }}>
+              <Download size={14} />{loc === "zh" ? "导出配置 (JSON)" : "Export Config (JSON)"}
+            </button>
+            <button className="btn btn-secondary btn-sm" style={{ gap: 6 }}
+              onClick={async () => {
+                try {
+                  const msg = await invoke<string>("import_config_json");
+                  showToast("success", msg);
+                  loadToolsAndPaths();
+                } catch (e) {
+                  if (String(e) !== "Cancelled") showToast("error", String(e));
+                }
+              }}>
+              <Upload size={14} />{loc === "zh" ? "导入配置 (JSON)" : "Import Config (JSON)"}
             </button>
           </div>
         </div>

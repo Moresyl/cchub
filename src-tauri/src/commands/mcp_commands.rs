@@ -342,3 +342,82 @@ pub fn check_mcp_server_in_tools(
     }
     result
 }
+
+#[tauri::command]
+pub fn check_runtime_dependencies() -> Vec<health::RuntimeDepStatus> {
+    health::check_runtime_deps()
+}
+
+/// Import MCP server configs from a JSON file via file dialog.
+/// Expects a JSON object where keys are server names and values are
+/// `{ "command": "...", "args": [...], "env": {...} }`.
+#[tauri::command]
+pub async fn import_mcp_servers_from_file(
+    db: State<'_, DbState>,
+) -> Result<u32, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Import MCP Servers")
+        .add_filter("JSON", &["json"])
+        .pick_file()
+        .await
+        .ok_or("Cancelled")?;
+
+    let content = std::fs::read_to_string(file.path())
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let data: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Invalid JSON: {}", e))?;
+
+    // Support two formats:
+    // 1. { "mcpServers": { "name": {...}, ... } }  (Claude's .claude.json format)
+    // 2. { "name": { "command": "...", "args": [...], ... }, ... }  (flat map)
+    let servers_map = if let Some(inner) = data.get("mcpServers").and_then(|v| v.as_object()) {
+        inner.clone()
+    } else if let Some(obj) = data.as_object() {
+        obj.clone()
+    } else {
+        return Err("JSON must be an object mapping server names to configs".into());
+    };
+
+    let mut imported = 0u32;
+    for (name, cfg) in &servers_map {
+        let command = cfg.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if command.is_empty() { continue; }
+
+        let args: Vec<String> = cfg.get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        let env: HashMap<String, String> = cfg.get("env")
+            .and_then(|v| v.as_object())
+            .map(|obj| obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+            .unwrap_or_default();
+
+        let server_config = config::McpServerConfig {
+            command: command.clone(),
+            args: args.clone(),
+            env: env.clone(),
+            transport_type: None,
+        };
+
+        if let Err(e) = config::write_claude_mcp_server(name, &server_config) {
+            eprintln!("Failed to write MCP server {}: {}", name, e);
+            continue;
+        }
+
+        // Insert into DB
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let id = format!("mcp-{}", name);
+        let args_str = serde_json::to_string(&args).unwrap_or_default();
+        let env_str = serde_json::to_string(&env).unwrap_or_default();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, status, transport, source, package_name, version, config_path) VALUES (?1, ?2, ?3, ?4, ?5, 'active', 'stdio', 'import', NULL, NULL, NULL)",
+            rusqlite::params![id, name, command, args_str, env_str],
+        );
+
+        imported += 1;
+    }
+
+    Ok(imported)
+}

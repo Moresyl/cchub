@@ -250,3 +250,18 @@ pub fn set_skill_sync_method(method: String, db: State<'_, DbState>) -> Result<(
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// Import a skill .md file from disk via file dialog
+#[tauri::command]
+pub async fn import_skill_file(target_skills_dir: String, method: Option<String>) -> Result<String, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Import Skill")
+        .add_filter("Markdown", &["md"])
+        .pick_file()
+        .await
+        .ok_or("Cancelled")?;
+
+    let source = file.path().to_string_lossy().to_string();
+    let m = method.as_deref().unwrap_or("copy");
+    crate::skills::installer::install_skill_file(&source, &target_skills_dir, m)
+}

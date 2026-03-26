@@ -417,6 +417,42 @@ fn resolve_tool_config_path(conn: &rusqlite::Connection, tool_id: &str) -> Resul
     Ok(resolve_tool_config_dir(conn, tool_id)?.join(tool_config_file_name(tool_id)?))
 }
 
+fn resolve_claude_paths(conn: &rusqlite::Connection) -> Result<(PathBuf, PathBuf), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    let custom_dir: Option<String> = conn
+        .query_row(
+            "SELECT config_dir FROM custom_paths WHERE tool_id = 'claude'",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    let settings_json = if let Some(dir) = custom_dir.filter(|dir| !dir.trim().is_empty()) {
+        PathBuf::from(dir).join("settings.json")
+    } else {
+        home.join(".claude").join("settings.json")
+    };
+
+    let custom_mcp_path: Option<String> = conn
+        .query_row(
+            "SELECT mcp_config_path FROM custom_paths WHERE tool_id = 'claude'",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    let claude_json = if let Some(path) = custom_mcp_path.filter(|path| !path.trim().is_empty()) {
+        PathBuf::from(path)
+    } else {
+        home.join(".claude.json")
+    };
+
+    Ok((claude_json, settings_json))
+}
+
 fn candidate_home_dirs() -> Vec<PathBuf> {
     let mut homes = Vec::new();
 
@@ -770,9 +806,7 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
             .map_err(|e| e.to_string())
         }
         "claude" => {
-            let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-            let claude_json = home.join(".claude.json");
-            let settings_json = home.join(".claude").join("settings.json");
+            let (claude_json, settings_json) = resolve_claude_paths(conn)?;
 
             let claude_json_obj: serde_json::Map<String, serde_json::Value> = if claude_json.exists() {
                 std::fs::read_to_string(&claude_json).ok()
@@ -860,9 +894,7 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
             crate::utils::atomic_write_string(&settings_path, snapshot).map_err(|e| e.to_string())
         }
         "claude" => {
-            let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-            let claude_json_path = home.join(".claude.json");
-            let settings_json_path = home.join(".claude").join("settings.json");
+            let (claude_json_path, settings_json_path) = resolve_claude_paths(conn)?;
 
             let snap: serde_json::Value = serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
             let snap_obj = snap.as_object().ok_or("Invalid claude snapshot")?;
@@ -881,7 +913,7 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
 
             // Keys that should be preserved in settings.json during profile switch
             let preserve_keys: std::collections::HashSet<&str> = [
-                "statusLine", "enabledPlugins", "mcpServers", "env",
+                "statusLine", "enabledPlugins", "mcpServers",
             ].iter().copied().collect();
 
             // Split snapshot fields back to their original files
@@ -2089,4 +2121,175 @@ fn import_legacy_json(db: &State<'_, DbState>, content: &str) -> Result<String, 
     }
 
     Ok(format!("已从旧版备份恢复 {} 项 ({})", restored_count, backup.created_at))
+}
+
+/// Lightweight JSON config export
+#[tauri::command]
+pub async fn export_config_json(db: State<'_, DbState>) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    let mut export = serde_json::json!({
+        "version": "1.0",
+        "exported_at": chrono::Local::now().to_rfc3339(),
+    });
+
+    // Collect tool config files
+    let mut tool_configs = serde_json::json!({});
+    let config_files: Vec<(&str, PathBuf)> = vec![
+        ("claude_settings", home.join(".claude").join("settings.json")),
+        ("claude_mcp", home.join(".claude.json")),
+        ("codex", home.join(".codex").join("config.toml")),
+        ("gemini", home.join(".gemini").join("settings.json")),
+        ("opencode", home.join(".opencode").join("opencode.json")),
+    ];
+    for (key, path) in config_files {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                // Try to parse as JSON for pretty output, otherwise store as string
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    tool_configs[key] = val;
+                } else {
+                    tool_configs[key] = serde_json::json!(content);
+                }
+            }
+        }
+    }
+    export["tool_configs"] = tool_configs;
+
+    // Collect MCP servers from DB
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, name, command, args, env, transport, source, config_path, status FROM mcp_servers")
+            .map_err(|e| e.to_string())?;
+        let servers: Vec<serde_json::Value> = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "name": row.get::<_, String>(1)?,
+                    "command": row.get::<_, Option<String>>(2)?,
+                    "args": row.get::<_, String>(3)?,
+                    "env": row.get::<_, String>(4)?,
+                    "transport": row.get::<_, String>(5)?,
+                    "source": row.get::<_, String>(6)?,
+                    "config_path": row.get::<_, Option<String>>(7)?,
+                    "status": row.get::<_, String>(8)?,
+                }))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        export["mcp_servers"] = serde_json::json!(servers);
+    }
+
+    // Collect config profiles from DB
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, name, tool_id, config_content, description, is_active FROM config_profiles")
+            .map_err(|e| e.to_string())?;
+        let profiles: Vec<serde_json::Value> = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "name": row.get::<_, String>(1)?,
+                    "tool_id": row.get::<_, String>(2)?,
+                    "config_content": row.get::<_, String>(3)?,
+                    "description": row.get::<_, Option<String>>(4)?,
+                    "is_active": row.get::<_, bool>(5)?,
+                }))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        export["config_profiles"] = serde_json::json!(profiles);
+    }
+
+    let json_str = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
+
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("导出配置")
+        .set_file_name(&format!("cchub-config-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")))
+        .add_filter("JSON", &["json"])
+        .save_file()
+        .await
+        .ok_or("Cancelled")?;
+
+    let path = file.path();
+    crate::utils::atomic_write_string(path, &json_str).map_err(|e| e.to_string())?;
+
+    Ok(path.display().to_string())
+}
+
+/// Lightweight JSON config import
+#[tauri::command]
+pub async fn import_config_json(db: State<'_, DbState>) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("导入配置")
+        .add_filter("JSON", &["json"])
+        .pick_file()
+        .await
+        .ok_or("Cancelled")?;
+
+    let content = std::fs::read_to_string(file.path()).map_err(|e| e.to_string())?;
+    let data: serde_json::Value = serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
+
+    // Validate version
+    let version = data.get("version").and_then(|v| v.as_str()).unwrap_or("0");
+    if version != "1.0" {
+        return Err(format!("Unsupported config version: {}", version));
+    }
+
+    let mut restored_count = 0;
+
+    // Restore tool config files
+    if let Some(tool_configs) = data.get("tool_configs").and_then(|v| v.as_object()) {
+        let path_map: HashMap<&str, PathBuf> = [
+            ("claude_settings", home.join(".claude").join("settings.json")),
+            ("claude_mcp", home.join(".claude.json")),
+            ("codex", home.join(".codex").join("config.toml")),
+            ("gemini", home.join(".gemini").join("settings.json")),
+            ("opencode", home.join(".opencode").join("opencode.json")),
+        ].into_iter().collect();
+
+        for (key, value) in tool_configs {
+            if let Some(path) = path_map.get(key.as_str()) {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let content_str = if value.is_string() {
+                    value.as_str().unwrap_or("").to_string()
+                } else {
+                    serde_json::to_string_pretty(value).unwrap_or_default()
+                };
+                if !content_str.is_empty() {
+                    crate::utils::atomic_write_string(path, &content_str).map_err(|e| e.to_string())?;
+                    restored_count += 1;
+                }
+            }
+        }
+    }
+
+    // Restore config profiles to DB
+    if let Some(profiles) = data.get("config_profiles").and_then(|v| v.as_array()) {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        for profile in profiles {
+            let name = profile.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let tool_id = profile.get("tool_id").and_then(|v| v.as_str()).unwrap_or("");
+            let config_content = profile.get("config_content").and_then(|v| v.as_str()).unwrap_or("");
+            let description = profile.get("description").and_then(|v| v.as_str());
+            let is_active = profile.get("is_active").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            if !name.is_empty() && !tool_id.is_empty() {
+                let id = uuid::Uuid::new_v4().to_string();
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO config_profiles (id, name, tool_id, config_content, description, is_active) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    rusqlite::params![id, name, tool_id, config_content, description, is_active],
+                );
+                restored_count += 1;
+            }
+        }
+    }
+
+    Ok(format!("已恢复 {} 项配置", restored_count))
 }

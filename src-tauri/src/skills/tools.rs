@@ -88,9 +88,17 @@ pub fn detect_tools() -> Vec<DetectedTool> {
         .map(|t| {
             let base = home.join(t.dir);
             let config_path = base.join(t.config_file);
-            let mcp_config_path = base.join(t.mcp_config_file);
+            let mcp_config_path = if t.id == "claude" {
+                home.join(".claude.json")
+            } else {
+                base.join(t.mcp_config_file)
+            };
             let skills_dir = base.join(t.skills_subdir);
-            let installed = base.exists();
+            let installed = if t.id == "claude" {
+                base.exists() || mcp_config_path.exists()
+            } else {
+                base.exists()
+            };
 
             DetectedTool {
                 id: t.id.to_string(),

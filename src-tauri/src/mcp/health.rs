@@ -14,6 +14,14 @@ pub struct HealthCheckResult {
     pub checked_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RuntimeDepStatus {
+    pub name: String,
+    pub display_name: String,
+    pub installed: bool,
+    pub version: Option<String>,
+}
+
 pub fn check_command_exists(command: &str) -> bool {
     if command.is_empty() {
         return false;
@@ -32,6 +40,63 @@ pub fn check_command_exists(command: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn get_command_version(command: &str, version_flag: &str) -> Option<String> {
+    let output = std::process::Command::new(command)
+        .arg(version_flag)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() { None } else { Some(stderr.lines().next().unwrap_or("").to_string()) }
+    } else {
+        Some(stdout.lines().next().unwrap_or("").to_string())
+    }
+}
+
+/// Check common runtime dependencies for MCP servers
+pub fn check_runtime_deps() -> Vec<RuntimeDepStatus> {
+    let runtimes = vec![
+        ("node", "Node.js", "--version"),
+        ("npx", "npx", "--version"),
+        ("npm", "npm", "--version"),
+        ("uvx", "uvx", "--version"),
+        ("uv", "uv", "--version"),
+        ("python", "Python", "--version"),
+        ("python3", "Python3", "--version"),
+        ("pip", "pip", "--version"),
+        ("pip3", "pip3", "--version"),
+        ("docker", "Docker", "--version"),
+        ("bun", "Bun", "--version"),
+        ("deno", "Deno", "--version"),
+    ];
+
+    runtimes
+        .into_iter()
+        .map(|(name, display_name, flag)| {
+            let installed = check_command_exists(name);
+            let version = if installed {
+                get_command_version(name, flag)
+            } else {
+                None
+            };
+            RuntimeDepStatus {
+                name: name.to_string(),
+                display_name: display_name.to_string(),
+                installed,
+                version,
+            }
+        })
+        .collect()
 }
 
 pub fn try_spawn_server(

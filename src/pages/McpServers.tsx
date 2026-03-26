@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Trash2, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2, Wand2 } from "lucide-react";
+import { RefreshCw, Trash2, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2, Wand2, MonitorCheck, Upload } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -19,6 +19,10 @@ interface HealthCheckResult {
   error_message: string | null; latency_ms: number | null; checked_at: string;
 }
 
+interface RuntimeDepStatus {
+  name: string; display_name: string; installed: boolean; version: string | null;
+}
+
 export default function McpServers() {
   const [servers, setServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +39,9 @@ export default function McpServers() {
   const [installedTools, setInstalledTools] = useState<DetectedTool[]>([]);
   const [toolSyncStatus, setToolSyncStatus] = useState<Record<string, boolean>>({});
   const [pendingDelete, setPendingDelete] = useState<McpServer | null>(null);
+  const [runtimeDeps, setRuntimeDeps] = useState<RuntimeDepStatus[]>([]);
+  const [showDeps, setShowDeps] = useState(false);
+  const [checkingDeps, setCheckingDeps] = useState(false);
   const i = t();
 
   useEffect(() => { loadServers(); loadTools(); }, []);
@@ -51,6 +58,15 @@ export default function McpServers() {
       const dt = await invoke<DetectedTool[]>("detect_tools");
       setInstalledTools(dt.filter((t) => t.installed && t.id !== "openclaw"));
     } catch (e) { console.error(e); }
+  }
+
+  async function checkDeps() {
+    setCheckingDeps(true);
+    setShowDeps(true);
+    try {
+      setRuntimeDeps(await invoke<RuntimeDepStatus[]>("check_runtime_dependencies"));
+    } catch (e) { console.error(e); }
+    finally { setCheckingDeps(false); }
   }
 
   async function checkHealth() {
@@ -256,6 +272,21 @@ export default function McpServers() {
           <p className="page-subtitle">{tReplace(i.mcp.serverCount, { count: servers.length })}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={checkDeps} disabled={checkingDeps} style={{ gap: 6 }}>
+            <MonitorCheck size={14} />{getLocale() === "zh" ? "环境检查" : "Env Check"}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={async () => {
+            try {
+              const count = await invoke<number>("import_mcp_servers_from_file");
+              showToast("success", `${i.mcp.importSuccess} (${count})`);
+              await loadServers();
+            } catch (e) {
+              const msg = String(e);
+              if (msg !== "Cancelled") showToast("error", msg);
+            }
+          }} style={{ gap: 6 }}>
+            <Upload size={14} />{i.mcp.importServer}
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={checkHealth} disabled={checkingHealth}>
             <Activity size={14} />{checkingHealth ? i.mcp.checking : i.mcp.checkHealth}
           </button>
@@ -264,6 +295,49 @@ export default function McpServers() {
           </button>
         </div>
       </div>
+
+      {/* Runtime Dependencies Panel */}
+      {showDeps && (
+        <div className="section-card" style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <MonitorCheck size={15} style={{ color: "var(--text-secondary)" }} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{getLocale() === "zh" ? "运行环境检查" : "Runtime Environment"}</span>
+            </div>
+            <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowDeps(false)}><X size={14} /></button>
+          </div>
+          {checkingDeps ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
+              <div className="spinner" style={{ width: 14, height: 14 }} />
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{getLocale() === "zh" ? "检测中..." : "Checking..."}</span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {runtimeDeps.map((dep) => (
+                <div key={dep.name} style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "6px 12px", borderRadius: 6,
+                  background: dep.installed ? "var(--success-subtle)" : "var(--bg-tertiary)",
+                  border: `1px solid ${dep.installed ? "var(--success)" : "var(--border-default)"}`,
+                }}>
+                  <span className={`dot ${dep.installed ? "dot-active" : "dot-disabled"}`} />
+                  <span style={{ fontSize: 12, fontWeight: 500 }}>{dep.display_name}</span>
+                  {dep.version && (
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+                      {dep.version}
+                    </span>
+                  )}
+                  {!dep.installed && (
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      {getLocale() === "zh" ? "未安装" : "Not installed"}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {servers.length === 0 ? (
         <div className="card empty-state" style={{ flex: 1 }}>

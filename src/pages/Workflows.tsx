@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Save, RotateCcw, Plus, Trash2, Pencil, ArrowLeft, Download, X, GitBranch } from "lucide-react";
+import { RefreshCw, Save, RotateCcw, Plus, Trash2, Pencil, ArrowLeft, Download, X, GitBranch, Upload } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 
@@ -151,6 +151,17 @@ export default function Workflows() {
   const filteredFiles = activeTab === "all" ? files : files.filter(f => f.tool_id === activeTab);
   const hasChanges = content !== originalContent;
 
+  async function handleImport() {
+    try {
+      await invoke<string>("import_workflow_file", { toolId: activeTab === "all" ? "claude" : activeTab });
+      showToast("success", i.workflows.importSuccess);
+      await load();
+    } catch (e) {
+      const msg = String(e);
+      if (msg !== "Cancelled") showToast("error", msg);
+    }
+  }
+
   const installedIds = new Set(
     files.filter(f => f.tool_id === installTool).map(f => f.file_name.replace(".md", "").replace(".disabled", ""))
   );
@@ -218,6 +229,9 @@ export default function Workflows() {
           <p className="page-subtitle">{zh ? `共 ${files.length} 个工作流` : `${files.length} workflows`}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={handleImport}>
+            <Upload size={14} />{i.workflows.importWorkflow}
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowInstall(!showInstall)}>
             <Plus size={14} />{i.workflows.installTemplate}
           </button>

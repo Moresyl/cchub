@@ -768,33 +768,104 @@ fn gemini_env_has_api_key(path: &std::path::Path) -> bool {
     })
 }
 
+fn is_external_target(target: &str) -> bool {
+    let trimmed = target.trim();
+    trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("mailto:")
+        || trimmed.starts_with("tel:")
+}
+
+fn existing_open_target(target: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(target);
+    if path.exists() {
+        return Ok(path);
+    }
+
+    let mut current = path.parent().map(|parent| parent.to_path_buf());
+    while let Some(candidate) = current {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+        current = candidate.parent().map(|parent| parent.to_path_buf());
+    }
+
+    Err(format!("Path not found: {}", target))
+}
+
 fn open_target_in_system(target: &str) -> Result<(), String> {
     if target.trim().is_empty() {
         return Err("Target is empty".to_string());
     }
 
+    if is_external_target(target) {
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", target])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg(target)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(target)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+
+    let resolved_target = existing_open_target(target)?;
+    let resolved_text = resolved_target.to_string_lossy().to_string();
+
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", target])
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        if resolved_target.is_file() {
+            std::process::Command::new("explorer")
+                .args(["/select,", &resolved_text])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("explorer")
+                .arg(&resolved_text)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
         return Ok(());
     }
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(target)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        if resolved_target.is_file() {
+            std::process::Command::new("open")
+                .args(["-R", &resolved_text])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("open")
+                .arg(&resolved_text)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
         return Ok(());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         std::process::Command::new("xdg-open")
-            .arg(target)
+            .arg(&resolved_text)
             .spawn()
             .map_err(|e| e.to_string())?;
         return Ok(());

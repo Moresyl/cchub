@@ -1,6 +1,7 @@
 use crate::db::DbState;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tauri::State;
 
@@ -38,6 +39,84 @@ pub struct Workspace {
     pub base_path: Option<String>,
     pub is_active: bool,
     pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingImportedProjectRoot {
+    pub project_root: String,
+    pub file_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoRemapImportedProjectRootsResult {
+    pub remapped_roots: usize,
+    pub restored_files: usize,
+    pub skipped_roots: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolEnvironmentReport {
+    pub tool_id: String,
+    pub tool_name: String,
+    pub cli_available: bool,
+    pub cli_command: String,
+    pub config_path: String,
+    pub config_exists: bool,
+    pub mcp_config_path: String,
+    pub mcp_config_exists: bool,
+    pub skills_dir: String,
+    pub skills_dir_exists: bool,
+    pub config_dir: String,
+    pub config_dir_exists: bool,
+    pub has_custom_config_dir: bool,
+    pub has_custom_mcp_config_path: bool,
+    pub has_custom_skills_dir: bool,
+    pub manual_setup_kind: Option<String>,
+    pub manual_setup_command: Option<String>,
+    pub manual_setup_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootstrapToolEnvironmentResult {
+    pub created_dirs: usize,
+    pub created_files: usize,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastImportSummary {
+    pub imported_at: String,
+    pub db_rows_restored: usize,
+    pub tool_configs_restored: usize,
+    pub skills_restored: usize,
+    pub full_files_restored: usize,
+    pub pending_project_files: usize,
+    pub safety_backup_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FullRescanResult {
+    pub mcp_servers: usize,
+    pub skills: usize,
+    pub hooks: usize,
+    pub instruction_files: usize,
+    pub workflows: usize,
+    pub config_roots: usize,
+    pub pending_project_roots: usize,
+    pub tool_health_issues: usize,
+    pub manual_setup_required: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairAllResult {
+    pub remapped_roots: usize,
+    pub restored_project_files: usize,
+    pub skipped_remap_roots: usize,
+    pub bootstrapped_tools: usize,
+    pub created_dirs: usize,
+    pub created_files: usize,
+    pub bootstrap_notes: Vec<String>,
+    pub rescan: FullRescanResult,
 }
 
 // ── MCP Clients ──
@@ -253,13 +332,45 @@ pub fn update_workspace(
     id: String,
     name: String,
     description: Option<String>,
+    base_path: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let previous_base_path: Option<String> = conn
+        .query_row(
+            "SELECT base_path FROM workspaces WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    let normalized_next_base_path = base_path
+        .as_deref()
+        .and_then(normalize_project_root_path)
+        .map(str::to_string);
+
     conn.execute(
-        "UPDATE workspaces SET name = ?1, description = ?2 WHERE id = ?3",
-        rusqlite::params![name, description, id],
+        "UPDATE workspaces SET name = ?1, description = ?2, base_path = ?3 WHERE id = ?4",
+        rusqlite::params![name, description, base_path, id],
     ).map_err(|e| e.to_string())?;
+
+    if let Some(next_base_path) = normalized_next_base_path.as_deref() {
+        sync_known_project_root(&conn, previous_base_path.as_deref(), Some(next_base_path))?;
+
+        if let Some(previous_base_path) = previous_base_path
+            .as_deref()
+            .and_then(normalize_project_root_path)
+        {
+            if !project_root_paths_match(previous_base_path, next_base_path) {
+                let _ = apply_project_root_remap(
+                    &conn,
+                    previous_base_path,
+                    next_base_path,
+                )?;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -451,6 +562,280 @@ fn resolve_claude_paths(conn: &rusqlite::Connection) -> Result<(PathBuf, PathBuf
     };
 
     Ok((claude_json, settings_json))
+}
+
+fn resolve_tool_skills_dir(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
+    let custom_skills_dir: Option<String> = conn
+        .query_row(
+            "SELECT skills_dir FROM custom_paths WHERE tool_id = ?1",
+            rusqlite::params![tool_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    if let Some(dir) = custom_skills_dir.filter(|dir| !dir.trim().is_empty()) {
+        return Ok(PathBuf::from(dir));
+    }
+
+    Ok(resolve_tool_config_dir(conn, tool_id)?.join("skills"))
+}
+
+fn tool_cli_command(tool_id: &str) -> &'static str {
+    match tool_id {
+        "claude" => "claude",
+        "codex" => "codex",
+        "gemini" => "gemini",
+        "opencode" => "opencode",
+        "openclaw" => "openclaw",
+        _ => "",
+    }
+}
+
+fn is_executable_file(path: &std::path::Path) -> bool {
+    path.is_file()
+}
+
+fn cli_exists_in_path(command: &str) -> bool {
+    if command.trim().is_empty() {
+        return false;
+    }
+
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    let path_exts: Vec<String> = if cfg!(windows) {
+        std::env::var_os("PATHEXT")
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .split(';')
+                    .map(|item| item.trim().to_string())
+                    .filter(|item| !item.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|items| !items.is_empty())
+            .unwrap_or_else(|| vec![".EXE".to_string(), ".CMD".to_string(), ".BAT".to_string(), ".COM".to_string()])
+    } else {
+        Vec::new()
+    };
+
+    for dir in std::env::split_paths(&path_var) {
+        let direct = dir.join(command);
+        if is_executable_file(&direct) {
+            return true;
+        }
+
+        if cfg!(windows) {
+            for ext in &path_exts {
+                let ext = ext.trim();
+                if ext.is_empty() {
+                    continue;
+                }
+                let normalized_ext = if ext.starts_with('.') {
+                    ext.to_string()
+                } else {
+                    format!(".{}", ext)
+                };
+                let candidate = dir.join(format!("{command}{normalized_ext}"));
+                if is_executable_file(&candidate) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn write_default_file_if_missing(
+    path: &std::path::Path,
+    content: &str,
+    created_files: &mut usize,
+) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    crate::utils::atomic_write_string(path, content).map_err(|e| e.to_string())?;
+    *created_files += 1;
+    Ok(())
+}
+
+fn ensure_dir_exists(path: &std::path::Path, created_dirs: &mut usize) -> Result<(), String> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
+    *created_dirs += 1;
+    Ok(())
+}
+
+fn bootstrap_tool_environment_from_conn(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+) -> Result<BootstrapToolEnvironmentResult, String> {
+    let mut created_dirs = 0usize;
+    let mut created_files = 0usize;
+    let mut notes = Vec::new();
+
+    let config_dir = resolve_tool_config_dir(conn, tool_id)?;
+    ensure_dir_exists(&config_dir, &mut created_dirs)?;
+
+    let skills_dir = resolve_tool_skills_dir(conn, tool_id)?;
+    ensure_dir_exists(&skills_dir, &mut created_dirs)?;
+
+    match tool_id {
+        "claude" => {
+            let (claude_json_path, settings_json_path) = resolve_claude_paths(conn)?;
+            if let Some(parent) = claude_json_path.parent() {
+                ensure_dir_exists(parent, &mut created_dirs)?;
+            }
+            if let Some(parent) = settings_json_path.parent() {
+                ensure_dir_exists(parent, &mut created_dirs)?;
+            }
+            write_default_file_if_missing(&claude_json_path, "{}\n", &mut created_files)?;
+            write_default_file_if_missing(&settings_json_path, "{}\n", &mut created_files)?;
+        }
+        "codex" => {
+            write_default_file_if_missing(&config_dir.join("config.toml"), "", &mut created_files)?;
+            write_default_file_if_missing(&config_dir.join("auth.json"), "{}\n", &mut created_files)?;
+            notes.push("Codex CLI 仍需登录后 auth.json 才会真正可用".to_string());
+        }
+        "gemini" => {
+            write_default_file_if_missing(&config_dir.join("settings.json"), "{}\n", &mut created_files)?;
+            write_default_file_if_missing(
+                &config_dir.join(".env"),
+                "# Add GEMINI_API_KEY=...\n",
+                &mut created_files,
+            )?;
+            notes.push("Gemini CLI 仍需在 .env 中填写 GEMINI_API_KEY".to_string());
+        }
+        "opencode" => {
+            write_default_file_if_missing(&config_dir.join("opencode.json"), "{}\n", &mut created_files)?;
+        }
+        "openclaw" => {
+            write_default_file_if_missing(&config_dir.join("openclaw.json"), "{}\n", &mut created_files)?;
+        }
+        _ => return Err(format!("Unknown tool: {}", tool_id)),
+    }
+
+    Ok(BootstrapToolEnvironmentResult {
+        created_dirs,
+        created_files,
+        notes,
+    })
+}
+
+fn json_file_has_content(path: &std::path::Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+
+    match value {
+        serde_json::Value::Object(map) => !map.is_empty(),
+        serde_json::Value::Array(items) => !items.is_empty(),
+        serde_json::Value::Null => false,
+        serde_json::Value::String(text) => !text.trim().is_empty(),
+        _ => true,
+    }
+}
+
+fn gemini_env_has_api_key(path: &std::path::Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+
+    content.lines().any(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return false;
+        }
+
+        let Some((key, value)) = trimmed.split_once('=') else {
+            return false;
+        };
+
+        key.trim() == "GEMINI_API_KEY"
+            && !value.trim().is_empty()
+            && value.trim() != "..."
+    })
+}
+
+fn open_target_in_system(target: &str) -> Result<(), String> {
+    if target.trim().is_empty() {
+        return Err("Target is empty".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", target])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err("Unsupported platform".to_string())
+}
+
+fn set_json_app_setting<T: Serialize>(
+    conn: &rusqlite::Connection,
+    key: &str,
+    value: &T,
+) -> Result<(), String> {
+    let payload = serde_json::to_string(value).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+        rusqlite::params![key, payload],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn get_json_app_setting<T: for<'de> Deserialize<'de>>(
+    conn: &rusqlite::Connection,
+    key: &str,
+) -> Result<Option<T>, String> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![key],
+            |row| row.get(0),
+        )
+        .ok();
+
+    match raw {
+        Some(raw) => serde_json::from_str(&raw)
+            .map(Some)
+            .map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
 }
 
 fn candidate_home_dirs() -> Vec<PathBuf> {
@@ -1775,31 +2160,920 @@ pub fn set_claude_hud_config(config: serde_json::Value) -> Result<(), String> {
     Ok(())
 }
 
-// Legacy JSON backup structs (for backward-compatible import)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyBackupData {
-    pub version: String,
-    pub created_at: String,
-    pub sql_dump: String,
-    pub tools: HashMap<String, LegacyToolBackup>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyToolBackup {
-    pub config_content: Option<String>,
-    pub config_path: String,
-    pub skills: Vec<LegacySkillFileBackup>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacySkillFileBackup {
-    pub name: String,
-    pub content: String,
-}
+const SQL_BACKUP_MARKER: &str = "-- CCHub Database Backup (.sql)";
 
 /// Escape a string value for SQL: replace ' with ''
 fn sql_escape(s: &str) -> String {
     s.replace('\'', "''")
+}
+
+fn path_is_within(path: &std::path::Path, root: &std::path::Path) -> bool {
+    path.starts_with(root)
+}
+
+fn collect_backup_file_rows(
+    base_path: &std::path::Path,
+    root_key: &str,
+    relative_prefix: &std::path::Path,
+    rows: &mut Vec<(String, String, String)>,
+) {
+    let entries = match std::fs::read_dir(base_path) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let next_relative = relative_prefix.join(name);
+
+        if path.is_dir() {
+            collect_backup_file_rows(&path, root_key, &next_relative, rows);
+            continue;
+        }
+
+        if !path.is_file() {
+            continue;
+        }
+
+        if let Ok(bytes) = std::fs::read(&path) {
+            let relative = next_relative.to_string_lossy().replace('\\', "/");
+            let content_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            rows.push((root_key.to_string(), relative, content_base64));
+        }
+    }
+}
+
+fn collect_backup_entry_row(
+    path: &std::path::Path,
+    root_key: &str,
+    relative_path: &std::path::Path,
+    rows: &mut Vec<(String, String, String)>,
+) {
+    if !path.is_file() {
+        return;
+    }
+
+    if let Ok(bytes) = std::fs::read(path) {
+        let relative = relative_path.to_string_lossy().replace('\\', "/");
+        let content_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+        rows.push((root_key.to_string(), relative, content_base64));
+    }
+}
+
+fn discover_project_roots(conn: &rusqlite::Connection) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut push_root = |raw_path: String| {
+        let trimmed = raw_path.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let key = trimmed.replace('\\', "/");
+        if !seen.insert(key) {
+            return;
+        }
+
+        let path = PathBuf::from(trimmed);
+        if path.exists() {
+            roots.push(path);
+        }
+    };
+
+    if let Ok(mut stmt) = conn.prepare("SELECT base_path FROM workspaces WHERE base_path IS NOT NULL AND trim(base_path) != ''") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                push_root(row);
+            }
+        }
+    }
+
+    if let Ok(mut stmt) = conn.prepare("SELECT project_path FROM hooks WHERE project_path IS NOT NULL AND trim(project_path) != ''") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for row in rows.flatten() {
+                push_root(row);
+            }
+        }
+    }
+
+    let known_roots: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'known_project_roots'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(raw) = known_roots {
+        if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
+            for path in paths {
+                push_root(path);
+            }
+        }
+    }
+
+    roots
+}
+
+fn normalize_project_root_path(path: &str) -> Option<&str> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.trim_end_matches(['\\', '/']))
+    }
+}
+
+fn project_root_paths_match(left: &str, right: &str) -> bool {
+    normalize_project_root_path(left)
+        .zip(normalize_project_root_path(right))
+        .is_some_and(|(left, right)| left.replace('\\', "/").eq_ignore_ascii_case(&right.replace('\\', "/")))
+}
+
+fn sync_known_project_root(
+    conn: &rusqlite::Connection,
+    previous_path: Option<&str>,
+    next_path: Option<&str>,
+) -> Result<(), String> {
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'known_project_roots'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    let mut roots: Vec<String> = existing
+        .as_deref()
+        .and_then(|value| serde_json::from_str(value).ok())
+        .unwrap_or_default();
+
+    if let Some(previous_path) = previous_path.and_then(normalize_project_root_path) {
+        roots.retain(|value| !project_root_paths_match(value, previous_path));
+    }
+
+    if let Some(next_path) = next_path.and_then(normalize_project_root_path) {
+        if !roots.iter().any(|value| project_root_paths_match(value, next_path)) {
+            roots.push(next_path.to_string());
+        }
+    }
+
+    let payload = serde_json::to_string(&roots).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('known_project_roots', ?1)",
+        rusqlite::params![payload],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn restore_imported_project_root_snapshot(
+    conn: &rusqlite::Connection,
+    source_path: &str,
+    target_path: &str,
+) -> Result<usize, String> {
+    let Some(source_root) = normalize_project_root_path(source_path) else {
+        return Ok(0);
+    };
+    let Some(target_root) = normalize_project_root_path(target_path) else {
+        return Ok(0);
+    };
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT relative_path, content_base64
+             FROM imported_project_files
+             WHERE project_root = ?1
+             ORDER BY relative_path",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![source_root], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let files: Vec<(String, String)> = rows.filter_map(|row| row.ok()).collect();
+    if files.is_empty() {
+        return Ok(0);
+    }
+
+    let target_root_path = PathBuf::from(target_root);
+    let mut restored = 0usize;
+
+    for (relative_path, content_base64) in &files {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(content_base64)
+            .map_err(|e| e.to_string())?;
+        let target_path =
+            target_root_path.join(relative_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&target_path, bytes).map_err(|e| e.to_string())?;
+        restored += 1;
+    }
+
+    if !project_root_paths_match(source_root, target_root) {
+        conn.execute(
+            "INSERT OR REPLACE INTO imported_project_files (project_root, relative_path, content_base64)
+             SELECT ?1, relative_path, content_base64
+             FROM imported_project_files
+             WHERE project_root = ?2",
+            rusqlite::params![target_root, source_root],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM imported_project_files WHERE project_root = ?1",
+            rusqlite::params![source_root],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(restored)
+}
+
+fn store_imported_project_file(
+    conn: &rusqlite::Connection,
+    project_root: &str,
+    relative_path: &str,
+    content_base64: &str,
+) -> Result<(), String> {
+    let Some(project_root) = normalize_project_root_path(project_root) else {
+        return Ok(());
+    };
+
+    conn.execute(
+        "INSERT OR REPLACE INTO imported_project_files (project_root, relative_path, content_base64)
+         VALUES (?1, ?2, ?3)",
+        rusqlite::params![project_root, relative_path, content_base64],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn apply_project_root_remap(
+    conn: &rusqlite::Connection,
+    source_path: &str,
+    target_path: &str,
+) -> Result<usize, String> {
+    let Some(source_root) = normalize_project_root_path(source_path) else {
+        return Ok(0);
+    };
+    let Some(target_root) = normalize_project_root_path(target_path) else {
+        return Ok(0);
+    };
+
+    if project_root_paths_match(source_root, target_root) {
+        return Ok(0);
+    }
+
+    conn.execute(
+        "UPDATE hooks SET project_path = ?1 WHERE project_path = ?2",
+        rusqlite::params![target_root, source_root],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE workspaces SET base_path = ?1 WHERE base_path = ?2",
+        rusqlite::params![target_root, source_root],
+    )
+    .map_err(|e| e.to_string())?;
+    sync_known_project_root(conn, Some(source_root), Some(target_root))?;
+
+    restore_imported_project_root_snapshot(conn, source_root, target_root)
+}
+
+fn get_pending_imported_project_roots_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<PendingImportedProjectRoot>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT project_root, COUNT(*) as file_count
+             FROM imported_project_files
+             GROUP BY project_root
+             ORDER BY project_root",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PendingImportedProjectRoot {
+                project_root: row.get(0)?,
+                file_count: row.get::<_, i64>(1)? as usize,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows
+        .filter_map(|row| row.ok())
+        .filter(|item| !PathBuf::from(&item.project_root).exists())
+        .collect())
+}
+
+fn project_root_match_key(path: &str) -> Option<String> {
+    let normalized = normalize_project_root_path(path)?;
+    let file_name = PathBuf::from(normalized).file_name()?.to_string_lossy().to_string();
+    if file_name.trim().is_empty() {
+        None
+    } else {
+        Some(file_name.to_ascii_lowercase())
+    }
+}
+
+fn normalized_path_segments(path: &str) -> Vec<String> {
+    normalize_project_root_path(path)
+        .map(|value| {
+            value
+                .replace('\\', "/")
+                .split('/')
+                .filter(|segment| !segment.trim().is_empty())
+                .map(|segment| segment.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn shared_trailing_segment_count(left: &str, right: &str) -> usize {
+    let left_segments = normalized_path_segments(left);
+    let right_segments = normalized_path_segments(right);
+    let mut count = 0usize;
+
+    for (left, right) in left_segments.iter().rev().zip(right_segments.iter().rev()) {
+        if left == right {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+
+    count
+}
+
+fn best_project_root_candidate<'a>(
+    pending_path: &str,
+    candidates: &'a [String],
+) -> Option<&'a String> {
+    let pending_key = project_root_match_key(pending_path)?;
+    let mut scored: Vec<(&String, usize)> = candidates
+        .iter()
+        .filter(|candidate| project_root_match_key(candidate).as_deref() == Some(pending_key.as_str()))
+        .map(|candidate| (candidate, shared_trailing_segment_count(pending_path, candidate)))
+        .collect();
+
+    if scored.is_empty() {
+        return None;
+    }
+
+    scored.sort_by(|(left_path, left_score), (right_path, right_score)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left_path.cmp(right_path))
+    });
+
+    let (best_path, best_score) = scored[0];
+    if best_score == 0 {
+        return None;
+    }
+
+    if scored.get(1).is_some_and(|(_, score)| *score == best_score) {
+        return None;
+    }
+
+    Some(best_path)
+}
+
+fn build_tool_environment_report_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<ToolEnvironmentReport>, String> {
+    let tools = crate::skills::tools::detect_tools();
+    let mut reports = Vec::new();
+
+    for tool in tools {
+        let cli_command = tool_cli_command(&tool.id).to_string();
+        let config_path = resolve_tool_config_path(conn, &tool.id)?.to_string_lossy().to_string();
+        let mcp_config_path = if tool.id == "claude" {
+            resolve_claude_paths(conn)?.0.to_string_lossy().to_string()
+        } else {
+            resolve_tool_config_path(conn, &tool.id)?.to_string_lossy().to_string()
+        };
+        let skills_dir = resolve_tool_skills_dir(conn, &tool.id)?.to_string_lossy().to_string();
+        let config_dir = resolve_tool_config_dir(conn, &tool.id)?.to_string_lossy().to_string();
+
+        let custom_row: Option<(Option<String>, Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT config_dir, mcp_config_path, skills_dir FROM custom_paths WHERE tool_id = ?1",
+                rusqlite::params![&tool.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .ok();
+
+        let has_custom_config_dir = custom_row
+            .as_ref()
+            .and_then(|row| row.0.as_deref())
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_custom_mcp_config_path = custom_row
+            .as_ref()
+            .and_then(|row| row.1.as_deref())
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_custom_skills_dir = custom_row
+            .as_ref()
+            .and_then(|row| row.2.as_deref())
+            .is_some_and(|value| !value.trim().is_empty());
+        let mut manual_setup_kind = None;
+        let mut manual_setup_command = None;
+        let mut manual_setup_path = None;
+
+        match tool.id.as_str() {
+            "codex" => {
+                let auth_path = PathBuf::from(&config_dir).join("auth.json");
+                if !json_file_has_content(&auth_path) {
+                    manual_setup_kind = Some("codex_login".to_string());
+                    manual_setup_command = Some("codex".to_string());
+                    manual_setup_path = Some(auth_path.to_string_lossy().to_string());
+                }
+            }
+            "gemini" => {
+                let env_path = PathBuf::from(&config_dir).join(".env");
+                if !gemini_env_has_api_key(&env_path) {
+                    manual_setup_kind = Some("gemini_api_key".to_string());
+                    manual_setup_path = Some(env_path.to_string_lossy().to_string());
+                }
+            }
+            _ => {}
+        }
+
+        reports.push(ToolEnvironmentReport {
+            tool_id: tool.id,
+            tool_name: tool.name,
+            cli_available: cli_exists_in_path(&cli_command),
+            cli_command,
+            config_path: config_path.clone(),
+            config_exists: PathBuf::from(&config_path).is_file(),
+            mcp_config_path: mcp_config_path.clone(),
+            mcp_config_exists: PathBuf::from(&mcp_config_path).is_file(),
+            skills_dir: skills_dir.clone(),
+            skills_dir_exists: PathBuf::from(&skills_dir).is_dir(),
+            config_dir: config_dir.clone(),
+            config_dir_exists: PathBuf::from(&config_dir).is_dir(),
+            has_custom_config_dir,
+            has_custom_mcp_config_path,
+            has_custom_skills_dir,
+            manual_setup_kind,
+            manual_setup_command,
+            manual_setup_path,
+        });
+    }
+
+    Ok(reports)
+}
+
+fn refresh_mcp_servers_from_scan(conn: &rusqlite::Connection) -> Result<usize, String> {
+    let scanned = crate::mcp::config::scan_all_mcp_servers();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    for s in &scanned {
+        let args_json = serde_json::to_string(&s.args).unwrap_or_else(|_| "[]".to_string());
+        let env_json = serde_json::to_string(&s.env).unwrap_or_else(|_| "{}".to_string());
+
+        let existing_status: Option<String> = conn
+            .query_row(
+                "SELECT status FROM mcp_servers WHERE id = ?1",
+                rusqlite::params![s.name],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let status = existing_status.unwrap_or_else(|| "active".to_string());
+
+        conn.execute(
+            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE((SELECT installed_at FROM mcp_servers WHERE id = ?1), ?10), ?10)",
+            rusqlite::params![s.name, s.name, s.command, args_json, env_json, s.transport, s.source, s.config_path, status, now],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    Ok(scanned.len())
+}
+
+fn run_full_rescan_from_conn(conn: &rusqlite::Connection) -> Result<FullRescanResult, String> {
+    let mcp_servers = refresh_mcp_servers_from_scan(conn)?;
+    let skills = crate::skills::scanner::scan_local_skills().len();
+    let hooks = crate::hooks::manager::read_hooks_from_settings(conn).len();
+    let instruction_files = crate::claude_md::manager::scan_claude_md_files(conn).len();
+    let workflows = crate::workflows::scan_workflow_files().len();
+    let config_roots = crate::commands::config_files_commands::get_config_roots()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|root| root.exists)
+        .count();
+    let pending_project_roots = get_pending_imported_project_roots_from_conn(conn)?.len();
+    let tool_reports = build_tool_environment_report_from_conn(conn)?;
+    let tool_health_issues = tool_reports
+        .iter()
+        .filter(|report| {
+            !report.cli_available
+                || !report.config_dir_exists
+                || !report.config_exists
+                || !report.mcp_config_exists
+                || !report.skills_dir_exists
+        })
+        .count();
+    let manual_setup_required = tool_reports
+        .iter()
+        .filter(|report| report.manual_setup_kind.is_some())
+        .count();
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let imported_counts = sync_profiles_from_compatible_databases(conn, &now)?;
+    sync_live_profiles(conn, &imported_counts, &now)?;
+
+    Ok(FullRescanResult {
+        mcp_servers,
+        skills,
+        hooks,
+        instruction_files,
+        workflows,
+        config_roots,
+        pending_project_roots,
+        tool_health_issues,
+        manual_setup_required,
+    })
+}
+
+fn auto_remap_imported_project_roots_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<AutoRemapImportedProjectRootsResult, String> {
+    let pending_roots = get_pending_imported_project_roots_from_conn(conn)?;
+    let mut candidate_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut pending_key_counts: HashMap<String, usize> = HashMap::new();
+
+    for candidate in discover_project_roots(conn) {
+        let candidate_str = candidate.to_string_lossy().to_string();
+        if let Some(key) = project_root_match_key(&candidate_str) {
+            candidate_map.entry(key).or_default().push(candidate_str);
+        }
+    }
+
+    for pending in &pending_roots {
+        if let Some(key) = project_root_match_key(&pending.project_root) {
+            *pending_key_counts.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    let mut remapped_roots = 0usize;
+    let mut restored_files = 0usize;
+    let mut skipped_roots = 0usize;
+
+    for pending in pending_roots {
+        let Some(key) = project_root_match_key(&pending.project_root) else {
+            skipped_roots += 1;
+            continue;
+        };
+
+        if pending_key_counts.get(&key).copied().unwrap_or(0) != 1 {
+            skipped_roots += 1;
+            continue;
+        }
+
+        let Some(candidates) = candidate_map.get(&key) else {
+            skipped_roots += 1;
+            continue;
+        };
+
+        let Some(best_candidate) = best_project_root_candidate(&pending.project_root, candidates) else {
+            skipped_roots += 1;
+            continue;
+        };
+
+        let restored = apply_project_root_remap(conn, &pending.project_root, best_candidate)?;
+        remapped_roots += 1;
+        restored_files += restored;
+    }
+
+    Ok(AutoRemapImportedProjectRootsResult {
+        remapped_roots,
+        restored_files,
+        skipped_roots,
+    })
+}
+
+fn resolve_backup_root(conn: &rusqlite::Connection, root_key: &str) -> Result<PathBuf, String> {
+    if root_key == "claude_mcp" {
+        return Ok(resolve_claude_paths(conn)?.0);
+    }
+
+    if let Some(tool_id) = root_key.strip_prefix("tooldir:") {
+        return resolve_tool_config_dir(conn, tool_id);
+    }
+
+    if let Some(tool_id) = root_key.strip_prefix("skillsdir:") {
+        return resolve_tool_skills_dir(conn, tool_id);
+    }
+
+    if let Some(project_root) = root_key.strip_prefix("project:") {
+        return Ok(PathBuf::from(project_root));
+    }
+
+    Err(format!("Unknown backup root: {}", root_key))
+}
+
+fn trim_utf8_bom(content: &str) -> &str {
+    content.strip_prefix('\u{feff}').unwrap_or(content)
+}
+
+fn validate_sql_backup_content(content: &str) -> Result<&str, String> {
+    let trimmed = trim_utf8_bom(content).trim_start();
+    let header_ok = trimmed
+        .lines()
+        .take(8)
+        .any(|line| line.trim() == SQL_BACKUP_MARKER);
+
+    if header_ok {
+        Ok(trimmed)
+    } else {
+        Err("仅支持导入由 CCHub 导出的 SQL 备份文件".to_string())
+    }
+}
+
+fn configure_database_connection(
+    conn: &rusqlite::Connection,
+    db_exists: bool,
+) -> Result<(), String> {
+    conn.execute_batch("PRAGMA journal_mode = WAL;")
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA busy_timeout = 5000;")
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA synchronous = NORMAL;")
+        .map_err(|e| e.to_string())?;
+
+    if !db_exists {
+        conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")
+            .map_err(|e| e.to_string())?;
+    }
+
+    crate::db::schema::run_migrations(conn).map_err(|e| e.to_string())
+}
+
+fn restore_proxy_env_from_conn(conn: &rusqlite::Connection) {
+    let proxy = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'proxy_url'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .unwrap_or_default();
+
+    if proxy.trim().is_empty() {
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+            std::env::remove_var(key);
+        }
+        return;
+    }
+
+    std::env::set_var("HTTP_PROXY", &proxy);
+    std::env::set_var("HTTPS_PROXY", &proxy);
+    std::env::set_var("http_proxy", &proxy);
+    std::env::set_var("https_proxy", &proxy);
+}
+
+fn get_main_db_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
+    let mut stmt = conn
+        .prepare("PRAGMA database_list")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for row in rows.flatten() {
+        let (name, file) = row;
+        if name == "main" && !file.trim().is_empty() {
+            return Ok(PathBuf::from(file));
+        }
+    }
+
+    Err("Cannot determine database path".to_string())
+}
+
+fn create_safety_db_backup(
+    conn: &rusqlite::Connection,
+    backup_path: &std::path::Path,
+) -> Result<(), String> {
+    if let Some(parent) = backup_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    if backup_path.exists() {
+        std::fs::remove_file(backup_path).map_err(|e| e.to_string())?;
+    }
+
+    let vacuum_sql = format!(
+        "PRAGMA wal_checkpoint(TRUNCATE);\nVACUUM main INTO '{}';",
+        sql_escape(&backup_path.to_string_lossy())
+    );
+    conn.execute_batch(&vacuum_sql).map_err(|e| e.to_string())
+}
+
+fn validate_imported_backup_tables(conn: &rusqlite::Connection) -> Result<(), String> {
+    let backup_meta_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_backup_meta'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if backup_meta_exists == 0 {
+        return Err("备份文件格式不正确，缺少 _backup_meta 表".to_string());
+    }
+
+    Ok(())
+}
+
+fn remove_db_sidecars(db_path: &std::path::Path) {
+    let wal_path = db_path.with_extension(
+        db_path
+            .extension()
+            .map(|ext| format!("{}-wal", ext.to_string_lossy()))
+            .unwrap_or_else(|| "wal".to_string()),
+    );
+    let shm_path = db_path.with_extension(
+        db_path
+            .extension()
+            .map(|ext| format!("{}-shm", ext.to_string_lossy()))
+            .unwrap_or_else(|| "shm".to_string()),
+    );
+
+    let _ = std::fs::remove_file(wal_path);
+    let _ = std::fs::remove_file(shm_path);
+}
+
+fn restore_imported_artifacts(
+    conn: &rusqlite::Connection,
+    restored_count: usize,
+) -> Result<(usize, usize, usize, usize, usize), String> {
+    let temp_backup_rows = conn
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM _backup_meta) +
+                (SELECT COUNT(*) FROM _tool_configs) +
+                (SELECT COUNT(*) FROM _skill_files) +
+                (SELECT COUNT(*) FROM _backup_files)",
+            [],
+            |row| row.get::<_, usize>(0),
+        )
+        .unwrap_or(0);
+
+    let mut tool_configs_restored = 0;
+    let mut skills_restored = 0;
+    let mut full_files_restored = 0;
+    let mut pending_project_files = 0;
+
+    if let Ok(mut stmt) = conn.prepare("SELECT tool_id, config_path, config_content FROM _tool_configs") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for row in rows.flatten() {
+                let (tool_id, _config_path, config_content) = row;
+                let restored = match tool_id.as_str() {
+                    "claude-settings" => {
+                        let (_, settings_json_path) = resolve_claude_paths(conn)?;
+                        if let Some(parent) = settings_json_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        crate::utils::atomic_write_string(&settings_json_path, &config_content).is_ok()
+                    }
+                    "claude" => {
+                        let parsed = serde_json::from_str::<serde_json::Value>(&config_content).ok();
+                        let is_snapshot = parsed
+                            .as_ref()
+                            .and_then(|value| value.as_object())
+                            .is_some_and(|obj| {
+                                obj.contains_key("__claude_json_keys__")
+                                    || obj.contains_key("__settings_json_keys__")
+                            });
+
+                        if is_snapshot {
+                            apply_tool_snapshot(conn, "claude", &config_content).is_ok()
+                        } else {
+                            let (claude_json_path, _) = resolve_claude_paths(conn)?;
+                            if let Some(parent) = claude_json_path.parent() {
+                                let _ = std::fs::create_dir_all(parent);
+                            }
+                            crate::utils::atomic_write_string(&claude_json_path, &config_content).is_ok()
+                        }
+                    }
+                    "codex" | "gemini" | "opencode" | "openclaw" => {
+                        apply_tool_snapshot(conn, &tool_id, &config_content).is_ok()
+                    }
+                    _ => false,
+                };
+                if restored {
+                    tool_configs_restored += 1;
+                }
+            }
+        }
+    }
+
+    if let Ok(mut stmt) = conn.prepare("SELECT tool_id, name, content FROM _skill_files") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for row in rows.flatten() {
+                let (tool_id, name, file_content) = row;
+                let normalized_tool_id = match tool_id.as_str() {
+                    "claude-settings" => "claude",
+                    "claude" => "claude",
+                    "codex" => "codex",
+                    "gemini" => "gemini",
+                    "opencode" => "opencode",
+                    "openclaw" => "openclaw",
+                    _ => continue,
+                };
+                let skills_dir = match resolve_tool_skills_dir(conn, normalized_tool_id) {
+                    Ok(path) => path,
+                    Err(_) => continue,
+                };
+                let _ = std::fs::create_dir_all(&skills_dir);
+                if crate::utils::atomic_write_string(&skills_dir.join(&name), &file_content).is_ok() {
+                    skills_restored += 1;
+                }
+            }
+        }
+    }
+
+    if let Ok(mut stmt) = conn.prepare("SELECT root_key, relative_path, content_base64 FROM _backup_files ORDER BY id") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for row in rows.flatten() {
+                let (root_key, relative_path, content_base64) = row;
+                if let Some(project_root) = root_key.strip_prefix("project:") {
+                    store_imported_project_file(conn, project_root, &relative_path, &content_base64)?;
+                    if !PathBuf::from(project_root).exists() {
+                        pending_project_files += 1;
+                        continue;
+                    }
+                }
+
+                let root_path = match resolve_backup_root(conn, &root_key) {
+                    Ok(path) => path,
+                    Err(_) => continue,
+                };
+                let target_path = if relative_path.is_empty() {
+                    root_path
+                } else {
+                    root_path.join(relative_path.replace('/', std::path::MAIN_SEPARATOR_STR))
+                };
+                let bytes = match base64::engine::general_purpose::STANDARD.decode(content_base64) {
+                    Ok(bytes) => bytes,
+                    Err(_) => continue,
+                };
+                if let Some(parent) = target_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if std::fs::write(&target_path, bytes).is_ok() {
+                    full_files_restored += 1;
+                }
+            }
+        }
+    }
+
+    let _ = conn.execute_batch("DROP TABLE IF EXISTS _backup_meta;");
+    let _ = conn.execute_batch("DROP TABLE IF EXISTS _tool_configs;");
+    let _ = conn.execute_batch("DROP TABLE IF EXISTS _skill_files;");
+    let _ = conn.execute_batch("DROP TABLE IF EXISTS _backup_files;");
+
+    let db_rows_restored = restored_count.saturating_sub(temp_backup_rows);
+    Ok((
+        db_rows_restored,
+        tool_configs_restored,
+        skills_restored,
+        full_files_restored,
+        pending_project_files,
+    ))
 }
 
 /// Generate complete .sql backup content
@@ -1829,11 +3103,13 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
 
     // Skill files table
     sql.push_str("CREATE TABLE IF NOT EXISTS _skill_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT, name TEXT, content TEXT);\n\n");
+    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_files (id INTEGER PRIMARY KEY AUTOINCREMENT, root_key TEXT, relative_path TEXT, content_base64 TEXT);\n\n");
 
     // Data dump for all 12 business tables
     sql.push_str("-- ── Data ──\n\n");
     let tables = ["mcp_servers", "plugins", "skills", "hooks", "activity_logs", "mcp_clients",
-                   "workspaces", "custom_paths", "config_profiles", "app_settings", "update_history", "metrics"];
+                   "workspaces", "custom_paths", "config_profiles", "app_settings",
+                   "imported_project_files", "update_history", "metrics"];
 
     for table in tables {
         let query = format!("SELECT * FROM {}", table);
@@ -1882,33 +3158,37 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
 
     // Tool config files
     sql.push_str("-- ── Tool Configs ──\n\n");
-    let tool_configs: Vec<(&str, std::path::PathBuf)> = vec![
-        ("claude", home.join(".claude.json")),
-        ("claude-settings", home.join(".claude").join("settings.json")),
-        ("codex", home.join(".codex").join("config.toml")),
-        ("gemini", home.join(".gemini").join("settings.json")),
-        ("opencode", home.join(".opencode").join("opencode.json")),
-        ("openclaw", home.join(".openclaw").join("openclaw.json")),
-    ];
+    let tool_ids = ["claude", "codex", "gemini", "opencode", "openclaw"];
+    for tool_id in tool_ids {
+        if let Ok(content) = read_tool_snapshot(conn, tool_id) {
+            let config_path = match tool_id {
+                "claude" => resolve_claude_paths(conn)
+                    .map(|(claude_json, settings_json)| {
+                        format!("{} | {}", claude_json.display(), settings_json.display())
+                    })
+                    .unwrap_or_else(|_| home.join(".claude").join("settings.json").display().to_string()),
+                _ => resolve_tool_config_path(conn, tool_id)
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|_| home.join(format!(".{}", tool_id)).display().to_string()),
+            };
 
-    for (tool_id, config_path) in &tool_configs {
-        if config_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(config_path) {
-                sql.push_str(&format!(
-                    "INSERT OR REPLACE INTO _tool_configs VALUES ('{}', '{}', '{}');\n",
-                    tool_id,
-                    sql_escape(&config_path.to_string_lossy()),
-                    sql_escape(&content)
-                ));
-            }
+            sql.push_str(&format!(
+                "INSERT OR REPLACE INTO _tool_configs VALUES ('{}', '{}', '{}');\n",
+                tool_id,
+                sql_escape(&config_path),
+                sql_escape(&content)
+            ));
         }
     }
     sql.push('\n');
 
     // Skill files
     sql.push_str("-- ── Skill Files ──\n\n");
-    for (tool_id, config_path) in &tool_configs {
-        let skills_dir = config_path.parent().unwrap_or(home).join("skills");
+    for tool_id in tool_ids {
+        let skills_dir = match resolve_tool_skills_dir(conn, tool_id) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
         if skills_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&skills_dir) {
                 for entry in entries.flatten() {
@@ -1925,6 +3205,80 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
                 }
             }
         }
+    }
+
+    // Full file backup for tool directories and standalone config files
+    sql.push_str("-- ── Full File Backup ──\n\n");
+    let mut backup_roots: Vec<(String, PathBuf)> = Vec::new();
+    for tool_id in tool_ids {
+        if let Ok(tool_dir) = resolve_tool_config_dir(conn, tool_id) {
+            backup_roots.push((format!("tooldir:{}", tool_id), tool_dir.clone()));
+
+            if let Ok(skills_dir) = resolve_tool_skills_dir(conn, tool_id) {
+                if !path_is_within(&skills_dir, &tool_dir) {
+                    backup_roots.push((format!("skillsdir:{}", tool_id), skills_dir));
+                }
+            }
+
+            if tool_id == "claude" {
+                if let Ok((claude_mcp, _)) = resolve_claude_paths(conn) {
+                    if !path_is_within(&claude_mcp, &tool_dir) {
+                        backup_roots.push(("claude_mcp".to_string(), claude_mcp));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut backup_file_rows = Vec::new();
+    for (root_key, root_path) in &backup_roots {
+        if root_path.is_dir() {
+            collect_backup_file_rows(root_path, root_key, std::path::Path::new(""), &mut backup_file_rows);
+        } else if root_path.is_file() {
+            if let Ok(bytes) = std::fs::read(root_path) {
+                let content_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+                backup_file_rows.push((root_key.clone(), String::new(), content_base64));
+            }
+        }
+    }
+
+    // Project-level tool files so workspace/project-scoped settings migrate too.
+    let project_relative_files = [
+        "CLAUDE.md",
+        "CLAUDE.md.bak",
+        "AGENTS.md",
+        "AGENTS.md.bak",
+        "GEMINI.md",
+        "GEMINI.md.bak",
+        ".claude.json",
+    ];
+    let project_relative_dirs = [".claude", ".codex", ".gemini", ".opencode", ".openclaw"];
+
+    for project_root in discover_project_roots(conn) {
+        let root_key = format!("project:{}", project_root.to_string_lossy());
+
+        for relative_file in project_relative_files {
+            let relative_path = std::path::Path::new(relative_file);
+            let absolute_path = project_root.join(relative_path);
+            collect_backup_entry_row(&absolute_path, &root_key, relative_path, &mut backup_file_rows);
+        }
+
+        for relative_dir in project_relative_dirs {
+            let relative_path = std::path::Path::new(relative_dir);
+            let absolute_path = project_root.join(relative_path);
+            if absolute_path.is_dir() {
+                collect_backup_file_rows(&absolute_path, &root_key, relative_path, &mut backup_file_rows);
+            }
+        }
+    }
+
+    for (root_key, relative_path, content_base64) in backup_file_rows {
+        sql.push_str(&format!(
+            "INSERT INTO _backup_files (root_key, relative_path, content_base64) VALUES ('{}', '{}', '{}');\n",
+            sql_escape(&root_key),
+            sql_escape(&relative_path),
+            sql_escape(&content_base64),
+        ));
     }
 
     sql.push_str("\n-- ── End of Backup ──\n");
@@ -1958,338 +3312,342 @@ pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, Strin
     }
 }
 
-/// Import backup: supports .sql (new) and .json (legacy)
+/// Import backup from SQL only.
 #[tauri::command]
 pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, String> {
     let file = rfd::AsyncFileDialog::new()
         .set_title("导入备份")
-        .add_filter("CCHub Backup", &["sql", "json"])
+        .add_filter("CCHub SQL Backup", &["sql"])
         .pick_file()
         .await;
 
     let file = file.ok_or("Cancelled")?;
     let file_path = file.path().to_path_buf();
-    let content = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+    let raw_content = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+    let content = validate_sql_backup_content(&raw_content)?;
+    let restored_count = content.matches("\nINSERT").count();
 
-    let is_json = file_path.extension()
-        .map(|ext| ext.to_string_lossy().to_lowercase() == "json")
-        .unwrap_or(false);
+    let db_path;
+    let db_dir;
+    let safety_backup_path;
+    let pre_import_path;
+    let temp_file = {
+        let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+        db_path = get_main_db_path(&conn)?;
+        db_dir = db_path
+            .parent()
+            .map(|path| path.to_path_buf())
+            .ok_or("Cannot determine database directory")?;
 
-    if is_json {
-        // Legacy JSON import
-        return import_legacy_json(&db, &content);
-    }
+        let backups_dir = db_dir.join("backups");
+        std::fs::create_dir_all(&backups_dir).map_err(|e| e.to_string())?;
 
-    // .sql import
-    let mut restored_count = 0;
-    let mut tool_configs_restored = 0;
-    let mut skills_restored = 0;
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+        safety_backup_path = backups_dir.join(format!("cchub-safety-{}.db", stamp));
+        pre_import_path = backups_dir.join(format!("cchub-pre-import-{}.db", stamp));
 
-    {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        create_safety_db_backup(&conn, &safety_backup_path)?;
 
-        // Execute all SQL statements (CREATE TABLE + INSERT)
-        // Split by semicolons and execute each statement
-        for statement in content.split(";\n") {
-            let stmt = statement.trim();
-            if stmt.is_empty() || stmt.starts_with("--") {
-                continue;
-            }
-            let stmt_with_semi = format!("{};", stmt);
-            if conn.execute_batch(&stmt_with_semi).is_ok() {
-                if stmt.starts_with("INSERT") {
-                    restored_count += 1;
-                }
-            }
-        }
-
-        // Extract tool configs from _tool_configs table
-        if let Ok(mut stmt) = conn.prepare("SELECT tool_id, config_path, config_content FROM _tool_configs") {
-            if let Ok(rows) = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            }) {
-                let home = dirs::home_dir().ok_or("Cannot find home directory").unwrap();
-                for row in rows.flatten() {
-                    let (tool_id, _config_path, config_content) = row;
-                    let target_path = match tool_id.as_str() {
-                        "claude" => home.join(".claude.json"),
-                        "claude-settings" => home.join(".claude").join("settings.json"),
-                        "codex" => home.join(".codex").join("config.toml"),
-                        "gemini" => home.join(".gemini").join("settings.json"),
-                        "opencode" => home.join(".opencode").join("opencode.json"),
-                        "openclaw" => home.join(".openclaw").join("openclaw.json"),
-                        _ => continue,
-                    };
-                    if let Some(parent) = target_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    if crate::utils::atomic_write_string(&target_path, &config_content).is_ok() {
-                        tool_configs_restored += 1;
-                    }
-                }
-            }
-        }
-
-        // Extract skill files from _skill_files table
-        if let Ok(mut stmt) = conn.prepare("SELECT tool_id, name, content FROM _skill_files") {
-            if let Ok(rows) = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            }) {
-                let home = dirs::home_dir().ok_or("Cannot find home directory").unwrap();
-                for row in rows.flatten() {
-                    let (tool_id, name, file_content) = row;
-                    let base_dir = match tool_id.as_str() {
-                        "claude" | "claude-settings" => home.join(".claude"),
-                        "codex" => home.join(".codex"),
-                        "gemini" => home.join(".gemini"),
-                        "opencode" => home.join(".opencode"),
-                        "openclaw" => home.join(".openclaw"),
-                        _ => continue,
-                    };
-                    let skills_dir = base_dir.join("skills");
-                    let _ = std::fs::create_dir_all(&skills_dir);
-                    if crate::utils::atomic_write_string(&skills_dir.join(&name), &file_content).is_ok() {
-                        skills_restored += 1;
-                    }
-                }
-            }
-        }
-
-        // Clean up temporary backup tables from main DB
-        let _ = conn.execute_batch("DROP TABLE IF EXISTS _backup_meta;");
-        let _ = conn.execute_batch("DROP TABLE IF EXISTS _tool_configs;");
-        let _ = conn.execute_batch("DROP TABLE IF EXISTS _skill_files;");
-    }
-
-    Ok(format!("已恢复 {} 条数据记录, {} 个工具配置, {} 个技能文件",
-        restored_count - tool_configs_restored - skills_restored - 2, // subtract meta/config/skill inserts
-        tool_configs_restored, skills_restored))
-}
-
-/// Import legacy .json backup format
-fn import_legacy_json(db: &State<'_, DbState>, content: &str) -> Result<String, String> {
-    let backup: LegacyBackupData = serde_json::from_str(content).map_err(|e| format!("Invalid backup: {}", e))?;
-    let mut restored_count = 0;
-
-    if !backup.sql_dump.is_empty() {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        for line in backup.sql_dump.lines() {
-            let line = line.trim();
-            if line.starts_with("INSERT") {
-                let _ = conn.execute_batch(line);
-                restored_count += 1;
-            }
-        }
-    }
-
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    for (tool_id, tool_backup) in &backup.tools {
-        let config_path = match tool_id.as_str() {
-            "claude" => home.join(".claude.json"),
-            "claude-settings" => home.join(".claude").join("settings.json"),
-            "codex" => home.join(".codex").join("config.toml"),
-            "gemini" => home.join(".gemini").join("settings.json"),
-            "opencode" => home.join(".opencode").join("opencode.json"),
-            "openclaw" => home.join(".openclaw").join("openclaw.json"),
-            _ => continue,
-        };
-
-        if let Some(config_content) = &tool_backup.config_content {
-            if let Some(parent) = config_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = crate::utils::atomic_write_string(&config_path, config_content);
-            restored_count += 1;
-        }
-
-        if !tool_backup.skills.is_empty() {
-            let skills_dir = config_path.parent().unwrap_or(&home).join("skills");
-            let _ = std::fs::create_dir_all(&skills_dir);
-            for skill in &tool_backup.skills {
-                let _ = crate::utils::atomic_write_string(&skills_dir.join(&skill.name), &skill.content);
-                restored_count += 1;
-            }
-        }
-    }
-
-    Ok(format!("已从旧版备份恢复 {} 项 ({})", restored_count, backup.created_at))
-}
-
-/// Lightweight JSON config export
-#[tauri::command]
-pub async fn export_config_json(db: State<'_, DbState>) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-
-    let mut export = serde_json::json!({
-        "version": "1.0",
-        "exported_at": chrono::Local::now().to_rfc3339(),
-    });
-
-    // Collect tool config files
-    let mut tool_configs = serde_json::json!({});
-    let config_files: Vec<(&str, PathBuf)> = vec![
-        ("claude_settings", home.join(".claude").join("settings.json")),
-        ("claude_mcp", home.join(".claude.json")),
-        ("codex", home.join(".codex").join("config.toml")),
-        ("gemini", home.join(".gemini").join("settings.json")),
-        ("opencode", home.join(".opencode").join("opencode.json")),
-    ];
-    for (key, path) in config_files {
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                // Try to parse as JSON for pretty output, otherwise store as string
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    tool_configs[key] = val;
-                } else {
-                    tool_configs[key] = serde_json::json!(content);
-                }
-            }
-        }
-    }
-    export["tool_configs"] = tool_configs;
-
-    // Collect MCP servers from DB
-    {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare("SELECT id, name, command, args, env, transport, source, config_path, status FROM mcp_servers")
+        let temp_file = tempfile::Builder::new()
+            .prefix("cchub-import-")
+            .suffix(".db")
+            .tempfile_in(&db_dir)
             .map_err(|e| e.to_string())?;
-        let servers: Vec<serde_json::Value> = stmt
-            .query_map([], |row| {
-                Ok(serde_json::json!({
-                    "name": row.get::<_, String>(1)?,
-                    "command": row.get::<_, Option<String>>(2)?,
-                    "args": row.get::<_, String>(3)?,
-                    "env": row.get::<_, String>(4)?,
-                    "transport": row.get::<_, String>(5)?,
-                    "source": row.get::<_, String>(6)?,
-                    "config_path": row.get::<_, Option<String>>(7)?,
-                    "status": row.get::<_, String>(8)?,
-                }))
-            })
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect();
-        export["mcp_servers"] = serde_json::json!(servers);
+
+        {
+            let temp_conn =
+                rusqlite::Connection::open(temp_file.path()).map_err(|e| e.to_string())?;
+            configure_database_connection(&temp_conn, false)?;
+            temp_conn.execute_batch(content).map_err(|e| e.to_string())?;
+            crate::db::schema::run_migrations(&temp_conn).map_err(|e| e.to_string())?;
+            validate_imported_backup_tables(&temp_conn)?;
+        }
+
+        let placeholder =
+            rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
+        let old_conn = std::mem::replace(&mut *conn, placeholder);
+        drop(conn);
+
+        if let Err((old_conn, err)) = old_conn.close() {
+            let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+            *conn = old_conn;
+            return Err(err.to_string());
+        }
+
+        temp_file
+    };
+
+    let import_result = (|| -> Result<(rusqlite::Connection, usize, usize, usize, usize, usize), String> {
+        remove_db_sidecars(&db_path);
+
+        if db_path.exists() {
+            std::fs::rename(&db_path, &pre_import_path).map_err(|e| e.to_string())?;
+        }
+
+        temp_file
+            .persist(&db_path)
+            .map_err(|e| e.error.to_string())?;
+
+        let reopened = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+        configure_database_connection(&reopened, true)?;
+        let (
+            db_rows_restored,
+            tool_configs_restored,
+            skills_restored,
+            full_files_restored,
+            pending_project_files,
+        ) =
+            restore_imported_artifacts(&reopened, restored_count)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let imported_counts = sync_profiles_from_compatible_databases(&reopened, &now)?;
+        sync_live_profiles(&reopened, &imported_counts, &now)?;
+        restore_proxy_env_from_conn(&reopened);
+
+        Ok((
+            reopened,
+            db_rows_restored,
+            tool_configs_restored,
+            skills_restored,
+            full_files_restored,
+            pending_project_files,
+        ))
+    })();
+
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    match import_result {
+        Ok((
+            reopened,
+            db_rows_restored,
+            tool_configs_restored,
+            skills_restored,
+            full_files_restored,
+            pending_project_files,
+        )) => {
+            *conn = reopened;
+            drop(conn);
+
+            let _ = std::fs::remove_file(&pre_import_path);
+
+            let mut message = format!(
+                "已恢复 {} 条数据记录, {} 个工具配置, {} 个技能文件, {} 个附属文件。安全备份: {}",
+                db_rows_restored,
+                tool_configs_restored,
+                skills_restored,
+                full_files_restored,
+                safety_backup_path.display()
+            );
+            if pending_project_files > 0 {
+                message.push_str(&format!(
+                    "；另有 {} 个项目文件已保留为迁移快照，修改工作区/项目路径后会自动恢复到新路径",
+                    pending_project_files
+                ));
+            }
+            let summary = LastImportSummary {
+                imported_at: chrono::Utc::now().to_rfc3339(),
+                db_rows_restored,
+                tool_configs_restored,
+                skills_restored,
+                full_files_restored,
+                pending_project_files,
+                safety_backup_path: safety_backup_path.to_string_lossy().to_string(),
+            };
+            let reopened_conn = db.0.lock().map_err(|e| e.to_string())?;
+            set_json_app_setting(&reopened_conn, "last_import_summary", &summary)?;
+            drop(reopened_conn);
+            Ok(message)
+        }
+        Err(err) => {
+            remove_db_sidecars(&db_path);
+            if pre_import_path.exists() {
+                let _ = std::fs::remove_file(&db_path);
+                let _ = std::fs::rename(&pre_import_path, &db_path);
+            }
+
+            let fallback = rusqlite::Connection::open(&db_path)
+                .or_else(|_| rusqlite::Connection::open_in_memory())
+                .map_err(|e| e.to_string())?;
+            let _ = configure_database_connection(&fallback, true);
+            restore_proxy_env_from_conn(&fallback);
+            *conn = fallback;
+
+            Err(err)
+        }
     }
-
-    // Collect config profiles from DB
-    {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare("SELECT id, name, tool_id, config_content, description, is_active FROM config_profiles")
-            .map_err(|e| e.to_string())?;
-        let profiles: Vec<serde_json::Value> = stmt
-            .query_map([], |row| {
-                Ok(serde_json::json!({
-                    "name": row.get::<_, String>(1)?,
-                    "tool_id": row.get::<_, String>(2)?,
-                    "config_content": row.get::<_, String>(3)?,
-                    "description": row.get::<_, Option<String>>(4)?,
-                    "is_active": row.get::<_, bool>(5)?,
-                }))
-            })
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect();
-        export["config_profiles"] = serde_json::json!(profiles);
-    }
-
-    let json_str = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
-
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("导出配置")
-        .set_file_name(&format!("cchub-config-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")))
-        .add_filter("JSON", &["json"])
-        .save_file()
-        .await
-        .ok_or("Cancelled")?;
-
-    let path = file.path();
-    crate::utils::atomic_write_string(path, &json_str).map_err(|e| e.to_string())?;
-
-    Ok(path.display().to_string())
 }
 
-/// Lightweight JSON config import
 #[tauri::command]
-pub async fn import_config_json(db: State<'_, DbState>) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+pub fn remap_imported_project_root(
+    source_path: String,
+    target_path: String,
+    db: State<'_, DbState>,
+) -> Result<usize, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let restored = apply_project_root_remap(&conn, &source_path, &target_path)?;
+    Ok(restored)
+}
 
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("导入配置")
-        .add_filter("JSON", &["json"])
-        .pick_file()
-        .await
-        .ok_or("Cancelled")?;
+#[tauri::command]
+pub fn get_pending_imported_project_roots(
+    db: State<'_, DbState>,
+) -> Result<Vec<PendingImportedProjectRoot>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    get_pending_imported_project_roots_from_conn(&conn)
+}
 
-    let content = std::fs::read_to_string(file.path()).map_err(|e| e.to_string())?;
-    let data: serde_json::Value = serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
+#[tauri::command]
+pub fn get_tool_environment_report(
+    db: State<'_, DbState>,
+) -> Result<Vec<ToolEnvironmentReport>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    build_tool_environment_report_from_conn(&conn)
+}
 
-    // Validate version
-    let version = data.get("version").and_then(|v| v.as_str()).unwrap_or("0");
-    if version != "1.0" {
-        return Err(format!("Unsupported config version: {}", version));
-    }
+#[tauri::command]
+pub fn bootstrap_tool_environment(
+    tool_id: String,
+    db: State<'_, DbState>,
+) -> Result<BootstrapToolEnvironmentResult, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    bootstrap_tool_environment_from_conn(&conn, &tool_id)
+}
 
-    let mut restored_count = 0;
+#[tauri::command]
+pub fn auto_remap_imported_project_roots(
+    db: State<'_, DbState>,
+) -> Result<AutoRemapImportedProjectRootsResult, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    auto_remap_imported_project_roots_from_conn(&conn)
+}
 
-    // Restore tool config files
-    if let Some(tool_configs) = data.get("tool_configs").and_then(|v| v.as_object()) {
-        let path_map: HashMap<&str, PathBuf> = [
-            ("claude_settings", home.join(".claude").join("settings.json")),
-            ("claude_mcp", home.join(".claude.json")),
-            ("codex", home.join(".codex").join("config.toml")),
-            ("gemini", home.join(".gemini").join("settings.json")),
-            ("opencode", home.join(".opencode").join("opencode.json")),
-        ].into_iter().collect();
+#[tauri::command]
+pub fn get_last_import_summary(
+    db: State<'_, DbState>,
+) -> Result<Option<LastImportSummary>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    get_json_app_setting(&conn, "last_import_summary")
+}
 
-        for (key, value) in tool_configs {
-            if let Some(path) = path_map.get(key.as_str()) {
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let content_str = if value.is_string() {
-                    value.as_str().unwrap_or("").to_string()
-                } else {
-                    serde_json::to_string_pretty(value).unwrap_or_default()
-                };
-                if !content_str.is_empty() {
-                    crate::utils::atomic_write_string(path, &content_str).map_err(|e| e.to_string())?;
-                    restored_count += 1;
-                }
-            }
+#[tauri::command]
+pub fn run_full_rescan(
+    db: State<'_, DbState>,
+) -> Result<FullRescanResult, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    run_full_rescan_from_conn(&conn)
+}
+
+#[tauri::command]
+pub fn repair_all_migration_issues(
+    db: State<'_, DbState>,
+) -> Result<RepairAllResult, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let remap = auto_remap_imported_project_roots_from_conn(&conn)?;
+    let reports = build_tool_environment_report_from_conn(&conn)?;
+    let mut bootstrapped_tools = 0usize;
+    let mut created_dirs = 0usize;
+    let mut created_files = 0usize;
+    let mut bootstrap_notes = Vec::new();
+
+    for report in reports {
+        if report.config_dir_exists
+            && report.config_exists
+            && report.mcp_config_exists
+            && report.skills_dir_exists
+        {
+            continue;
+        }
+
+        let result = bootstrap_tool_environment_from_conn(&conn, &report.tool_id)?;
+        if result.created_dirs > 0 || result.created_files > 0 {
+            bootstrapped_tools += 1;
+        }
+        created_dirs += result.created_dirs;
+        created_files += result.created_files;
+        for note in result.notes {
+            bootstrap_notes.push(format!("{}: {}", report.tool_name, note));
         }
     }
 
-    // Restore config profiles to DB
-    if let Some(profiles) = data.get("config_profiles").and_then(|v| v.as_array()) {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        for profile in profiles {
-            let name = profile.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let tool_id = profile.get("tool_id").and_then(|v| v.as_str()).unwrap_or("");
-            let config_content = profile.get("config_content").and_then(|v| v.as_str()).unwrap_or("");
-            let description = profile.get("description").and_then(|v| v.as_str());
-            let is_active = profile.get("is_active").and_then(|v| v.as_bool()).unwrap_or(false);
+    let rescan = run_full_rescan_from_conn(&conn)?;
+    Ok(RepairAllResult {
+        remapped_roots: remap.remapped_roots,
+        restored_project_files: remap.restored_files,
+        skipped_remap_roots: remap.skipped_roots,
+        bootstrapped_tools,
+        created_dirs,
+        created_files,
+        bootstrap_notes,
+        rescan,
+    })
+}
 
-            if !name.is_empty() && !tool_id.is_empty() {
-                let id = uuid::Uuid::new_v4().to_string();
-                let _ = conn.execute(
-                    "INSERT OR REPLACE INTO config_profiles (id, name, tool_id, config_content, description, is_active) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    rusqlite::params![id, name, tool_id, config_content, description, is_active],
-                );
-                restored_count += 1;
-            }
-        }
+#[tauri::command]
+pub fn open_in_system(target: String) -> Result<(), String> {
+    open_target_in_system(&target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        best_project_root_candidate, normalized_path_segments, project_root_match_key,
+        shared_trailing_segment_count,
+    };
+
+    #[test]
+    fn project_root_key_uses_last_segment() {
+        assert_eq!(project_root_match_key("D:/work/foo-bar").as_deref(), Some("foo-bar"));
+        assert_eq!(project_root_match_key("/tmp/demo/").as_deref(), Some("demo"));
+        assert_eq!(project_root_match_key("   ").as_deref(), None);
     }
 
-    Ok(format!("已恢复 {} 项配置", restored_count))
+    #[test]
+    fn shared_trailing_segments_counts_suffix_depth() {
+        assert_eq!(
+            shared_trailing_segment_count(
+                "D:/old/workspace/acme/app",
+                "E:/new/workspace/acme/app"
+            ),
+            3
+        );
+        assert_eq!(
+            shared_trailing_segment_count(
+                "D:/old/workspace/acme/app",
+                "E:/new/workspace/other/app"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn best_candidate_prefers_longest_unique_suffix_match() {
+        let candidates = vec![
+            "E:/new/workspace/acme/app".to_string(),
+            "E:/archive/app".to_string(),
+        ];
+
+        let best = best_project_root_candidate("D:/old/workspace/acme/app", &candidates)
+            .map(|value| value.as_str());
+
+        assert_eq!(best, Some("E:/new/workspace/acme/app"));
+    }
+
+    #[test]
+    fn best_candidate_rejects_ambiguous_matches() {
+        let candidates = vec![
+            "E:/new/a/app".to_string(),
+            "F:/new/b/app".to_string(),
+        ];
+
+        let best = best_project_root_candidate("D:/old/c/app", &candidates)
+            .map(|value| value.as_str());
+
+        assert_eq!(best, None);
+    }
+
+    #[test]
+    fn normalized_segments_ignore_empty_parts() {
+        assert_eq!(
+            normalized_path_segments("D:\\foo\\\\bar\\baz"),
+            vec!["d:".to_string(), "foo".to_string(), "bar".to_string(), "baz".to_string()]
+        );
+    }
 }

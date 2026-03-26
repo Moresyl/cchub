@@ -23,6 +23,7 @@ export default function Workspaces() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [editPath, setEditPath] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
   const locale = getLocale();
 
@@ -72,7 +73,12 @@ export default function Workspaces() {
 
   async function handleSaveEdit(ws: Workspace) {
     try {
-      await invoke("update_workspace", { id: ws.id, name: editName.trim(), description: editDesc.trim() || null });
+      await invoke("update_workspace", {
+        id: ws.id,
+        name: editName.trim(),
+        description: editDesc.trim() || null,
+        basePath: editPath.trim() || null,
+      });
       setEditing(null);
       await load();
     } catch (e) { console.error(e); }
@@ -82,6 +88,7 @@ export default function Workspaces() {
     setEditing(ws.id);
     setEditName(ws.name);
     setEditDesc(ws.description || "");
+    setEditPath(ws.base_path || "");
   }
 
   if (loading) {
@@ -116,7 +123,21 @@ export default function Workspaces() {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <input className="input" placeholder={locale === "zh" ? "工作区名称" : "Workspace name"} value={newName} onChange={e => setNewName(e.target.value)} />
             <input className="input" placeholder={locale === "zh" ? "描述（可选）" : "Description (optional)"} value={newDesc} onChange={e => setNewDesc(e.target.value)} />
-            <input className="input" placeholder={locale === "zh" ? "项目路径（可选）" : "Project path (optional)"} value={newPath} onChange={e => setNewPath(e.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="input" placeholder={locale === "zh" ? "项目路径（可选）" : "Project path (optional)"} value={newPath} onChange={e => setNewPath(e.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={async () => {
+                  try {
+                    const picked = await invoke<string | null>("pick_folder");
+                    if (picked) setNewPath(picked);
+                  } catch (e) { console.error(e); }
+                }}
+                type="button"
+              >
+                <FolderOpen size={14} />
+              </button>
+            </div>
             <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={!newName.trim()} style={{ alignSelf: "flex-end" }}>
               <Plus size={14} />{locale === "zh" ? "创建" : "Create"}
             </button>
@@ -147,6 +168,28 @@ export default function Workspaces() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <input className="input" style={{ fontSize: 13, padding: "4px 8px" }} value={editName} onChange={e => setEditName(e.target.value)} />
                       <input className="input" style={{ fontSize: 12, padding: "4px 8px" }} value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder={locale === "zh" ? "描述" : "Description"} />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          className="input"
+                          style={{ fontSize: 12, padding: "4px 8px", fontFamily: "'JetBrains Mono', monospace" }}
+                          value={editPath}
+                          onChange={e => setEditPath(e.target.value)}
+                          placeholder={locale === "zh" ? "项目路径" : "Project path"}
+                        />
+                        <button
+                          className="btn btn-secondary btn-icon-sm"
+                          onClick={async e => {
+                            e.stopPropagation();
+                            try {
+                              const picked = await invoke<string | null>("pick_folder");
+                              if (picked) setEditPath(picked);
+                            } catch (err) { console.error(err); }
+                          }}
+                          title={locale === "zh" ? "选择目录" : "Pick folder"}
+                        >
+                          <FolderOpen size={14} />
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <>

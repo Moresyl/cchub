@@ -14,6 +14,9 @@ interface ClaudeMdFile {
   modified_at: string | null;
   content_preview: string;
   disabled: boolean;
+  tool_name: string;
+  file_name: string;
+  scope: string;
 }
 
 interface ClaudeMdTemplate {
@@ -21,6 +24,8 @@ interface ClaudeMdTemplate {
   name: string;
   description: string;
   content: string;
+  file_name: string;
+  tool_name: string;
 }
 
 export default function ClaudeMd() {
@@ -94,8 +99,10 @@ export default function ClaudeMd() {
   async function handleCreate(template: ClaudeMdTemplate) {
     if (!newDirPath.trim()) return;
     try {
-      const path = await invoke<string>("create_new_claude_md", {
-        dirPath: newDirPath.trim(),
+      const dirPath = newDirPath.trim();
+      const path = await invoke<string>("create_instruction_doc_file", {
+        dirPath,
+        fileName: template.file_name,
         content: template.content,
       });
       setShowCreate(false);
@@ -103,11 +110,14 @@ export default function ClaudeMd() {
       await load();
       const newFile: ClaudeMdFile = {
         path,
-        project_name: newDirPath.split(/[/\\]/).pop() || newDirPath,
+        project_name: dirPath.split(/[/\\]/).pop() || dirPath,
         size_bytes: template.content.length,
         modified_at: new Date().toISOString().slice(0, 16).replace("T", " "),
         content_preview: template.content.slice(0, 200),
         disabled: false,
+        tool_name: template.tool_name,
+        file_name: template.file_name,
+        scope: "project",
       };
       openEditor(newFile);
     } catch (e: any) {
@@ -299,6 +309,7 @@ export default function ClaudeMd() {
                     onClick={() => handleCreate(tmpl)}
                   >
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tmpl.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{tmpl.file_name}</div>
                     <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{tmpl.description}</div>
                   </div>
                 ))}
@@ -334,7 +345,7 @@ export default function ClaudeMd() {
                       )}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {file.path}
+                      {file.tool_name} · {file.file_name} · {file.scope === "project" ? "Project" : "Global"}
                     </div>
                   </div>
 

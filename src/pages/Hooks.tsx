@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Webhook, Plus, Edit3, Trash2, X, Save } from "lucide-react";
+import { RefreshCw, Webhook, Plus, Edit3, Trash2, X, Save, FolderOpen } from "lucide-react";
 import { t, tReplace } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -8,6 +8,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 interface Hook {
   id: string; event: string; matcher: string | null;
   command: string; scope: string; project_path: string | null;
+  source_event: string | null; source_index: number | null;
   enabled: boolean; timeout: number | null;
 }
 
@@ -22,8 +23,12 @@ export default function Hooks() {
   const [editMatcher, setEditMatcher] = useState("");
   const [editCommand, setEditCommand] = useState("");
   const [editTimeout, setEditTimeout] = useState("");
-  const [editOriginalEvent, setEditOriginalEvent] = useState(""); // for locating hook in settings
+  const [editScope, setEditScope] = useState<"global" | "project">("global");
+  const [editProjectPath, setEditProjectPath] = useState("");
+  const [editOriginalEvent, setEditOriginalEvent] = useState("");
   const [editOriginalIndex, setEditOriginalIndex] = useState<number | null>(null);
+  const [editOriginalScope, setEditOriginalScope] = useState<"global" | "project">("global");
+  const [editOriginalProjectPath, setEditOriginalProjectPath] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Hook | null>(null);
   const [saving, setSaving] = useState(false);
   const i = t();
@@ -44,8 +49,12 @@ export default function Hooks() {
     setEditMatcher("");
     setEditCommand("");
     setEditTimeout("");
+    setEditScope("global");
+    setEditProjectPath("");
     setEditOriginalEvent("");
     setEditOriginalIndex(null);
+    setEditOriginalScope("global");
+    setEditOriginalProjectPath(null);
   }
 
   function startEdit(hook: Hook) {
@@ -54,13 +63,13 @@ export default function Hooks() {
     setEditMatcher(hook.matcher || "");
     setEditCommand(hook.command);
     setEditTimeout(hook.timeout ? String(hook.timeout) : "");
-    // Parse the hook id to get the original event and index
-    const dashIdx = hook.id.lastIndexOf("-");
-    const origEvent = hook.id.substring(0, dashIdx);
-    const origIndex = parseInt(hook.id.substring(dashIdx + 1), 10);
-    setEditOriginalEvent(origEvent);
-    setEditOriginalIndex(origIndex);
-    setEditIndex(origIndex);
+    setEditScope(hook.scope === "project" ? "project" : "global");
+    setEditProjectPath(hook.project_path || "");
+    setEditOriginalEvent(hook.source_event || hook.event);
+    setEditOriginalIndex(hook.source_index ?? null);
+    setEditOriginalScope(hook.scope === "project" ? "project" : "global");
+    setEditOriginalProjectPath(hook.project_path || null);
+    setEditIndex(hook.source_index ?? 0);
   }
 
   function cancelEdit() {
@@ -73,34 +82,55 @@ export default function Hooks() {
       showToast("error", i.hooks.commandRequired);
       return;
     }
+    if (editScope === "project" && !editProjectPath.trim()) {
+      showToast("error", i.hooks.projectPathRequired);
+      return;
+    }
     setSaving(true);
     try {
+      const targetProjectPath = editScope === "project" ? editProjectPath.trim() : null;
       if (editOriginalIndex !== null && editOriginalEvent) {
-        // Editing existing: if event changed, delete old then create new
-        if (editOriginalEvent !== editEvent) {
+        const sourceChanged =
+          editOriginalEvent !== editEvent
+          || editOriginalScope !== editScope
+          || (editOriginalProjectPath || null) !== targetProjectPath;
+
+        if (sourceChanged) {
           await invoke("delete_hook_from_settings", {
             event: editOriginalEvent,
             index: editOriginalIndex,
-            scope: "global",
-            projectPath: null,
+            scope: editOriginalScope,
+            projectPath: editOriginalProjectPath,
           });
           await invoke("save_hook_to_settings", {
             event: editEvent,
             matcher: editMatcher.trim() || null,
             command: editCommand.trim(),
             timeout: editTimeout.trim() ? parseInt(editTimeout.trim(), 10) : null,
-            scope: "global",
-            projectPath: null,
+            scope: editScope,
+            projectPath: targetProjectPath,
             editIndex: null,
           });
+          if (
+            editOriginalProjectPath
+            && targetProjectPath
+            && editOriginalScope === "project"
+            && editScope === "project"
+            && editOriginalProjectPath !== targetProjectPath
+          ) {
+            await invoke("remap_imported_project_root", {
+              sourcePath: editOriginalProjectPath,
+              targetPath: targetProjectPath,
+            });
+          }
         } else {
           await invoke("save_hook_to_settings", {
             event: editEvent,
             matcher: editMatcher.trim() || null,
             command: editCommand.trim(),
             timeout: editTimeout.trim() ? parseInt(editTimeout.trim(), 10) : null,
-            scope: "global",
-            projectPath: null,
+            scope: editScope,
+            projectPath: targetProjectPath,
             editIndex: editOriginalIndex,
           });
         }
@@ -111,8 +141,8 @@ export default function Hooks() {
           matcher: editMatcher.trim() || null,
           command: editCommand.trim(),
           timeout: editTimeout.trim() ? parseInt(editTimeout.trim(), 10) : null,
-          scope: "global",
-          projectPath: null,
+          scope: editScope,
+          projectPath: targetProjectPath,
           editIndex: null,
         });
       }
@@ -128,15 +158,18 @@ export default function Hooks() {
   }
 
   async function doDelete(hook: Hook) {
-    const dashIdx = hook.id.lastIndexOf("-");
-    const event = hook.id.substring(0, dashIdx);
-    const index = parseInt(hook.id.substring(dashIdx + 1), 10);
+    const event = hook.source_event || hook.event;
+    const index = hook.source_index;
+    if (index === null || index === undefined) {
+      showToast("error", i.hooks.hookMetaInvalid);
+      return;
+    }
     try {
       await invoke("delete_hook_from_settings", {
         event,
         index,
-        scope: "global",
-        projectPath: null,
+        scope: hook.scope,
+        projectPath: hook.project_path,
       });
       showToast("success", i.hooks.deleteSuccess);
       await load();
@@ -176,6 +209,42 @@ export default function Hooks() {
               <input className="input" value={editMatcher} onChange={e => setEditMatcher(e.target.value)}
                 placeholder={i.hooks.matcherPlaceholder} />
             </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label className="field-label">{i.hooks.scope}</label>
+              <select className="input" value={editScope} onChange={e => setEditScope(e.target.value as "global" | "project")}>
+                <option value="global">{i.hooks.global}</option>
+                <option value="project">{i.hooks.project}</option>
+              </select>
+            </div>
+
+            {editScope === "project" && (
+              <div style={{ marginBottom: 20 }}>
+                <label className="field-label">{i.hooks.projectPath}</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input"
+                    value={editProjectPath}
+                    onChange={e => setEditProjectPath(e.target.value)}
+                    placeholder={i.hooks.projectPathPlaceholder}
+                    style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                  />
+                  <button
+                    className="btn btn-secondary btn-icon-sm"
+                    onClick={async () => {
+                      try {
+                        const picked = await invoke<string | null>("pick_folder");
+                        if (picked) setEditProjectPath(picked);
+                      } catch (e) { console.error(e); }
+                    }}
+                    type="button"
+                    title={i.hooks.projectPath}
+                  >
+                    <FolderOpen size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Command */}
             <div style={{ marginBottom: 20 }}>

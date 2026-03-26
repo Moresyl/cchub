@@ -308,6 +308,7 @@ dependencies = [
 name = "cchub"
 version = "1.2.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "flate2",

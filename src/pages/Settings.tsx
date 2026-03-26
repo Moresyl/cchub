@@ -1240,6 +1240,15 @@ export default function Settings() {
                               {i.settings.authGuideOpenPath}
                             </button>
                           )}
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => runBootstrapForTool(report.tool_id, report.tool_name)}
+                            disabled={bootstrappingToolId === report.tool_id}
+                            style={{ gap: 6 }}
+                          >
+                            <FolderOpen size={12} className={bootstrappingToolId === report.tool_id ? "spin" : ""} />
+                            {bootstrappingToolId === report.tool_id ? i.settings.migrationHealthBootstrapping : i.settings.authGuidePrepareFile}
+                          </button>
                           {tool?.install_url && (
                             <button
                               className="btn btn-secondary btn-sm"

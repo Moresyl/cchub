@@ -440,6 +440,45 @@ export default function Settings() {
     migrationPanelsInitialized.current = true;
   }, [lastImportSummary, manualSetupReports.length, pendingProjectRoots.length, toolHealthIssues.length, toolReports.length, tools.length]);
 
+  const migrationOverviewCards = [
+    {
+      panel: "pending" as const,
+      label: i.settings.pendingImports,
+      value: pendingProjectRoots.length,
+      tone: pendingProjectRoots.length > 0 ? "warning" : "ready",
+      helper: pendingProjectRoots.length > 0
+        ? (loc === "zh" ? "需要恢复路径" : "Needs path repair")
+        : (loc === "zh" ? "已处理" : "Resolved"),
+    },
+    {
+      panel: "summary" as const,
+      label: i.settings.importSummaryPending,
+      value: pendingProjectFiles,
+      tone: pendingProjectFiles > 0 ? "warning" : "neutral",
+      helper: lastImportSummary
+        ? (loc === "zh" ? "查看最近导入" : "Review latest import")
+        : (loc === "zh" ? "暂无导入记录" : "No recent import"),
+    },
+    {
+      panel: "health" as const,
+      label: i.settings.migrationHealth,
+      value: toolHealthIssues.length,
+      tone: toolHealthIssues.length > 0 ? "danger" : "ready",
+      helper: toolHealthIssues.length > 0
+        ? (loc === "zh" ? "优先处理环境缺失" : "Fix environment gaps first")
+        : (loc === "zh" ? "环境正常" : "Environment ready"),
+    },
+    {
+      panel: "auth" as const,
+      label: i.settings.authGuide,
+      value: manualSetupReports.length,
+      tone: manualSetupReports.length > 0 ? "warning" : "ready",
+      helper: manualSetupReports.length > 0
+        ? (loc === "zh" ? "仍需手动认证" : "Manual auth still required")
+        : (loc === "zh" ? "无需补全" : "No manual auth needed"),
+    },
+  ];
+
   return (
     <div className="animate-in">
       <div className="page-header">
@@ -661,29 +700,77 @@ export default function Settings() {
           </p>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
-            {[
-              ["pending", i.settings.pendingImports, pendingProjectRoots.length],
-              ["summary", i.settings.importSummaryPending, pendingProjectFiles],
-              ["health", i.settings.migrationHealth, toolHealthIssues.length],
-              ["auth", i.settings.authGuide, manualSetupReports.length],
-            ].map(([panel, label, value]) => (
+            {migrationOverviewCards.map(({ panel, label, value, tone, helper }) => {
+              const isActive = migrationPanelsOpen[panel];
+              const palette = tone === "danger"
+                ? {
+                    border: "rgba(239, 68, 68, 0.35)",
+                    background: "rgba(239, 68, 68, 0.08)",
+                    valueColor: "var(--error)",
+                    badgeBg: "rgba(239, 68, 68, 0.14)",
+                    badgeColor: "var(--error)",
+                  }
+                : tone === "warning"
+                  ? {
+                      border: "rgba(245, 158, 11, 0.35)",
+                      background: "rgba(245, 158, 11, 0.08)",
+                      valueColor: "var(--warning)",
+                      badgeBg: "rgba(245, 158, 11, 0.14)",
+                      badgeColor: "var(--warning)",
+                    }
+                  : tone === "ready"
+                    ? {
+                        border: "rgba(34, 197, 94, 0.28)",
+                        background: "rgba(34, 197, 94, 0.07)",
+                        valueColor: "var(--success)",
+                        badgeBg: "rgba(34, 197, 94, 0.12)",
+                        badgeColor: "var(--success)",
+                      }
+                    : {
+                        border: "var(--border-color)",
+                        background: "var(--bg-input)",
+                        valueColor: "var(--text-primary)",
+                        badgeBg: "var(--bg-card)",
+                        badgeColor: "var(--text-secondary)",
+                      };
+
+              return (
               <button
-                key={String(label)}
+                key={label}
                 type="button"
-                onClick={() => focusMigrationPanel(panel as keyof typeof migrationPanelsOpen)}
+                onClick={() => focusMigrationPanel(panel)}
                 style={{
                   padding: "12px 14px",
                   borderRadius: 10,
-                  background: "var(--bg-input)",
-                  border: "1px solid var(--border-color)",
+                  background: palette.background,
+                  border: `1px solid ${palette.border}`,
                   textAlign: "left",
                   cursor: "pointer",
+                  boxShadow: isActive ? "0 0 0 1px var(--accent-primary)" : "none",
+                  transform: isActive ? "translateY(-1px)" : "none",
+                  transition: "all 160ms ease",
                 }}
               >
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>{label}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>{value}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>{label}</div>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      padding: "3px 7px",
+                      borderRadius: 999,
+                      background: palette.badgeBg,
+                      color: palette.badgeColor,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {isActive ? (loc === "zh" ? "当前展开" : "Open") : (loc === "zh" ? "查看" : "View")}
+                  </span>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.1, color: palette.valueColor }}>{value}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>{helper}</div>
               </button>
-            ))}
+              );
+            })}
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>

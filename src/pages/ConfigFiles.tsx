@@ -25,6 +25,8 @@ import type { FolderNode } from "../types/skills";
 import { showToast } from "../components/Toast";
 import CodeEditor from "../components/CodeEditor";
 import ConfirmDialog from "../components/ConfirmDialog";
+import OmoConfigSection from "../components/OmoConfigSection";
+import OpenClawConfigSection from "../components/OpenClawConfigSection";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 import {
   isCodexConfigToml,
@@ -460,6 +462,9 @@ export default function ConfigFiles() {
           );
         })}
       </div>
+
+      {activeRoot === "opencode" && <OmoConfigSection />}
+      {activeRoot === "openclaw" && <OpenClawConfigSection />}
 
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "320px minmax(0, 1fr)", gap: 16 }}>
         <div className="card" style={{ minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>

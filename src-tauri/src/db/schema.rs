@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS config_profiles (
     name TEXT NOT NULL,
     tool_id TEXT NOT NULL,
     config_snapshot TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
     source_type TEXT DEFAULT 'manual',
     source_key TEXT,
     created_at TEXT,
@@ -126,7 +127,65 @@ CREATE TABLE IF NOT EXISTS imported_project_files (
     content_base64 TEXT NOT NULL,
     PRIMARY KEY (project_root, relative_path)
 );
-"#.to_string()
+
+CREATE TABLE IF NOT EXISTS proxy_request_logs (
+    request_id TEXT PRIMARY KEY,
+    tool_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    provider_name TEXT NOT NULL,
+    request_model TEXT,
+    response_model TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    cache_read_tokens INTEGER DEFAULT 0,
+    cache_creation_tokens INTEGER DEFAULT 0,
+    total_cost_usd TEXT DEFAULT '0',
+    latency_ms INTEGER DEFAULT 0,
+    status_code INTEGER DEFAULT 0,
+    is_streaming INTEGER DEFAULT 0,
+    error_message TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_created_at
+ON proxy_request_logs(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_tool_id_created_at
+ON proxy_request_logs(tool_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS model_pricing (
+    model_id TEXT PRIMARY KEY,
+    normalized_model_id TEXT NOT NULL,
+    input_cost_per_million TEXT NOT NULL DEFAULT '0',
+    output_cost_per_million TEXT NOT NULL DEFAULT '0',
+    cache_read_cost_per_million TEXT NOT NULL DEFAULT '0',
+    cache_write_cost_per_million TEXT NOT NULL DEFAULT '0',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_pricing_normalized_model_id
+ON model_pricing(normalized_model_id);
+
+CREATE TABLE IF NOT EXISTS proxy_usage_daily_rollups (
+    day TEXT NOT NULL,
+    tool_id TEXT NOT NULL,
+    total_requests INTEGER NOT NULL DEFAULT 0,
+    success_requests INTEGER NOT NULL DEFAULT 0,
+    total_input_tokens INTEGER NOT NULL DEFAULT 0,
+    total_output_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost_usd TEXT NOT NULL DEFAULT '0',
+    avg_latency_ms REAL NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (day, tool_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_usage_daily_rollups_day
+ON proxy_usage_daily_rollups(day DESC, tool_id ASC);
+"#
+    .to_string()
 }
 
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -134,7 +193,10 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // Migration: add config_path column if not exists
     let _ = conn.execute_batch("ALTER TABLE mcp_servers ADD COLUMN config_path TEXT;");
-    let _ = conn.execute_batch("ALTER TABLE config_profiles ADD COLUMN source_type TEXT DEFAULT 'manual';");
+    let _ =
+        conn.execute_batch("ALTER TABLE config_profiles ADD COLUMN sort_order INTEGER DEFAULT 0;");
+    let _ = conn
+        .execute_batch("ALTER TABLE config_profiles ADD COLUMN source_type TEXT DEFAULT 'manual';");
     let _ = conn.execute_batch("ALTER TABLE config_profiles ADD COLUMN source_key TEXT;");
 
     Ok(())

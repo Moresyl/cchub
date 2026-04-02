@@ -44,6 +44,14 @@
     ]
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "cchub",
+          "ccswitch"
+        ]
+      }
+    },
     "updater": {
       "endpoints": [
         "https://github.com/Moresl/cchub/releases/latest/download/latest.json"

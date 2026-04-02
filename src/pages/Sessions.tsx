@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Clock3,
+  Copy,
   Database,
   FileText,
   FolderOpen,
   History,
-  Play,
   RefreshCw,
   Search,
   Trash2,
@@ -45,12 +45,6 @@ interface SessionEntry {
 interface SessionDetail {
   session: SessionSummary;
   entries: SessionEntry[];
-}
-
-interface SessionResumeResult {
-  launched: boolean;
-  command: string;
-  cwd: string | null;
 }
 
 const TOOL_ORDER: ManagedAppId[] = ["claude", "codex", "gemini", "opencode", "openclaw"];
@@ -93,7 +87,6 @@ export default function Sessions() {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailQuery, setDetailQuery] = useState("");
-  const [restoringId, setRestoringId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
   const locale = getLocale();
@@ -201,59 +194,6 @@ export default function Sessions() {
       setDetail(null);
     } finally {
       setDetailLoading(false);
-    }
-  }
-
-  async function handleResume(session: SessionSummary) {
-    if (!session.can_resume) {
-      showToast("error", uiText("当前会话来源暂不支持恢复", "This session backend cannot be resumed yet", "この会話バックエンドはまだ復元に対応していません"));
-      return;
-    }
-
-    setRestoringId(session.id);
-    try {
-      const result = await invoke<SessionResumeResult>("resume_session_in_preferred_terminal", {
-        toolId: session.tool_id,
-        sessionId: session.id,
-        cwd: session.cwd,
-        sourcePath: session.source_path,
-      });
-      if (!result.launched && result.command) {
-        try {
-          await navigator.clipboard.writeText(result.command);
-          showToast(
-            "success",
-            uiText(
-              "已打开首选终端目录，恢复命令已复制到剪贴板",
-              "Opened the preferred terminal directory and copied the resume command",
-              "優先ターミナルのディレクトリを開き、復元コマンドをコピーしました",
-            ),
-          );
-          return;
-        } catch {
-          showToast(
-            "success",
-            uiText(
-              `已打开终端目录，请运行: ${result.command}`,
-              `Opened the terminal directory. Run: ${result.command}`,
-              `ターミナルのディレクトリを開きました。次を実行してください: ${result.command}`,
-            ),
-          );
-          return;
-        }
-      }
-      showToast(
-        "success",
-        uiText(
-          "已在首选终端中发起会话恢复",
-          "Started session restore in the preferred terminal",
-          "優先ターミナルで会話の復元を開始しました",
-        ),
-      );
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setRestoringId(null);
     }
   }
 
@@ -435,12 +375,13 @@ export default function Sessions() {
                           className="btn btn-secondary btn-xs"
                           onClick={(event) => {
                             event.stopPropagation();
-                            void handleResume(session);
+                            void navigator.clipboard.writeText(session.id).then(() =>
+                              showToast("success", uiText("已复制会话 ID", "Session ID copied", "セッション ID をコピーしました")),
+                            );
                           }}
-                          disabled={!session.can_resume || restoringId === session.id}
-                          title={uiText("恢复会话", "Resume session", "会話を復元")}
+                          title={uiText("复制会话 ID", "Copy session ID", "セッション ID をコピー")}
                         >
-                          <Play size={12} />
+                          <Copy size={12} />
                         </button>
                         <button
                           className="btn btn-danger btn-xs"
@@ -498,14 +439,6 @@ export default function Sessions() {
                   </div>
                   <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                     <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => void handleResume(detail.session)}
-                      disabled={!detail.session.can_resume || restoringId === detail.session.id}
-                    >
-                      <Play size={14} />
-                      {uiText("恢复", "Resume", "復元")}
-                    </button>
-                    <button
                       className="btn btn-danger btn-sm"
                       onClick={() => setPendingDelete(detail.session)}
                       disabled={!detail.session.can_delete || deletingId === detail.session.id}
@@ -514,6 +447,63 @@ export default function Sessions() {
                       {uiText("删除", "Delete", "削除")}
                     </button>
                   </div>
+                </div>
+
+                {/* Session ID & resume info */}
+                <div style={{
+                  display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14,
+                  padding: "10px 14px", borderRadius: 8,
+                  background: "var(--bg-elevated)", border: "1px solid var(--border-default)",
+                  fontSize: 12, color: "var(--text-muted)", alignItems: "center",
+                }}>
+                  <span style={{ fontWeight: 600, color: "var(--text-secondary)", flexShrink: 0 }}>
+                    {uiText("会话 ID", "Session ID", "セッション ID")}:
+                  </span>
+                  <code style={{
+                    fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                    background: "var(--bg-card)", padding: "2px 8px", borderRadius: 4,
+                    userSelect: "all", cursor: "text",
+                  }}>
+                    {detail.session.id}
+                  </code>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(detail.session.id).then(() =>
+                        showToast("success", uiText("已复制会话 ID", "Session ID copied", "セッション ID をコピーしました")),
+                      );
+                    }}
+                    style={{ padding: "2px 6px" }}
+                  >
+                    <Copy size={12} />
+                  </button>
+                  {detail.session.cwd && (
+                    <>
+                      <span style={{ color: "var(--border-default)" }}>|</span>
+                      <span style={{ fontWeight: 600, color: "var(--text-secondary)", flexShrink: 0 }}>
+                        {uiText("目录", "Directory", "ディレクトリ")}:
+                      </span>
+                      <code style={{
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                        background: "var(--bg-card)", padding: "2px 8px", borderRadius: 4,
+                        userSelect: "all", cursor: "text", minWidth: 0,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {detail.session.cwd}
+                      </code>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(detail.session.cwd!).then(() =>
+                            showToast("success", uiText("已复制目录路径", "Directory path copied", "ディレクトリパスをコピーしました")),
+                          );
+                        }}
+                        style={{ padding: "2px 6px" }}
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </>
+                  )}
                 </div>
 
                 <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>

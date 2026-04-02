@@ -197,6 +197,57 @@ pub struct ProviderStreamCheckResult {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CommonConfigSnippet {
+    pub hide_attribution: bool,
+    pub enable_teammates: bool,
+    pub effort_level_high: bool,
+    pub enable_tool_search: bool,
+    pub custom_values: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderPingResult {
+    pub profile_id: String,
+    pub tool_id: String,
+    pub provider_name: String,
+    pub base_url: Option<String>,
+    pub status: String,
+    pub latency_ms: Option<u64>,
+    pub http_status: Option<u16>,
+    pub checked_at: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeConfigToggles {
+    pub hide_attribution: bool,
+    pub enable_teammates: bool,
+    pub max_thinking_tokens: bool,
+    pub max_thinking_tokens_value: String,
+    pub enable_tool_search: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexTomlStructuredConfig {
+    pub model_provider: String,
+    pub provider_label: String,
+    pub base_url: String,
+    pub wire_api: String,
+    pub model: String,
+    pub reasoning_effort: String,
+    pub personality: String,
+    pub disable_response_storage: bool,
+    pub model_context_window: String,
+    pub model_auto_compact_token_limit: String,
+    pub api_key: String,
+    pub mcp_servers: Vec<String>,
+    pub malformed_mcp_servers: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenClawDailyMemoryEntry {
     pub path: String,
@@ -1082,20 +1133,98 @@ fn preferred_texts_from_value(value: &serde_json::Value, texts: &mut Vec<String>
     }
 }
 
+/// Resolve the full path to a CLI tool executable (returned WITHOUT quotes).
+/// On Windows, checks npm global bin first, then `where`.
+/// Falls back to the bare command name if nothing is found.
+fn resolve_cli_path(cmd: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        // 1) npm global bin — most Node.js CLI tools live here
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let npm_cmd = std::path::PathBuf::from(&appdata)
+                .join("npm")
+                .join(format!("{cmd}.cmd"));
+            if npm_cmd.exists() {
+                return npm_cmd.to_string_lossy().to_string();
+            }
+        }
+        // 2) `where` — may return system shims (e.g. C:\Windows\claude.exe)
+        if let Ok(output) = std::process::Command::new("where").arg(cmd).output() {
+            if output.status.success() {
+                let mut fallback = None;
+                for line in String::from_utf8_lossy(&output.stdout).lines() {
+                    let p = line.trim();
+                    if p.is_empty() {
+                        continue;
+                    }
+                    let path = std::path::PathBuf::from(p);
+                    if !path.exists() {
+                        continue;
+                    }
+                    let lower = p.to_ascii_lowercase();
+                    let is_windows_alias = lower.starts_with("c:\\windows\\")
+                        && (lower.ends_with(&format!("\\{cmd}.exe"))
+                            || lower.ends_with(&format!("\\{cmd}.cmd")));
+                    let is_cmd_wrapper =
+                        lower.ends_with(".cmd") || lower.ends_with(".bat") || lower.ends_with(".ps1");
+
+                    if !is_windows_alias && is_cmd_wrapper {
+                        return p.to_string();
+                    }
+                    if !is_windows_alias && fallback.is_none() {
+                        fallback = Some(p.to_string());
+                    }
+                }
+                if let Some(path) = fallback {
+                    return path;
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(output) = std::process::Command::new("which").arg(cmd).output() {
+            if output.status.success() {
+                if let Some(line) = String::from_utf8_lossy(&output.stdout).lines().next() {
+                    let p = line.trim();
+                    if !p.is_empty() {
+                        return p.to_string();
+                    }
+                }
+            }
+        }
+    }
+    cmd.to_string()
+}
+
+/// Quote a CLI path for embedding in a shell command string.
+/// Only adds quotes when the path contains spaces.
+fn shell_quote_cli(path: &str) -> String {
+    if path.contains(' ') {
+        format!("\"{}\"", path)
+    } else {
+        path.to_string()
+    }
+}
+
 fn codex_resume_command(session_id: &str) -> String {
-    format!("codex resume {session_id}")
+    let cli = shell_quote_cli(&resolve_cli_path("codex"));
+    format!("{cli} resume {session_id}")
 }
 
 fn claude_resume_command(session_id: &str) -> String {
-    format!("claude --resume {session_id}")
+    let cli = shell_quote_cli(&resolve_cli_path("claude"));
+    format!("{cli} --resume {session_id}")
 }
 
 fn gemini_resume_command(session_id: &str) -> String {
-    format!("gemini --resume {session_id}")
+    let cli = shell_quote_cli(&resolve_cli_path("gemini"));
+    format!("{cli} --resume {session_id}")
 }
 
 fn opencode_resume_command(session_id: &str) -> String {
-    format!("opencode session resume {session_id}")
+    let cli = shell_quote_cli(&resolve_cli_path("opencode"));
+    format!("{cli} session resume {session_id}")
 }
 
 fn shell_single_quote(value: &str) -> String {
@@ -1467,6 +1596,255 @@ fn get_text_app_setting(conn: &rusqlite::Connection, key: &str) -> Result<Option
 const MANAGED_APP_IDS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "openclaw"];
 const VISIBLE_APPS_SETTING_KEY: &str = "visible_apps";
 const WINDOW_PREFERENCES_SETTING_KEY: &str = "window_preferences";
+const COMMON_CONFIG_SNIPPETS_SETTING_KEY: &str = "common_config_snippets";
+
+fn is_common_config_tool(tool_id: &str) -> bool {
+    matches!(tool_id, "claude" | "codex" | "gemini")
+}
+
+fn normalize_integer_like(value: &str) -> Option<i64> {
+    let normalized = value.trim().replace(['_', ',', ' '], "");
+    if normalized.is_empty() {
+        return None;
+    }
+    normalized.parse::<i64>().ok()
+}
+
+fn normalized_non_empty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_common_config_snippet(mut snippet: CommonConfigSnippet) -> CommonConfigSnippet {
+    let mut normalized = HashMap::new();
+    for (key, value) in snippet.custom_values {
+        let Some(key) = normalized_non_empty(&key) else {
+            continue;
+        };
+        let Some(value) = normalized_non_empty(&value) else {
+            continue;
+        };
+        normalized.insert(key, value);
+    }
+    snippet.custom_values = normalized;
+    snippet
+}
+
+fn common_config_snippet_has_payload(snippet: &CommonConfigSnippet) -> bool {
+    snippet.hide_attribution
+        || snippet.enable_teammates
+        || snippet.effort_level_high
+        || snippet.enable_tool_search
+        || !snippet.custom_values.is_empty()
+}
+
+fn load_common_config_snippets_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<HashMap<String, CommonConfigSnippet>, String> {
+    Ok(get_json_app_setting(conn, COMMON_CONFIG_SNIPPETS_SETTING_KEY)?.unwrap_or_default())
+}
+
+fn read_common_config_snippet_from_conn(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+) -> Result<CommonConfigSnippet, String> {
+    if !is_common_config_tool(tool_id) {
+        return Ok(CommonConfigSnippet::default());
+    }
+
+    let snippets = load_common_config_snippets_from_conn(conn)?;
+    Ok(snippets
+        .get(tool_id)
+        .cloned()
+        .map(normalize_common_config_snippet)
+        .unwrap_or_default())
+}
+
+fn write_common_config_snippet_to_conn(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    snippet: CommonConfigSnippet,
+) -> Result<CommonConfigSnippet, String> {
+    if !is_common_config_tool(tool_id) {
+        return Err(format!(
+            "Common Config Snippet is not supported for tool: {tool_id}"
+        ));
+    }
+
+    let mut snippets = load_common_config_snippets_from_conn(conn)?;
+    let normalized = normalize_common_config_snippet(snippet);
+    if common_config_snippet_has_payload(&normalized) {
+        snippets.insert(tool_id.to_string(), normalized.clone());
+    } else {
+        snippets.remove(tool_id);
+    }
+    set_json_app_setting(conn, COMMON_CONFIG_SNIPPETS_SETTING_KEY, &snippets)?;
+    Ok(normalized)
+}
+
+fn resolve_claude_settings_local_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
+    let (_, settings_json_path) = resolve_claude_paths(conn)?;
+    let parent = settings_json_path
+        .parent()
+        .ok_or_else(|| "Invalid Claude settings path".to_string())?;
+    Ok(parent.join("settings.local.json"))
+}
+
+fn read_json_file_or_default(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+fn write_json_file_pretty(path: &std::path::Path, value: &serde_json::Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(path, &content).map_err(|e| e.to_string())
+}
+
+fn read_claude_config_toggles_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<ClaudeConfigToggles, String> {
+    let path = resolve_claude_settings_local_path(conn)?;
+    let settings = read_json_file_or_default(&path)?;
+    let env = settings
+        .get("env")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let truthy = |key: &str| {
+        env.get(key)
+            .and_then(|value| value.as_str())
+            .map(|value| matches!(value, "1" | "true" | "TRUE" | "True"))
+            .unwrap_or(false)
+    };
+
+    let max_thinking_tokens_value = env
+        .get("CLAUDE_CODE_MAX_THINKING_TOKENS")
+        .and_then(|value| value.as_str())
+        .unwrap_or("32000")
+        .to_string();
+
+    Ok(ClaudeConfigToggles {
+        hide_attribution: truthy("ANTHROPIC_HIDE_ATTRIBUTION"),
+        enable_teammates: truthy("CLAUDE_CODE_ENABLE_TEAMMATES"),
+        max_thinking_tokens: env
+            .get("CLAUDE_CODE_MAX_THINKING_TOKENS")
+            .and_then(|value| value.as_str())
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+        max_thinking_tokens_value,
+        enable_tool_search: truthy("ENABLE_TOOL_SEARCH"),
+    })
+}
+
+fn write_claude_config_toggle_to_conn(
+    conn: &rusqlite::Connection,
+    key: &str,
+    enabled: bool,
+) -> Result<ClaudeConfigToggles, String> {
+    let path = resolve_claude_settings_local_path(conn)?;
+    let mut settings = read_json_file_or_default(&path)?;
+
+    if !settings.is_object() {
+        settings = serde_json::json!({});
+    }
+    if settings.get("env").is_none() || !settings.get("env").is_some_and(|value| value.is_object())
+    {
+        settings["env"] = serde_json::json!({});
+    }
+
+    let env = settings
+        .get_mut("env")
+        .and_then(|value| value.as_object_mut())
+        .ok_or_else(|| "Claude settings.local env must be an object".to_string())?;
+
+    match key {
+        "hideAttribution" => {
+            if enabled {
+                env.insert(
+                    "ANTHROPIC_HIDE_ATTRIBUTION".to_string(),
+                    serde_json::json!("true"),
+                );
+            } else {
+                env.remove("ANTHROPIC_HIDE_ATTRIBUTION");
+            }
+        }
+        "enableTeammates" => {
+            if enabled {
+                env.insert(
+                    "CLAUDE_CODE_ENABLE_TEAMMATES".to_string(),
+                    serde_json::json!("true"),
+                );
+            } else {
+                env.remove("CLAUDE_CODE_ENABLE_TEAMMATES");
+            }
+        }
+        "maxThinkingTokens" => {
+            if enabled {
+                env.insert(
+                    "CLAUDE_CODE_MAX_THINKING_TOKENS".to_string(),
+                    serde_json::json!("32000"),
+                );
+            } else {
+                env.remove("CLAUDE_CODE_MAX_THINKING_TOKENS");
+            }
+        }
+        "enableToolSearch" => {
+            if enabled {
+                env.insert("ENABLE_TOOL_SEARCH".to_string(), serde_json::json!("true"));
+            } else {
+                env.remove("ENABLE_TOOL_SEARCH");
+            }
+        }
+        _ => {
+            return Err(format!("Unknown Claude config toggle: {key}"));
+        }
+    }
+
+    if env.is_empty() {
+        settings.as_object_mut().map(|value| value.remove("env"));
+    }
+
+    write_json_file_pretty(&path, &settings)?;
+    read_claude_config_toggles_from_conn(conn)
+}
+
+fn resolve_codex_structured_paths(
+    conn: &rusqlite::Connection,
+    path: Option<String>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let config_path = match path.and_then(|value| normalized_non_empty(&value)) {
+        Some(path) => PathBuf::from(path),
+        None => resolve_tool_config_dir(conn, "codex")?.join("config.toml"),
+    };
+
+    if config_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        != "config.toml"
+    {
+        return Err(format!(
+            "Codex structured editing only supports config.toml: {}",
+            config_path.display()
+        ));
+    }
+
+    let dir = config_path
+        .parent()
+        .ok_or_else(|| "Invalid Codex config.toml path".to_string())?;
+    Ok((config_path.clone(), dir.join("auth.json")))
+}
 const PREFERRED_TERMINAL_SETTING_KEY: &str = "preferred_terminal";
 const BACKUP_PREFERENCES_SETTING_KEY: &str = "backup_preferences";
 const LOG_PREFERENCES_SETTING_KEY: &str = "log_preferences";
@@ -1607,7 +1985,7 @@ fn updater_environment_state() -> UpdaterEnvironmentState {
 fn log_level_for_provider_status(status: &str) -> &'static str {
     match status {
         "error" => "warn",
-        "healthy" | "reachable" => "info",
+        "healthy" | "reachable" | "fast" | "medium" | "slow" => "info",
         _ => "debug",
     }
 }
@@ -1791,6 +2169,7 @@ fn read_terminal_preferences_from_conn(
     })
 }
 
+#[allow(dead_code)]
 fn shell_quote_single(value: &str) -> String {
     format!("'{}'", value.replace('\'', r#"'"'"'"#))
 }
@@ -1824,28 +2203,38 @@ fn launch_preferred_terminal_impl(
 
     #[cfg(target_os = "windows")]
     {
+        // Use raw_arg to bypass Rust's msvcrt arg escaping which causes
+        // quote-nesting issues with cmd.exe / wt on Windows.
+        use std::os::windows::process::CommandExt;
+
         if let Some(command) = shell_command {
             match preferences.selected_terminal.as_str() {
                 "windows-terminal" => {
                     std::process::Command::new("wt")
-                        .args(["-d", &target_text, "cmd", "/K", command])
+                        .raw_arg(format!(
+                            "-d \"{}\" cmd.exe /K {}",
+                            target_text, command
+                        ))
                         .spawn()
                         .map_err(|e| e.to_string())?;
                 }
                 "powershell" => {
-                    let command = format!(
-                        "Set-Location -LiteralPath {}; {}",
-                        shell_quote_single(&target_text),
+                    let ps_cmd = format!(
+                        "Set-Location -LiteralPath '{}'; {}",
+                        target_text.replace('\'', "''"),
                         command,
                     );
                     std::process::Command::new("powershell")
-                        .args(["-NoExit", "-Command", &command])
+                        .raw_arg(format!("-NoExit -Command \"{}\"", ps_cmd))
                         .spawn()
                         .map_err(|e| e.to_string())?;
                 }
                 "cmd" => {
-                    std::process::Command::new("cmd")
-                        .args(["/K", &format!("cd /d \"{target_text}\" && {command}")])
+                    std::process::Command::new("cmd.exe")
+                        .raw_arg(format!(
+                            "/K cd /d \"{}\" && {}",
+                            target_text, command
+                        ))
                         .spawn()
                         .map_err(|e| e.to_string())?;
                 }
@@ -1862,23 +2251,23 @@ fn launch_preferred_terminal_impl(
         match preferences.selected_terminal.as_str() {
             "windows-terminal" => {
                 std::process::Command::new("wt")
-                    .args(["-d", &target_text])
+                    .raw_arg(format!("-d \"{}\"", target_text))
                     .spawn()
                     .map_err(|e| e.to_string())?;
             }
             "powershell" => {
-                let command = format!(
-                    "Set-Location -LiteralPath {}",
-                    shell_quote_single(&target_text)
+                let ps_cmd = format!(
+                    "Set-Location -LiteralPath '{}'",
+                    target_text.replace('\'', "''")
                 );
                 std::process::Command::new("powershell")
-                    .args(["-NoExit", "-Command", &command])
+                    .raw_arg(format!("-NoExit -Command \"{}\"", ps_cmd))
                     .spawn()
                     .map_err(|e| e.to_string())?;
             }
             "cmd" => {
-                std::process::Command::new("cmd")
-                    .args(["/K", &format!("cd /d \"{target_text}\"")])
+                std::process::Command::new("cmd.exe")
+                    .raw_arg(format!("/K cd /d \"{}\"", target_text))
                     .spawn()
                     .map_err(|e| e.to_string())?;
             }
@@ -2966,8 +3355,12 @@ fn apply_tool_snapshot(
     tool_id: &str,
     snapshot: &str,
 ) -> Result<(), String> {
-    let effective_snapshot =
-        crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool_id, snapshot)?;
+    let common_overlay_snapshot = apply_common_config_snippet_to_snapshot(conn, tool_id, snapshot)?;
+    let effective_snapshot = crate::provider_proxy::materialize_tool_snapshot_for_runtime(
+        conn,
+        tool_id,
+        &common_overlay_snapshot,
+    )?;
 
     match tool_id {
         "codex" => {
@@ -3614,6 +4007,283 @@ fn parse_toml_assignment(content: &str, key: &str) -> Option<String> {
     })
 }
 
+fn parse_toml_section_assignment(content: &str, section: &str, key: &str) -> Option<String> {
+    let mut in_section = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = trimmed.trim_matches(['[', ']']) == section;
+            continue;
+        }
+        if !in_section || !trimmed.starts_with(key) {
+            continue;
+        }
+        let (_, raw_value) = trimmed.split_once('=')?;
+        let value = raw_value.trim().trim_matches('"').trim_matches('\'');
+        if value.is_empty() {
+            return None;
+        }
+        return Some(value.to_string());
+    }
+    None
+}
+
+fn read_codex_structured_config_from_content(
+    content: &str,
+    api_key: String,
+) -> CodexTomlStructuredConfig {
+    let model_provider =
+        parse_toml_assignment(content, "model_provider").unwrap_or_else(|| "custom".to_string());
+    let provider_section = format!("model_providers.{model_provider}");
+
+    let mcp_servers = content
+        .parse::<toml_edit::DocumentMut>()
+        .ok()
+        .and_then(|doc| {
+            doc.get("mcp_servers")
+                .and_then(|item| item.as_table())
+                .map(|table| {
+                    table
+                        .iter()
+                        .map(|(key, _)| key.to_string())
+                        .collect::<Vec<_>>()
+                })
+        })
+        .unwrap_or_default();
+
+    let malformed_mcp_servers = content
+        .parse::<toml_edit::DocumentMut>()
+        .ok()
+        .and_then(|doc| doc.get("mcp_servers").map(|item| !item.is_table()))
+        .unwrap_or(false);
+
+    CodexTomlStructuredConfig {
+        model_provider: model_provider.clone(),
+        provider_label: parse_toml_section_assignment(content, &provider_section, "name")
+            .unwrap_or_else(|| model_provider.clone()),
+        base_url: parse_toml_section_assignment(content, &provider_section, "base_url")
+            .unwrap_or_default(),
+        wire_api: parse_toml_section_assignment(content, &provider_section, "wire_api")
+            .unwrap_or_else(|| "responses".to_string()),
+        model: parse_toml_assignment(content, "model").unwrap_or_default(),
+        reasoning_effort: parse_toml_assignment(content, "model_reasoning_effort")
+            .unwrap_or_else(|| "medium".to_string()),
+        personality: parse_toml_assignment(content, "personality")
+            .unwrap_or_else(|| "pragmatic".to_string()),
+        disable_response_storage: parse_toml_assignment(content, "disable_response_storage")
+            .map(|value| value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        model_context_window: parse_toml_assignment(content, "model_context_window")
+            .unwrap_or_default(),
+        model_auto_compact_token_limit: parse_toml_assignment(
+            content,
+            "model_auto_compact_token_limit",
+        )
+        .unwrap_or_default(),
+        api_key,
+        mcp_servers,
+        malformed_mcp_servers,
+    }
+}
+
+fn write_codex_structured_config_to_text(
+    raw_toml: &str,
+    config: &CodexTomlStructuredConfig,
+) -> String {
+    let mut doc = raw_toml
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap_or_else(|_| toml_edit::DocumentMut::new());
+
+    let provider_name =
+        normalized_non_empty(&config.model_provider).unwrap_or_else(|| "custom".to_string());
+    let provider_label =
+        normalized_non_empty(&config.provider_label).unwrap_or_else(|| provider_name.clone());
+    let wire_api =
+        normalized_non_empty(&config.wire_api).unwrap_or_else(|| "responses".to_string());
+    let reasoning_effort =
+        normalized_non_empty(&config.reasoning_effort).unwrap_or_else(|| "medium".to_string());
+    let personality =
+        normalized_non_empty(&config.personality).unwrap_or_else(|| "pragmatic".to_string());
+
+    doc["model_provider"] = toml_edit::value(provider_name.clone());
+    doc["model"] = toml_edit::value(config.model.trim());
+    doc["model_reasoning_effort"] = toml_edit::value(reasoning_effort);
+    doc["personality"] = toml_edit::value(personality);
+    doc["disable_response_storage"] = toml_edit::value(config.disable_response_storage);
+
+    if let Some(context_window) = normalize_integer_like(&config.model_context_window) {
+        doc["model_context_window"] = toml_edit::value(context_window);
+    } else {
+        doc.as_table_mut().remove("model_context_window");
+    }
+
+    if let Some(compact_limit) = normalize_integer_like(&config.model_auto_compact_token_limit) {
+        doc["model_auto_compact_token_limit"] = toml_edit::value(compact_limit);
+    } else {
+        doc.as_table_mut().remove("model_auto_compact_token_limit");
+    }
+
+    doc["model_providers"][provider_name.as_str()]["name"] = toml_edit::value(provider_label);
+    doc["model_providers"][provider_name.as_str()]["base_url"] =
+        toml_edit::value(config.base_url.trim());
+    doc["model_providers"][provider_name.as_str()]["wire_api"] = toml_edit::value(wire_api);
+    doc["model_providers"][provider_name.as_str()]["requires_openai_auth"] = toml_edit::value(true);
+
+    let malformed_mcp_servers = doc
+        .get("mcp_servers")
+        .map(|item| !item.is_table())
+        .unwrap_or(false);
+    if malformed_mcp_servers {
+        doc.as_table_mut().remove("mcp_servers");
+    }
+    if doc.get("mcp_servers").is_none() {
+        doc["mcp_servers"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+
+    doc.to_string()
+}
+
+fn apply_common_config_to_claude_snapshot(
+    snapshot: &str,
+    snippet: &CommonConfigSnippet,
+) -> Result<String, String> {
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
+    let obj = parsed
+        .as_object_mut()
+        .ok_or_else(|| "Invalid Claude snapshot".to_string())?;
+
+    if snippet.hide_attribution {
+        obj.insert(
+            "attribution".to_string(),
+            serde_json::json!({ "commit": "", "pr": "" }),
+        );
+    }
+    if snippet.effort_level_high {
+        obj.insert(
+            "effortLevel".to_string(),
+            serde_json::Value::String("high".to_string()),
+        );
+    }
+
+    let env = obj
+        .entry("env")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Claude env must be an object".to_string())?;
+    if snippet.enable_teammates {
+        env.insert(
+            "CLAUDE_CODE_ENABLE_TEAMMATES".to_string(),
+            serde_json::json!("true"),
+        );
+        env.insert(
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
+            serde_json::json!("1"),
+        );
+    }
+    if snippet.enable_tool_search {
+        env.insert("ENABLE_TOOL_SEARCH".to_string(), serde_json::json!("true"));
+    }
+    for (key, value) in &snippet.custom_values {
+        env.insert(key.clone(), serde_json::json!(value));
+    }
+
+    serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
+}
+
+fn apply_common_config_to_codex_snapshot(
+    snapshot: &str,
+    snippet: &CommonConfigSnippet,
+) -> Result<String, String> {
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
+    let obj = parsed
+        .as_object_mut()
+        .ok_or_else(|| "Invalid Codex snapshot".to_string())?;
+    let current_config = obj
+        .get("config")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let current_config = current_config.to_string();
+    let current_api_key = obj
+        .get("auth")
+        .and_then(|value| value.get("OPENAI_API_KEY"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut structured =
+        read_codex_structured_config_from_content(&current_config, current_api_key);
+    if snippet.effort_level_high {
+        structured.reasoning_effort = "high".to_string();
+    }
+    for (key, value) in &snippet.custom_values {
+        if key == "model_auto_compact_token_limit" {
+            structured.model_auto_compact_token_limit = value.clone();
+        }
+    }
+    let mut next_toml = write_codex_structured_config_to_text(&current_config, &structured);
+    for (key, value) in &snippet.custom_values {
+        if key == "model_auto_compact_token_limit" {
+            continue;
+        }
+        let normalized_key = key.trim();
+        if normalized_key.is_empty() {
+            continue;
+        }
+        let mut doc = next_toml
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap_or_else(|_| toml_edit::DocumentMut::new());
+        if let Some(integer) = normalize_integer_like(value) {
+            doc[normalized_key] = toml_edit::value(integer);
+        } else if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
+            doc[normalized_key] = toml_edit::value(value.eq_ignore_ascii_case("true"));
+        } else {
+            doc[normalized_key] = toml_edit::value(value.as_str());
+        }
+        next_toml = doc.to_string();
+    }
+    obj.insert("config".to_string(), serde_json::Value::String(next_toml));
+    serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
+}
+
+fn apply_common_config_to_gemini_snapshot(
+    snapshot: &str,
+    snippet: &CommonConfigSnippet,
+) -> Result<String, String> {
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
+    let obj = parsed
+        .as_object_mut()
+        .ok_or_else(|| "Invalid Gemini snapshot".to_string())?;
+    let env = obj
+        .entry("env")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Gemini env must be an object".to_string())?;
+    for (key, value) in &snippet.custom_values {
+        env.insert(key.clone(), serde_json::json!(value));
+    }
+    serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
+}
+
+fn apply_common_config_snippet_to_snapshot(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    snapshot: &str,
+) -> Result<String, String> {
+    let snippet = read_common_config_snippet_from_conn(conn, tool_id)?;
+    if !common_config_snippet_has_payload(&snippet) {
+        return Ok(snapshot.to_string());
+    }
+
+    match tool_id {
+        "claude" => apply_common_config_to_claude_snapshot(snapshot, &snippet),
+        "codex" => apply_common_config_to_codex_snapshot(snapshot, &snippet),
+        "gemini" => apply_common_config_to_gemini_snapshot(snapshot, &snippet),
+        _ => Ok(snapshot.to_string()),
+    }
+}
+
 fn join_api_endpoint(base_url: &str, suffix: &str) -> String {
     let trimmed_base = base_url.trim().trim_end_matches('/');
     let trimmed_suffix = suffix.trim_start_matches('/');
@@ -3868,6 +4538,16 @@ async fn extract_probe_target(
             Ok((base_url, headers))
         }
         _ => Ok((None, Vec::new())),
+    }
+}
+
+fn classify_provider_latency_status(latency_ms: u64) -> String {
+    if latency_ms < 200 {
+        "fast".to_string()
+    } else if latency_ms <= 500 {
+        "medium".to_string()
+    } else {
+        "slow".to_string()
     }
 }
 
@@ -4251,6 +4931,139 @@ async fn extract_stream_check_request(
         }
         _ => Err("Stream check is not supported for this profile".to_string()),
     }
+}
+
+#[tauri::command]
+pub async fn ping_provider_endpoint(
+    id: String,
+    app_handle: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<ProviderPingResult, String> {
+    let (profile, client) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let profile = read_all_config_profiles_from_conn(&conn)?
+            .into_iter()
+            .find(|profile| profile.id == id)
+            .ok_or_else(|| format!("Profile not found: {id}"))?;
+        let client = build_provider_probe_client(&conn)?;
+        (profile, client)
+    };
+
+    let checked_at = chrono::Utc::now().to_rfc3339();
+    let (base_url, headers) = match extract_probe_target(&app_handle, &profile).await {
+        Ok(value) => value,
+        Err(message) => {
+            let result = ProviderPingResult {
+                profile_id: profile.id,
+                tool_id: profile.tool_id,
+                provider_name: profile.name,
+                base_url: None,
+                status: "error".to_string(),
+                latency_ms: None,
+                http_status: None,
+                checked_at,
+                message,
+            };
+            log_provider_result(
+                "ping",
+                &result.tool_id,
+                &result.provider_name,
+                result.base_url.as_deref(),
+                &result.status,
+                &result.message,
+            );
+            return Ok(result);
+        }
+    };
+
+    let Some(base_url) = base_url else {
+        let result = ProviderPingResult {
+            profile_id: profile.id,
+            tool_id: profile.tool_id,
+            provider_name: profile.name,
+            base_url: None,
+            status: "error".to_string(),
+            latency_ms: None,
+            http_status: None,
+            checked_at,
+            message: "No base URL configured for latency ping".to_string(),
+        };
+        log_provider_result(
+            "ping",
+            &result.tool_id,
+            &result.provider_name,
+            result.base_url.as_deref(),
+            &result.status,
+            &result.message,
+        );
+        return Ok(result);
+    };
+
+    let send_request = |method: reqwest::Method| {
+        let client = client.clone();
+        let base_url = base_url.clone();
+        let headers = headers.clone();
+        async move {
+            let started_at = std::time::Instant::now();
+            let mut request = client.request(method, &base_url);
+            for (name, value) in headers {
+                request = request.header(&name, value);
+            }
+            request
+                .send()
+                .await
+                .map(|response| (response, started_at.elapsed().as_millis() as u64))
+        }
+    };
+
+    let mut response_result = send_request(reqwest::Method::HEAD).await;
+    let should_fallback_to_get = matches!(
+        response_result,
+        Ok((ref response, _))
+            if response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
+                || response.status() == reqwest::StatusCode::NOT_IMPLEMENTED
+    );
+    if should_fallback_to_get {
+        response_result = send_request(reqwest::Method::GET).await;
+    }
+
+    let result = match response_result {
+        Ok((response, latency_ms)) => {
+            let http_status = response.status().as_u16();
+            ProviderPingResult {
+                profile_id: profile.id,
+                tool_id: profile.tool_id,
+                provider_name: profile.name,
+                base_url: Some(base_url),
+                status: classify_provider_latency_status(latency_ms),
+                latency_ms: Some(latency_ms),
+                http_status: Some(http_status),
+                checked_at,
+                message: format!("Endpoint responded with HTTP {http_status}"),
+            }
+        }
+        Err(error) => ProviderPingResult {
+            profile_id: profile.id,
+            tool_id: profile.tool_id,
+            provider_name: profile.name,
+            base_url: Some(base_url),
+            status: "error".to_string(),
+            latency_ms: None,
+            http_status: None,
+            checked_at,
+            message: error.to_string(),
+        },
+    };
+
+    log_provider_result(
+        "ping",
+        &result.tool_id,
+        &result.provider_name,
+        result.base_url.as_deref(),
+        &result.status,
+        &result.message,
+    );
+    Ok(result)
 }
 
 #[tauri::command]
@@ -5889,6 +6702,92 @@ pub fn write_tool_config(
     Ok(())
 }
 
+#[tauri::command]
+pub fn read_codex_toml_structured(
+    path: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<CodexTomlStructuredConfig, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let (config_path, auth_path) = resolve_codex_structured_paths(&conn, path)?;
+    let content = if config_path.exists() {
+        std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+    let auth = read_json_file_or_default(&auth_path)?;
+    let api_key = auth
+        .get("OPENAI_API_KEY")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok(read_codex_structured_config_from_content(&content, api_key))
+}
+
+#[tauri::command]
+pub fn write_codex_toml_structured(
+    path: Option<String>,
+    raw_toml: String,
+    config: CodexTomlStructuredConfig,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let (config_path, auth_path) = resolve_codex_structured_paths(&conn, path)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let written_toml = write_codex_structured_config_to_text(&raw_toml, &config);
+    crate::utils::atomic_write_string(&config_path, &written_toml).map_err(|e| e.to_string())?;
+
+    let mut auth = read_json_file_or_default(&auth_path)?;
+    if !auth.is_object() {
+        auth = serde_json::json!({});
+    }
+    if let Some(api_key) = normalized_non_empty(&config.api_key) {
+        auth["OPENAI_API_KEY"] = serde_json::json!(api_key);
+    } else if let Some(auth_obj) = auth.as_object_mut() {
+        auth_obj.remove("OPENAI_API_KEY");
+    }
+    write_json_file_pretty(&auth_path, &auth)?;
+
+    Ok(written_toml)
+}
+
+#[tauri::command]
+pub fn get_common_config_snippet(
+    tool_id: String,
+    db: State<'_, DbState>,
+) -> Result<CommonConfigSnippet, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    read_common_config_snippet_from_conn(&conn, &tool_id)
+}
+
+#[tauri::command]
+pub fn set_common_config_snippet(
+    tool_id: String,
+    snippet: CommonConfigSnippet,
+    db: State<'_, DbState>,
+) -> Result<CommonConfigSnippet, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    write_common_config_snippet_to_conn(&conn, &tool_id, snippet)
+}
+
+#[tauri::command]
+pub fn read_claude_config_toggles(db: State<'_, DbState>) -> Result<ClaudeConfigToggles, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    read_claude_config_toggles_from_conn(&conn)
+}
+
+#[tauri::command]
+pub fn write_claude_config_toggle(
+    key: String,
+    enabled: bool,
+    db: State<'_, DbState>,
+) -> Result<ClaudeConfigToggles, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    write_claude_config_toggle_to_conn(&conn, &key, enabled)
+}
+
 /// Get Claude Code permissions level (0=strict, 1=standard, 2=relaxed, 3=bypass)
 #[tauri::command]
 pub fn get_claude_permissions_level() -> Result<u32, String> {
@@ -6171,52 +7070,16 @@ pub fn set_claude_model(model: String) -> Result<(), String> {
 
 /// Get Claude Code Tool Search (ENABLE_TOOL_SEARCH) status from settings.local.json
 #[tauri::command]
-pub fn get_claude_tool_search() -> Result<bool, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let path = home.join(".claude").join("settings.local.json");
-    if !path.exists() {
-        return Ok(false);
-    }
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    let enabled = settings
-        .get("env")
-        .and_then(|e| e.get("ENABLE_TOOL_SEARCH"))
-        .and_then(|v| v.as_str())
-        .map(|s| s == "true")
-        .unwrap_or(false);
-    Ok(enabled)
+pub fn get_claude_tool_search(db: State<'_, DbState>) -> Result<bool, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(read_claude_config_toggles_from_conn(&conn)?.enable_tool_search)
 }
 
 /// Set Claude Code Tool Search (ENABLE_TOOL_SEARCH) in settings.local.json
 #[tauri::command]
-pub fn set_claude_tool_search(enabled: bool) -> Result<(), String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let path = home.join(".claude").join("settings.local.json");
-
-    let mut settings: serde_json::Value = if path.exists() {
-        let c = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&c).unwrap_or(serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
-
-    if settings.get("env").is_none() {
-        settings["env"] = serde_json::json!({});
-    }
-    if enabled {
-        settings["env"]["ENABLE_TOOL_SEARCH"] = serde_json::json!("true");
-    } else {
-        if let Some(env) = settings.get_mut("env").and_then(|e| e.as_object_mut()) {
-            env.remove("ENABLE_TOOL_SEARCH");
-        }
-    }
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
+pub fn set_claude_tool_search(enabled: bool, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let _ = write_claude_config_toggle_to_conn(&conn, "enableToolSearch", enabled)?;
     Ok(())
 }
 

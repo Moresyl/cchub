@@ -8,7 +8,6 @@ import type { DetectedTool } from "../types/skills";
 interface McpServer { id: string; name: string; command: string | null; args: string; env: string; status: string; transport: string; source: string; }
 interface Skill { id: string; name: string; plugin_id: string | null; trigger_command: string | null; description: string | null; }
 interface Plugin { id: string; name: string; description: string | null; }
-
 const TOOL_ICONS: Record<string, typeof Monitor> = { claude: Terminal, cursor: Code, windsurf: Wind, codex: Monitor };
 
 export default function Dashboard() {
@@ -20,6 +19,9 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const i = t();
   const locale = getLocale();
+  const uiText = (zhText: string, enText: string, jaText?: string) => (
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  );
 
   useEffect(() => {
     (async () => {
@@ -58,7 +60,7 @@ export default function Dashboard() {
         <StatCard
           label={i.dashboard.skills}
           value={skills.length}
-          sub={`${skills.filter(s => s.plugin_id).length} ${locale === "zh" ? "来自插件" : "from plugins"}`}
+          sub={`${skills.filter(s => s.plugin_id).length} ${uiText("来自插件", "from plugins", "プラグイン由来")}`}
           icon={Zap}
           color="var(--text-secondary)"
           onClick={() => navigate("/skills")}
@@ -73,7 +75,7 @@ export default function Dashboard() {
         <StatCard
           label={i.skills.detectedTools}
           value={installedTools.length}
-          sub={`/ ${tools.length} ${locale === "zh" ? "已知" : "known"}`}
+          sub={`/ ${tools.length} ${uiText("已知", "known", "検出済み")}`}
           icon={Monitor}
           color="var(--text-primary)"
           onClick={() => navigate("/skills")}
@@ -123,7 +125,7 @@ export default function Dashboard() {
               {i.dashboard.recentMcp}
             </div>
             <button className="btn btn-ghost btn-xs" onClick={() => navigate("/mcp-servers")} style={{ gap: 4 }}>
-              {locale === "zh" ? "查看全部" : "View all"}<ArrowRight size={12} />
+              {uiText("查看全部", "View all", "すべて表示")}<ArrowRight size={12} />
             </button>
           </div>
           {servers.length === 0 ? (
@@ -143,7 +145,7 @@ export default function Dashboard() {
               ))}
               {servers.length > 3 && (
                 <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "8px 0" }}>
-                  +{servers.length - 3} {locale === "zh" ? "更多" : "more"}
+                  +{servers.length - 3} {uiText("更多", "more", "件")}
                 </p>
               )}
             </div>
@@ -158,7 +160,7 @@ export default function Dashboard() {
               {i.dashboard.recentSkills}
             </div>
             <button className="btn btn-ghost btn-xs" onClick={() => navigate("/skills")} style={{ gap: 4 }}>
-              {locale === "zh" ? "查看全部" : "View all"}<ArrowRight size={12} />
+              {uiText("查看全部", "View all", "すべて表示")}<ArrowRight size={12} />
             </button>
           </div>
           {skills.length === 0 ? (
@@ -178,7 +180,7 @@ export default function Dashboard() {
               ))}
               {skills.length > 3 && (
                 <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "8px 0" }}>
-                  +{skills.length - 3} {locale === "zh" ? "更多" : "more"}
+                  +{skills.length - 3} {uiText("更多", "more", "件")}
                 </p>
               )}
             </div>
@@ -190,26 +192,26 @@ export default function Dashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginTop: 20 }}>
         <QuickAction
           icon={Monitor}
-          label={locale === "zh" ? "客户端管理" : "MCP Clients"}
-          desc={locale === "zh" ? "管理 AI 应用访问权限" : "Manage AI app access"}
+          label={uiText("客户端管理", "MCP Clients", "MCP クライアント")}
+          desc={uiText("管理 AI 应用访问权限", "Manage AI app access", "AI アプリのアクセス権を管理")}
           onClick={() => navigate("/mcp-clients")}
         />
         <QuickAction
           icon={Activity}
-          label={locale === "zh" ? "请求日志" : "Request Logs"}
-          desc={locale === "zh" ? "查看 MCP 活动记录" : "View MCP activity"}
+          label={uiText("请求日志", "Request Logs", "リクエストログ")}
+          desc={uiText("查看 MCP 活动记录", "View MCP activity", "MCP の活動履歴を表示")}
           onClick={() => navigate("/logs")}
         />
         <QuickAction
           icon={Layers}
-          label={locale === "zh" ? "工作区" : "Workspaces"}
-          desc={locale === "zh" ? "切换与管理工作区" : "Switch workspaces"}
+          label={uiText("工作区", "Workspaces", "ワークスペース")}
+          desc={uiText("切换与管理工作区", "Switch workspaces", "ワークスペースを切り替えて管理")}
           onClick={() => navigate("/workspaces")}
         />
         <QuickAction
           icon={Shield}
-          label={locale === "zh" ? "安全审计" : "Security Audit"}
-          desc={locale === "zh" ? "扫描 MCP 安全风险" : "Scan MCP security risks"}
+          label={uiText("安全审计", "Security Audit", "セキュリティ監査")}
+          desc={uiText("扫描 MCP 安全风险", "Scan MCP security risks", "MCP のセキュリティリスクをスキャン")}
           onClick={() => navigate("/security")}
         />
       </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw, Zap, Package, FileText, ExternalLink, Search,
@@ -12,6 +12,7 @@ import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
@@ -23,6 +24,15 @@ interface Skill {
 interface Plugin {
   id: string; name: string; description: string | null;
   source_url: string | null; version: string | null;
+}
+
+interface SkillBackup {
+  id: string;
+  skill_name: string;
+  original_path: string;
+  backup_path: string;
+  created_at: string;
+  size_bytes: number;
 }
 
 const TOOL_ICONS: Record<string, typeof Monitor> = {
@@ -65,27 +75,68 @@ export default function Skills() {
   const [editContent, setEditContent] = useState("");
   const [syncedSkills, setSyncedSkills] = useState<Record<string, Set<string>>>({});
   const [pendingDelete, setPendingDelete] = useState<{ type: "skill"; item: Skill } | { type: "plugin"; item: Plugin } | null>(null);
+  const [skillBackups, setSkillBackups] = useState<SkillBackup[]>([]);
+  const [backupBusyId, setBackupBusyId] = useState<string | null>(null);
+  const [pendingBackupDelete, setPendingBackupDelete] = useState<SkillBackup | null>(null);
   const [skillSyncMethod, setSkillSyncMethod] = useState<string>("copy");
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
   const i = t();
   const locale = getLocale();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (visibleApps.includes(activeTool as ManagedAppId)) return;
+    const nextTool = tools.find((tool) => tool.installed && visibleApps.includes(tool.id as ManagedAppId));
+    if (nextTool) setActiveTool(nextTool.id);
+  }, [activeTool, tools, visibleApps]);
+  useEffect(() => {
+    const handleEscape = () => {
+      if (editingSkill) {
+        setEditingSkill(false);
+        return;
+      }
+      if (showExplorer) {
+        setShowExplorer(false);
+        return;
+      }
+      if (selectedSkill) {
+        setSelectedSkill(null);
+        setSkillContent(null);
+      }
+    };
+    window.addEventListener("cchub-shortcut-escape", handleEscape);
+    return () => window.removeEventListener("cchub-shortcut-escape", handleEscape);
+  }, [editingSkill, selectedSkill, showExplorer]);
+  useEffect(() => {
+    const handleSearchShortcut = () => {
+      if (editingSkill || showExplorer) return;
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    };
+    window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
+    return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
+  }, [editingSkill, showExplorer]);
 
   async function load() {
     setLoading(true);
     try {
-      const [sk, pl, dt, syncMethod] = await Promise.all([
+      const [sk, pl, dt, syncMethod, nextVisibleApps, backups] = await Promise.all([
         invoke<Skill[]>("scan_skills"),
         invoke<Plugin[]>("get_plugins"),
         invoke<DetectedTool[]>("detect_tools"),
         invoke<string>("get_skill_sync_method").catch(() => "copy"),
+        fetchVisibleApps(),
+        invoke<SkillBackup[]>("get_skill_backups").catch(() => []),
       ]);
       setSkills(sk);
       setPlugins(pl);
       setTools(dt);
       setSkillSyncMethod(syncMethod);
+      setVisibleApps(nextVisibleApps);
+      setSkillBackups(backups);
       // Auto-select first installed tool
-      const firstInstalled = dt.find((t) => t.installed);
+      const firstInstalled = dt.find((t) => t.installed && nextVisibleApps.includes(t.id as ManagedAppId));
       if (firstInstalled) setActiveTool(firstInstalled.id);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -182,6 +233,7 @@ export default function Skills() {
         setEditingSkill(false);
       }
       await load();
+      showToast("success", locale === "zh" ? "技能已删除，并已自动备份" : "Skill deleted and backed up");
     } catch (e) { console.error(e); }
   }
 
@@ -240,7 +292,9 @@ export default function Skills() {
     return true;
   });
 
-  const installedTools = tools.filter((t) => t.installed);
+  const visibleToolIds = new Set(visibleApps);
+  const visibleTools = tools.filter((tool) => visibleToolIds.has(tool.id as ManagedAppId));
+  const installedTools = visibleTools.filter((t) => t.installed);
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.skills.loading}</span></div>;
@@ -378,10 +432,80 @@ export default function Skills() {
         </div>
       </div>
 
+      {skillBackups.length > 0 && (
+        <div className="section-card" style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+            <div>
+              <div className="section-card-title" style={{ marginBottom: 4 }}>
+                <RotateCcw size={16} style={{ color: "var(--text-secondary)" }} />
+                {locale === "zh" ? "Skill 备份" : "Skill Backups"}
+              </div>
+              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {locale === "zh"
+                  ? `自动保留最近 ${skillBackups.length} 个卸载备份，可恢复或删除`
+                  : `Recent uninstall backups are kept automatically. You can restore or delete them here.`}
+              </p>
+            </div>
+            <span className="badge badge-accent">{skillBackups.length}</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {skillBackups.slice(0, 8).map((backup) => (
+              <div key={backup.id} style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-input)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{backup.skill_name}</span>
+                    <span className="badge badge-muted" style={{ fontSize: 10 }}>
+                      {backup.size_bytes < 1024 ? `${backup.size_bytes} B` : `${(backup.size_bytes / 1024).toFixed(1)} KB`}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+                    {backup.original_path}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                    {backup.created_at.replace("T", " ").slice(0, 19)}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={backupBusyId === backup.id}
+                    onClick={async () => {
+                      setBackupBusyId(backup.id);
+                      try {
+                        const restoredTo = await invoke<string>("restore_skill_backup", { id: backup.id });
+                        await load();
+                        showToast("success", locale === "zh" ? `已恢复到 ${restoredTo}` : `Restored to ${restoredTo}`);
+                      } catch (e) {
+                        showToast("error", String(e));
+                      } finally {
+                        setBackupBusyId((current) => current === backup.id ? null : current);
+                      }
+                    }}
+                    style={{ gap: 6 }}
+                  >
+                    <RotateCcw size={13} />
+                    {locale === "zh" ? "恢复" : "Restore"}
+                  </button>
+                  <button
+                    className="btn btn-danger-ghost btn-sm"
+                    disabled={backupBusyId === backup.id}
+                    onClick={() => setPendingBackupDelete(backup)}
+                    style={{ gap: 6 }}
+                  >
+                    <Trash2 size={13} />
+                    {locale === "zh" ? "删除备份" : "Delete Backup"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tool Selector */}
-      {tools.length > 0 && (
+      {visibleTools.length > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-          {tools.map((tool) => {
+          {visibleTools.map((tool) => {
             const Icon = TOOL_ICONS[tool.id] || Monitor;
             const isActive = activeTool === tool.id;
             return (
@@ -408,7 +532,7 @@ export default function Skills() {
             );
           })}
           {/* Uninstalled tool hints */}
-          {tools.filter(t => !t.installed).length > 0 && (
+          {visibleTools.filter(t => !t.installed).length > 0 && (
             <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
               {locale === "zh" ? "红点 = 未安装" : "red dot = not installed"}
             </span>
@@ -421,6 +545,7 @@ export default function Skills() {
         <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
           <Search size={15} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
           <input
+            ref={searchInputRef}
             className="input"
             style={{ paddingLeft: 40 }}
             placeholder={i.skills.searchPlaceholder}
@@ -698,7 +823,7 @@ export default function Skills() {
                 <div style={{ marginBottom: 18 }}>
                   <span className="field-label">{locale === "zh" ? "同步到工具" : "Sync to tools"}</span>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {tools.map((tool) => {
+                    {visibleTools.map((tool) => {
                       const Icon = TOOL_ICONS[tool.id] || Monitor;
                       const isSynced = syncedSkills[selectedSkill.id]?.has(tool.id) || false;
                       const isCurrent = tool.id === activeTool;
@@ -795,6 +920,30 @@ export default function Skills() {
           setPendingDelete(null);
         }}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={!!pendingBackupDelete}
+        title={locale === "zh" ? "删除 Skill 备份" : "Delete Skill Backup"}
+        message={pendingBackupDelete
+          ? (locale === "zh"
+            ? `确定删除备份「${pendingBackupDelete.skill_name}」？删除后将无法再从该备份恢复。`
+            : `Delete backup "${pendingBackupDelete.skill_name}"? This backup cannot be restored after deletion.`)
+          : ""}
+        confirmText={locale === "zh" ? "删除备份" : "Delete Backup"}
+        variant="destructive"
+        onConfirm={() => {
+          const backup = pendingBackupDelete;
+          if (!backup) return;
+          setPendingBackupDelete(null);
+          setBackupBusyId(backup.id);
+          void invoke("delete_skill_backup", { id: backup.id })
+            .then(() => load())
+            .then(() => showToast("success", locale === "zh" ? "备份已删除" : "Backup deleted"))
+            .catch((error) => showToast("error", String(error)))
+            .finally(() => setBackupBusyId((current) => current === backup.id ? null : current));
+        }}
+        onCancel={() => setPendingBackupDelete(null)}
       />
     </div>
   );

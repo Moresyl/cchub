@@ -34,6 +34,32 @@ export default function Hooks() {
   const i = t();
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if (editing && !saving) {
+        void handleSave();
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!editing) {
+        startCreate();
+      }
+    };
+    const handleEscapeShortcut = () => {
+      if (editing) {
+        cancelEdit();
+      }
+    };
+
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    window.addEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+      window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    };
+  }, [editing, saving, editCommand, editEvent, editMatcher, editTimeout, editScope, editProjectPath, editOriginalEvent, editOriginalIndex, editOriginalScope, editOriginalProjectPath]);
 
   async function load() {
     setLoading(true);

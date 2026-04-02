@@ -25,6 +25,9 @@ export default function Security() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const i = t();
   const locale = localStorage.getItem("cchub-locale") || "zh";
+  const uiText = (zhText: string, enText: string, jaText?: string) => (
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  );
 
   async function runAudit() {
     setLoading(true);
@@ -70,20 +73,13 @@ export default function Security() {
   }
 
   function getCategoryLabel(cat: string): string {
-    const labels: Record<string, string> = locale === "zh" ? {
-      env_secrets: "敏感环境变量",
-      shell_exec: "Shell 执行",
-      npx_risk: "npx 自动安装",
-      network_access: "网络访问",
-      file_access: "文件访问",
-      config_changed: "配置变更",
-    } : {
-      env_secrets: "Env Secrets",
-      shell_exec: "Shell Execution",
-      npx_risk: "npx Auto-install",
-      network_access: "Network Access",
-      file_access: "File Access",
-      config_changed: "Config Changed",
+    const labels: Record<string, string> = {
+      env_secrets: uiText("敏感环境变量", "Env Secrets", "機密環境変数"),
+      shell_exec: uiText("Shell 执行", "Shell Execution", "Shell 実行"),
+      npx_risk: uiText("npx 自动安装", "npx Auto-install", "npx 自動インストール"),
+      network_access: uiText("网络访问", "Network Access", "ネットワークアクセス"),
+      file_access: uiText("文件访问", "File Access", "ファイルアクセス"),
+      config_changed: uiText("配置变更", "Config Changed", "設定変更"),
     };
     return labels[cat] || cat;
   }
@@ -104,7 +100,7 @@ export default function Security() {
           <h2 className="page-title">{i.security.title}</h2>
           <p className="page-subtitle">
             {tReplace(i.security.serverCount, { count: results.length })}
-            {totalFindings > 0 && ` · ${totalFindings} ${locale === "zh" ? "个发现" : "findings"}`}
+            {totalFindings > 0 && ` · ${totalFindings} ${uiText("个发现", "findings", "件の検出")}`}
           </p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={runAudit} disabled={loading}>
@@ -171,7 +167,7 @@ export default function Security() {
                     <span style={{ fontSize: 14, fontWeight: 600 }}>{result.server_name}</span>
                     {getRiskBadge(result.risk_level)}
                     {result.findings.length > 0 && (
-                      <span className="badge badge-muted">{result.findings.length} {locale === "zh" ? "项" : "findings"}</span>
+                      <span className="badge badge-muted">{result.findings.length} {uiText("项", "findings", "件")}</span>
                     )}
                   </div>
                 </div>
@@ -199,7 +195,7 @@ export default function Security() {
                 {expanded[result.server_id] && result.findings.length === 0 && (
                   <div style={{ marginTop: 12, paddingLeft: 28 }}>
                     <p style={{ fontSize: 12, color: "var(--success)" }}>
-                      {locale === "zh" ? "未发现安全问题" : "No security issues found"}
+                      {uiText("未发现安全问题", "No security issues found", "セキュリティ問題は見つかりませんでした")}
                     </p>
                   </div>
                 )}

@@ -30,6 +30,9 @@ export default function McpClients() {
   const [editAccess, setEditAccess] = useState<Record<string, boolean>>({});
   const [pendingDelete, setPendingDelete] = useState<McpClient | null>(null);
   const locale = getLocale();
+  const uiText = (zhText: string, enText: string, jaText?: string) => (
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  );
 
   useEffect(() => { load(); }, []);
 
@@ -89,19 +92,72 @@ export default function McpClients() {
     } catch (e) { console.error(e); }
   }
 
+  function openCreate() {
+    setShowCreate(true);
+  }
+
+  function closeCreate() {
+    setShowCreate(false);
+    setNewName("");
+    setNewConfigPath("");
+  }
+
+  function stopEditing() {
+    setEditing(false);
+  }
+
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if (showCreate) {
+        void handleCreate();
+        return;
+      }
+      if (editing) {
+        void handleSaveAccess();
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!showCreate && !editing) {
+        openCreate();
+      }
+    };
+    const handleEscapeShortcut = () => {
+      if (showCreate) {
+        closeCreate();
+        return;
+      }
+      if (editing) {
+        stopEditing();
+        return;
+      }
+      if (selected) {
+        setSelected(null);
+      }
+    };
+
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    window.addEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+      window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    };
+  }, [showCreate, editing, selected, newName, newConfigPath, editAccess, servers]);
+
   if (loading) {
-    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{locale === "zh" ? "加载中..." : "Loading..."}</span></div>;
+    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{uiText("加载中...", "Loading...", "読み込み中...")}</span></div>;
   }
 
   return (
     <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{locale === "zh" ? "MCP 客户端" : "MCP Clients"}</h2>
-          <p className="page-subtitle">{locale === "zh" ? `管理 ${clients.length} 个 AI 客户端应用的 MCP 访问权限` : `Manage MCP access for ${clients.length} AI client apps`}</p>
+          <h2 className="page-title">{uiText("MCP 客户端", "MCP Clients", "MCP クライアント")}</h2>
+          <p className="page-subtitle">{uiText(`管理 ${clients.length} 个 AI 客户端应用的 MCP 访问权限`, `Manage MCP access for ${clients.length} AI client apps`, `${clients.length} 個の AI クライアントの MCP アクセス権を管理`)}</p>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} style={{ gap: 6 }}>
-          <Plus size={14} />{locale === "zh" ? "添加客户端" : "Add Client"}
+        <button className="btn btn-primary btn-sm" onClick={openCreate} style={{ gap: 6 }}>
+          <Plus size={14} />{uiText("添加客户端", "Add Client", "クライアントを追加")}
         </button>
       </div>
 
@@ -109,13 +165,13 @@ export default function McpClients() {
         <div className="card empty-state" style={{ flex: 1 }}>
           <div className="empty-icon"><Monitor size={28} style={{ color: "var(--text-muted)" }} /></div>
           <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>
-            {locale === "zh" ? "尚未添加客户端" : "No clients added"}
+            {uiText("尚未添加客户端", "No clients added", "まだクライアントがありません")}
           </p>
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>
-            {locale === "zh" ? "添加 AI 客户端应用以管理其对 MCP 服务器的访问权限" : "Add AI client apps to manage their MCP server access"}
+            {uiText("添加 AI 客户端应用以管理其对 MCP 服务器的访问权限", "Add AI client apps to manage their MCP server access", "AI クライアントを追加して MCP サーバーへのアクセス権を管理します")}
           </p>
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 16 }} onClick={() => setShowCreate(true)}>
-            <Plus size={14} />{locale === "zh" ? "添加客户端" : "Add Client"}
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 16 }} onClick={openCreate}>
+            <Plus size={14} />{uiText("添加客户端", "Add Client", "クライアントを追加")}
           </button>
         </div>
       ) : (
@@ -126,14 +182,14 @@ export default function McpClients() {
             {showCreate && (
               <div className="section-card" style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-                  <h3 style={{ fontSize: 14, fontWeight: 600 }}>{locale === "zh" ? "新建客户端" : "New Client"}</h3>
-                  <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowCreate(false)}><X size={14} /></button>
+                  <h3 style={{ fontSize: 14, fontWeight: 600 }}>{uiText("新建客户端", "New Client", "クライアントを新規作成")}</h3>
+                  <button className="btn btn-ghost btn-icon-sm" onClick={closeCreate}><X size={14} /></button>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <input className="input" placeholder={locale === "zh" ? "客户端名称（如 Claude Desktop）" : "Client name (e.g. Claude Desktop)"} value={newName} onChange={e => setNewName(e.target.value)} />
-                  <input className="input" placeholder={locale === "zh" ? "配置文件路径（可选）" : "Config file path (optional)"} value={newConfigPath} onChange={e => setNewConfigPath(e.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
+                  <input className="input" placeholder={uiText("客户端名称（如 Claude Desktop）", "Client name (e.g. Claude Desktop)", "クライアント名（例: Claude Desktop）")} value={newName} onChange={e => setNewName(e.target.value)} />
+                  <input className="input" placeholder={uiText("配置文件路径（可选）", "Config file path (optional)", "設定ファイルパス（任意）")} value={newConfigPath} onChange={e => setNewConfigPath(e.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
                   <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={!newName.trim()} style={{ alignSelf: "flex-end" }}>
-                    <Plus size={14} />{locale === "zh" ? "创建" : "Create"}
+                    <Plus size={14} />{uiText("创建", "Create", "作成")}
                   </button>
                 </div>
               </div>
@@ -156,7 +212,7 @@ export default function McpClients() {
                       <div>
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{client.name}</span>
                         <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                          {locale === "zh" ? `可访问 ${accessCount}/${servers.length} 个服务器` : `${accessCount}/${servers.length} servers accessible`}
+                          {uiText(`可访问 ${accessCount}/${servers.length} 个服务器`, `${accessCount}/${servers.length} servers accessible`, `${accessCount}/${servers.length} 個のサーバーにアクセス可能`)}
                         </p>
                       </div>
                     </div>
@@ -180,25 +236,25 @@ export default function McpClients() {
                   </div>
                   {editing ? (
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}><X size={14} />{locale === "zh" ? "取消" : "Cancel"}</button>
-                      <button className="btn btn-primary btn-sm" onClick={handleSaveAccess}><Save size={14} />{locale === "zh" ? "保存" : "Save"}</button>
+                      <button className="btn btn-secondary btn-sm" onClick={stopEditing}><X size={14} />{uiText("取消", "Cancel", "キャンセル")}</button>
+                      <button className="btn btn-primary btn-sm" onClick={handleSaveAccess}><Save size={14} />{uiText("保存", "Save", "保存")}</button>
                     </div>
                   ) : (
                     <button className="btn btn-secondary btn-sm" onClick={() => startEdit(selected)}>
-                      <Shield size={14} />{locale === "zh" ? "管理权限" : "Manage Access"}
+                      <Shield size={14} />{uiText("管理权限", "Manage Access", "アクセス権を管理")}
                     </button>
                   )}
                 </div>
 
                 {selected.config_path && (
                   <div style={{ marginBottom: 18 }}>
-                    <span className="field-label">{locale === "zh" ? "配置路径" : "Config Path"}</span>
+                    <span className="field-label">{uiText("配置路径", "Config Path", "設定パス")}</span>
                     <div className="code-block" style={{ fontSize: 11 }}>{selected.config_path}</div>
                   </div>
                 )}
 
                 <div>
-                  <span className="field-label">{locale === "zh" ? "服务器访问权限" : "Server Access"}</span>
+                  <span className="field-label">{uiText("服务器访问权限", "Server Access", "サーバーアクセス権")}</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {servers.map(server => {
                       const hasAccess = editing ? (editAccess[server.id] ?? true) : (selected.server_access[server.id] ?? true);
@@ -218,7 +274,9 @@ export default function McpClients() {
                             </button>
                           ) : (
                             <span className={`badge ${hasAccess ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
-                              {hasAccess ? (locale === "zh" ? "允许" : "Allowed") : (locale === "zh" ? "拒绝" : "Denied")}
+                              {hasAccess
+                                ? uiText("允许", "Allowed", "許可")
+                                : uiText("拒绝", "Denied", "拒否")}
                             </span>
                           )}
                         </div>
@@ -229,7 +287,7 @@ export default function McpClients() {
               </div>
             ) : (
               <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200 }}>
-                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>{locale === "zh" ? "选择一个客户端查看详情" : "Select a client to view details"}</p>
+                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>{uiText("选择一个客户端查看详情", "Select a client to view details", "クライアントを選択して詳細を表示")}</p>
               </div>
             )}
           </div>
@@ -237,9 +295,9 @@ export default function McpClients() {
       )}
       <ConfirmDialog
         isOpen={!!pendingDelete}
-        title={locale === "zh" ? "删除客户端" : "Delete Client"}
-        message={locale === "zh" ? `确定删除客户端「${pendingDelete?.name}」？` : `Delete client "${pendingDelete?.name}"?`}
-        confirmText={locale === "zh" ? "删除" : "Delete"}
+        title={uiText("删除客户端", "Delete Client", "クライアントを削除")}
+        message={uiText(`确定删除客户端「${pendingDelete?.name}」？`, `Delete client "${pendingDelete?.name}"?`, `クライアント「${pendingDelete?.name}」を削除しますか？`)}
+        confirmText={uiText("删除", "Delete", "削除")}
         variant="destructive"
         onConfirm={() => { if (pendingDelete) void doDelete(pendingDelete); setPendingDelete(null); }}
         onCancel={() => setPendingDelete(null)}

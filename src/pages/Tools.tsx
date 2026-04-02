@@ -426,45 +426,49 @@ export default function Tools() {
               </div>
 
               {hudStatus?.installed && (
-                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-                  {/* Layout & Path */}
-                  <div style={{ display: "flex", gap: 16, marginBottom: 10, alignItems: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{uiText("布局", "Layout", "レイアウト")}</span>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        {(["default", "separators"] as const).map(layout => (
-                          <button key={layout}
-                            className={`btn btn-xs ${(hc.layout || "separators") === layout ? "btn-primary" : "btn-secondary"}`}
-                            onClick={() => void updateHudConfig({ layout })}
-                            style={{ fontSize: 11 }}
-                          >
-                            {layout === "default"
-                              ? uiText("紧凑", "Compact", "コンパクト")
-                              : uiText("分隔线", "Separators", "区切り線")}
-                          </button>
-                        ))}
-                      </div>
+                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+                  {/* Layout */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("布局", "Layout", "レイアウト")}</span>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{uiText("路径层级", "Path Levels", "パス階層")}</span>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        {[1, 2, 3].map(n => (
-                          <button key={n}
-                            className={`btn btn-xs ${(hc.pathLevels || 2) === n ? "btn-primary" : "btn-secondary"}`}
-                            onClick={() => void updateHudConfig({ pathLevels: n })}
-                            style={{ fontSize: 11, minWidth: 24 }}
-                          >
-                            {n}
-                          </button>
-                        ))}
-                      </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {(["default", "separators"] as const).map(layout => (
+                        <button key={layout}
+                          className={`btn btn-xs ${(hc.layout || "separators") === layout ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => void updateHudConfig({ layout })}
+                          style={{ fontSize: 11 }}
+                        >
+                          {layout === "default"
+                            ? uiText("紧凑", "Compact", "コンパクト")
+                            : uiText("分隔线", "Separators", "区切り線")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Path Levels */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("路径层级", "Path Levels", "パス階層")}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {[1, 2, 3].map(n => (
+                        <button key={n}
+                          className={`btn btn-xs ${(hc.pathLevels || 2) === n ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => void updateHudConfig({ pathLevels: n })}
+                          style={{ fontSize: 11, minWidth: 24 }}
+                        >
+                          {n}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
                   {/* Git Status */}
-                  <div style={{ marginBottom: 8 }}>
+                  <div>
                     <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Git Status</span>
-                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px 16px", marginTop: 8 }}>
                       {([
                         ["enabled", uiText("显示分支", "Branch", "ブランチ表示"), hc.gitStatus?.enabled],
                         ["showDirty", uiText("未提交标记", "Dirty Mark", "変更あり表示"), hc.gitStatus?.showDirty],
@@ -483,7 +487,7 @@ export default function Tools() {
                   {/* Display Options */}
                   <div>
                     <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{uiText("显示选项", "Display", "表示項目")}</span>
-                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px 16px", marginTop: 8 }}>
                       {([
                         ["showModel", uiText("模型名", "Model", "モデル名"), hc.display?.showModel],
                         ["showContextBar", uiText("上下文进度条", "Context Bar", "コンテキストバー"), hc.display?.showContextBar],

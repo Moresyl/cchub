@@ -1,9 +1,9 @@
-pub mod schema;
 pub mod models;
+pub mod schema;
 
 use rusqlite::Connection;
-use std::sync::Mutex;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::AppHandle;
 use tauri::Manager;
 
@@ -33,22 +33,32 @@ pub fn get_db_path(app_handle: &AppHandle) -> PathBuf {
     app_dir.join("cchub.db")
 }
 
+fn ensure_incremental_auto_vacuum(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let mode: i64 = conn.query_row("PRAGMA auto_vacuum;", [], |row| row.get(0))?;
+    if mode != 2 {
+        conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;")?;
+    }
+    conn.execute_batch("PRAGMA incremental_vacuum;")?;
+    Ok(())
+}
+
 pub fn init_db(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = get_db_path(app_handle);
     let db_exists = db_path.exists();
     let conn = Connection::open(&db_path)?;
 
     // SQLite PRAGMA optimizations for local desktop usage
-    conn.execute_batch("PRAGMA journal_mode = WAL;")?;       // Write-Ahead Logging for better concurrency
-    conn.execute_batch("PRAGMA foreign_keys = ON;")?;        // Enforce foreign key constraints
-    conn.execute_batch("PRAGMA busy_timeout = 5000;")?;      // Wait up to 5s on locked DB instead of failing immediately
-    conn.execute_batch("PRAGMA synchronous = NORMAL;")?;     // Good balance of safety vs performance with WAL
+    conn.execute_batch("PRAGMA journal_mode = WAL;")?; // Write-Ahead Logging for better concurrency
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?; // Enforce foreign key constraints
+    conn.execute_batch("PRAGMA busy_timeout = 5000;")?; // Wait up to 5s on locked DB instead of failing immediately
+    conn.execute_batch("PRAGMA synchronous = NORMAL;")?; // Good balance of safety vs performance with WAL
 
     if !db_exists {
-        conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?;  // Enable incremental vacuum for new DBs
+        conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?; // Enable incremental vacuum for new DBs
     }
 
     schema::run_migrations(&conn)?;
+    ensure_incremental_auto_vacuum(&conn)?;
 
     // Restore proxy setting from database
     if let Ok(proxy) = conn.query_row(

@@ -5,7 +5,8 @@ node_modules/
 # Build output
 dist/
 src-tauri/target/
-
+*.claude
+.claude
 # IDE
 .vscode/
 .idea/

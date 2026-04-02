@@ -1,8 +1,77 @@
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 应用版本号
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn cchub_state_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cchub")
+}
+
+pub fn crash_log_path() -> PathBuf {
+    cchub_state_dir().join("crash.log")
+}
+
+pub fn runtime_log_path() -> PathBuf {
+    cchub_state_dir().join("app.log")
+}
+
+fn trim_text_log(path: &Path, max_bytes: u64, keep_chars: usize) {
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.len() <= max_bytes {
+            return;
+        }
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let keep_from = content.len().saturating_sub(keep_chars);
+            let keep_from = content.ceil_char_boundary(keep_from);
+            let _ = std::fs::write(path, &content[keep_from..]);
+        }
+    }
+}
+
+fn log_level_rank(level: &str) -> u8 {
+    match level.trim().to_ascii_lowercase().as_str() {
+        "trace" => 4,
+        "debug" => 3,
+        "info" => 2,
+        "warn" => 1,
+        _ => 0,
+    }
+}
+
+fn runtime_log_enabled(level: &str) -> bool {
+    let configured = std::env::var("CCHUB_LOG_LEVEL").unwrap_or_else(|_| "error".to_string());
+    log_level_rank(level) <= log_level_rank(&configured)
+}
+
+pub fn append_runtime_log(level: &str, scope: &str, message: &str) {
+    if !runtime_log_enabled(level) {
+        return;
+    }
+
+    let log_path = runtime_log_path();
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let entry = format!(
+        "[{timestamp}] [{level}] [{scope}] {message}\n",
+        level = level.trim().to_ascii_uppercase(),
+    );
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        let _ = file.write_all(entry.as_bytes());
+        let _ = file.flush();
+        trim_text_log(&log_path, 400_000, 180_000);
+    }
+}
 
 /// Install a panic hook that logs crash details to ~/.cchub/crash.log
 pub fn install_panic_hook() {
@@ -14,10 +83,7 @@ pub fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
 
     std::panic::set_hook(Box::new(move |info| {
-        let log_path = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".cchub")
-            .join("crash.log");
+        let log_path = crash_log_path();
 
         // Ensure directory exists
         if let Some(parent) = log_path.parent() {
@@ -26,7 +92,9 @@ pub fn install_panic_hook() {
 
         // Timestamp (with fallback if chrono panics)
         let timestamp = std::panic::catch_unwind(|| {
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string()
+            chrono::Local::now()
+                .format("%Y-%m-%d %H:%M:%S%.3f")
+                .to_string()
         })
         .unwrap_or_else(|_| {
             std::time::SystemTime::now()
@@ -89,18 +157,7 @@ pub fn install_panic_hook() {
         {
             let _ = file.write_all(crash_entry.as_bytes());
             let _ = file.flush();
-
-            // Truncate if too large (keep last 200KB)
-            if let Ok(meta) = std::fs::metadata(&log_path) {
-                if meta.len() > 200_000 {
-                    if let Ok(content) = std::fs::read_to_string(&log_path) {
-                        let keep_from = content.len().saturating_sub(100_000);
-                        // Ensure we slice at a valid UTF-8 char boundary
-                        let keep_from = content.ceil_char_boundary(keep_from);
-                        let _ = std::fs::write(&log_path, &content[keep_from..]);
-                    }
-                }
-            }
+            trim_text_log(&log_path, 200_000, 100_000);
 
             eprintln!("\n[CCHub] Crash log saved to: {}", log_path.display());
         }

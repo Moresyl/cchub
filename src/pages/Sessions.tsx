@@ -59,6 +59,22 @@ function matchesEntry(entry: SessionEntry, query: string) {
   );
 }
 
+/** Build the CLI resume command for a given tool + session ID. */
+function buildResumeCommand(toolId: string, sessionId: string): string | null {
+  switch (toolId) {
+    case "claude":
+      return `claude --resume ${sessionId}`;
+    case "codex":
+      return `codex resume ${sessionId}`;
+    case "gemini":
+      return `gemini --resume ${sessionId}`;
+    case "opencode":
+      return `opencode session resume ${sessionId}`;
+    default:
+      return null; // openclaw etc. — no CLI resume
+  }
+}
+
 function entryBadgeColor(kind: string) {
   switch (kind) {
     case "user":
@@ -371,18 +387,21 @@ export default function Sessions() {
                         </div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-                        <button
-                          className="btn btn-secondary btn-xs"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void navigator.clipboard.writeText(session.id).then(() =>
-                              showToast("success", uiText("已复制会话 ID", "Session ID copied", "セッション ID をコピーしました")),
-                            );
-                          }}
-                          title={uiText("复制会话 ID", "Copy session ID", "セッション ID をコピー")}
-                        >
-                          <Copy size={12} />
-                        </button>
+                        {buildResumeCommand(session.tool_id, session.id) && (
+                          <button
+                            className="btn btn-secondary btn-xs"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              const cmd = buildResumeCommand(session.tool_id, session.id)!;
+                              void navigator.clipboard.writeText(cmd).then(() =>
+                                showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
+                              );
+                            }}
+                            title={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
+                          >
+                            <Copy size={12} />
+                          </button>
+                        )}
                         <button
                           className="btn btn-danger btn-xs"
                           onClick={(event) => {
@@ -449,44 +468,48 @@ export default function Sessions() {
                   </div>
                 </div>
 
-                {/* Session ID & resume info */}
+                {/* Resume command & directory */}
                 <div style={{
-                  display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14,
-                  padding: "10px 14px", borderRadius: 8,
+                  display: "flex", flexDirection: "column", gap: 10, marginBottom: 14,
+                  padding: "12px 14px", borderRadius: 8,
                   background: "var(--bg-elevated)", border: "1px solid var(--border-default)",
-                  fontSize: 12, color: "var(--text-muted)", alignItems: "center",
+                  fontSize: 12, color: "var(--text-muted)",
                 }}>
-                  <span style={{ fontWeight: 600, color: "var(--text-secondary)", flexShrink: 0 }}>
-                    {uiText("会话 ID", "Session ID", "セッション ID")}:
-                  </span>
-                  <code style={{
-                    fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                    background: "var(--bg-card)", padding: "2px 8px", borderRadius: 4,
-                    userSelect: "all", cursor: "text",
-                  }}>
-                    {detail.session.id}
-                  </code>
-                  <button
-                    className="btn btn-ghost btn-xs"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(detail.session.id).then(() =>
-                        showToast("success", uiText("已复制会话 ID", "Session ID copied", "セッション ID をコピーしました")),
-                      );
-                    }}
-                    style={{ padding: "2px 6px" }}
-                  >
-                    <Copy size={12} />
-                  </button>
-                  {detail.session.cwd && (
-                    <>
-                      <span style={{ color: "var(--border-default)" }}>|</span>
+                  {buildResumeCommand(detail.session.tool_id, detail.session.id) && (
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                       <span style={{ fontWeight: 600, color: "var(--text-secondary)", flexShrink: 0 }}>
-                        {uiText("目录", "Directory", "ディレクトリ")}:
+                        {uiText("恢复命令", "Resume Command", "復元コマンド")}:
                       </span>
                       <code style={{
                         fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                        background: "var(--bg-card)", padding: "2px 8px", borderRadius: 4,
-                        userSelect: "all", cursor: "text", minWidth: 0,
+                        background: "var(--bg-card)", padding: "4px 10px", borderRadius: 4,
+                        userSelect: "all", cursor: "text", flex: 1, minWidth: 0,
+                      }}>
+                        {buildResumeCommand(detail.session.tool_id, detail.session.id)}
+                      </code>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => {
+                          const cmd = buildResumeCommand(detail.session.tool_id, detail.session.id)!;
+                          void navigator.clipboard.writeText(cmd).then(() =>
+                            showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
+                          );
+                        }}
+                        style={{ padding: "2px 6px" }}
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                  )}
+                  {detail.session.cwd && (
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 600, color: "var(--text-secondary)", flexShrink: 0 }}>
+                        {uiText("项目目录", "Directory", "ディレクトリ")}:
+                      </span>
+                      <code style={{
+                        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                        background: "var(--bg-card)", padding: "4px 10px", borderRadius: 4,
+                        userSelect: "all", cursor: "text", flex: 1, minWidth: 0,
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>
                         {detail.session.cwd}
@@ -502,7 +525,7 @@ export default function Sessions() {
                       >
                         <Copy size={12} />
                       </button>
-                    </>
+                    </div>
                   )}
                 </div>
 

@@ -81,14 +81,6 @@ interface DetectedTool {
   installed: boolean;
 }
 
-interface CommonConfigSnippet {
-  hideAttribution: boolean;
-  enableTeammates: boolean;
-  effortLevelHigh: boolean;
-  enableToolSearch: boolean;
-  customValues: Record<string, string>;
-}
-
 const TOOL_ICONS: Record<string, typeof Monitor> = {
   claude: Terminal,
   codex: Code,
@@ -116,15 +108,6 @@ const OPENCODE_NPM_OPTIONS: OpenCodeNpmPackage[] = [
 const CODEX_REASONING_OPTIONS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
 const CODEX_WIRE_API_OPTIONS: CodexWireApi[] = ["responses", "chat"];
 const THINKING_LEVEL_OPTIONS: OpenCodeThinkingLevel[] = ["minimal", "low", "medium", "high"];
-const COMMON_CONFIG_SUPPORTED_TOOLS = ["claude", "codex", "gemini"] as const;
-const EMPTY_COMMON_CONFIG_SNIPPET: CommonConfigSnippet = {
-  hideAttribution: false,
-  enableTeammates: false,
-  effortLevelHigh: false,
-  enableToolSearch: false,
-  customValues: {},
-};
-
 function formatTime(value: string | null) {
   if (!value) return "";
   return value.replace("T", " ").slice(0, 19);
@@ -136,38 +119,6 @@ function prettyJson(content: string): string {
   } catch {
     return content;
   }
-}
-
-function parseCommonConfigCustomValues(input: string) {
-  const values: Record<string, string> = {};
-  for (const rawLine of input.split("\n")) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const [key, ...rest] = line.split("=");
-    const normalizedKey = key?.trim();
-    const normalizedValue = rest.join("=").trim();
-    if (!normalizedKey || !normalizedValue) continue;
-    values[normalizedKey] = normalizedValue;
-  }
-  return values;
-}
-
-function stringifyCommonConfigCustomValues(values: Record<string, string>) {
-  return Object.entries(values)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
-}
-
-function hasCommonConfigSnippetPayload(snippet: CommonConfigSnippet | null | undefined) {
-  if (!snippet) return false;
-  return (
-    snippet.hideAttribution
-    || snippet.enableTeammates
-    || snippet.effortLevelHigh
-    || snippet.enableToolSearch
-    || Object.keys(snippet.customValues || {}).length > 0
-  );
 }
 
 function getConfigLanguage(toolId: string, content: string): "json" | "toml" {
@@ -443,10 +394,6 @@ export default function Profiles() {
   const [streamCheckingId, setStreamCheckingId] = useState<string | null>(null);
   const [streamCheckResults, setStreamCheckResults] = useState<Record<string, ProviderStreamCheckResult>>({});
   const [streamCheckConfirmProfile, setStreamCheckConfirmProfile] = useState<ConfigProfile | null>(null);
-  const [commonConfigSnippets, setCommonConfigSnippets] = useState<Record<string, CommonConfigSnippet>>({});
-  const [commonConfigDraft, setCommonConfigDraft] = useState<CommonConfigSnippet>(EMPTY_COMMON_CONFIG_SNIPPET);
-  const [commonConfigCustomText, setCommonConfigCustomText] = useState("");
-  const [savingCommonConfigToolId, setSavingCommonConfigToolId] = useState<string | null>(null);
 
   const [confirmAction, setConfirmAction] = useState<{ type: string; profile: ConfigProfile } | null>(null);
   const locale = getLocale();
@@ -454,24 +401,7 @@ export default function Profiles() {
   const localeText = (zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
   );
-  const activeCommonConfigTool = useMemo(() => {
-    if (COMMON_CONFIG_SUPPORTED_TOOLS.includes(filterTool as (typeof COMMON_CONFIG_SUPPORTED_TOOLS)[number])) {
-      return filterTool;
-    }
-    return tools.find((tool) =>
-      tool.installed && COMMON_CONFIG_SUPPORTED_TOOLS.includes(tool.id as (typeof COMMON_CONFIG_SUPPORTED_TOOLS)[number]))?.id || "claude";
-  }, [filterTool, tools]);
-
   useEffect(() => { void load(); }, []);
-  useEffect(() => {
-    const snippet = commonConfigSnippets[activeCommonConfigTool] || EMPTY_COMMON_CONFIG_SNIPPET;
-    setCommonConfigDraft({
-      ...EMPTY_COMMON_CONFIG_SNIPPET,
-      ...snippet,
-      customValues: { ...(snippet.customValues || {}) },
-    });
-    setCommonConfigCustomText(stringifyCommonConfigCustomValues(snippet.customValues || {}));
-  }, [activeCommonConfigTool, commonConfigSnippets]);
   useEffect(() => {
     const handleSaveShortcut = () => {
       if ((showCreateModal || editingProfile) && draftName.trim() && !saving) {
@@ -502,23 +432,16 @@ export default function Profiles() {
     setLoading(true);
     try {
       await invoke("sync_config_profiles");
-      const [nextProfiles, nextTools, nextActiveIds, nextFragments, nextCommonConfigEntries] = await Promise.all([
+      const [nextProfiles, nextTools, nextActiveIds, nextFragments] = await Promise.all([
         invoke<ConfigProfile[]>("get_config_profiles"),
         invoke<DetectedTool[]>("detect_tools"),
         invoke<string[]>("get_active_config_profile_ids"),
         invoke<ProviderConfigFragment[]>("get_provider_config_fragments").catch(() => [] as ProviderConfigFragment[]),
-        Promise.all(
-          COMMON_CONFIG_SUPPORTED_TOOLS.map(async (toolId) => {
-            const snippet = await invoke<CommonConfigSnippet>("get_common_config_snippet", { toolId }).catch(() => EMPTY_COMMON_CONFIG_SNIPPET);
-            return [toolId, snippet] as const;
-          }),
-        ),
       ]);
       setProfiles(nextProfiles);
       setTools(nextTools);
       setActiveIds(nextActiveIds);
       setProviderFragments(nextFragments);
-      setCommonConfigSnippets(Object.fromEntries(nextCommonConfigEntries));
       await invoke("refresh_tray_provider_menu").catch(() => undefined);
       setNewTool((prev) => {
         const installed = nextTools.filter((tool) => tool.installed);
@@ -877,13 +800,7 @@ export default function Profiles() {
     try {
       await invoke("apply_config_profile", { id: profile.id });
       await load();
-      const snippet = commonConfigSnippets[profile.tool_id];
-      showToast(
-        "success",
-        hasCommonConfigSnippetPayload(snippet)
-          ? localeText("配置已切换，并叠加公共配置", "Configuration switched with Common Config overlay", "設定を切り替え、共通設定も重ねて適用しました")
-          : (locale === "zh" ? "配置已切换" : "Configuration switched"),
-      );
+      showToast("success", locale === "zh" ? "配置已切换" : "Configuration switched");
     } catch (e) {
       console.error(e);
       showToast("error", locale === "zh" ? `切换失败: ${e}` : `Switch failed: ${e}`);
@@ -892,41 +809,6 @@ export default function Profiles() {
     }
   }
 
-  async function handleSaveCommonConfig() {
-    if (!COMMON_CONFIG_SUPPORTED_TOOLS.includes(activeCommonConfigTool as (typeof COMMON_CONFIG_SUPPORTED_TOOLS)[number])) {
-      return;
-    }
-    const toolId = activeCommonConfigTool;
-    const snippet: CommonConfigSnippet = {
-      ...commonConfigDraft,
-      customValues: parseCommonConfigCustomValues(commonConfigCustomText),
-    };
-    setSavingCommonConfigToolId(toolId);
-    try {
-      const saved = await invoke<CommonConfigSnippet>("set_common_config_snippet", { toolId, snippet });
-      setCommonConfigSnippets((current) => {
-        const next = { ...current };
-        if (hasCommonConfigSnippetPayload(saved)) {
-          next[toolId] = saved;
-        } else {
-          delete next[toolId];
-        }
-        return next;
-      });
-      showToast(
-        "success",
-        localeText("公共配置已保存", "Common Config saved", "共通設定を保存しました"),
-      );
-    } catch (e) {
-      console.error(e);
-      showToast(
-        "error",
-        localeText(`保存公共配置失败: ${e}`, `Failed to save Common Config: ${e}`, `共通設定の保存に失敗しました: ${e}`),
-      );
-    } finally {
-      setSavingCommonConfigToolId(null);
-    }
-  }
 
   async function handleDelete(profile: ConfigProfile) {
     setConfirmAction({ type: "delete", profile });
@@ -1619,111 +1501,6 @@ export default function Profiles() {
           ))}
         </div>
       </div>
-
-      {installedTools.some((tool) => COMMON_CONFIG_SUPPORTED_TOOLS.includes(tool.id as (typeof COMMON_CONFIG_SUPPORTED_TOOLS)[number]))
-        && COMMON_CONFIG_SUPPORTED_TOOLS.includes(activeCommonConfigTool as (typeof COMMON_CONFIG_SUPPORTED_TOOLS)[number]) && (
-        <div className="section-card" style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>
-                  {localeText("Common Config Snippet", "Common Config Snippet", "Common Config Snippet")}
-                </span>
-                <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                  {toolNameMap[activeCommonConfigTool] || activeCommonConfigTool}
-                </span>
-                {hasCommonConfigSnippetPayload(commonConfigSnippets[activeCommonConfigTool]) && (
-                  <span className="badge badge-success" style={{ fontSize: 10 }}>
-                    {localeText("切换时自动叠加", "Applied on switch", "切り替え時に自動適用")}
-                  </span>
-                )}
-              </div>
-              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
-                {activeCommonConfigTool === "codex"
-                  ? localeText(
-                    "公共配置不会写回 Provider 快照，只会在切换时作为运行时 overlay 叠加到 config.toml / auth.json。",
-                    "This does not mutate saved provider snapshots. It overlays runtime settings into config.toml / auth.json when you switch.",
-                    "保存済み Provider スナップショットは変更せず、切り替え時に config.toml / auth.json へランタイム適用します。",
-                  )
-                  : localeText(
-                    "公共配置不会写回 Provider 快照，只会在切换时动态叠加到当前 App 配置。",
-                    "This does not mutate saved provider snapshots. It overlays into the live app config when you switch.",
-                    "保存済み Provider スナップショットは変更せず、切り替え時に現在の App 設定へ動的に重ねます。",
-                  )}
-              </div>
-            </div>
-            <button
-              className="btn btn-secondary btn-sm"
-              type="button"
-              onClick={() => void handleSaveCommonConfig()}
-              disabled={savingCommonConfigToolId === activeCommonConfigTool}
-              style={{ gap: 6 }}
-            >
-              {savingCommonConfigToolId === activeCommonConfigTool ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Save size={14} />}
-              {localeText("保存公共配置", "Save Common Config", "共通設定を保存")}
-            </button>
-          </div>
-
-          <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-            {activeCommonConfigTool === "claude" && (
-              <>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                  <input
-                    type="checkbox"
-                    checked={commonConfigDraft.hideAttribution}
-                    onChange={(event) => setCommonConfigDraft((current) => ({ ...current, hideAttribution: event.target.checked }))}
-                  />
-                  {localeText("Hide Attribution", "Hide Attribution", "Hide Attribution")}
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                  <input
-                    type="checkbox"
-                    checked={commonConfigDraft.enableTeammates}
-                    onChange={(event) => setCommonConfigDraft((current) => ({ ...current, enableTeammates: event.target.checked }))}
-                  />
-                  {localeText("Enable Teammates", "Enable Teammates", "Enable Teammates")}
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                  <input
-                    type="checkbox"
-                    checked={commonConfigDraft.enableToolSearch}
-                    onChange={(event) => setCommonConfigDraft((current) => ({ ...current, enableToolSearch: event.target.checked }))}
-                  />
-                  {localeText("Enable Tool Search", "Enable Tool Search", "Enable Tool Search")}
-                </label>
-              </>
-            )}
-
-            {(activeCommonConfigTool === "claude" || activeCommonConfigTool === "codex") && (
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={commonConfigDraft.effortLevelHigh}
-                  onChange={(event) => setCommonConfigDraft((current) => ({ ...current, effortLevelHigh: event.target.checked }))}
-                />
-                {localeText("High Effort Level", "High Effort Level", "High Effort Level")}
-              </label>
-            )}
-          </div>
-
-          <div>
-            <label className="field-label">
-              {activeCommonConfigTool === "codex"
-                ? localeText("自定义 TOML key=value", "Custom TOML key=value", "カスタム TOML key=value")
-                : localeText("自定义环境变量 key=value", "Custom env key=value", "カスタム環境変数 key=value")}
-            </label>
-            <textarea
-              className="input"
-              value={commonConfigCustomText}
-              onChange={(event) => setCommonConfigCustomText(event.target.value)}
-              placeholder={activeCommonConfigTool === "codex"
-                ? "model_auto_compact_token_limit=900000\ndisable_response_storage=true"
-                : "ENABLE_TOOL_SEARCH=true\nMY_CUSTOM_FLAG=1"}
-              style={{ minHeight: 86, resize: "vertical", fontSize: 13 }}
-            />
-          </div>
-        </div>
-      )}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
         {filteredProfiles.length === 0 ? (

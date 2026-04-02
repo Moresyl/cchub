@@ -30,7 +30,11 @@ pub fn get_folder_tree(base_dir: &str) -> Result<FolderNode, String> {
 }
 
 fn build_tree(path: &PathBuf, max_depth: usize, depth: usize) -> FolderNode {
-    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let mut node = FolderNode {
         name,
         path: path.to_string_lossy().to_string(),
@@ -50,7 +54,9 @@ fn build_tree(path: &PathBuf, max_depth: usize, depth: usize) -> FolderNode {
                 .collect();
             // Directories first, then files, alphabetical within each
             children.sort_by(|a, b| {
-                b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                b.is_dir
+                    .cmp(&a.is_dir)
+                    .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             });
             node.children = children;
         }
@@ -93,12 +99,19 @@ pub fn categorize_skill(skill: &Skill) -> String {
     let desc_lower = skill.description.as_deref().unwrap_or("").to_lowercase();
 
     // Check for prompt patterns
-    if name_lower.contains("prompt") || desc_lower.contains("prompt") || desc_lower.contains("template") {
+    if name_lower.contains("prompt")
+        || desc_lower.contains("prompt")
+        || desc_lower.contains("template")
+    {
         return "prompt".to_string();
     }
 
     // Check for command patterns
-    if skill.trigger_command.is_some() && (name_lower.contains("command") || desc_lower.contains("command") || desc_lower.contains("slash")) {
+    if skill.trigger_command.is_some()
+        && (name_lower.contains("command")
+            || desc_lower.contains("command")
+            || desc_lower.contains("slash"))
+    {
         return "command".to_string();
     }
 
@@ -136,7 +149,11 @@ pub fn scan_local_plugins() -> Vec<Plugin> {
                 continue;
             }
 
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
 
             // Try to read package.json or plugin metadata
             let (description, version, source_url) = read_plugin_metadata(&path);
@@ -178,7 +195,12 @@ pub fn scan_local_skills() -> Vec<Skill> {
     skills
 }
 
-fn scan_skills_in_dir(dir: &PathBuf, skills: &mut Vec<Skill>, is_plugin_dir: bool, tool_id: Option<&str>) {
+fn scan_skills_in_dir(
+    dir: &PathBuf,
+    skills: &mut Vec<Skill>,
+    is_plugin_dir: bool,
+    tool_id: Option<&str>,
+) {
     let walker = walkdir(dir, is_plugin_dir);
     for skill_file in walker {
         if let Some(skill) = parse_skill_file(&skill_file, is_plugin_dir, tool_id) {
@@ -193,7 +215,12 @@ fn walkdir(dir: &PathBuf, deep: bool) -> Vec<PathBuf> {
     results
 }
 
-fn walk_recursive(dir: &PathBuf, results: &mut Vec<PathBuf>, max_depth: usize, current_depth: usize) {
+fn walk_recursive(
+    dir: &PathBuf,
+    results: &mut Vec<PathBuf>,
+    max_depth: usize,
+    current_depth: usize,
+) {
     if current_depth > max_depth {
         return;
     }
@@ -251,7 +278,10 @@ fn parse_skill_file(path: &PathBuf, is_plugin_dir: bool, tool_id: Option<&str>) 
     })
 }
 
-fn parse_frontmatter(content: &str, default_name: &str) -> (String, Option<String>, Option<String>) {
+fn parse_frontmatter(
+    content: &str,
+    default_name: &str,
+) -> (String, Option<String>, Option<String>) {
     let mut name = default_name.to_string();
     let mut description = None;
     let mut trigger = None;
@@ -279,8 +309,12 @@ fn read_plugin_metadata(path: &PathBuf) -> (Option<String>, Option<String>, Opti
         if let Ok(content) = std::fs::read_to_string(&pkg_json) {
             if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) {
                 return (
-                    pkg.get("description").and_then(|v| v.as_str()).map(String::from),
-                    pkg.get("version").and_then(|v| v.as_str()).map(String::from),
+                    pkg.get("description")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    pkg.get("version")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     pkg.get("repository")
                         .and_then(|v| v.get("url").or(Some(v)))
                         .and_then(|v| v.as_str())

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::mcp::config;
+use serde::{Deserialize, Serialize};
 
 /// Build an HTTP client that respects proxy settings (env vars + system proxy)
 fn build_http_client() -> Result<reqwest::Client, String> {
@@ -17,13 +17,19 @@ fn build_http_client() -> Result<reqwest::Client, String> {
     if let Some(ref url) = proxy_url {
         if !url.trim().is_empty() {
             match reqwest::Proxy::all(url) {
-                Ok(proxy) => { builder = builder.proxy(proxy); }
-                Err(e) => { eprintln!("Invalid proxy URL '{}': {}", url, e); }
+                Ok(proxy) => {
+                    builder = builder.proxy(proxy);
+                }
+                Err(e) => {
+                    eprintln!("Invalid proxy URL '{}': {}", url, e);
+                }
             }
         }
     }
 
-    builder.build().map_err(|e| format!("Failed to build HTTP client: {}", e))
+    builder
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -58,15 +64,23 @@ pub struct SkillRegistryEntry {
 // ── SkillHub API Integration ──
 
 /// Fetch skills from the SkillHub catalog API (https://www.skillhub.club)
-pub async fn fetch_skillhub_catalog(page: u32, limit: u32, category: &str) -> Result<(Vec<SkillRegistryEntry>, usize), String> {
+pub async fn fetch_skillhub_catalog(
+    page: u32,
+    limit: u32,
+    category: &str,
+) -> Result<(Vec<SkillRegistryEntry>, usize), String> {
     let client = build_http_client()?;
 
-    let mut url = format!("https://www.skillhub.club/api/v1/desktop/catalog?page={}&limit={}", page, limit);
+    let mut url = format!(
+        "https://www.skillhub.club/api/v1/desktop/catalog?page={}&limit={}",
+        page, limit
+    );
     if !category.is_empty() && category != "all" {
         url.push_str(&format!("&category={}", category));
     }
 
-    let resp = client.get(&url)
+    let resp = client
+        .get(&url)
         .send()
         .await
         .map_err(|e| format!("SkillHub API error: {}", e))?;
@@ -75,7 +89,10 @@ pub async fn fetch_skillhub_catalog(page: u32, limit: u32, category: &str) -> Re
         return Err(format!("SkillHub API returned {}", resp.status()));
     }
 
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
 
     let total = body.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let skills_arr = body.get("skills").and_then(|v| v.as_array());
@@ -83,15 +100,47 @@ pub async fn fetch_skillhub_catalog(page: u32, limit: u32, category: &str) -> Re
     let mut entries = Vec::new();
     if let Some(skills) = skills_arr {
         for skill in skills {
-            let id = skill.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let name = skill.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let description = skill.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let description_zh = skill.get("description_zh").and_then(|v| v.as_str()).map(String::from);
-            let category = skill.get("category").and_then(|v| v.as_str()).unwrap_or("development").to_string();
-            let author = skill.get("author").and_then(|v| v.as_str()).map(String::from);
-            let repo_url = skill.get("repo_url").and_then(|v| v.as_str()).map(String::from);
-            let slug = skill.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let stars = skill.get("github_stars").and_then(|v| v.as_i64()).unwrap_or(0);
+            let id = skill
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = skill
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let description = skill
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let description_zh = skill
+                .get("description_zh")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let category = skill
+                .get("category")
+                .and_then(|v| v.as_str())
+                .unwrap_or("development")
+                .to_string();
+            let author = skill
+                .get("author")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let repo_url = skill
+                .get("repo_url")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let slug = skill
+                .get("slug")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let stars = skill
+                .get("github_stars")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
 
             entries.push(SkillRegistryEntry {
                 id: if id.is_empty() { slug.clone() } else { id },
@@ -102,7 +151,11 @@ pub async fn fetch_skillhub_catalog(page: u32, limit: u32, category: &str) -> Re
                 author,
                 github_url: repo_url,
                 cover_url: None,
-                tags: if stars > 0 { vec![format!("{}stars", stars)] } else { vec![] },
+                tags: if stars > 0 {
+                    vec![format!("{}stars", stars)]
+                } else {
+                    vec![]
+                },
                 content: slug, // Store slug for later fetching full content
             });
         }
@@ -115,8 +168,13 @@ pub async fn fetch_skillhub_catalog(page: u32, limit: u32, category: &str) -> Re
 pub async fn search_skillhub(query: &str, limit: u32) -> Result<Vec<SkillRegistryEntry>, String> {
     let client = build_http_client()?;
 
-    let url = format!("https://www.skillhub.club/api/v1/desktop/search?q={}&limit={}", urlencoding::encode(query), limit);
-    let resp = client.get(&url)
+    let url = format!(
+        "https://www.skillhub.club/api/v1/desktop/search?q={}&limit={}",
+        urlencoding::encode(query),
+        limit
+    );
+    let resp = client
+        .get(&url)
         .send()
         .await
         .map_err(|e| format!("SkillHub search error: {}", e))?;
@@ -125,16 +183,41 @@ pub async fn search_skillhub(query: &str, limit: u32) -> Result<Vec<SkillRegistr
         return Err(format!("SkillHub search returned {}", resp.status()));
     }
 
-    let skills: Vec<serde_json::Value> = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let skills: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
 
     let mut entries = Vec::new();
     for skill in skills {
-        let name = skill.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let slug = skill.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let description = skill.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let category = skill.get("category").and_then(|v| v.as_str()).unwrap_or("development").to_string();
-        let author = skill.get("author").and_then(|v| v.as_str()).map(String::from);
-        let repo_url = skill.get("repo_url").and_then(|v| v.as_str()).map(String::from);
+        let name = skill
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let slug = skill
+            .get("slug")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let description = skill
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let category = skill
+            .get("category")
+            .and_then(|v| v.as_str())
+            .unwrap_or("development")
+            .to_string();
+        let author = skill
+            .get("author")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let repo_url = skill
+            .get("repo_url")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         entries.push(SkillRegistryEntry {
             id: slug.clone(),
@@ -157,7 +240,8 @@ pub async fn search_skillhub(query: &str, limit: u32) -> Result<Vec<SkillRegistr
 pub async fn fetch_skillhub_skill_content(slug: &str) -> Result<String, String> {
     let client = build_http_client()?;
     let url = format!("https://www.skillhub.club/api/v1/desktop/skills/{}", slug);
-    let resp = client.get(&url)
+    let resp = client
+        .get(&url)
         .send()
         .await
         .map_err(|e| format!("SkillHub detail error: {}", e))?;
@@ -166,8 +250,12 @@ pub async fn fetch_skillhub_skill_content(slug: &str) -> Result<String, String> 
         return Err(format!("SkillHub detail returned {}", resp.status()));
     }
 
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
-    let skill_md = body.get("skill")
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let skill_md = body
+        .get("skill")
         .and_then(|s| s.get("skill_md_raw"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -182,7 +270,8 @@ pub async fn fetch_skillhub_skill_content(slug: &str) -> Result<String, String> 
 
 pub async fn fetch_custom_source(url: &str) -> Result<Vec<SkillRegistryEntry>, String> {
     let client = build_http_client()?;
-    let resp = client.get(url)
+    let resp = client
+        .get(url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch custom source: {}", e))?;
@@ -196,7 +285,11 @@ pub async fn fetch_custom_source(url: &str) -> Result<Vec<SkillRegistryEntry>, S
 }
 
 /// Fetch skills from a GitHub repository by downloading ZIP and scanning for SKILL.md files
-pub async fn fetch_skills_from_github_repo(owner: &str, repo: &str, branch: &str) -> Result<Vec<SkillRegistryEntry>, String> {
+pub async fn fetch_skills_from_github_repo(
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> Result<Vec<SkillRegistryEntry>, String> {
     let client = build_http_client()?;
     let mut all_skills = Vec::new();
 
@@ -205,31 +298,59 @@ pub async fn fetch_skills_from_github_repo(owner: &str, repo: &str, branch: &str
     if !branch.is_empty() && branch != "HEAD" {
         branches.push(branch.to_string());
     }
-    if !branches.iter().any(|b| b == "main") { branches.push("main".to_string()); }
-    if !branches.iter().any(|b| b == "master") { branches.push("master".to_string()); }
+    if !branches.iter().any(|b| b == "main") {
+        branches.push("main".to_string());
+    }
+    if !branches.iter().any(|b| b == "master") {
+        branches.push("master".to_string());
+    }
 
     let temp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
     let mut download_ok = false;
     let mut resolved_branch = branch.to_string();
     for b in &branches {
-        let url = format!("https://github.com/{}/{}/archive/refs/heads/{}.zip", owner, repo, b);
+        let url = format!(
+            "https://github.com/{}/{}/archive/refs/heads/{}.zip",
+            owner, repo, b
+        );
         match download_and_extract_zip(&client, &url, temp_dir.path()).await {
-            Ok(_) => { download_ok = true; resolved_branch = b.clone(); break; }
+            Ok(_) => {
+                download_ok = true;
+                resolved_branch = b.clone();
+                break;
+            }
             Err(_) => continue,
         }
     }
 
     if !download_ok {
-        return Err(format!("Failed to download {}/{} (tried branches: {:?})", owner, repo, branches));
+        return Err(format!(
+            "Failed to download {}/{} (tried branches: {:?})",
+            owner, repo, branches
+        ));
     }
 
     // Recursively scan for SKILL.md files
-    scan_skills_recursive(temp_dir.path(), temp_dir.path(), owner, repo, &resolved_branch, &mut all_skills);
+    scan_skills_recursive(
+        temp_dir.path(),
+        temp_dir.path(),
+        owner,
+        repo,
+        &resolved_branch,
+        &mut all_skills,
+    );
 
     // If no SKILL.md found, fall back to scanning .md files
     if all_skills.is_empty() {
-        scan_md_files_recursive(temp_dir.path(), temp_dir.path(), owner, repo, &resolved_branch, &mut all_skills);
+        scan_md_files_recursive(
+            temp_dir.path(),
+            temp_dir.path(),
+            owner,
+            repo,
+            &resolved_branch,
+            &mut all_skills,
+        );
     }
 
     if all_skills.is_empty() {
@@ -239,9 +360,16 @@ pub async fn fetch_skills_from_github_repo(owner: &str, repo: &str, branch: &str
     Ok(all_skills)
 }
 
-async fn download_and_extract_zip(client: &reqwest::Client, url: &str, dest: &std::path::Path) -> Result<(), String> {
-    let response = client.get(url)
-        .send().await.map_err(|e| format!("Download failed: {}", e))?;
+async fn download_and_extract_zip(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &std::path::Path,
+) -> Result<(), String> {
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
 
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
@@ -271,12 +399,16 @@ async fn download_and_extract_zip(client: &reqwest::Client, url: &str, dest: &st
             &name
         };
 
-        if relative.is_empty() { continue; }
+        if relative.is_empty() {
+            continue;
+        }
 
         let out_path = dest.join(relative);
 
         // Security: skip paths with ..
-        if relative.contains("..") { continue; }
+        if relative.contains("..") {
+            continue;
+        }
 
         if file.is_dir() {
             let _ = std::fs::create_dir_all(&out_path);
@@ -304,18 +436,29 @@ fn scan_skills_recursive(
     let skill_md = current.join("SKILL.md");
     if skill_md.exists() {
         if let Ok(content) = std::fs::read_to_string(&skill_md) {
-            let dir_name = current.strip_prefix(base)
+            let dir_name = current
+                .strip_prefix(base)
                 .unwrap_or(current)
                 .to_string_lossy()
                 .to_string();
 
-            let (name, desc) = parse_skill_frontmatter(&content, &dir_name.replace('\\', "/").split('/').last().unwrap_or(&dir_name));
+            let (name, desc) = parse_skill_frontmatter(
+                &content,
+                &dir_name
+                    .replace('\\', "/")
+                    .split('/')
+                    .last()
+                    .unwrap_or(&dir_name),
+            );
 
             // Read all .md files in this skill directory as the content
             let mut full_content = content.clone();
             for entry in std::fs::read_dir(current).into_iter().flatten().flatten() {
                 let path = entry.path();
-                if path.is_file() && path.extension().map(|e| e == "md").unwrap_or(false) && path.file_name().map(|n| n != "SKILL.md").unwrap_or(false) {
+                if path.is_file()
+                    && path.extension().map(|e| e == "md").unwrap_or(false)
+                    && path.file_name().map(|n| n != "SKILL.md").unwrap_or(false)
+                {
                     if let Ok(extra) = std::fs::read_to_string(&path) {
                         full_content.push_str("\n\n---\n\n");
                         full_content.push_str(&extra);
@@ -330,7 +473,10 @@ fn scan_skills_recursive(
                 description_zh: None,
                 category: guess_category(&desc),
                 author: Some(format!("{}/{}", owner, repo)),
-                github_url: Some(format!("https://github.com/{}/{}/tree/{}/{}", owner, repo, branch, dir_name)),
+                github_url: Some(format!(
+                    "https://github.com/{}/{}/tree/{}/{}",
+                    owner, repo, branch, dir_name
+                )),
                 cover_url: None,
                 tags: vec![],
                 content: full_content,
@@ -349,7 +495,11 @@ fn scan_skills_recursive(
         if path.is_dir() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             // Skip hidden dirs and common non-skill dirs
-            if name.starts_with('.') || name == "node_modules" || name == "__pycache__" || name == "target" {
+            if name.starts_with('.')
+                || name == "node_modules"
+                || name == "__pycache__"
+                || name == "target"
+            {
                 continue;
             }
             scan_skills_recursive(&path, base, owner, repo, branch, skills);
@@ -379,16 +529,32 @@ fn scan_md_files_recursive(
                 scan_md_files_recursive(&path, base, owner, repo, branch, skills);
             }
         } else if path.is_file() {
-            let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-            if !fname.ends_with(".md") { continue; }
+            let fname = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            if !fname.ends_with(".md") {
+                continue;
+            }
             // Skip common non-skill files
             let lower = fname.to_lowercase();
-            if lower == "readme.md" || lower == "changelog.md" || lower == "contributing.md"
-                || lower == "license.md" || lower == "code_of_conduct.md" { continue; }
+            if lower == "readme.md"
+                || lower == "changelog.md"
+                || lower == "contributing.md"
+                || lower == "license.md"
+                || lower == "code_of_conduct.md"
+            {
+                continue;
+            }
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let stem = fname.trim_end_matches(".md");
-                let rel_path = path.strip_prefix(base).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                let rel_path = path
+                    .strip_prefix(base)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
                 let (name, desc) = parse_skill_frontmatter(&content, stem);
 
                 skills.push(SkillRegistryEntry {
@@ -398,7 +564,10 @@ fn scan_md_files_recursive(
                     description_zh: None,
                     category: guess_category(&desc),
                     author: Some(format!("{}/{}", owner, repo)),
-                    github_url: Some(format!("https://github.com/{}/{}/tree/{}/{}", owner, repo, branch, rel_path)),
+                    github_url: Some(format!(
+                        "https://github.com/{}/{}/tree/{}/{}",
+                        owner, repo, branch, rel_path
+                    )),
                     cover_url: None,
                     tags: vec![],
                     content,
@@ -416,7 +585,7 @@ fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, Strin
     // Try frontmatter (---\nname: xxx\ndescription: xxx\n---)
     if content.starts_with("---") {
         if let Some(end) = content[3..].find("---") {
-            let fm = &content[3..3+end];
+            let fm = &content[3..3 + end];
             for line in fm.lines() {
                 let line = line.trim();
                 if let Some(v) = line.strip_prefix("name:") {
@@ -443,11 +612,19 @@ fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, Strin
     if desc.is_empty() {
         let skip_fm = if content.starts_with("---") {
             content[3..].find("---").map(|i| 3 + i + 3).unwrap_or(0)
-        } else { 0 };
+        } else {
+            0
+        };
         for line in content[skip_fm..].lines() {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" { continue; }
-            desc = if trimmed.len() > 120 { format!("{}...", &trimmed[..117]) } else { trimmed.to_string() };
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" {
+                continue;
+            }
+            desc = if trimmed.len() > 120 {
+                format!("{}...", &trimmed[..117])
+            } else {
+                trimmed.to_string()
+            };
             break;
         }
     }
@@ -457,16 +634,28 @@ fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, Strin
 
 fn guess_category(desc: &str) -> String {
     let d = desc.to_lowercase();
-    if d.contains("test") { "testing".to_string() }
-    else if d.contains("doc") || d.contains("readme") { "documentation".to_string() }
-    else if d.contains("secur") || d.contains("audit") { "security".to_string() }
-    else if d.contains("deploy") || d.contains("ci") || d.contains("docker") { "devops".to_string() }
-    else if d.contains("api") || d.contains("backend") || d.contains("server") { "backend".to_string() }
-    else if d.contains("ai") || d.contains("ml") || d.contains("model") { "ai-ml".to_string() }
-    else { "development".to_string() }
+    if d.contains("test") {
+        "testing".to_string()
+    } else if d.contains("doc") || d.contains("readme") {
+        "documentation".to_string()
+    } else if d.contains("secur") || d.contains("audit") {
+        "security".to_string()
+    } else if d.contains("deploy") || d.contains("ci") || d.contains("docker") {
+        "devops".to_string()
+    } else if d.contains("api") || d.contains("backend") || d.contains("server") {
+        "backend".to_string()
+    } else if d.contains("ai") || d.contains("ml") || d.contains("model") {
+        "ai-ml".to_string()
+    } else {
+        "development".to_string()
+    }
 }
 
-pub async fn search_npm_registry(query: &str, page: u32, page_size: u32) -> Result<(Vec<RegistryEntry>, u32), String> {
+pub async fn search_npm_registry(
+    query: &str,
+    page: u32,
+    page_size: u32,
+) -> Result<(Vec<RegistryEntry>, u32), String> {
     let client = build_http_client()?;
     let from = page * page_size;
 
@@ -475,7 +664,8 @@ pub async fn search_npm_registry(query: &str, page: u32, page_size: u32) -> Resu
         query, page_size, from
     );
 
-    let resp = client.get(&url)
+    let resp = client
+        .get(&url)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch npm: {}", e))?;
@@ -510,10 +700,10 @@ pub async fn search_npm_registry(query: &str, page: u32, page_size: u32) -> Resu
                 package_name: Some(name.to_string()),
                 github_url: pkg["links"]["repository"].as_str().map(|s| {
                     s.trim_start_matches("git+")
-                     .trim_end_matches(".git")
-                     .replace("git://", "https://")
-                     .replace("ssh://git@", "https://")
-                     .to_string()
+                        .trim_end_matches(".git")
+                        .replace("git://", "https://")
+                        .replace("ssh://git@", "https://")
+                        .to_string()
                 }),
                 command: "npx".to_string(),
                 args: vec!["-y".to_string(), name.to_string()],

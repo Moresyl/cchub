@@ -1,6 +1,6 @@
 use crate::db::models::{Plugin, Skill};
-use crate::db::{DbState, record_activity};
-use crate::skills::{scanner, tools, installer};
+use crate::db::{record_activity, DbState};
+use crate::skills::{installer, scanner, tools};
 use tauri::State;
 
 #[tauri::command]
@@ -69,7 +69,10 @@ pub fn get_plugins(db: State<'_, DbState>) -> Result<Vec<Plugin>, String> {
 
 #[tauri::command]
 pub fn install_plugin(source_url: String) -> Result<String, String> {
-    Err(format!("Plugin installation from {} not yet implemented", source_url))
+    Err(format!(
+        "Plugin installation from {} not yet implemented",
+        source_url
+    ))
 }
 
 #[tauri::command]
@@ -80,10 +83,16 @@ pub fn read_skill_content(file_path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn uninstall_plugin(plugin_id: String, db: State<'_, DbState>) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM skills WHERE plugin_id = ?1", rusqlite::params![plugin_id])
-        .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM plugins WHERE id = ?1", rusqlite::params![plugin_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM skills WHERE plugin_id = ?1",
+        rusqlite::params![plugin_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM plugins WHERE id = ?1",
+        rusqlite::params![plugin_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -111,7 +120,11 @@ pub fn get_skill_categories(_db: State<'_, DbState>) -> Result<scanner::Category
 }
 
 #[tauri::command]
-pub fn install_skill_file(source: String, target_skills_dir: String, method: Option<String>) -> Result<String, String> {
+pub fn install_skill_file(
+    source: String,
+    target_skills_dir: String,
+    method: Option<String>,
+) -> Result<String, String> {
     let m = method.as_deref().unwrap_or("copy");
     installer::install_skill_file(&source, &target_skills_dir, m)
 }
@@ -130,7 +143,26 @@ pub fn uninstall_skill_file(path: String, db: State<'_, DbState>) -> Result<(), 
 }
 
 #[tauri::command]
-pub fn copy_skill_between_tools(path: String, target_skills_dir: String, method: Option<String>) -> Result<String, String> {
+pub fn get_skill_backups() -> Result<Vec<installer::SkillBackup>, String> {
+    installer::list_skill_backups()
+}
+
+#[tauri::command]
+pub fn restore_skill_backup(id: String, target_path: Option<String>) -> Result<String, String> {
+    installer::restore_skill_backup(&id, target_path.as_deref())
+}
+
+#[tauri::command]
+pub fn delete_skill_backup(id: String) -> Result<(), String> {
+    installer::delete_skill_backup(&id)
+}
+
+#[tauri::command]
+pub fn copy_skill_between_tools(
+    path: String,
+    target_skills_dir: String,
+    method: Option<String>,
+) -> Result<String, String> {
     let m = method.as_deref().unwrap_or("copy");
     installer::copy_skill_between_tools(&path, &target_skills_dir, m)
 }
@@ -148,7 +180,7 @@ pub fn remove_synced_skill(skill_name: String, target_skills_dir: String) -> Res
                 if path.is_dir() {
                     std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
                 } else {
-                    std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+                    installer::uninstall_skill_file(&path.to_string_lossy())?;
                 }
                 return Ok(());
             }
@@ -162,14 +194,17 @@ pub fn remove_synced_skill(skill_name: String, target_skills_dir: String) -> Res
                     if path.is_dir() {
                         let _ = std::fs::remove_dir_all(&path);
                     } else {
-                        let _ = std::fs::remove_file(&path);
+                        let _ = installer::uninstall_skill_file(&path.to_string_lossy());
                     }
                     return Ok(());
                 }
             }
         }
     }
-    Err(format!("Skill '{}' not found in {}", skill_name, target_skills_dir))
+    Err(format!(
+        "Skill '{}' not found in {}",
+        skill_name, target_skills_dir
+    ))
 }
 
 #[tauri::command]
@@ -179,7 +214,11 @@ pub fn write_skill_content(file_path: String, content: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn toggle_skill_file(file_path: String, enabled: bool, db: State<'_, DbState>) -> Result<String, String> {
+pub fn toggle_skill_file(
+    file_path: String,
+    enabled: bool,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
     let skill_name = std::path::Path::new(&file_path)
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -208,7 +247,17 @@ pub fn toggle_skill_file(file_path: String, enabled: bool, db: State<'_, DbState
         }
     };
     if let Ok(conn) = db.0.lock() {
-        record_activity(&conn, &skill_name, if enabled { "skill_enable" } else { "skill_disable" }, "success", None);
+        record_activity(
+            &conn,
+            &skill_name,
+            if enabled {
+                "skill_enable"
+            } else {
+                "skill_disable"
+            },
+            "success",
+            None,
+        );
     }
     result
 }
@@ -253,10 +302,13 @@ pub fn set_skill_sync_method(method: String, db: State<'_, DbState>) -> Result<(
 
 /// Import a skill .md file from disk via file dialog
 #[tauri::command]
-pub async fn import_skill_file(target_skills_dir: String, method: Option<String>) -> Result<String, String> {
+pub async fn import_skill_file(
+    target_skills_dir: String,
+    method: Option<String>,
+) -> Result<String, String> {
     let file = rfd::AsyncFileDialog::new()
         .set_title("Import Skill")
-        .add_filter("Markdown", &["md"])
+        .add_filter("Skill Package", &["md", "zip", "skill"])
         .pick_file()
         .await
         .ok_or("Cancelled")?;

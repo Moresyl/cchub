@@ -1,9 +1,9 @@
 use crate::db::models::McpServer;
-use crate::db::{DbState, record_activity};
+use crate::db::{record_activity, DbState};
 use crate::mcp::config;
 use crate::mcp::health;
-use tauri::State;
 use std::collections::HashMap;
+use tauri::State;
 
 #[tauri::command]
 pub fn scan_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String> {
@@ -94,8 +94,15 @@ pub fn toggle_mcp_server(id: String, enabled: bool, db: State<'_, DbState>) -> R
     conn.execute(
         "UPDATE mcp_servers SET status = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![status, chrono::Utc::now().to_rfc3339(), id],
-    ).map_err(|e| e.to_string())?;
-    record_activity(&conn, &id, if enabled { "enable" } else { "disable" }, "success", None);
+    )
+    .map_err(|e| e.to_string())?;
+    record_activity(
+        &conn,
+        &id,
+        if enabled { "enable" } else { "disable" },
+        "success",
+        None,
+    );
     Ok(())
 }
 
@@ -117,7 +124,12 @@ pub fn install_mcp_server(
     config::write_claude_mcp_server(&name, &server_config)?;
 
     let config_path = dirs::home_dir()
-        .map(|h| h.join(".claude").join("settings.json").to_string_lossy().to_string())
+        .map(|h| {
+            h.join(".claude")
+                .join("settings.json")
+                .to_string_lossy()
+                .to_string()
+        })
         .unwrap_or_default();
 
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -169,8 +181,11 @@ pub fn uninstall_mcp_server(name: String, db: State<'_, DbState>) -> Result<(), 
         config::remove_claude_mcp_server(&name)?;
     }
 
-    conn.execute("DELETE FROM mcp_servers WHERE id = ?1", rusqlite::params![name])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM mcp_servers WHERE id = ?1",
+        rusqlite::params![name],
+    )
+    .map_err(|e| e.to_string())?;
     record_activity(&conn, &name, "uninstall", "success", None);
     Ok(())
 }
@@ -214,7 +229,8 @@ pub fn update_mcp_server_config(
     conn.execute(
         "UPDATE mcp_servers SET command = ?1, args = ?2, env = ?3, updated_at = ?4 WHERE id = ?5",
         rusqlite::params![command, args_json, env_json, now, name],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     record_activity(&conn, &name, "config_update", "success", None);
 
@@ -222,7 +238,10 @@ pub fn update_mcp_server_config(
 }
 
 #[tauri::command]
-pub fn check_mcp_server_health(name: String, db: State<'_, DbState>) -> Result<health::HealthCheckResult, String> {
+pub fn check_mcp_server_health(
+    name: String,
+    db: State<'_, DbState>,
+) -> Result<health::HealthCheckResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let server: McpServer = conn
         .query_row(
@@ -249,11 +268,19 @@ pub fn check_mcp_server_health(name: String, db: State<'_, DbState>) -> Result<h
         .map_err(|e| format!("Server not found: {}", e))?;
 
     let command = server.command.unwrap_or_default();
-    Ok(health::check_server_health(&server.id, &server.name, &command, &server.args, &server.env))
+    Ok(health::check_server_health(
+        &server.id,
+        &server.name,
+        &command,
+        &server.args,
+        &server.env,
+    ))
 }
 
 #[tauri::command]
-pub fn check_all_mcp_health(db: State<'_, DbState>) -> Result<Vec<health::HealthCheckResult>, String> {
+pub fn check_all_mcp_health(
+    db: State<'_, DbState>,
+) -> Result<Vec<health::HealthCheckResult>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, name, command, args, env FROM mcp_servers WHERE status != 'disabled'")
@@ -278,16 +305,24 @@ pub fn check_all_mcp_health(db: State<'_, DbState>) -> Result<Vec<health::Health
 
     let results: Vec<health::HealthCheckResult> = servers
         .iter()
-        .map(|(id, name, cmd, args, env)| {
-            health::check_server_health(id, name, cmd, args, env)
-        })
+        .map(|(id, name, cmd, args, env)| health::check_server_health(id, name, cmd, args, env))
         .collect();
 
     // Log health check results
     let conn2 = db.0.lock().map_err(|e| e.to_string())?;
     for r in &results {
-        let status = if r.status == "healthy" { "success" } else { "error" };
-        record_activity(&conn2, &r.server_id, "health_check", status, r.latency_ms.map(|v| v as i64));
+        let status = if r.status == "healthy" {
+            "success"
+        } else {
+            "error"
+        };
+        record_activity(
+            &conn2,
+            &r.server_id,
+            "health_check",
+            status,
+            r.latency_ms.map(|v| v as i64),
+        );
     }
 
     Ok(results)
@@ -309,7 +344,8 @@ pub fn sync_mcp_server_to_tool(
         .map_err(|e| format!("Server not found: {}", e))?;
 
     let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
-    let env: std::collections::HashMap<String, String> = serde_json::from_str(&env_json).unwrap_or_default();
+    let env: std::collections::HashMap<String, String> =
+        serde_json::from_str(&env_json).unwrap_or_default();
 
     let mcp_config = config::McpServerConfig {
         command: command.clone(),
@@ -319,26 +355,30 @@ pub fn sync_mcp_server_to_tool(
     };
 
     config::sync_mcp_to_tool(&server_name, &mcp_config, &target_tool)?;
-    record_activity(&conn, &server_name, &format!("sync_to_{}", target_tool), "success", None);
+    record_activity(
+        &conn,
+        &server_name,
+        &format!("sync_to_{}", target_tool),
+        "success",
+        None,
+    );
     Ok(())
 }
 
 #[tauri::command]
-pub fn unsync_mcp_server_from_tool(
-    server_name: String,
-    target_tool: String,
-) -> Result<(), String> {
+pub fn unsync_mcp_server_from_tool(server_name: String, target_tool: String) -> Result<(), String> {
     config::unsync_mcp_from_tool(&server_name, &target_tool)
 }
 
 #[tauri::command]
-pub fn check_mcp_server_in_tools(
-    server_name: String,
-) -> std::collections::HashMap<String, bool> {
+pub fn check_mcp_server_in_tools(server_name: String) -> std::collections::HashMap<String, bool> {
     let tools = ["claude", "codex", "gemini", "opencode", "openclaw"];
     let mut result = std::collections::HashMap::new();
     for tool in tools {
-        result.insert(tool.to_string(), config::check_server_in_tool(&server_name, tool));
+        result.insert(
+            tool.to_string(),
+            config::check_server_in_tool(&server_name, tool),
+        );
     }
     result
 }
@@ -352,9 +392,7 @@ pub fn check_runtime_dependencies() -> Vec<health::RuntimeDepStatus> {
 /// Expects a JSON object where keys are server names and values are
 /// `{ "command": "...", "args": [...], "env": {...} }`.
 #[tauri::command]
-pub async fn import_mcp_servers_from_file(
-    db: State<'_, DbState>,
-) -> Result<u32, String> {
+pub async fn import_mcp_servers_from_file(db: State<'_, DbState>) -> Result<u32, String> {
     let file = rfd::AsyncFileDialog::new()
         .set_title("Import MCP Servers")
         .add_filter("JSON", &["json"])
@@ -362,11 +400,11 @@ pub async fn import_mcp_servers_from_file(
         .await
         .ok_or("Cancelled")?;
 
-    let content = std::fs::read_to_string(file.path())
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let content =
+        std::fs::read_to_string(file.path()).map_err(|e| format!("Failed to read file: {}", e))?;
 
-    let data: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Invalid JSON: {}", e))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
 
     // Support two formats:
     // 1. { "mcpServers": { "name": {...}, ... } }  (Claude's .claude.json format)
@@ -381,17 +419,33 @@ pub async fn import_mcp_servers_from_file(
 
     let mut imported = 0u32;
     for (name, cfg) in &servers_map {
-        let command = cfg.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if command.is_empty() { continue; }
+        let command = cfg
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if command.is_empty() {
+            continue;
+        }
 
-        let args: Vec<String> = cfg.get("args")
+        let args: Vec<String> = cfg
+            .get("args")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let env: HashMap<String, String> = cfg.get("env")
+        let env: HashMap<String, String> = cfg
+            .get("env")
             .and_then(|v| v.as_object())
-            .map(|obj| obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let server_config = config::McpServerConfig {

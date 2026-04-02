@@ -176,19 +176,31 @@ fn parse_mcp_json_file(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
     }
 }
 
-fn parse_server_entry(name: &str, cfg: &serde_json::Value, source: &str, config_path: &str) -> Option<ScannedMcpServer> {
+fn parse_server_entry(
+    name: &str,
+    cfg: &serde_json::Value,
+    source: &str,
+    config_path: &str,
+) -> Option<ScannedMcpServer> {
     let command = cfg.get("command").and_then(|v| v.as_str())?.to_string();
 
-    let args: Vec<String> = cfg.get("args")
+    let args: Vec<String> = cfg
+        .get("args")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
-    let env: HashMap<String, String> = cfg.get("env")
+    let env: HashMap<String, String> = cfg
+        .get("env")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    let transport = cfg.get("type")
+    let transport = cfg
+        .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("stdio")
         .to_string();
@@ -233,7 +245,11 @@ fn scan_claude_desktop_config(path: &PathBuf, servers: &mut Vec<ScannedMcpServer
 }
 
 /// Write MCP server config to a specific config file (writes back to the original source)
-pub fn write_mcp_server_to_config(name: &str, config: &McpServerConfig, config_path: &str) -> Result<(), String> {
+pub fn write_mcp_server_to_config(
+    name: &str,
+    config: &McpServerConfig,
+    config_path: &str,
+) -> Result<(), String> {
     let path = PathBuf::from(config_path);
 
     let mut settings: serde_json::Value = if path.exists() {
@@ -348,7 +364,11 @@ fn scan_codex_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
             let args: Vec<String> = cfg_table
                 .get("args")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             let mut env = HashMap::new();
@@ -389,7 +409,9 @@ pub fn write_mcp_to_codex(name: &str, config: &McpServerConfig) -> Result<(), St
         String::new()
     };
 
-    let mut doc: DocumentMut = content.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
 
     // Ensure [mcp_servers] table exists
     if doc.get("mcp_servers").is_none() {
@@ -456,7 +478,9 @@ pub fn remove_mcp_from_codex(name: &str) -> Result<(), String> {
     };
 
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut doc: DocumentMut = content.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
 
     if let Some(mcp_servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
         mcp_servers.remove(name);
@@ -499,7 +523,9 @@ pub fn unsync_mcp_from_tool(name: &str, tool_id: &str) -> Result<(), String> {
 // ── Check if MCP server exists in tool config ──
 
 fn check_server_in_json_config(name: &str, path: &std::path::Path) -> bool {
-    if !path.exists() { return false; }
+    if !path.exists() {
+        return false;
+    }
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return false,
@@ -508,7 +534,8 @@ fn check_server_in_json_config(name: &str, path: &std::path::Path) -> bool {
         Ok(v) => v,
         Err(_) => return false,
     };
-    settings.get("mcpServers")
+    settings
+        .get("mcpServers")
         .and_then(|s| s.as_object())
         .map(|obj| obj.contains_key(name))
         .unwrap_or(false)

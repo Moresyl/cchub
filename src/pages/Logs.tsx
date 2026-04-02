@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Activity, DollarSign, PencilLine, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { showToast } from "../components/Toast";
@@ -87,6 +87,9 @@ const EMPTY_PRICING_DRAFT: ModelPricingDraft = {
   cache_write_cost_per_million: "",
 };
 
+const AUTO_REFRESH_INTERVALS = [5, 10, 30, 60] as const;
+const MAX_MERGED_PROXY_LOG_ROWS = 240;
+
 export default function Logs() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [proxySummary, setProxySummary] = useState<ProxyUsageSummary | null>(null);
@@ -99,12 +102,27 @@ export default function Logs() {
   const [savingPricing, setSavingPricing] = useState(false);
   const [deletingPricingId, setDeletingPricingId] = useState<string | null>(null);
   const [selectedDate] = useState<string>(todayStr());
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<(typeof AUTO_REFRESH_INTERVALS)[number]>(10);
+  const [refreshing, setRefreshing] = useState(false);
+  const proxyListRef = useRef<HTMLDivElement | null>(null);
   const locale = getLocale();
   const uiText = (zhText: string, enText: string, jaText?: string) =>
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 
-  async function load() {
-    setLoading(true);
+  async function load(options: { silent?: boolean; mergeProxyRows?: boolean; preserveProxyScroll?: boolean } = {}) {
+    const {
+      silent = false,
+      mergeProxyRows = false,
+      preserveProxyScroll = false,
+    } = options;
+    const previousScrollTop = preserveProxyScroll ? proxyListRef.current?.scrollTop || 0 : 0;
+    const previousScrollHeight = preserveProxyScroll ? proxyListRef.current?.scrollHeight || 0 : 0;
+    if (!silent) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
     try {
       const [acts, summary, filteredProxyLogs, pricing] = await Promise.all([
         invoke<ActivityItem[]>("get_activity_logs", { date: selectedDate }),
@@ -121,20 +139,42 @@ export default function Logs() {
         }),
         invoke<ModelPricingRow[]>("list_model_pricing"),
       ]);
-      setActivities(acts);
-      setProxySummary(summary);
-      setProxyLogs(filteredProxyLogs);
-      setModelPricingRows(pricing);
+      startTransition(() => {
+        setActivities(acts);
+        setProxySummary(summary);
+        setModelPricingRows(pricing);
+        setProxyLogs((current) => (mergeProxyRows ? mergeProxyLogs(current, filteredProxyLogs) : filteredProxyLogs));
+      });
+      if (preserveProxyScroll && previousScrollTop > 0) {
+        requestAnimationFrame(() => {
+          const element = proxyListRef.current;
+          if (!element) return;
+          const delta = element.scrollHeight - previousScrollHeight;
+          element.scrollTop = previousScrollTop + delta;
+        });
+      }
     } catch (error) {
       console.error(error);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      } else {
+        setRefreshing(false);
+      }
     }
   }
 
   useEffect(() => {
     void load();
   }, [selectedDate, proxyFilters]);
+
+  useEffect(() => {
+    if (!autoRefreshEnabled) return undefined;
+    const timer = window.setInterval(() => {
+      void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true });
+    }, autoRefreshInterval * 1000);
+    return () => window.clearInterval(timer);
+  }, [autoRefreshEnabled, autoRefreshInterval, selectedDate, proxyFilters]);
 
   const hasActiveProxyFilters =
     proxyFilters.toolId !== "" ||
@@ -224,8 +264,8 @@ export default function Logs() {
             )}
           </p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={() => void load()}>
-          <RefreshCw size={14} />
+        <button className="btn btn-secondary btn-sm" onClick={() => void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true })}>
+          {refreshing ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
           {uiText("刷新", "Refresh", "更新")}
         </button>
       </div>
@@ -348,7 +388,7 @@ export default function Logs() {
       </div>
 
       <div className="section-card" style={{ display: "flex", flexDirection: "column", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Activity size={14} style={{ color: "var(--text-secondary)" }} />
             <span
@@ -375,6 +415,36 @@ export default function Logs() {
               )}
             </span>
           )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+              <input
+                type="checkbox"
+                checked={autoRefreshEnabled}
+                onChange={(event) => setAutoRefreshEnabled(event.target.checked)}
+              />
+              {uiText("自动刷新", "Auto Refresh", "自動更新")}
+            </label>
+            <select
+              className="input"
+              value={String(autoRefreshInterval)}
+              onChange={(event) => setAutoRefreshInterval(Number(event.target.value) as (typeof AUTO_REFRESH_INTERVALS)[number])}
+              disabled={!autoRefreshEnabled}
+              style={{ width: 96, fontSize: 12 }}
+            >
+              {AUTO_REFRESH_INTERVALS.map((seconds) => (
+                <option key={seconds} value={seconds}>
+                  {seconds}s
+                </option>
+              ))}
+            </select>
+            {autoRefreshEnabled && (
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                {refreshing
+                  ? uiText("正在拉取增量日志…", "Fetching incremental logs...", "増分ログを取得中...")
+                  : uiText("仅增量追加新请求，不重置滚动位置", "Appends new requests without resetting scroll", "スクロール位置を保ったまま新規リクエストだけを追加")}
+              </span>
+            )}
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
@@ -449,7 +519,7 @@ export default function Logs() {
               <UsageMetric label={uiText("缓存创建", "Cache Create", "キャッシュ作成")} value={formatCount(proxySummary.total_cache_creation_tokens)} />
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 360, overflowY: "auto" }}>
+            <div ref={proxyListRef} style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 360, overflowY: "auto" }}>
               {proxyLogs.map((item) => {
                 const toolLabel = TOOL_LABELS[item.tool_id] || item.tool_id;
                 const model = item.response_model || item.request_model || "--";
@@ -584,6 +654,11 @@ export default function Logs() {
       </div>
     </div>
   );
+}
+
+function mergeProxyLogs(previous: ProxyRequestLogRow[], incoming: ProxyRequestLogRow[]) {
+  const seen = new Set(incoming.map((item) => item.request_id));
+  return [...incoming, ...previous.filter((item) => !seen.has(item.request_id))].slice(0, MAX_MERGED_PROXY_LOG_ROWS);
 }
 
 function todayStr() {

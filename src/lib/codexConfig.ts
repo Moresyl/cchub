@@ -8,6 +8,7 @@ export interface CodexStructuredConfig {
   personality: string;
   disableResponseStorage: boolean;
   modelContextWindow: string;
+  modelAutoCompactTokenLimit: string;
   mcpServers: string[];
   malformedMcpServers: boolean;
 }
@@ -192,6 +193,7 @@ export function parseCodexStructuredConfig(content: string): CodexStructuredConf
     personality: readTopLevelString(lines, "personality", "pragmatic"),
     disableResponseStorage: readTopLevelBoolean(lines, "disable_response_storage", false),
     modelContextWindow: readTopLevelInteger(lines, "model_context_window"),
+    modelAutoCompactTokenLimit: readTopLevelInteger(lines, "model_auto_compact_token_limit"),
     mcpServers,
     malformedMcpServers: Boolean(findTopLevelAssignment(lines, "mcp_servers")),
   };
@@ -240,6 +242,13 @@ export function updateCodexStructuredContent(
     removeTopLevelAssignment(lines, "model_context_window");
   }
 
+  const normalizedCompactLimit = normalizeIntegerLike(next.modelAutoCompactTokenLimit);
+  if (normalizedCompactLimit) {
+    upsertTopLevelAssignment(lines, "model_auto_compact_token_limit", normalizedCompactLimit);
+  } else {
+    removeTopLevelAssignment(lines, "model_auto_compact_token_limit");
+  }
+
   upsertSectionAssignment(lines, providerSection, "name", renderString(next.providerLabel.trim() || providerKey));
   upsertSectionAssignment(lines, providerSection, "base_url", renderString(next.baseUrl.trim()));
   upsertSectionAssignment(lines, providerSection, "wire_api", renderString(next.wireApi.trim() || "responses"));
@@ -265,6 +274,10 @@ export function validateCodexStructuredConfig(config: CodexStructuredConfig): Co
   const contextWindow = normalizeIntegerLike(config.modelContextWindow);
   if (config.modelContextWindow.trim() && !contextWindow) {
     errors.push("Context window must be an integer.");
+  }
+  const compactLimit = normalizeIntegerLike(config.modelAutoCompactTokenLimit);
+  if (config.modelAutoCompactTokenLimit.trim() && !compactLimit) {
+    errors.push("Auto compact token limit must be an integer.");
   }
   if (config.malformedMcpServers) {
     warnings.push("Detected a malformed top-level mcp_servers assignment. Repairing will normalize it to a TOML table.");

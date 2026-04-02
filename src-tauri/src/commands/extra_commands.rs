@@ -1,9 +1,11 @@
+use crate::copilot_auth::{self, CopilotAuthState};
 use crate::db::DbState;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpClient {
@@ -119,6 +121,133 @@ pub struct RepairAllResult {
     pub rescan: FullRescanResult,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManagedBackupFile {
+    pub path: String,
+    pub name: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+    pub kind: String,
+    pub can_restore: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupPreferences {
+    pub auto_backup_enabled: bool,
+    pub retention_count: usize,
+}
+
+impl Default for BackupPreferences {
+    fn default() -> Self {
+        Self {
+            auto_backup_enabled: false,
+            retention_count: 20,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogPreferences {
+    pub level: String,
+}
+
+impl Default for LogPreferences {
+    fn default() -> Self {
+        Self {
+            level: "error".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogFileTargets {
+    pub runtime_log_path: String,
+    pub crash_log_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdaterEnvironmentState {
+    pub disabled_by_env: bool,
+    pub env_var_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderProbeResult {
+    pub profile_id: String,
+    pub tool_id: String,
+    pub provider_name: String,
+    pub base_url: Option<String>,
+    pub status: String,
+    pub latency_ms: Option<u64>,
+    pub http_status: Option<u16>,
+    pub checked_at: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderStreamCheckResult {
+    pub profile_id: String,
+    pub tool_id: String,
+    pub provider_name: String,
+    pub base_url: Option<String>,
+    pub status: String,
+    pub latency_ms: Option<u64>,
+    pub http_status: Option<u16>,
+    pub checked_at: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenClawDailyMemoryEntry {
+    pub path: String,
+    pub file_name: String,
+    pub source: String,
+    pub project_name: Option<String>,
+    pub modified_at: Option<String>,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub id: String,
+    pub tool_id: String,
+    pub tool_name: String,
+    pub title: String,
+    pub cwd: Option<String>,
+    pub source_kind: String,
+    pub source_backend: String,
+    pub source_path: String,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub preview: String,
+    pub message_count: usize,
+    pub search_hit_count: usize,
+    pub can_resume: bool,
+    pub can_delete: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEntry {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub content: String,
+    pub timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDetail {
+    pub session: SessionSummary,
+    pub entries: Vec<SessionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionResumeResult {
+    pub launched: bool,
+    pub command: String,
+    pub cwd: Option<String>,
+}
+
 // ── MCP Clients ──
 
 #[tauri::command]
@@ -184,22 +313,29 @@ pub fn update_mcp_client_access(
     conn.execute(
         "UPDATE mcp_clients SET server_access = ?1 WHERE id = ?2",
         rusqlite::params![access_json, id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn delete_mcp_client(id: String, db: State<'_, DbState>) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM mcp_clients WHERE id = ?1", rusqlite::params![id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM mcp_clients WHERE id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 // ── Activity Logs ──
 
 #[tauri::command]
-pub fn get_activity_logs(date: String, db: State<'_, DbState>) -> Result<Vec<ActivityItem>, String> {
+pub fn get_activity_logs(
+    date: String,
+    db: State<'_, DbState>,
+) -> Result<Vec<ActivityItem>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
@@ -323,7 +459,8 @@ pub fn switch_workspace(id: String, db: State<'_, DbState>) -> Result<(), String
     conn.execute(
         "UPDATE workspaces SET is_active = 1 WHERE id = ?1",
         rusqlite::params![id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -352,7 +489,8 @@ pub fn update_workspace(
     conn.execute(
         "UPDATE workspaces SET name = ?1, description = ?2, base_path = ?3 WHERE id = ?4",
         rusqlite::params![name, description, base_path, id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     if let Some(next_base_path) = normalized_next_base_path.as_deref() {
         sync_known_project_root(&conn, previous_base_path.as_deref(), Some(next_base_path))?;
@@ -362,11 +500,7 @@ pub fn update_workspace(
             .and_then(normalize_project_root_path)
         {
             if !project_root_paths_match(previous_base_path, next_base_path) {
-                let _ = apply_project_root_remap(
-                    &conn,
-                    previous_base_path,
-                    next_base_path,
-                )?;
+                let _ = apply_project_root_remap(&conn, previous_base_path, next_base_path)?;
             }
         }
     }
@@ -390,8 +524,11 @@ pub fn delete_workspace(id: String, db: State<'_, DbState>) -> Result<(), String
         return Err("Cannot delete active workspace".to_string());
     }
 
-    conn.execute("DELETE FROM workspaces WHERE id = ?1", rusqlite::params![id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM workspaces WHERE id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -447,8 +584,11 @@ pub fn save_custom_path(
 #[tauri::command]
 pub fn delete_custom_path(tool_id: String, db: State<'_, DbState>) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM custom_paths WHERE tool_id = ?1", rusqlite::params![tool_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM custom_paths WHERE tool_id = ?1",
+        rusqlite::params![tool_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -460,10 +600,29 @@ pub struct ConfigProfile {
     pub name: String,
     pub tool_id: String,
     pub config_snapshot: String,
+    pub sort_order: i64,
     pub source_type: Option<String>,
     pub source_key: Option<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedConfigProfileInput {
+    pub tool_id: String,
+    pub config_snapshot: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderConfigFragment {
+    pub id: String,
+    pub name: String,
+    pub target_tools: Vec<String>,
+    pub fields: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
@@ -616,7 +775,14 @@ fn cli_exists_in_path(command: &str) -> bool {
                     .collect::<Vec<_>>()
             })
             .filter(|items| !items.is_empty())
-            .unwrap_or_else(|| vec![".EXE".to_string(), ".CMD".to_string(), ".BAT".to_string(), ".COM".to_string()])
+            .unwrap_or_else(|| {
+                vec![
+                    ".EXE".to_string(),
+                    ".CMD".to_string(),
+                    ".BAT".to_string(),
+                    ".COM".to_string(),
+                ]
+            })
     } else {
         Vec::new()
     };
@@ -647,6 +813,362 @@ fn cli_exists_in_path(command: &str) -> bool {
     }
 
     false
+}
+
+fn tool_label(tool_id: &str) -> &'static str {
+    match tool_id {
+        "claude" => "Claude",
+        "codex" => "Codex",
+        "gemini" => "Gemini",
+        "opencode" => "OpenCode",
+        "openclaw" => "OpenClaw",
+        _ => "Session",
+    }
+}
+
+fn tool_hidden_dir(tool_id: &str) -> Option<&'static str> {
+    match tool_id {
+        "claude" => Some(".claude"),
+        "codex" => Some(".codex"),
+        "gemini" => Some(".gemini"),
+        "opencode" => Some(".opencode"),
+        "openclaw" => Some(".openclaw"),
+        _ => None,
+    }
+}
+
+fn format_unix_timestamp(value: i64) -> Option<String> {
+    if value <= 0 {
+        return None;
+    }
+
+    let (seconds, nanos) = if value > 10_000_000_000 {
+        let seconds = value / 1000;
+        let remainder = (value % 1000).unsigned_abs() as u32;
+        (seconds, remainder.saturating_mul(1_000_000))
+    } else {
+        (value, 0)
+    };
+
+    chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, nanos).map(|datetime| {
+        datetime
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string()
+    })
+}
+
+fn format_timestamp_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = trimmed.parse::<i64>() {
+        return format_unix_timestamp(parsed);
+    }
+
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return Some(
+            parsed
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string(),
+        );
+    }
+
+    Some(trimmed.chars().take(19).collect())
+}
+
+fn truncate_session_text(text: &str, max_chars: usize) -> String {
+    let condensed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if condensed.chars().count() <= max_chars {
+        condensed
+    } else {
+        let mut result = condensed.chars().take(max_chars).collect::<String>();
+        result.push_str("...");
+        result
+    }
+}
+
+fn count_query_hits(query: &str, values: &[String]) -> usize {
+    if query.is_empty() {
+        return 0;
+    }
+
+    values
+        .iter()
+        .filter(|value| value.to_lowercase().contains(query))
+        .count()
+}
+
+fn normalize_session_query(query: Option<String>) -> String {
+    query.unwrap_or_default().trim().to_lowercase()
+}
+
+fn session_roots_for_tool(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Ok(global_root) = resolve_tool_config_dir(conn, tool_id) {
+        if global_root.exists() {
+            let key = global_root.to_string_lossy().to_string();
+            if seen.insert(key) {
+                roots.push(global_root);
+            }
+        }
+    }
+
+    if let Some(hidden_dir) = tool_hidden_dir(tool_id) {
+        for project_root in discover_project_roots(conn) {
+            let session_root = project_root.join(hidden_dir);
+            if !session_root.exists() {
+                continue;
+            }
+            let key = session_root.to_string_lossy().to_string();
+            if seen.insert(key) {
+                roots.push(session_root);
+            }
+        }
+    }
+
+    Ok(roots)
+}
+
+fn is_session_candidate_path(
+    tool_id: &str,
+    path: &std::path::Path,
+    base_dir: &std::path::Path,
+) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    let relative = match path.strip_prefix(base_dir) {
+        Ok(relative) => relative.to_string_lossy().to_ascii_lowercase(),
+        Err(_) => path.to_string_lossy().to_ascii_lowercase(),
+    };
+
+    let has_keyword = [
+        "session",
+        "sessions",
+        "history",
+        "conversation",
+        "conversations",
+        "thread",
+        "threads",
+        "chat",
+        "rollout",
+        "transcript",
+        "project",
+    ]
+    .iter()
+    .any(|keyword| relative.contains(keyword));
+
+    match extension.as_deref() {
+        Some("jsonl") => has_keyword,
+        Some("sqlite" | "db") => has_keyword || tool_id == "opencode",
+        _ => false,
+    }
+}
+
+fn collect_session_candidate_files(
+    tool_id: &str,
+    current_dir: &std::path::Path,
+    base_dir: &std::path::Path,
+    jsonl_files: &mut Vec<PathBuf>,
+    sqlite_files: &mut Vec<PathBuf>,
+    depth: usize,
+) {
+    if depth > 5 {
+        return;
+    }
+
+    let read_dir = match std::fs::read_dir(current_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let dir_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if matches!(
+                dir_name.as_str(),
+                ".git" | "node_modules" | "dist" | "target"
+            ) {
+                continue;
+            }
+            collect_session_candidate_files(
+                tool_id,
+                &path,
+                base_dir,
+                jsonl_files,
+                sqlite_files,
+                depth + 1,
+            );
+            continue;
+        }
+
+        if !is_session_candidate_path(tool_id, &path, base_dir) {
+            continue;
+        }
+
+        match path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("jsonl") => jsonl_files.push(path),
+            Some("sqlite" | "db") => sqlite_files.push(path),
+            _ => {}
+        }
+    }
+}
+
+fn preferred_texts_from_value(value: &serde_json::Value, texts: &mut Vec<String>, depth: usize) {
+    if depth > 4 || texts.len() >= 8 {
+        return;
+    }
+
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                texts.push(trimmed.to_string());
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter().take(8) {
+                preferred_texts_from_value(item, texts, depth + 1);
+                if texts.len() >= 8 {
+                    break;
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for key in [
+                "text", "message", "content", "preview", "prompt", "output", "title",
+            ] {
+                if let Some(child) = map.get(key) {
+                    preferred_texts_from_value(child, texts, depth + 1);
+                    if texts.len() >= 8 {
+                        return;
+                    }
+                }
+            }
+            for key in ["payload", "items", "messages", "data"] {
+                if let Some(child) = map.get(key) {
+                    preferred_texts_from_value(child, texts, depth + 1);
+                    if texts.len() >= 8 {
+                        return;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn codex_resume_command(session_id: &str) -> String {
+    format!("codex resume {session_id}")
+}
+
+fn claude_resume_command(session_id: &str) -> String {
+    format!("claude --resume {session_id}")
+}
+
+fn gemini_resume_command(session_id: &str) -> String {
+    format!("gemini --resume {session_id}")
+}
+
+fn opencode_resume_command(session_id: &str) -> String {
+    format!("opencode session resume {session_id}")
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn resolve_openclaw_session_key(
+    source_path: Option<&str>,
+    session_id: &str,
+) -> Result<String, String> {
+    let source_path = source_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Missing OpenClaw session source path".to_string())?;
+    let source = PathBuf::from(source_path);
+    let index_path = source
+        .parent()
+        .ok_or_else(|| format!("Invalid OpenClaw session path: {source_path}"))?
+        .join("sessions.json");
+    let content = std::fs::read_to_string(&index_path).map_err(|e| {
+        format!(
+            "Failed to read OpenClaw sessions index {}: {e}",
+            index_path.display()
+        )
+    })?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        format!(
+            "Failed to parse OpenClaw sessions index {}: {e}",
+            index_path.display()
+        )
+    })?;
+    let obj = parsed.as_object().ok_or_else(|| {
+        format!(
+            "OpenClaw sessions index is not a JSON object: {}",
+            index_path.display()
+        )
+    })?;
+
+    for (session_key, entry) in obj {
+        let same_id = entry.get("sessionId").and_then(|value| value.as_str()) == Some(session_id);
+        let same_file = entry
+            .get("sessionFile")
+            .and_then(|value| value.as_str())
+            .map(|value| PathBuf::from(value) == source)
+            .unwrap_or(false);
+        if same_id || same_file {
+            return Ok(session_key.clone());
+        }
+    }
+
+    Err(format!(
+        "OpenClaw session key not found for session {session_id} in {}",
+        index_path.display()
+    ))
+}
+
+fn openclaw_resume_command(source_path: Option<&str>, session_id: &str) -> Result<String, String> {
+    let session_key = resolve_openclaw_session_key(source_path, session_id)?;
+    Ok(format!(
+        "openclaw tui --session {}",
+        shell_single_quote(&session_key)
+    ))
+}
+
+fn tool_supports_session_resume(tool_id: &str) -> bool {
+    match tool_id {
+        "codex" => cli_exists_in_path("codex"),
+        "claude" => cli_exists_in_path("claude"),
+        "gemini" => cli_exists_in_path("gemini"),
+        "opencode" => cli_exists_in_path("opencode"),
+        "openclaw" => cli_exists_in_path("openclaw"),
+        _ => false,
+    }
 }
 
 fn write_default_file_if_missing(
@@ -702,11 +1224,19 @@ fn bootstrap_tool_environment_from_conn(
         }
         "codex" => {
             write_default_file_if_missing(&config_dir.join("config.toml"), "", &mut created_files)?;
-            write_default_file_if_missing(&config_dir.join("auth.json"), "{}\n", &mut created_files)?;
+            write_default_file_if_missing(
+                &config_dir.join("auth.json"),
+                "{}\n",
+                &mut created_files,
+            )?;
             notes.push("Codex CLI 仍需登录后 auth.json 才会真正可用".to_string());
         }
         "gemini" => {
-            write_default_file_if_missing(&config_dir.join("settings.json"), "{}\n", &mut created_files)?;
+            write_default_file_if_missing(
+                &config_dir.join("settings.json"),
+                "{}\n",
+                &mut created_files,
+            )?;
             write_default_file_if_missing(
                 &config_dir.join(".env"),
                 "# Add GEMINI_API_KEY=...\n",
@@ -715,10 +1245,18 @@ fn bootstrap_tool_environment_from_conn(
             notes.push("Gemini CLI 仍需在 .env 中填写 GEMINI_API_KEY".to_string());
         }
         "opencode" => {
-            write_default_file_if_missing(&config_dir.join("opencode.json"), "{}\n", &mut created_files)?;
+            write_default_file_if_missing(
+                &config_dir.join("opencode.json"),
+                "{}\n",
+                &mut created_files,
+            )?;
         }
         "openclaw" => {
-            write_default_file_if_missing(&config_dir.join("openclaw.json"), "{}\n", &mut created_files)?;
+            write_default_file_if_missing(
+                &config_dir.join("openclaw.json"),
+                "{}\n",
+                &mut created_files,
+            )?;
         }
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     }
@@ -762,9 +1300,7 @@ fn gemini_env_has_api_key(path: &std::path::Path) -> bool {
             return false;
         };
 
-        key.trim() == "GEMINI_API_KEY"
-            && !value.trim().is_empty()
-            && value.trim() != "..."
+        key.trim() == "GEMINI_API_KEY" && !value.trim().is_empty() && value.trim() != "..."
     })
 }
 
@@ -875,7 +1411,7 @@ fn open_target_in_system(target: &str) -> Result<(), String> {
     Err("Unsupported platform".to_string())
 }
 
-fn set_json_app_setting<T: Serialize>(
+pub(crate) fn set_json_app_setting<T: Serialize>(
     conn: &rusqlite::Connection,
     key: &str,
     value: &T,
@@ -889,7 +1425,7 @@ fn set_json_app_setting<T: Serialize>(
     Ok(())
 }
 
-fn get_json_app_setting<T: for<'de> Deserialize<'de>>(
+pub(crate) fn get_json_app_setting<T: for<'de> Deserialize<'de>>(
     conn: &rusqlite::Connection,
     key: &str,
 ) -> Result<Option<T>, String> {
@@ -907,6 +1443,871 @@ fn get_json_app_setting<T: for<'de> Deserialize<'de>>(
             .map_err(|e| e.to_string()),
         None => Ok(None),
     }
+}
+
+fn set_text_app_setting(conn: &rusqlite::Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+        rusqlite::params![key, value],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn get_text_app_setting(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>, String> {
+    Ok(conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![key],
+            |row| row.get(0),
+        )
+        .ok())
+}
+
+const MANAGED_APP_IDS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "openclaw"];
+const VISIBLE_APPS_SETTING_KEY: &str = "visible_apps";
+const WINDOW_PREFERENCES_SETTING_KEY: &str = "window_preferences";
+const PREFERRED_TERMINAL_SETTING_KEY: &str = "preferred_terminal";
+const BACKUP_PREFERENCES_SETTING_KEY: &str = "backup_preferences";
+const LOG_PREFERENCES_SETTING_KEY: &str = "log_preferences";
+const PROVIDER_CONFIG_FRAGMENTS_SETTING_KEY: &str = "provider_config_fragments";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowPreferences {
+    pub launch_at_login: bool,
+    pub launch_hidden: bool,
+    pub close_to_tray: bool,
+}
+
+impl Default for WindowPreferences {
+    fn default() -> Self {
+        Self {
+            launch_at_login: false,
+            launch_hidden: false,
+            close_to_tray: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalOption {
+    pub id: String,
+    pub label: String,
+    pub command: String,
+    pub installed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalPreferences {
+    pub platform: String,
+    pub selected_terminal: String,
+    pub options: Vec<TerminalOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentConflict {
+    pub id: String,
+    pub kind: String,
+    pub variables: Vec<String>,
+    pub affected_apps: Vec<String>,
+}
+
+fn default_visible_apps() -> Vec<String> {
+    MANAGED_APP_IDS.iter().map(|id| (*id).to_string()).collect()
+}
+
+fn normalize_visible_apps(visible_apps: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for app_id in visible_apps {
+        let trimmed = app_id.trim();
+        if MANAGED_APP_IDS.contains(&trimmed) && seen.insert(trimmed.to_string()) {
+            normalized.push(trimmed.to_string());
+        }
+    }
+
+    if normalized.is_empty() {
+        normalized.push("claude".to_string());
+    }
+
+    normalized
+}
+
+fn read_backup_preferences_from_conn(conn: &rusqlite::Connection) -> BackupPreferences {
+    let mut preferences: BackupPreferences =
+        get_json_app_setting(conn, BACKUP_PREFERENCES_SETTING_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+    if preferences.retention_count == 0 {
+        preferences.retention_count = BackupPreferences::default().retention_count;
+    }
+    preferences
+}
+
+fn normalize_log_level(level: &str) -> String {
+    match level.trim().to_ascii_lowercase().as_str() {
+        "error" | "warn" | "info" | "debug" | "trace" => level.trim().to_ascii_lowercase(),
+        _ => "error".to_string(),
+    }
+}
+
+pub fn read_log_preferences_from_conn(conn: &rusqlite::Connection) -> LogPreferences {
+    let mut preferences: LogPreferences = get_json_app_setting(conn, LOG_PREFERENCES_SETTING_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    preferences.level = normalize_log_level(&preferences.level);
+    preferences
+}
+
+pub fn apply_log_preferences(preferences: &LogPreferences) {
+    let level = normalize_log_level(&preferences.level);
+    std::env::set_var("CCHUB_LOG_LEVEL", &level);
+    std::env::set_var("RUST_LOG", &level);
+    std::env::set_var(
+        "RUST_BACKTRACE",
+        if matches!(level.as_str(), "debug" | "trace") {
+            "full"
+        } else {
+            "1"
+        },
+    );
+}
+
+fn build_log_file_targets() -> LogFileTargets {
+    LogFileTargets {
+        runtime_log_path: crate::utils::runtime_log_path()
+            .to_string_lossy()
+            .to_string(),
+        crash_log_path: crate::utils::crash_log_path().to_string_lossy().to_string(),
+    }
+}
+
+fn read_disable_auto_updater_env() -> Option<String> {
+    std::env::var("DISABLE_AUTOUPDATER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn updater_environment_state() -> UpdaterEnvironmentState {
+    let env_var_value = read_disable_auto_updater_env();
+    let normalized = env_var_value
+        .as_deref()
+        .map(|value| value.to_ascii_lowercase());
+
+    UpdaterEnvironmentState {
+        disabled_by_env: matches!(normalized.as_deref(), Some("1" | "true" | "yes" | "on")),
+        env_var_value,
+    }
+}
+
+fn log_level_for_provider_status(status: &str) -> &'static str {
+    match status {
+        "error" => "warn",
+        "healthy" | "reachable" => "info",
+        _ => "debug",
+    }
+}
+
+fn log_provider_result(
+    kind: &str,
+    tool_id: &str,
+    provider_name: &str,
+    base_url: Option<&str>,
+    status: &str,
+    message: &str,
+) {
+    let target = base_url.unwrap_or("n/a");
+    crate::utils::append_runtime_log(
+        log_level_for_provider_status(status),
+        "providers",
+        &format!("{kind} [{tool_id}] {provider_name} -> {target} [{status}] {message}"),
+    );
+}
+
+pub fn read_window_preferences_from_conn(conn: &rusqlite::Connection) -> WindowPreferences {
+    get_json_app_setting(conn, WINDOW_PREFERENCES_SETTING_KEY)
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+fn current_platform_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_exists(name: &str) -> bool {
+    let mut candidates = vec![PathBuf::from("/Applications")];
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join("Applications"));
+    }
+
+    candidates
+        .into_iter()
+        .any(|base| base.join(format!("{name}.app")).exists())
+}
+
+fn terminal_options_for_current_platform() -> Vec<TerminalOption> {
+    #[cfg(target_os = "windows")]
+    {
+        return vec![
+            TerminalOption {
+                id: "windows-terminal".to_string(),
+                label: "Windows Terminal".to_string(),
+                command: "wt".to_string(),
+                installed: cli_exists_in_path("wt"),
+            },
+            TerminalOption {
+                id: "powershell".to_string(),
+                label: "PowerShell".to_string(),
+                command: "powershell".to_string(),
+                installed: cli_exists_in_path("powershell"),
+            },
+            TerminalOption {
+                id: "cmd".to_string(),
+                label: "Command Prompt".to_string(),
+                command: "cmd".to_string(),
+                installed: cli_exists_in_path("cmd"),
+            },
+        ];
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return vec![
+            TerminalOption {
+                id: "terminal".to_string(),
+                label: "Terminal".to_string(),
+                command: "open -a Terminal".to_string(),
+                installed: macos_app_exists("Terminal"),
+            },
+            TerminalOption {
+                id: "iterm2".to_string(),
+                label: "iTerm".to_string(),
+                command: "open -a iTerm".to_string(),
+                installed: macos_app_exists("iTerm"),
+            },
+            TerminalOption {
+                id: "warp".to_string(),
+                label: "Warp".to_string(),
+                command: "open -a Warp".to_string(),
+                installed: macos_app_exists("Warp"),
+            },
+            TerminalOption {
+                id: "ghostty".to_string(),
+                label: "Ghostty".to_string(),
+                command: "open -a Ghostty".to_string(),
+                installed: macos_app_exists("Ghostty"),
+            },
+            TerminalOption {
+                id: "kitty".to_string(),
+                label: "Kitty".to_string(),
+                command: "kitty".to_string(),
+                installed: cli_exists_in_path("kitty"),
+            },
+            TerminalOption {
+                id: "alacritty".to_string(),
+                label: "Alacritty".to_string(),
+                command: "alacritty".to_string(),
+                installed: cli_exists_in_path("alacritty"),
+            },
+        ];
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        vec![
+            TerminalOption {
+                id: "gnome-terminal".to_string(),
+                label: "GNOME Terminal".to_string(),
+                command: "gnome-terminal".to_string(),
+                installed: cli_exists_in_path("gnome-terminal"),
+            },
+            TerminalOption {
+                id: "konsole".to_string(),
+                label: "Konsole".to_string(),
+                command: "konsole".to_string(),
+                installed: cli_exists_in_path("konsole"),
+            },
+            TerminalOption {
+                id: "xterm".to_string(),
+                label: "xterm".to_string(),
+                command: "xterm".to_string(),
+                installed: cli_exists_in_path("xterm"),
+            },
+            TerminalOption {
+                id: "kitty".to_string(),
+                label: "Kitty".to_string(),
+                command: "kitty".to_string(),
+                installed: cli_exists_in_path("kitty"),
+            },
+            TerminalOption {
+                id: "alacritty".to_string(),
+                label: "Alacritty".to_string(),
+                command: "alacritty".to_string(),
+                installed: cli_exists_in_path("alacritty"),
+            },
+            TerminalOption {
+                id: "wezterm".to_string(),
+                label: "WezTerm".to_string(),
+                command: "wezterm".to_string(),
+                installed: cli_exists_in_path("wezterm"),
+            },
+        ]
+    }
+}
+
+fn read_terminal_preferences_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<TerminalPreferences, String> {
+    let options = terminal_options_for_current_platform();
+    let stored = get_text_app_setting(conn, PREFERRED_TERMINAL_SETTING_KEY)?;
+
+    let selected_terminal = stored
+        .filter(|terminal_id| options.iter().any(|option| option.id == *terminal_id))
+        .or_else(|| {
+            options
+                .iter()
+                .find(|option| option.installed)
+                .map(|option| option.id.clone())
+        })
+        .or_else(|| options.first().map(|option| option.id.clone()))
+        .unwrap_or_default();
+
+    Ok(TerminalPreferences {
+        platform: current_platform_name().to_string(),
+        selected_terminal,
+        options,
+    })
+}
+
+fn shell_quote_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r#"'"'"'"#))
+}
+
+fn normalize_terminal_target(path: Option<String>) -> Result<PathBuf, String> {
+    let base = match path.filter(|value| !value.trim().is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => dirs::home_dir().ok_or("Cannot find home directory")?,
+    };
+
+    if base.is_dir() {
+        return Ok(base);
+    }
+
+    if base.is_file() {
+        return base
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .ok_or_else(|| "Cannot determine file parent directory".to_string());
+    }
+
+    Err(format!("Path does not exist: {}", base.display()))
+}
+
+fn launch_preferred_terminal_impl(
+    preferences: &TerminalPreferences,
+    target_dir: &std::path::Path,
+    shell_command: Option<&str>,
+) -> Result<bool, String> {
+    let target_text = target_dir.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(command) = shell_command {
+            match preferences.selected_terminal.as_str() {
+                "windows-terminal" => {
+                    std::process::Command::new("wt")
+                        .args(["-d", &target_text, "cmd", "/K", command])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                "powershell" => {
+                    let command = format!(
+                        "Set-Location -LiteralPath {}; {}",
+                        shell_quote_single(&target_text),
+                        command,
+                    );
+                    std::process::Command::new("powershell")
+                        .args(["-NoExit", "-Command", &command])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                "cmd" => {
+                    std::process::Command::new("cmd")
+                        .args(["/K", &format!("cd /d \"{target_text}\" && {command}")])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => {
+                    return Err(format!(
+                        "Unsupported terminal: {}",
+                        preferences.selected_terminal
+                    ))
+                }
+            }
+            return Ok(true);
+        }
+
+        match preferences.selected_terminal.as_str() {
+            "windows-terminal" => {
+                std::process::Command::new("wt")
+                    .args(["-d", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "powershell" => {
+                let command = format!(
+                    "Set-Location -LiteralPath {}",
+                    shell_quote_single(&target_text)
+                );
+                std::process::Command::new("powershell")
+                    .args(["-NoExit", "-Command", &command])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "cmd" => {
+                std::process::Command::new("cmd")
+                    .args(["/K", &format!("cd /d \"{target_text}\"")])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            _ => {
+                return Err(format!(
+                    "Unsupported terminal: {}",
+                    preferences.selected_terminal
+                ))
+            }
+        }
+        return Ok(true);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(command) = shell_command {
+            let shell_line = format!(
+                "cd {} && {} ; exec bash",
+                shell_quote_single(&target_text),
+                command,
+            );
+            match preferences.selected_terminal.as_str() {
+                "kitty" => {
+                    std::process::Command::new("kitty")
+                        .args(["--directory", &target_text, "bash", "-lc", &shell_line])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    return Ok(true);
+                }
+                "alacritty" => {
+                    std::process::Command::new("alacritty")
+                        .args([
+                            "--working-directory",
+                            &target_text,
+                            "-e",
+                            "bash",
+                            "-lc",
+                            &shell_line,
+                        ])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    return Ok(true);
+                }
+                "terminal" => {
+                    std::process::Command::new("open")
+                        .args(["-a", "Terminal", &target_text])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    return Ok(false);
+                }
+                "iterm2" => {
+                    std::process::Command::new("open")
+                        .args(["-a", "iTerm", &target_text])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    return Ok(false);
+                }
+                "warp" => {
+                    std::process::Command::new("open")
+                        .args(["-a", "Warp", &target_text])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    return Ok(false);
+                }
+                "ghostty" => {
+                    std::process::Command::new("open")
+                        .args(["-a", "Ghostty", &target_text])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    return Ok(false);
+                }
+                _ => {
+                    return Err(format!(
+                        "Unsupported terminal: {}",
+                        preferences.selected_terminal
+                    ))
+                }
+            }
+        }
+
+        match preferences.selected_terminal.as_str() {
+            "terminal" => {
+                std::process::Command::new("open")
+                    .args(["-a", "Terminal", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "iterm2" => {
+                std::process::Command::new("open")
+                    .args(["-a", "iTerm", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "warp" => {
+                std::process::Command::new("open")
+                    .args(["-a", "Warp", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "ghostty" => {
+                std::process::Command::new("open")
+                    .args(["-a", "Ghostty", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "kitty" => {
+                std::process::Command::new("kitty")
+                    .args(["--directory", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "alacritty" => {
+                std::process::Command::new("alacritty")
+                    .args(["--working-directory", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            _ => {
+                return Err(format!(
+                    "Unsupported terminal: {}",
+                    preferences.selected_terminal
+                ))
+            }
+        }
+        return Ok(true);
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(command) = shell_command {
+            let shell_line = format!(
+                "cd {} && {} ; exec bash",
+                shell_quote_single(&target_text),
+                command,
+            );
+            match preferences.selected_terminal.as_str() {
+                "gnome-terminal" => {
+                    std::process::Command::new("gnome-terminal")
+                        .args([
+                            "--working-directory",
+                            &target_text,
+                            "--",
+                            "bash",
+                            "-lc",
+                            &shell_line,
+                        ])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                "konsole" => {
+                    std::process::Command::new("konsole")
+                        .args(["--workdir", &target_text, "-e", "bash", "-lc", &shell_line])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                "xterm" => {
+                    std::process::Command::new("xterm")
+                        .args(["-e", "bash", "-lc", &shell_line])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                "kitty" => {
+                    std::process::Command::new("kitty")
+                        .args(["--directory", &target_text, "bash", "-lc", &shell_line])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                "alacritty" => {
+                    std::process::Command::new("alacritty")
+                        .args([
+                            "--working-directory",
+                            &target_text,
+                            "-e",
+                            "bash",
+                            "-lc",
+                            &shell_line,
+                        ])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                "wezterm" => {
+                    std::process::Command::new("wezterm")
+                        .args(["start", "--cwd", &target_text, "bash", "-lc", &shell_line])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => {
+                    return Err(format!(
+                        "Unsupported terminal: {}",
+                        preferences.selected_terminal
+                    ))
+                }
+            }
+            return Ok(true);
+        }
+
+        match preferences.selected_terminal.as_str() {
+            "gnome-terminal" => {
+                std::process::Command::new("gnome-terminal")
+                    .args(["--working-directory", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "konsole" => {
+                std::process::Command::new("konsole")
+                    .args(["--workdir", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "xterm" => {
+                std::process::Command::new("xterm")
+                    .args([
+                        "-e",
+                        "bash",
+                        "-lc",
+                        &format!("cd {} && exec bash", shell_quote_single(&target_text)),
+                    ])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "kitty" => {
+                std::process::Command::new("kitty")
+                    .args(["--directory", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "alacritty" => {
+                std::process::Command::new("alacritty")
+                    .args(["--working-directory", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "wezterm" => {
+                std::process::Command::new("wezterm")
+                    .args(["start", "--cwd", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            _ => {
+                return Err(format!(
+                    "Unsupported terminal: {}",
+                    preferences.selected_terminal
+                ))
+            }
+        }
+        return Ok(true);
+    }
+
+    #[allow(unreachable_code)]
+    Ok(false)
+}
+
+fn build_session_resume_command(
+    tool_id: &str,
+    session_id: &str,
+    source_path: Option<&str>,
+) -> Result<String, String> {
+    match tool_id {
+        "codex" => Ok(codex_resume_command(session_id)),
+        "claude" => Ok(claude_resume_command(session_id)),
+        "gemini" => Ok(gemini_resume_command(session_id)),
+        "opencode" => Ok(opencode_resume_command(session_id)),
+        "openclaw" => openclaw_resume_command(source_path, session_id),
+        _ => Err(format!("Session restore is not supported for {tool_id}")),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn autostart_entry_path() -> Result<PathBuf, String> {
+    let appdata = std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?;
+    Ok(PathBuf::from(appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("Startup")
+        .join("CCHub.cmd"))
+}
+
+#[cfg(target_os = "windows")]
+fn autostart_entry_content(exe: &std::path::Path) -> String {
+    format!("@echo off\r\nstart \"\" \"{}\"\r\n", exe.display())
+}
+
+#[cfg(target_os = "macos")]
+fn autostart_entry_path() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    Ok(home
+        .join("Library")
+        .join("LaunchAgents")
+        .join("com.cchub.app.plist"))
+}
+
+#[cfg(target_os = "macos")]
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+#[cfg(target_os = "macos")]
+fn autostart_entry_content(exe: &std::path::Path) -> String {
+    let exe = xml_escape(&exe.to_string_lossy());
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.cchub.app</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{exe}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+"#
+    )
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn autostart_entry_path() -> Result<PathBuf, String> {
+    let config_dir = dirs::config_dir().ok_or("Cannot find config directory")?;
+    Ok(config_dir.join("autostart").join("com.cchub.app.desktop"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn autostart_entry_content(exe: &std::path::Path) -> String {
+    let escaped = exe.to_string_lossy().replace('"', "\\\"");
+    format!(
+        "[Desktop Entry]\nType=Application\nVersion=1.0\nName=CCHub\nExec=\"{escaped}\"\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+    )
+}
+
+fn sync_launch_at_login(enabled: bool) -> Result<(), String> {
+    let path = autostart_entry_path()?;
+
+    if !enabled {
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    crate::utils::atomic_write_string(&path, &autostart_entry_content(&exe))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn scan_environment_conflicts() -> Vec<EnvironmentConflict> {
+    let env_groups = [
+        (
+            "claude",
+            vec![
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
+                "ANTHROPIC_BASE_URL",
+                "ANTHROPIC_MODEL",
+            ],
+        ),
+        (
+            "codex",
+            vec![
+                "OPENAI_API_KEY",
+                "OPENAI_BASE_URL",
+                "OPENAI_ORG_ID",
+                "OPENAI_MODEL",
+            ],
+        ),
+        (
+            "gemini",
+            vec![
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+                "GOOGLE_GEMINI_BASE_URL",
+                "GEMINI_MODEL",
+            ],
+        ),
+    ];
+
+    let mut conflicts = Vec::new();
+    let mut apps_with_overrides = Vec::new();
+    let mut all_variables = Vec::new();
+
+    for (app_id, keys) in env_groups {
+        let variables: Vec<String> = keys
+            .into_iter()
+            .filter(|key| {
+                std::env::var(key)
+                    .ok()
+                    .is_some_and(|value| !value.trim().is_empty())
+            })
+            .map(str::to_string)
+            .collect();
+
+        if variables.is_empty() {
+            continue;
+        }
+
+        all_variables.extend(variables.iter().cloned());
+        apps_with_overrides.push(app_id.to_string());
+        conflicts.push(EnvironmentConflict {
+            id: format!("{app_id}_env_override"),
+            kind: "tool_override".to_string(),
+            variables,
+            affected_apps: vec![app_id.to_string()],
+        });
+    }
+
+    if apps_with_overrides.len() >= 2 {
+        conflicts.insert(
+            0,
+            EnvironmentConflict {
+                id: "shared_env_overrides".to_string(),
+                kind: "multi_tool_override".to_string(),
+                variables: all_variables,
+                affected_apps: apps_with_overrides,
+            },
+        );
+    }
+
+    conflicts
 }
 
 fn candidate_home_dirs() -> Vec<PathBuf> {
@@ -973,13 +2374,85 @@ fn current_profile_setting_key(tool_id: &str) -> String {
     format!("current_config_profile:{}", tool_id)
 }
 
-fn get_stored_current_profile_ids(conn: &rusqlite::Connection) -> Result<HashMap<String, String>, String> {
+fn next_profile_sort_order(conn: &rusqlite::Connection, tool_id: &str) -> i64 {
+    conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM config_profiles WHERE tool_id = ?1",
+        rusqlite::params![tool_id],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
+}
+
+fn clear_active_profile_if_selected(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    profile_id: &str,
+) -> Result<(), String> {
+    let setting_key = current_profile_setting_key(tool_id);
+    let stored_id: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![&setting_key],
+            |row| row.get(0),
+        )
+        .ok();
+    if stored_id.as_deref() == Some(profile_id) {
+        conn.execute(
+            "DELETE FROM app_settings WHERE key = ?1",
+            rusqlite::params![setting_key],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn apply_snapshot_if_profile_active(
+    conn: &rusqlite::Connection,
+    profile_id: &str,
+    tool_id: &str,
+    config_snapshot: &str,
+) -> Result<(), String> {
+    let setting_key = current_profile_setting_key(tool_id);
+    let active_profile_id: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![setting_key],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if active_profile_id.as_deref() == Some(profile_id) {
+        apply_tool_snapshot(conn, tool_id, config_snapshot)?;
+    }
+
+    Ok(())
+}
+
+fn delete_profile_record(
+    conn: &rusqlite::Connection,
+    profile_id: &str,
+    tool_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM config_profiles WHERE id = ?1",
+        rusqlite::params![profile_id],
+    )
+    .map_err(|e| e.to_string())?;
+    clear_active_profile_if_selected(conn, tool_id, profile_id)?;
+    Ok(())
+}
+
+fn get_stored_current_profile_ids(
+    conn: &rusqlite::Connection,
+) -> Result<HashMap<String, String>, String> {
     let mut stmt = conn
         .prepare("SELECT key, value FROM app_settings WHERE key LIKE 'current_config_profile:%'")
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?;
 
     let mut current = HashMap::new();
@@ -991,6 +2464,48 @@ fn get_stored_current_profile_ids(conn: &rusqlite::Connection) -> Result<HashMap
     }
 
     Ok(current)
+}
+
+fn normalize_provider_fragment_target_tools(target_tools: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    target_tools
+        .into_iter()
+        .map(|tool_id| tool_id.trim().to_string())
+        .filter(|tool_id| !tool_id.is_empty())
+        .filter(|tool_id| MANAGED_APP_IDS.contains(&tool_id.as_str()))
+        .filter(|tool_id| seen.insert(tool_id.clone()))
+        .collect()
+}
+
+fn read_provider_config_fragments_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<ProviderConfigFragment>, String> {
+    let mut fragments = get_json_app_setting::<Vec<ProviderConfigFragment>>(
+        conn,
+        PROVIDER_CONFIG_FRAGMENTS_SETTING_KEY,
+    )?
+    .unwrap_or_default();
+
+    for fragment in &mut fragments {
+        fragment.name = fragment.name.trim().to_string();
+        fragment.target_tools =
+            normalize_provider_fragment_target_tools(fragment.target_tools.clone());
+    }
+
+    fragments.retain(|fragment| {
+        !fragment.id.trim().is_empty()
+            && !fragment.name.is_empty()
+            && !fragment.target_tools.is_empty()
+            && fragment.fields.is_object()
+    });
+
+    fragments.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(fragments)
 }
 
 fn get_compatible_current_profile_ids() -> Result<HashMap<String, String>, String> {
@@ -1012,16 +2527,118 @@ fn get_compatible_current_profile_ids() -> Result<HashMap<String, String>, Strin
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| e.to_string())?;
 
         for row in rows {
             let (provider_id, tool_id) = row.map_err(|e| e.to_string())?;
-            current.insert(tool_id.clone(), format!("compat-{}-{}", tool_id, provider_id));
+            current.insert(
+                tool_id.clone(),
+                format!("compat-{}-{}", tool_id, provider_id),
+            );
         }
     }
 
     Ok(current)
+}
+
+fn read_all_config_profiles_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<ConfigProfile>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, tool_id, config_snapshot, COALESCE(sort_order, 0), source_type, source_key, created_at, updated_at
+             FROM config_profiles
+             ORDER BY tool_id ASC, COALESCE(sort_order, 0) ASC, updated_at DESC, created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let profiles = stmt
+        .query_map([], |row| {
+            Ok(ConfigProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                tool_id: row.get(2)?,
+                config_snapshot: row.get(3)?,
+                sort_order: row.get(4)?,
+                source_type: row.get(5)?,
+                source_key: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|row| row.ok())
+        .collect();
+
+    Ok(profiles)
+}
+
+fn get_active_config_profile_ids_from_conn(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<String>, String> {
+    let profiles = read_all_config_profiles_from_conn(conn)?;
+    let mut active_ids = Vec::new();
+    let stored_current = get_stored_current_profile_ids(conn)?;
+    let compatible_current = get_compatible_current_profile_ids().unwrap_or_default();
+    let mut cache: HashMap<String, Option<String>> = HashMap::new();
+    let mut resolved_tools = std::collections::HashSet::new();
+
+    for profile in &profiles {
+        if resolved_tools.contains(&profile.tool_id) {
+            continue;
+        }
+
+        let preferred_id = stored_current
+            .get(&profile.tool_id)
+            .or_else(|| compatible_current.get(&profile.tool_id));
+
+        if let Some(preferred_id) = preferred_id {
+            if profiles
+                .iter()
+                .any(|item| item.tool_id == profile.tool_id && item.id == *preferred_id)
+            {
+                active_ids.push(preferred_id.clone());
+                resolved_tools.insert(profile.tool_id.clone());
+            }
+        }
+    }
+
+    for profile in profiles {
+        if resolved_tools.contains(&profile.tool_id) {
+            continue;
+        }
+
+        if !cache.contains_key(&profile.tool_id) {
+            let content = read_tool_snapshot(conn, &profile.tool_id).ok();
+            cache.insert(profile.tool_id.clone(), content);
+        }
+
+        if cache
+            .get(&profile.tool_id)
+            .and_then(|value| value.as_ref())
+            .is_some_and(|value| config_contents_match(value, &profile.config_snapshot))
+        {
+            active_ids.push(profile.id);
+            resolved_tools.insert(profile.tool_id.clone());
+        }
+    }
+
+    Ok(active_ids)
+}
+
+pub fn read_config_profiles_for_tray(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<ConfigProfile>, String> {
+    read_all_config_profiles_from_conn(conn)
+}
+
+pub fn read_active_config_profile_ids_for_tray(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<String>, String> {
+    get_active_config_profile_ids_from_conn(conn)
 }
 
 fn normalize_external_profile_snapshot(tool_id: &str, settings_config: &str) -> Option<String> {
@@ -1064,11 +2681,18 @@ fn upsert_synced_profile(
         )
         .map_err(|e| e.to_string())?;
     } else {
+        let next_sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM config_profiles WHERE tool_id = ?1",
+                rusqlite::params![tool_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         conn.execute(
             "INSERT INTO config_profiles
-             (id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-            rusqlite::params![id, name, tool_id, config_snapshot, source_type, source_key, now],
+             (id, name, tool_id, config_snapshot, sort_order, source_type, source_key, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            rusqlite::params![id, name, tool_id, config_snapshot, next_sort_order, source_type, source_key, now],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1112,7 +2736,9 @@ fn sync_profiles_from_compatible_databases(
 
         for row in rows {
             let (provider_id, tool_id, name, settings_config) = row.map_err(|e| e.to_string())?;
-            let Some(config_snapshot) = normalize_external_profile_snapshot(&tool_id, &settings_config) else {
+            let Some(config_snapshot) =
+                normalize_external_profile_snapshot(&tool_id, &settings_config)
+            else {
                 continue;
             };
             let id = format!("compat-{}-{}", tool_id, provider_id);
@@ -1145,8 +2771,11 @@ fn sync_profiles_from_compatible_databases(
         .collect();
 
     for id in stale_ids {
-        conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM config_profiles WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(counts)
@@ -1161,8 +2790,11 @@ fn sync_live_profiles(
         let id = format!("live-{}", tool_id);
 
         if imported_counts.get(tool_id).copied().unwrap_or(0) > 0 {
-            conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
-                .map_err(|e| e.to_string())?;
+            conn.execute(
+                "DELETE FROM config_profiles WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .map_err(|e| e.to_string())?;
             continue;
         }
 
@@ -1181,8 +2813,11 @@ fn sync_live_profiles(
                 )?;
             }
             Err(_) => {
-                conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![id])
-                    .map_err(|e| e.to_string())?;
+                conn.execute(
+                    "DELETE FROM config_profiles WHERE id = ?1",
+                    rusqlite::params![id],
+                )
+                .map_err(|e| e.to_string())?;
             }
         }
     }
@@ -1242,9 +2877,13 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
                 return Err(format!("Config file not found: {}", env_path.display()));
             }
             let env_text = std::fs::read_to_string(&env_path).map_err(|e| e.to_string())?;
-            let env: HashMap<String, String> = env_text.lines()
+            let env: HashMap<String, String> = env_text
+                .lines()
                 .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
-                .filter_map(|l| l.split_once('=').map(|(k,v)| (k.trim().to_string(), v.trim().to_string())))
+                .filter_map(|l| {
+                    l.split_once('=')
+                        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                })
                 .collect();
             let settings_path = dir.join("settings.json");
             let config = if settings_path.exists() {
@@ -1264,19 +2903,27 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
         "claude" => {
             let (claude_json, settings_json) = resolve_claude_paths(conn)?;
 
-            let claude_json_obj: serde_json::Map<String, serde_json::Value> = if claude_json.exists() {
-                std::fs::read_to_string(&claude_json).ok()
-                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                    .and_then(|v| v.as_object().cloned())
-                    .unwrap_or_default()
-            } else { serde_json::Map::new() };
+            let claude_json_obj: serde_json::Map<String, serde_json::Value> =
+                if claude_json.exists() {
+                    std::fs::read_to_string(&claude_json)
+                        .ok()
+                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                        .and_then(|v| v.as_object().cloned())
+                        .unwrap_or_default()
+                } else {
+                    serde_json::Map::new()
+                };
 
-            let settings_json_obj: serde_json::Map<String, serde_json::Value> = if settings_json.exists() {
-                std::fs::read_to_string(&settings_json).ok()
-                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                    .and_then(|v| v.as_object().cloned())
-                    .unwrap_or_default()
-            } else { serde_json::Map::new() };
+            let settings_json_obj: serde_json::Map<String, serde_json::Value> =
+                if settings_json.exists() {
+                    std::fs::read_to_string(&settings_json)
+                        .ok()
+                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                        .and_then(|v| v.as_object().cloned())
+                        .unwrap_or_default()
+                } else {
+                    serde_json::Map::new()
+                };
 
             if claude_json_obj.is_empty() && settings_json_obj.is_empty() {
                 return Err("No Claude config found".to_string());
@@ -1288,12 +2935,21 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
 
             let mut combined = claude_json_obj;
             for (k, v) in settings_json_obj {
-                if !combined.contains_key(&k) { combined.insert(k, v); }
+                if !combined.contains_key(&k) {
+                    combined.insert(k, v);
+                }
             }
-            combined.insert("__claude_json_keys__".to_string(), serde_json::json!(claude_json_keys));
-            combined.insert("__settings_json_keys__".to_string(), serde_json::json!(settings_json_keys));
+            combined.insert(
+                "__claude_json_keys__".to_string(),
+                serde_json::json!(claude_json_keys),
+            );
+            combined.insert(
+                "__settings_json_keys__".to_string(),
+                serde_json::json!(settings_json_keys),
+            );
 
-            serde_json::to_string_pretty(&serde_json::Value::Object(combined)).map_err(|e| e.to_string())
+            serde_json::to_string_pretty(&serde_json::Value::Object(combined))
+                .map_err(|e| e.to_string())
         }
         _ => {
             let config_path = resolve_tool_config_path(conn, tool_id)?;
@@ -1305,7 +2961,14 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
     }
 }
 
-fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &str) -> Result<(), String> {
+fn apply_tool_snapshot(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    snapshot: &str,
+) -> Result<(), String> {
+    let effective_snapshot =
+        crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool_id, snapshot)?;
+
     match tool_id {
         "codex" => {
             let dir = resolve_tool_config_dir(conn, tool_id)?;
@@ -1313,16 +2976,23 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
             let auth_path = dir.join("auth.json");
             let config_path = dir.join("config.toml");
 
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(snapshot) {
-                if let (Some(auth), Some(config)) = (value.get("auth"), value.get("config").and_then(|v| v.as_str())) {
-                    let auth_text = serde_json::to_string_pretty(auth).map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&auth_path, &auth_text).map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&config_path, config).map_err(|e| e.to_string())?;
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&effective_snapshot) {
+                if let (Some(auth), Some(config)) = (
+                    value.get("auth"),
+                    value.get("config").and_then(|v| v.as_str()),
+                ) {
+                    let auth_text =
+                        serde_json::to_string_pretty(auth).map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&auth_path, &auth_text)
+                        .map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&config_path, config)
+                        .map_err(|e| e.to_string())?;
                     return Ok(());
                 }
             }
 
-            crate::utils::atomic_write_string(&config_path, snapshot).map_err(|e| e.to_string())
+            crate::utils::atomic_write_string(&config_path, &effective_snapshot)
+                .map_err(|e| e.to_string())
         }
         "gemini" => {
             let dir = resolve_tool_config_dir(conn, tool_id)?;
@@ -1330,47 +3000,68 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
             let env_path = dir.join(".env");
             let settings_path = dir.join("settings.json");
 
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(snapshot) {
-                if let (Some(env), Some(config)) = (value.get("env").and_then(|v| v.as_object()), value.get("config")) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&effective_snapshot) {
+                if let (Some(env), Some(config)) = (
+                    value.get("env").and_then(|v| v.as_object()),
+                    value.get("config"),
+                ) {
                     let env_map: std::collections::HashMap<String, String> = env
                         .iter()
-                        .filter_map(|(key, value)| value.as_str().map(|v| (key.clone(), v.to_string())))
+                        .filter_map(|(key, value)| {
+                            value.as_str().map(|v| (key.clone(), v.to_string()))
+                        })
                         .collect();
-                    let env_text = env_map.iter()
+                    let env_text = env_map
+                        .iter()
                         .map(|(k, v)| format!("{}={}", k, v))
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let config_text = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&env_path, &env_text).map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&settings_path, &config_text).map_err(|e| e.to_string())?;
+                    let config_text =
+                        serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&env_path, &env_text)
+                        .map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&settings_path, &config_text)
+                        .map_err(|e| e.to_string())?;
                     return Ok(());
                 }
             }
 
-            crate::utils::atomic_write_string(&settings_path, snapshot).map_err(|e| e.to_string())
+            crate::utils::atomic_write_string(&settings_path, &effective_snapshot)
+                .map_err(|e| e.to_string())
         }
         "claude" => {
             let (claude_json_path, settings_json_path) = resolve_claude_paths(conn)?;
 
-            let snap: serde_json::Value = serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
+            let snap: serde_json::Value =
+                serde_json::from_str(&effective_snapshot).map_err(|e| e.to_string())?;
             let snap_obj = snap.as_object().ok_or("Invalid claude snapshot")?;
 
             // Determine which keys belong to which file
             let claude_json_keys: std::collections::HashSet<String> = snap_obj
                 .get("__claude_json_keys__")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let settings_json_keys: std::collections::HashSet<String> = snap_obj
                 .get("__settings_json_keys__")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             // Keys that should be preserved in settings.json during profile switch
-            let preserve_keys: std::collections::HashSet<&str> = [
-                "statusLine", "enabledPlugins", "mcpServers",
-            ].iter().copied().collect();
+            let preserve_keys: std::collections::HashSet<&str> =
+                ["statusLine", "enabledPlugins", "mcpServers"]
+                    .iter()
+                    .copied()
+                    .collect();
 
             // Split snapshot fields back to their original files
             let mut claude_data = serde_json::Map::new();
@@ -1395,9 +3086,15 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
                 } else {
                     // Legacy snapshot without metadata — use known-settings heuristic
                     let settings_known = [
-                        "permissions", "skipDangerousModePermissionPrompt",
-                        "alwaysThinkingEnabled", "attribution", "autoUpdatesChannel",
-                        "statusLine", "enabledPlugins", "mcpServers", "env",
+                        "permissions",
+                        "skipDangerousModePermissionPrompt",
+                        "alwaysThinkingEnabled",
+                        "attribution",
+                        "autoUpdatesChannel",
+                        "statusLine",
+                        "enabledPlugins",
+                        "mcpServers",
+                        "env",
                     ];
                     if settings_known.contains(&k.as_str()) {
                         settings_data.insert(k.clone(), v.clone());
@@ -1409,27 +3106,37 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
 
             // Write .claude.json — merge with existing
             if !claude_data.is_empty() {
-                let mut existing: serde_json::Map<String, serde_json::Value> = if claude_json_path.exists() {
-                    std::fs::read_to_string(&claude_json_path).ok()
-                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                        .and_then(|v| v.as_object().cloned())
-                        .unwrap_or_default()
-                } else { serde_json::Map::new() };
+                let mut existing: serde_json::Map<String, serde_json::Value> =
+                    if claude_json_path.exists() {
+                        std::fs::read_to_string(&claude_json_path)
+                            .ok()
+                            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                            .and_then(|v| v.as_object().cloned())
+                            .unwrap_or_default()
+                    } else {
+                        serde_json::Map::new()
+                    };
                 for (k, v) in claude_data {
                     existing.insert(k, v);
                 }
-                let text = serde_json::to_string_pretty(&serde_json::Value::Object(existing)).map_err(|e| e.to_string())?;
-                crate::utils::atomic_write_string(&claude_json_path, &text).map_err(|e| e.to_string())?;
+                let text = serde_json::to_string_pretty(&serde_json::Value::Object(existing))
+                    .map_err(|e| e.to_string())?;
+                crate::utils::atomic_write_string(&claude_json_path, &text)
+                    .map_err(|e| e.to_string())?;
             }
 
             // Write settings.json — merge, preserving protected keys
             {
-                let mut existing: serde_json::Map<String, serde_json::Value> = if settings_json_path.exists() {
-                    std::fs::read_to_string(&settings_json_path).ok()
-                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                        .and_then(|v| v.as_object().cloned())
-                        .unwrap_or_default()
-                } else { serde_json::Map::new() };
+                let mut existing: serde_json::Map<String, serde_json::Value> =
+                    if settings_json_path.exists() {
+                        std::fs::read_to_string(&settings_json_path)
+                            .ok()
+                            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                            .and_then(|v| v.as_object().cloned())
+                            .unwrap_or_default()
+                    } else {
+                        serde_json::Map::new()
+                    };
                 for (k, v) in settings_data {
                     if preserve_keys.contains(k.as_str()) {
                         // Don't overwrite preserved keys — keep current value
@@ -1437,9 +3144,12 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
                     }
                     existing.insert(k, v);
                 }
-                std::fs::create_dir_all(settings_json_path.parent().unwrap()).map_err(|e| e.to_string())?;
-                let text = serde_json::to_string_pretty(&serde_json::Value::Object(existing)).map_err(|e| e.to_string())?;
-                crate::utils::atomic_write_string(&settings_json_path, &text).map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(settings_json_path.parent().unwrap())
+                    .map_err(|e| e.to_string())?;
+                let text = serde_json::to_string_pretty(&serde_json::Value::Object(existing))
+                    .map_err(|e| e.to_string())?;
+                crate::utils::atomic_write_string(&settings_json_path, &text)
+                    .map_err(|e| e.to_string())?;
             }
 
             Ok(())
@@ -1449,7 +3159,8 @@ fn apply_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str, snapshot: &st
             if let Some(parent) = config_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            crate::utils::atomic_write_string(&config_path, snapshot).map_err(|e| e.to_string())
+            crate::utils::atomic_write_string(&config_path, &effective_snapshot)
+                .map_err(|e| e.to_string())
         }
     }
 }
@@ -1466,28 +3177,105 @@ pub fn sync_config_profiles(db: State<'_, DbState>) -> Result<(), String> {
 #[tauri::command]
 pub fn get_config_profiles(db: State<'_, DbState>) -> Result<Vec<ConfigProfile>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
-        .map_err(|e| e.to_string())?;
+    read_all_config_profiles_from_conn(&conn)
+}
 
-    let profiles = stmt
-        .query_map([], |row| {
-            Ok(ConfigProfile {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                tool_id: row.get(2)?,
-                config_snapshot: row.get(3)?,
-                source_type: row.get(4)?,
-                source_key: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+#[tauri::command]
+pub fn get_provider_config_fragments(
+    db: State<'_, DbState>,
+) -> Result<Vec<ProviderConfigFragment>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    read_provider_config_fragments_from_conn(&conn)
+}
 
-    Ok(profiles)
+#[tauri::command]
+pub fn save_provider_config_fragment(
+    id: Option<String>,
+    name: String,
+    target_tools: Vec<String>,
+    fields: serde_json::Value,
+    db: State<'_, DbState>,
+) -> Result<ProviderConfigFragment, String> {
+    let trimmed_name = name.trim();
+    if trimmed_name.is_empty() {
+        return Err("Fragment name is required".to_string());
+    }
+    if !fields.is_object() {
+        return Err("Fragment fields must be a JSON object".to_string());
+    }
+
+    let normalized_tools = normalize_provider_fragment_target_tools(target_tools);
+    if normalized_tools.is_empty() {
+        return Err("At least one target app is required".to_string());
+    }
+
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut fragments = read_provider_config_fragments_from_conn(&conn)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let next_id = id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let saved = if let Some(existing) = fragments.iter_mut().find(|fragment| fragment.id == next_id)
+    {
+        existing.name = trimmed_name.to_string();
+        existing.target_tools = normalized_tools.clone();
+        existing.fields = fields.clone();
+        existing.updated_at = now.clone();
+        existing.clone()
+    } else {
+        let fragment = ProviderConfigFragment {
+            id: next_id.clone(),
+            name: trimmed_name.to_string(),
+            target_tools: normalized_tools.clone(),
+            fields: fields.clone(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+        fragments.push(fragment.clone());
+        fragment
+    };
+
+    fragments.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    set_json_app_setting(&conn, PROVIDER_CONFIG_FRAGMENTS_SETTING_KEY, &fragments)?;
+    crate::utils::append_runtime_log(
+        "info",
+        "profiles",
+        &format!(
+            "Saved provider config fragment {} for apps {}",
+            saved.id,
+            saved.target_tools.join(",")
+        ),
+    );
+
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn delete_provider_config_fragment(id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut fragments = read_provider_config_fragments_from_conn(&conn)?;
+    let initial_len = fragments.len();
+    fragments.retain(|fragment| fragment.id != id);
+    if fragments.len() == initial_len {
+        return Err("Provider fragment not found".to_string());
+    }
+
+    set_json_app_setting(&conn, PROVIDER_CONFIG_FRAGMENTS_SETTING_KEY, &fragments)?;
+    crate::utils::append_runtime_log(
+        "info",
+        "profiles",
+        &format!("Deleted provider config fragment {id}"),
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -1500,13 +3288,133 @@ pub fn save_config_profile(
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    let next_sort_order = next_profile_sort_order(&conn, &tool_id);
 
     conn.execute(
-        "INSERT INTO config_profiles (id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'manual', NULL, ?5, ?5)",
-        rusqlite::params![id, name, tool_id, config_snapshot, now],
+        "INSERT INTO config_profiles (id, name, tool_id, config_snapshot, sort_order, source_type, source_key, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'manual', NULL, ?6, ?6)",
+        rusqlite::params![id, name, tool_id, config_snapshot, next_sort_order, now],
     ).map_err(|e| e.to_string())?;
 
     Ok(id)
+}
+
+#[tauri::command]
+pub fn save_shared_config_profiles(
+    name: String,
+    profiles: Vec<SharedConfigProfileInput>,
+    group_key: Option<String>,
+    replace_profile_id: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    if profiles.is_empty() {
+        return Err("At least one target tool is required".to_string());
+    }
+
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let shared_group_key = group_key.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let mut existing_by_tool: HashMap<String, (String, Option<String>)> = HashMap::new();
+    let mut stale_manual_replace: Option<(String, String)> = None;
+
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, tool_id, source_type
+                 FROM config_profiles
+                 WHERE source_type = 'shared' AND source_key = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![&shared_group_key], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+
+        for row in rows {
+            let (id, tool_id, source_type) = row.map_err(|e| e.to_string())?;
+            existing_by_tool.insert(tool_id, (id, source_type));
+        }
+    }
+
+    if let Some(profile_id) = replace_profile_id.as_ref() {
+        let existing = conn
+            .query_row(
+                "SELECT tool_id, source_type
+                 FROM config_profiles
+                 WHERE id = ?1",
+                rusqlite::params![profile_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .ok();
+
+        if let Some((tool_id, source_type)) = existing {
+            if source_type.as_deref() != Some("shared") && !existing_by_tool.contains_key(&tool_id)
+            {
+                if profiles.iter().any(|item| item.tool_id == tool_id) {
+                    existing_by_tool.insert(tool_id, (profile_id.clone(), source_type));
+                } else {
+                    stale_manual_replace = Some((tool_id, profile_id.clone()));
+                }
+            }
+        }
+    }
+
+    for profile in &profiles {
+        if let Some((existing_id, _)) = existing_by_tool.remove(&profile.tool_id) {
+            conn.execute(
+                "UPDATE config_profiles
+                 SET name = ?1, tool_id = ?2, config_snapshot = ?3, source_type = 'shared', source_key = ?4, updated_at = ?5
+                 WHERE id = ?6",
+                rusqlite::params![
+                    &name,
+                    &profile.tool_id,
+                    &profile.config_snapshot,
+                    &shared_group_key,
+                    &now,
+                    &existing_id
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+            apply_snapshot_if_profile_active(
+                &conn,
+                &existing_id,
+                &profile.tool_id,
+                &profile.config_snapshot,
+            )?;
+        } else {
+            let id = uuid::Uuid::new_v4().to_string();
+            let next_sort_order = next_profile_sort_order(&conn, &profile.tool_id);
+            conn.execute(
+                "INSERT INTO config_profiles (id, name, tool_id, config_snapshot, sort_order, source_type, source_key, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'shared', ?6, ?7, ?7)",
+                rusqlite::params![
+                    id,
+                    &name,
+                    &profile.tool_id,
+                    &profile.config_snapshot,
+                    next_sort_order,
+                    &shared_group_key,
+                    &now
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    if let Some((tool_id, profile_id)) = stale_manual_replace {
+        delete_profile_record(&conn, &profile_id, &tool_id)?;
+    }
+
+    for (tool_id, (profile_id, _)) in existing_by_tool {
+        delete_profile_record(&conn, &profile_id, &tool_id)?;
+    }
+
+    Ok(shared_group_key)
 }
 
 #[tauri::command]
@@ -1548,9 +3456,10 @@ pub fn update_config_profile(
     Ok(())
 }
 
-#[tauri::command]
-pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+pub fn apply_config_profile_from_conn(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<(String, String), String> {
     let (tool_id, snapshot): (String, String) = conn
         .query_row(
             "SELECT tool_id, config_snapshot FROM config_profiles WHERE id = ?1",
@@ -1559,21 +3468,34 @@ pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), St
         )
         .map_err(|e| format!("Profile not found: {}", e))?;
 
-    apply_tool_snapshot(&conn, &tool_id, &snapshot)?;
+    apply_tool_snapshot(conn, &tool_id, &snapshot)?;
 
-    // Update timestamp
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE config_profiles SET updated_at = ?1 WHERE id = ?2",
         rusqlite::params![now, id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     conn.execute(
         "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
         rusqlite::params![current_profile_setting_key(&tool_id), id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
-    crate::db::record_activity(&conn, &tool_id, "profile_switch", "success", None);
+    crate::db::record_activity(conn, &tool_id, "profile_switch", "success", None);
+    crate::utils::append_runtime_log(
+        "info",
+        "profiles",
+        &format!("Applied profile {id} for tool {tool_id}"),
+    );
+    Ok((tool_id, snapshot))
+}
+
+#[tauri::command]
+pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    apply_config_profile_from_conn(&conn, &id)?;
     Ok(())
 }
 
@@ -1592,20 +3514,74 @@ pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), S
         return Err("Only manual profiles can be deleted".to_string());
     }
 
-    conn.execute("DELETE FROM config_profiles WHERE id = ?1", rusqlite::params![&id])
+    delete_profile_record(&conn, &id, &tool_id)?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_config_profile_group(
+    source_key: String,
+    db: State<'_, DbState>,
+) -> Result<usize, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, tool_id
+             FROM config_profiles
+             WHERE source_type = 'shared' AND source_key = ?1",
+        )
         .map_err(|e| e.to_string())?;
 
-    let setting_key = current_profile_setting_key(&tool_id);
-    let stored_id: Option<String> = conn
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = ?1",
-            rusqlite::params![&setting_key],
-            |row| row.get(0),
+    let rows = stmt
+        .query_map(rusqlite::params![&source_key], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut profiles = Vec::new();
+    for row in rows {
+        profiles.push(row.map_err(|e| e.to_string())?);
+    }
+
+    if profiles.is_empty() {
+        return Err("Shared profile group not found".to_string());
+    }
+
+    for (profile_id, tool_id) in &profiles {
+        delete_profile_record(&conn, profile_id, tool_id)?;
+    }
+
+    Ok(profiles.len())
+}
+
+#[tauri::command]
+pub fn reorder_config_profiles(
+    tool_id: String,
+    ordered_ids: Vec<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    for (index, profile_id) in ordered_ids.iter().enumerate() {
+        let belongs_to_tool: Option<String> = conn
+            .query_row(
+                "SELECT tool_id FROM config_profiles WHERE id = ?1",
+                rusqlite::params![profile_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if belongs_to_tool.as_deref() != Some(tool_id.as_str()) {
+            return Err(format!(
+                "Profile does not belong to tool {tool_id}: {profile_id}"
+            ));
+        }
+
+        conn.execute(
+            "UPDATE config_profiles SET sort_order = ?1 WHERE id = ?2",
+            rusqlite::params![index as i64, profile_id],
         )
-        .ok();
-    if stored_id.as_deref() == Some(id.as_str()) {
-        conn.execute("DELETE FROM app_settings WHERE key = ?1", rusqlite::params![setting_key])
-            .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -1614,69 +3590,940 @@ pub fn delete_config_profile(id: String, db: State<'_, DbState>) -> Result<(), S
 #[tauri::command]
 pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<String>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, tool_id, config_snapshot, source_type, source_key, created_at, updated_at FROM config_profiles ORDER BY updated_at DESC")
-        .map_err(|e| e.to_string())?;
-    let profiles: Vec<ConfigProfile> = stmt
-        .query_map([], |row| {
-            Ok(ConfigProfile {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                tool_id: row.get(2)?,
-                config_snapshot: row.get(3)?,
-                source_type: row.get(4)?,
-                source_key: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    let mut active_ids = Vec::new();
-    let stored_current = get_stored_current_profile_ids(&conn)?;
-    let compatible_current = get_compatible_current_profile_ids().unwrap_or_default();
-    let mut cache: HashMap<String, Option<String>> = HashMap::new();
-    let mut resolved_tools = std::collections::HashSet::new();
+    get_active_config_profile_ids_from_conn(&conn)
+}
 
-    for profile in &profiles {
-        if resolved_tools.contains(&profile.tool_id) {
-            continue;
+#[tauri::command]
+pub fn refresh_tray_provider_menu(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::refresh_tray_menu(&app_handle).map_err(|e| e.to_string())
+}
+
+fn parse_toml_assignment(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if !trimmed.starts_with(key) {
+            return None;
         }
+        let (_, raw_value) = trimmed.split_once('=')?;
+        let value = raw_value.trim().trim_matches('"').trim_matches('\'');
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    })
+}
 
-        let preferred_id = stored_current
-            .get(&profile.tool_id)
-            .or_else(|| compatible_current.get(&profile.tool_id));
+fn join_api_endpoint(base_url: &str, suffix: &str) -> String {
+    let trimmed_base = base_url.trim().trim_end_matches('/');
+    let trimmed_suffix = suffix.trim_start_matches('/');
+    if trimmed_base.ends_with(trimmed_suffix) {
+        trimmed_base.to_string()
+    } else {
+        format!("{trimmed_base}/{trimmed_suffix}")
+    }
+}
 
-        if let Some(preferred_id) = preferred_id {
-            if profiles.iter().any(|item| item.tool_id == profile.tool_id && item.id == *preferred_id) {
-                active_ids.push(preferred_id.clone());
-                resolved_tools.insert(profile.tool_id.clone());
+fn build_claude_messages_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/messages") {
+        trimmed.to_string()
+    } else if trimmed.ends_with("/v1") {
+        format!("{trimmed}/messages")
+    } else {
+        format!("{trimmed}/v1/messages")
+    }
+}
+
+fn build_gemini_stream_endpoint(base_url: &str, model: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.contains(":streamGenerateContent") {
+        trimmed.to_string()
+    } else if trimmed.ends_with(&format!("/models/{model}")) {
+        format!("{trimmed}:streamGenerateContent?alt=sse")
+    } else {
+        format!("{trimmed}/models/{model}:streamGenerateContent?alt=sse")
+    }
+}
+
+struct StreamCheckRequestSpec {
+    endpoint: String,
+    headers: Vec<(String, String)>,
+    body: serde_json::Value,
+}
+
+fn build_provider_probe_client(conn: &rusqlite::Connection) -> Result<reqwest::Client, String> {
+    let proxy_url = get_text_app_setting(conn, "proxy_url")?.unwrap_or_default();
+    let mut builder = reqwest::Client::builder()
+        .user_agent("CCHub Provider Probe")
+        .timeout(std::time::Duration::from_secs(10));
+
+    if !proxy_url.trim().is_empty() {
+        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {e}"))?;
+        builder = builder.proxy(proxy);
+    }
+
+    builder.build().map_err(|e| e.to_string())
+}
+
+fn extract_profile_metadata(
+    parsed: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    parsed
+        .get("metadata")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn extract_provider_type_from_snapshot(parsed: &serde_json::Value) -> Option<String> {
+    extract_profile_metadata(parsed)
+        .get("providerType")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn extract_copilot_account_id_from_snapshot(parsed: &serde_json::Value) -> Option<String> {
+    let metadata = extract_profile_metadata(parsed);
+    metadata
+        .get("authBinding")
+        .and_then(|value| {
+            value
+                .get("authProvider")
+                .and_then(|item| item.as_str())
+                .map(|provider| (value, provider))
+        })
+        .and_then(|(value, provider)| {
+            if provider == "github_copilot" {
+                value
+                    .get("accountId")
+                    .and_then(|item| item.as_str())
+                    .map(|item| item.trim().to_string())
+                    .filter(|item| !item.is_empty())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            metadata
+                .get("githubAccountId")
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn build_openai_chat_endpoint(base_url: &str, provider_type: Option<&str>) -> String {
+    if provider_type == Some("github_copilot") {
+        join_api_endpoint(base_url, "chat/completions")
+    } else {
+        join_api_endpoint(base_url, "v1/chat/completions")
+    }
+}
+
+async fn resolve_copilot_headers(
+    app_handle: &AppHandle,
+    parsed: &serde_json::Value,
+) -> Result<Vec<(String, String)>, String> {
+    let account_id = extract_copilot_account_id_from_snapshot(parsed);
+    let manager = app_handle.state::<CopilotAuthState>().0.clone();
+    let token = manager
+        .get_valid_token_for_account(account_id.as_deref())
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(copilot_auth::copilot_request_headers(&token))
+}
+
+async fn extract_probe_target(
+    app_handle: &AppHandle,
+    profile: &ConfigProfile,
+) -> Result<(Option<String>, Vec<(String, String)>), String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&profile.config_snapshot).map_err(|e| e.to_string())?;
+    let provider_type = extract_provider_type_from_snapshot(&parsed);
+
+    match profile.tool_id.as_str() {
+        "claude" => {
+            let env = parsed
+                .get("env")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let base_url = env
+                .get("ANTHROPIC_BASE_URL")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let base_url = if provider_type.as_deref() == Some("github_copilot") {
+                base_url.map(|value| join_api_endpoint(&value, "models"))
+            } else {
+                base_url
+            };
+            let headers = if provider_type.as_deref() == Some("github_copilot") {
+                resolve_copilot_headers(app_handle, &parsed).await?
+            } else {
+                let mut headers = Vec::new();
+                if let Some(token) = env
+                    .get("ANTHROPIC_AUTH_TOKEN")
+                    .or_else(|| env.get("ANTHROPIC_API_KEY"))
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    let api_format = env
+                        .get("ANTHROPIC_API_FORMAT")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("anthropic");
+                    if api_format == "anthropic" {
+                        headers.push(("x-api-key".to_string(), token.to_string()));
+                        headers.push(("anthropic-version".to_string(), "2023-06-01".to_string()));
+                    } else {
+                        headers.push(("authorization".to_string(), format!("Bearer {token}")));
+                    }
+                }
+                headers
+            };
+            Ok((base_url, headers))
+        }
+        "codex" => {
+            let config = parsed
+                .get("config")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            let base_url = parse_toml_assignment(config, "base_url");
+            let mut headers = Vec::new();
+            if let Some(token) = parsed
+                .get("auth")
+                .and_then(|value| value.get("OPENAI_API_KEY"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                headers.push(("authorization".to_string(), format!("Bearer {token}")));
+            }
+            Ok((base_url, headers))
+        }
+        "gemini" => {
+            let env = parsed
+                .get("env")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let base_url = env
+                .get("GOOGLE_GEMINI_BASE_URL")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let mut headers = Vec::new();
+            if let Some(token) = env
+                .get("GEMINI_API_KEY")
+                .or_else(|| env.get("GOOGLE_API_KEY"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                headers.push(("x-goog-api-key".to_string(), token.to_string()));
+            }
+            Ok((base_url, headers))
+        }
+        "openclaw" => {
+            let base_url = parsed
+                .get("baseUrl")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let mut headers = Vec::new();
+            if let Some(token) = parsed
+                .get("apiKey")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                headers.push(("authorization".to_string(), format!("Bearer {token}")));
+            }
+            Ok((base_url, headers))
+        }
+        "opencode" => {
+            let base_url = parsed
+                .get("options")
+                .and_then(|value| value.get("baseURL"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let mut headers = Vec::new();
+            if let Some(token) = parsed
+                .get("options")
+                .and_then(|value| value.get("apiKey"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                headers.push(("authorization".to_string(), format!("Bearer {token}")));
+            }
+            Ok((base_url, headers))
+        }
+        _ => Ok((None, Vec::new())),
+    }
+}
+
+async fn extract_stream_check_request(
+    app_handle: &AppHandle,
+    profile: &ConfigProfile,
+) -> Result<StreamCheckRequestSpec, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&profile.config_snapshot).map_err(|e| e.to_string())?;
+    let provider_type = extract_provider_type_from_snapshot(&parsed);
+
+    match profile.tool_id.as_str() {
+        "claude" => {
+            let env = parsed
+                .get("env")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let base_url = env
+                .get("ANTHROPIC_BASE_URL")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("https://api.anthropic.com");
+            let model = env
+                .get("ANTHROPIC_MODEL")
+                .or_else(|| env.get("ANTHROPIC_DEFAULT_SONNET_MODEL"))
+                .or_else(|| env.get("ANTHROPIC_REASONING_MODEL"))
+                .or_else(|| env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"))
+                .or_else(|| env.get("ANTHROPIC_DEFAULT_OPUS_MODEL"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("claude-sonnet-4-5");
+            let api_format = env
+                .get("ANTHROPIC_API_FORMAT")
+                .and_then(|value| value.as_str())
+                .unwrap_or("anthropic");
+
+            if provider_type.as_deref() == Some("github_copilot") || api_format == "openai_chat" {
+                let headers = if provider_type.as_deref() == Some("github_copilot") {
+                    resolve_copilot_headers(app_handle, &parsed).await?
+                } else {
+                    let token = env
+                        .get("ANTHROPIC_AUTH_TOKEN")
+                        .or_else(|| env.get("ANTHROPIC_API_KEY"))
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| "No Claude API token configured".to_string())?;
+                    vec![("authorization".to_string(), format!("Bearer {token}"))]
+                };
+                return Ok(StreamCheckRequestSpec {
+                    endpoint: build_openai_chat_endpoint(base_url, provider_type.as_deref()),
+                    headers,
+                    body: serde_json::json!({
+                        "model": model,
+                        "stream": true,
+                        "max_tokens": 16,
+                        "messages": [
+                            { "role": "user", "content": "Reply with OK." }
+                        ],
+                    }),
+                });
+            }
+
+            if api_format == "openai_responses" {
+                let token = env
+                    .get("ANTHROPIC_AUTH_TOKEN")
+                    .or_else(|| env.get("ANTHROPIC_API_KEY"))
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "No Claude API token configured".to_string())?;
+                return Ok(StreamCheckRequestSpec {
+                    endpoint: join_api_endpoint(base_url, "v1/responses"),
+                    headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                    body: serde_json::json!({
+                        "model": model,
+                        "stream": true,
+                        "max_output_tokens": 16,
+                        "input": "Reply with OK.",
+                    }),
+                });
+            }
+
+            let token = env
+                .get("ANTHROPIC_AUTH_TOKEN")
+                .or_else(|| env.get("ANTHROPIC_API_KEY"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No Claude API token configured".to_string())?;
+
+            Ok(StreamCheckRequestSpec {
+                endpoint: build_claude_messages_endpoint(base_url),
+                headers: vec![
+                    ("x-api-key".to_string(), token.to_string()),
+                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                ],
+                body: serde_json::json!({
+                    "model": model,
+                    "max_tokens": 16,
+                    "stream": true,
+                    "messages": [
+                        { "role": "user", "content": "Reply with OK." }
+                    ],
+                }),
+            })
+        }
+        "codex" => {
+            let config = parsed
+                .get("config")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            let token = parsed
+                .get("auth")
+                .and_then(|value| value.get("OPENAI_API_KEY"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No Codex OPENAI_API_KEY configured".to_string())?;
+            let base_url = parse_toml_assignment(config, "base_url")
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+            let wire_api = parse_toml_assignment(config, "wire_api")
+                .unwrap_or_else(|| "responses".to_string());
+            let model =
+                parse_toml_assignment(config, "model").unwrap_or_else(|| "gpt-5.4".to_string());
+            let (endpoint, body) = if wire_api == "chat" {
+                (
+                    join_api_endpoint(&base_url, "chat/completions"),
+                    serde_json::json!({
+                        "model": model,
+                        "stream": true,
+                        "max_tokens": 16,
+                        "messages": [
+                            { "role": "user", "content": "Reply with OK." }
+                        ],
+                    }),
+                )
+            } else {
+                (
+                    join_api_endpoint(&base_url, "responses"),
+                    serde_json::json!({
+                        "model": model,
+                        "stream": true,
+                        "max_output_tokens": 16,
+                        "input": "Reply with OK.",
+                    }),
+                )
+            };
+
+            Ok(StreamCheckRequestSpec {
+                endpoint,
+                headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                body,
+            })
+        }
+        "gemini" => {
+            let env = parsed
+                .get("env")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let token = env
+                .get("GEMINI_API_KEY")
+                .or_else(|| env.get("GOOGLE_API_KEY"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No Gemini API key configured".to_string())?;
+            let base_url = env
+                .get("GOOGLE_GEMINI_BASE_URL")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("https://generativelanguage.googleapis.com/v1beta");
+            let model = env
+                .get("GEMINI_MODEL")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("gemini-2.5-flash");
+
+            Ok(StreamCheckRequestSpec {
+                endpoint: build_gemini_stream_endpoint(base_url, model),
+                headers: vec![("x-goog-api-key".to_string(), token.to_string())],
+                body: serde_json::json!({
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [{ "text": "Reply with OK." }]
+                        }
+                    ],
+                    "generationConfig": {
+                        "maxOutputTokens": 16
+                    }
+                }),
+            })
+        }
+        "openclaw" => {
+            let api = parsed
+                .get("api")
+                .and_then(|value| value.as_str())
+                .unwrap_or("openai-completions");
+            let base_url = parsed
+                .get("baseUrl")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No OpenClaw baseUrl configured".to_string())?;
+            let api_key = parsed
+                .get("apiKey")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let model = parsed
+                .get("models")
+                .and_then(|value| value.as_array())
+                .and_then(|models| models.first())
+                .and_then(|value| value.get("id"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("gpt-5.4");
+
+            match api {
+                "openai-responses" => {
+                    let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
+                    Ok(StreamCheckRequestSpec {
+                        endpoint: join_api_endpoint(base_url, "responses"),
+                        headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                        body: serde_json::json!({
+                            "model": model,
+                            "stream": true,
+                            "max_output_tokens": 16,
+                            "input": "Reply with OK.",
+                        }),
+                    })
+                }
+                "anthropic-messages" => {
+                    let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
+                    Ok(StreamCheckRequestSpec {
+                        endpoint: build_claude_messages_endpoint(base_url),
+                        headers: vec![
+                            ("x-api-key".to_string(), token),
+                            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                        ],
+                        body: serde_json::json!({
+                            "model": model,
+                            "max_tokens": 16,
+                            "stream": true,
+                            "messages": [
+                                { "role": "user", "content": "Reply with OK." }
+                            ],
+                        }),
+                    })
+                }
+                "google-generative-ai" => {
+                    let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
+                    Ok(StreamCheckRequestSpec {
+                        endpoint: build_gemini_stream_endpoint(base_url, model),
+                        headers: vec![("x-goog-api-key".to_string(), token)],
+                        body: serde_json::json!({
+                            "contents": [
+                                {
+                                    "role": "user",
+                                    "parts": [{ "text": "Reply with OK." }]
+                                }
+                            ],
+                            "generationConfig": {
+                                "maxOutputTokens": 16
+                            }
+                        }),
+                    })
+                }
+                "bedrock-converse-stream" => Err("AWS Bedrock ConverseStream requires SigV4 signing and is not yet supported for stream checks".to_string()),
+                _ => {
+                    let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
+                    Ok(StreamCheckRequestSpec {
+                        endpoint: join_api_endpoint(base_url, "chat/completions"),
+                        headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                        body: serde_json::json!({
+                            "model": model,
+                            "stream": true,
+                            "max_tokens": 16,
+                            "messages": [
+                                { "role": "user", "content": "Reply with OK." }
+                            ],
+                        }),
+                    })
+                }
             }
         }
+        "opencode" => {
+            let npm = parsed
+                .get("npm")
+                .and_then(|value| value.as_str())
+                .unwrap_or("@ai-sdk/openai-compatible");
+            let options = parsed
+                .get("options")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let base_url = options
+                .get("baseURL")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("https://api.openai.com/v1");
+            let token = options
+                .get("apiKey")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No OpenCode API key configured".to_string())?;
+            let model = parsed
+                .get("models")
+                .and_then(|value| value.as_object())
+                .and_then(|value| value.keys().next().cloned())
+                .unwrap_or_else(|| "gpt-5.4".to_string());
+
+            if npm.contains("anthropic") {
+                Ok(StreamCheckRequestSpec {
+                    endpoint: build_claude_messages_endpoint(base_url),
+                    headers: vec![
+                        ("x-api-key".to_string(), token.to_string()),
+                        ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                    ],
+                    body: serde_json::json!({
+                        "model": model,
+                        "max_tokens": 16,
+                        "stream": true,
+                        "messages": [
+                            { "role": "user", "content": "Reply with OK." }
+                        ],
+                    }),
+                })
+            } else if npm.contains("google") {
+                Ok(StreamCheckRequestSpec {
+                    endpoint: build_gemini_stream_endpoint(base_url, &model),
+                    headers: vec![("x-goog-api-key".to_string(), token.to_string())],
+                    body: serde_json::json!({
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [{ "text": "Reply with OK." }]
+                            }
+                        ],
+                        "generationConfig": {
+                            "maxOutputTokens": 16
+                        }
+                    }),
+                })
+            } else if npm == "@ai-sdk/openai" {
+                Ok(StreamCheckRequestSpec {
+                    endpoint: join_api_endpoint(base_url, "responses"),
+                    headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                    body: serde_json::json!({
+                        "model": model,
+                        "stream": true,
+                        "max_output_tokens": 16,
+                        "input": "Reply with OK.",
+                    }),
+                })
+            } else {
+                Ok(StreamCheckRequestSpec {
+                    endpoint: join_api_endpoint(base_url, "chat/completions"),
+                    headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                    body: serde_json::json!({
+                        "model": model,
+                        "stream": true,
+                        "max_tokens": 16,
+                        "messages": [
+                            { "role": "user", "content": "Reply with OK." }
+                        ],
+                    }),
+                })
+            }
+        }
+        _ => Err("Stream check is not supported for this profile".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn probe_config_profile(
+    id: String,
+    app_handle: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<ProviderProbeResult, String> {
+    let (profile, client) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let profile = read_all_config_profiles_from_conn(&conn)?
+            .into_iter()
+            .find(|profile| profile.id == id)
+            .ok_or_else(|| format!("Profile not found: {id}"))?;
+        let client = build_provider_probe_client(&conn)?;
+        (profile, client)
+    };
+
+    let checked_at = chrono::Utc::now().to_rfc3339();
+    let (base_url, headers) = match extract_probe_target(&app_handle, &profile).await {
+        Ok(value) => value,
+        Err(message) => {
+            let result = ProviderProbeResult {
+                profile_id: profile.id,
+                tool_id: profile.tool_id,
+                provider_name: profile.name,
+                base_url: None,
+                status: "unconfigured".to_string(),
+                latency_ms: None,
+                http_status: None,
+                checked_at,
+                message,
+            };
+            log_provider_result(
+                "probe",
+                &result.tool_id,
+                &result.provider_name,
+                result.base_url.as_deref(),
+                &result.status,
+                &result.message,
+            );
+            return Ok(result);
+        }
+    };
+
+    let result = if let Some(base_url) = base_url {
+        let started_at = std::time::Instant::now();
+        let mut request = client.get(&base_url);
+        for (name, value) in headers {
+            request = request.header(&name, value);
+        }
+
+        match request.send().await {
+            Ok(response) => {
+                let latency_ms = started_at.elapsed().as_millis() as u64;
+                let http_status = response.status().as_u16();
+                let status = if response.status().is_success() {
+                    "healthy"
+                } else if response.status().is_client_error() || response.status().is_server_error()
+                {
+                    "reachable"
+                } else {
+                    "unknown"
+                };
+
+                ProviderProbeResult {
+                    profile_id: profile.id,
+                    tool_id: profile.tool_id,
+                    provider_name: profile.name,
+                    base_url: Some(base_url),
+                    status: status.to_string(),
+                    latency_ms: Some(latency_ms),
+                    http_status: Some(http_status),
+                    checked_at,
+                    message: format!("Endpoint responded with HTTP {http_status}"),
+                }
+            }
+            Err(error) => ProviderProbeResult {
+                profile_id: profile.id,
+                tool_id: profile.tool_id,
+                provider_name: profile.name,
+                base_url: Some(base_url),
+                status: "error".to_string(),
+                latency_ms: None,
+                http_status: None,
+                checked_at,
+                message: error.to_string(),
+            },
+        }
+    } else {
+        ProviderProbeResult {
+            profile_id: profile.id,
+            tool_id: profile.tool_id,
+            provider_name: profile.name,
+            base_url: None,
+            status: "unconfigured".to_string(),
+            latency_ms: None,
+            http_status: None,
+            checked_at,
+            message: "No base URL configured for probing".to_string(),
+        }
+    };
+
+    log_provider_result(
+        "probe",
+        &result.tool_id,
+        &result.provider_name,
+        result.base_url.as_deref(),
+        &result.status,
+        &result.message,
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn stream_check_config_profile(
+    id: String,
+    app_handle: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<ProviderStreamCheckResult, String> {
+    let (profile, client) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let profile = read_all_config_profiles_from_conn(&conn)?
+            .into_iter()
+            .find(|profile| profile.id == id)
+            .ok_or_else(|| format!("Profile not found: {id}"))?;
+        let client = build_provider_probe_client(&conn)?;
+        (profile, client)
+    };
+
+    let checked_at = chrono::Utc::now().to_rfc3339();
+    let request = match extract_stream_check_request(&app_handle, &profile).await {
+        Ok(request) => request,
+        Err(message) => {
+            let status =
+                if message.contains("not yet supported") || message.contains("not supported") {
+                    "unsupported"
+                } else {
+                    "unconfigured"
+                };
+            let result = ProviderStreamCheckResult {
+                profile_id: profile.id,
+                tool_id: profile.tool_id,
+                provider_name: profile.name,
+                base_url: None,
+                status: status.to_string(),
+                latency_ms: None,
+                http_status: None,
+                checked_at,
+                message,
+            };
+            log_provider_result(
+                "stream-check",
+                &result.tool_id,
+                &result.provider_name,
+                result.base_url.as_deref(),
+                &result.status,
+                &result.message,
+            );
+            return Ok(result);
+        }
+    };
+    let StreamCheckRequestSpec {
+        endpoint,
+        headers,
+        body,
+    } = request;
+
+    let started_at = std::time::Instant::now();
+    let mut request_builder = client
+        .post(&endpoint)
+        .header("content-type", "application/json")
+        .header("accept", "text/event-stream, application/json");
+    for (name, value) in headers {
+        request_builder = request_builder.header(&name, value);
     }
 
-    for profile in profiles {
-        if resolved_tools.contains(&profile.tool_id) {
-            continue;
-        }
+    let result = match request_builder.json(&body).send().await {
+        Ok(mut response) => {
+            let latency_ms = started_at.elapsed().as_millis() as u64;
+            let http_status = response.status().as_u16();
 
-        if !cache.contains_key(&profile.tool_id) {
-            let content = read_tool_snapshot(&conn, &profile.tool_id).ok();
-            cache.insert(profile.tool_id.clone(), content);
+            if !response.status().is_success() {
+                let detail = response.text().await.unwrap_or_default();
+                ProviderStreamCheckResult {
+                    profile_id: profile.id,
+                    tool_id: profile.tool_id,
+                    provider_name: profile.name,
+                    base_url: Some(endpoint.clone()),
+                    status: "reachable".to_string(),
+                    latency_ms: Some(latency_ms),
+                    http_status: Some(http_status),
+                    checked_at,
+                    message: if detail.trim().is_empty() {
+                        format!("Endpoint responded with HTTP {http_status}")
+                    } else {
+                        format!(
+                            "HTTP {http_status}: {}",
+                            detail.chars().take(160).collect::<String>()
+                        )
+                    },
+                }
+            } else {
+                match tokio::time::timeout(std::time::Duration::from_secs(15), response.chunk()).await {
+                    Ok(Ok(Some(chunk))) => ProviderStreamCheckResult {
+                        profile_id: profile.id,
+                        tool_id: profile.tool_id,
+                        provider_name: profile.name,
+                        base_url: Some(endpoint.clone()),
+                        status: "healthy".to_string(),
+                        latency_ms: Some(latency_ms),
+                        http_status: Some(http_status),
+                        checked_at,
+                        message: format!("Received first stream chunk ({} bytes)", chunk.len()),
+                    },
+                    Ok(Ok(None)) => ProviderStreamCheckResult {
+                        profile_id: profile.id,
+                        tool_id: profile.tool_id,
+                        provider_name: profile.name,
+                        base_url: Some(endpoint.clone()),
+                        status: "reachable".to_string(),
+                        latency_ms: Some(latency_ms),
+                        http_status: Some(http_status),
+                        checked_at,
+                        message: "Stream endpoint closed without returning chunks".to_string(),
+                    },
+                    Ok(Err(error)) => ProviderStreamCheckResult {
+                        profile_id: profile.id,
+                        tool_id: profile.tool_id,
+                        provider_name: profile.name,
+                        base_url: Some(endpoint.clone()),
+                        status: "error".to_string(),
+                        latency_ms: Some(latency_ms),
+                        http_status: Some(http_status),
+                        checked_at,
+                        message: error.to_string(),
+                    },
+                    Err(_) => ProviderStreamCheckResult {
+                        profile_id: profile.id,
+                        tool_id: profile.tool_id,
+                        provider_name: profile.name,
+                        base_url: Some(endpoint.clone()),
+                        status: "reachable".to_string(),
+                        latency_ms: Some(latency_ms),
+                        http_status: Some(http_status),
+                        checked_at,
+                        message: "Connected successfully but did not receive a stream chunk within 15 seconds".to_string(),
+                    },
+                }
+            }
         }
+        Err(error) => ProviderStreamCheckResult {
+            profile_id: profile.id,
+            tool_id: profile.tool_id,
+            provider_name: profile.name,
+            base_url: Some(endpoint),
+            status: "error".to_string(),
+            latency_ms: None,
+            http_status: None,
+            checked_at,
+            message: error.to_string(),
+        },
+    };
 
-        if cache
-            .get(&profile.tool_id)
-            .and_then(|value| value.as_ref())
-            .is_some_and(|value| config_contents_match(value, &profile.config_snapshot))
-        {
-            active_ids.push(profile.id);
-            resolved_tools.insert(profile.tool_id.clone());
-        }
-    }
-
-    Ok(active_ids)
+    log_provider_result(
+        "stream-check",
+        &result.tool_id,
+        &result.provider_name,
+        result.base_url.as_deref(),
+        &result.status,
+        &result.message,
+    );
+    Ok(result)
 }
 
 // ── Proxy Settings ──
@@ -1691,16 +4538,22 @@ pub fn set_proxy(proxy_url: String, db: State<'_, DbState>) -> Result<(), String
         std::env::remove_var("HTTPS_PROXY");
         std::env::remove_var("http_proxy");
         std::env::remove_var("https_proxy");
-        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', '')", [])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', '')",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
     } else {
         let url = proxy_url.trim().to_string();
         std::env::set_var("HTTP_PROXY", &url);
         std::env::set_var("HTTPS_PROXY", &url);
         std::env::set_var("http_proxy", &url);
         std::env::set_var("https_proxy", &url);
-        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', ?1)", rusqlite::params![url])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', ?1)",
+            rusqlite::params![url],
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -1723,6 +4576,142 @@ pub fn get_proxy(db: State<'_, DbState>) -> String {
     std::env::var("HTTPS_PROXY")
         .or_else(|_| std::env::var("https_proxy"))
         .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn get_visible_apps(db: State<'_, DbState>) -> Result<Vec<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let stored = get_json_app_setting::<Vec<String>>(&conn, VISIBLE_APPS_SETTING_KEY)?;
+    Ok(stored
+        .map(normalize_visible_apps)
+        .unwrap_or_else(default_visible_apps))
+}
+
+#[tauri::command]
+pub fn set_visible_apps(
+    visible_apps: Vec<String>,
+    db: State<'_, DbState>,
+) -> Result<Vec<String>, String> {
+    let normalized = normalize_visible_apps(visible_apps);
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    set_json_app_setting(&conn, VISIBLE_APPS_SETTING_KEY, &normalized)?;
+    Ok(normalized)
+}
+
+#[tauri::command]
+pub fn get_window_preferences(db: State<'_, DbState>) -> Result<WindowPreferences, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(read_window_preferences_from_conn(&conn))
+}
+
+#[tauri::command]
+pub fn get_log_preferences(db: State<'_, DbState>) -> Result<LogPreferences, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(read_log_preferences_from_conn(&conn))
+}
+
+#[tauri::command]
+pub fn set_log_preferences(
+    preferences: LogPreferences,
+    db: State<'_, DbState>,
+) -> Result<LogPreferences, String> {
+    let sanitized = LogPreferences {
+        level: normalize_log_level(&preferences.level),
+    };
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    set_json_app_setting(&conn, LOG_PREFERENCES_SETTING_KEY, &sanitized)?;
+    apply_log_preferences(&sanitized);
+    crate::utils::append_runtime_log(
+        "info",
+        "settings",
+        &format!("Log level changed to {}", sanitized.level),
+    );
+    Ok(sanitized)
+}
+
+#[tauri::command]
+pub fn get_log_file_targets() -> LogFileTargets {
+    build_log_file_targets()
+}
+
+#[tauri::command]
+pub fn get_updater_environment_state() -> UpdaterEnvironmentState {
+    updater_environment_state()
+}
+
+#[tauri::command]
+pub fn set_window_preferences(
+    preferences: WindowPreferences,
+    db: State<'_, DbState>,
+) -> Result<WindowPreferences, String> {
+    sync_launch_at_login(preferences.launch_at_login)?;
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    set_json_app_setting(&conn, WINDOW_PREFERENCES_SETTING_KEY, &preferences)?;
+    Ok(preferences)
+}
+
+#[tauri::command]
+pub fn get_terminal_preferences(db: State<'_, DbState>) -> Result<TerminalPreferences, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    read_terminal_preferences_from_conn(&conn)
+}
+
+#[tauri::command]
+pub fn set_preferred_terminal(
+    terminal_id: String,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let preferences = read_terminal_preferences_from_conn(&conn)?;
+    if !preferences
+        .options
+        .iter()
+        .any(|option| option.id == terminal_id)
+    {
+        return Err(format!("Unsupported terminal: {terminal_id}"));
+    }
+    set_text_app_setting(&conn, PREFERRED_TERMINAL_SETTING_KEY, &terminal_id)?;
+    Ok(terminal_id)
+}
+
+#[tauri::command]
+pub fn open_in_preferred_terminal(
+    path: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let preferences = read_terminal_preferences_from_conn(&conn)?;
+    drop(conn);
+    let target_dir = normalize_terminal_target(path)?;
+    launch_preferred_terminal_impl(&preferences, &target_dir, None).map(|_| ())
+}
+
+#[tauri::command]
+pub fn resume_session_in_preferred_terminal(
+    tool_id: String,
+    session_id: String,
+    cwd: Option<String>,
+    source_path: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<SessionResumeResult, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let preferences = read_terminal_preferences_from_conn(&conn)?;
+    drop(conn);
+
+    let command = build_session_resume_command(&tool_id, &session_id, source_path.as_deref())?;
+    let target_dir = normalize_terminal_target(cwd)?;
+    let launched = launch_preferred_terminal_impl(&preferences, &target_dir, Some(&command))?;
+
+    Ok(SessionResumeResult {
+        launched,
+        command,
+        cwd: Some(target_dir.to_string_lossy().to_string()),
+    })
+}
+
+#[tauri::command]
+pub fn get_environment_conflicts() -> Result<Vec<EnvironmentConflict>, String> {
+    Ok(scan_environment_conflicts())
 }
 
 /// Open a native folder picker dialog and return the selected path
@@ -1753,17 +4742,1167 @@ pub fn read_tool_config(tool_id: String, db: State<'_, DbState>) -> Result<Strin
     read_tool_snapshot(&conn, &tool_id)
 }
 
+#[tauri::command]
+pub fn search_openclaw_daily_memory(
+    query: Option<String>,
+    limit: Option<usize>,
+    db: State<'_, DbState>,
+) -> Result<Vec<OpenClawDailyMemoryEntry>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let query = query.and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+    let max_results = limit.unwrap_or(30).clamp(1, 100);
+    let mut entries = Vec::new();
+    let mut scanned_roots = HashSet::new();
+
+    if let Some(home) = dirs::home_dir() {
+        let global_dir = home.join(".openclaw");
+        if global_dir.exists() && scanned_roots.insert(global_dir.to_string_lossy().to_string()) {
+            collect_openclaw_daily_memory_files(
+                &global_dir,
+                &global_dir,
+                "global",
+                None,
+                query.as_deref(),
+                &mut entries,
+                0,
+            );
+        }
+    }
+
+    for project_root in discover_project_roots(&conn) {
+        let project_name = project_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_string())
+            .unwrap_or_else(|| project_root.to_string_lossy().to_string());
+        let memory_root = project_root.join(".openclaw");
+        if !memory_root.exists() {
+            continue;
+        }
+        let key = memory_root.to_string_lossy().to_string();
+        if !scanned_roots.insert(key) {
+            continue;
+        }
+        collect_openclaw_daily_memory_files(
+            &memory_root,
+            &memory_root,
+            "project",
+            Some(&project_name),
+            query.as_deref(),
+            &mut entries,
+            0,
+        );
+    }
+
+    entries.sort_by(|a, b| {
+        b.modified_at
+            .cmp(&a.modified_at)
+            .then_with(|| a.file_name.cmp(&b.file_name))
+    });
+    entries.truncate(max_results);
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn read_openclaw_daily_memory_content(
+    path: String,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let path_buf = std::path::PathBuf::from(&path);
+    if !is_valid_openclaw_daily_memory_path(&path_buf, &conn) {
+        return Err("Invalid OpenClaw Daily Memory path".to_string());
+    }
+    std::fs::read_to_string(path_buf).map_err(|e| e.to_string())
+}
+
+fn load_codex_history_index(root: &std::path::Path) -> HashMap<String, Vec<String>> {
+    let mut index = HashMap::new();
+    let history_path = root.join("history.jsonl");
+    let file = match std::fs::File::open(history_path) {
+        Ok(file) => file,
+        Err(_) => return index,
+    };
+
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let Some(session_id) = value.get("session_id").and_then(|item| item.as_str()) else {
+            continue;
+        };
+        let Some(text) = value.get("text").and_then(|item| item.as_str()) else {
+            continue;
+        };
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        index
+            .entry(session_id.to_string())
+            .or_insert_with(Vec::new)
+            .push(trimmed.to_string());
+    }
+
+    index
+}
+
+fn codex_state_databases(root: &std::path::Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Ok(read_dir) = std::fs::read_dir(root) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let file_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !file_name.starts_with("state_") || !file_name.ends_with(".sqlite") {
+                continue;
+            }
+            if seen.insert(path.to_string_lossy().to_string()) {
+                paths.push(path);
+            }
+        }
+    }
+
+    let fallback = root.join("state.sqlite");
+    if fallback.exists() && seen.insert(fallback.to_string_lossy().to_string()) {
+        paths.push(fallback);
+    }
+
+    paths.sort();
+    paths.reverse();
+    paths
+}
+
+fn scan_codex_sessions(
+    conn: &rusqlite::Connection,
+    query: &str,
+) -> Result<Vec<SessionSummary>, String> {
+    let root = resolve_tool_config_dir(conn, "codex")?;
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let history_index = load_codex_history_index(&root);
+    let mut sessions = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    for db_path in codex_state_databases(&root) {
+        let external = match rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) {
+            Ok(conn) => conn,
+            Err(_) => continue,
+        };
+
+        let mut stmt = match external.prepare(
+            "SELECT id, rollout_path, created_at, updated_at, cwd, title, first_user_message
+             FROM threads
+             ORDER BY updated_at DESC",
+        ) {
+            Ok(stmt) => stmt,
+            Err(_) => continue,
+        };
+
+        let rows = match stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        }) {
+            Ok(rows) => rows,
+            Err(_) => continue,
+        };
+
+        for row in rows {
+            let (id, rollout_path, created_at_raw, updated_at_raw, cwd, title, first_user_message) =
+                row.map_err(|e| e.to_string())?;
+            if !seen_ids.insert(id.clone()) {
+                continue;
+            }
+
+            let history_items = history_index.get(&id).cloned().unwrap_or_default();
+            let preview_source = history_items
+                .last()
+                .cloned()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    let trimmed = first_user_message.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                })
+                .unwrap_or_else(|| title.clone());
+            let preview = truncate_session_text(&preview_source, 180);
+            let search_values = vec![
+                title.clone(),
+                preview.clone(),
+                cwd.clone(),
+                first_user_message.clone(),
+            ];
+            let search_hit_count = count_query_hits(query, &search_values);
+            if !query.is_empty() && search_hit_count == 0 {
+                continue;
+            }
+
+            sessions.push(SessionSummary {
+                id,
+                tool_id: "codex".to_string(),
+                tool_name: "Codex".to_string(),
+                title: if title.trim().is_empty() {
+                    truncate_session_text(&preview_source, 80)
+                } else {
+                    title
+                },
+                cwd: (!cwd.trim().is_empty()).then_some(cwd),
+                source_kind: "codex_jsonl".to_string(),
+                source_backend: "jsonl".to_string(),
+                source_path: rollout_path,
+                created_at: format_unix_timestamp(created_at_raw),
+                updated_at: format_unix_timestamp(updated_at_raw),
+                preview,
+                message_count: history_items.len(),
+                search_hit_count,
+                can_resume: tool_supports_session_resume("codex"),
+                can_delete: true,
+            });
+        }
+    }
+
+    if !sessions.is_empty() {
+        return Ok(sessions);
+    }
+
+    scan_generic_tool_sessions(conn, "codex", query)
+}
+
+fn parse_generic_jsonl_session_summary(
+    tool_id: &str,
+    path: &std::path::Path,
+    query: &str,
+) -> Option<SessionSummary> {
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = std::fs::metadata(path).ok();
+    let file_stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_string();
+
+    let mut session_id = file_stem.clone();
+    let mut title: Option<String> = None;
+    let mut cwd: Option<String> = None;
+    let mut created_at: Option<String> = metadata
+        .as_ref()
+        .and_then(|value| value.created().ok())
+        .map(format_local_datetime);
+    let mut updated_at: Option<String> = metadata
+        .as_ref()
+        .and_then(|value| value.modified().ok())
+        .map(format_local_datetime);
+    let mut preview: Option<String> = None;
+    let mut message_count = 0usize;
+
+    for line in BufReader::new(file).lines().map_while(Result::ok).take(120) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+
+        if let Some(found_id) = value.get("session_id").and_then(|item| item.as_str()) {
+            if !found_id.trim().is_empty() {
+                session_id = found_id.trim().to_string();
+            }
+        } else if value.get("type").and_then(|item| item.as_str()) == Some("session_meta") {
+            if let Some(found_id) = value
+                .get("payload")
+                .and_then(|item| item.get("id"))
+                .and_then(|item| item.as_str())
+            {
+                if !found_id.trim().is_empty() {
+                    session_id = found_id.trim().to_string();
+                }
+            }
+        }
+
+        if title.is_none() {
+            title = value
+                .get("title")
+                .and_then(|item| item.as_str())
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .or_else(|| {
+                    value
+                        .get("payload")
+                        .and_then(|item| item.get("title"))
+                        .and_then(|item| item.as_str())
+                        .map(|item| item.trim().to_string())
+                        .filter(|item| !item.is_empty())
+                });
+        }
+
+        if cwd.is_none() {
+            cwd = value
+                .get("cwd")
+                .and_then(|item| item.as_str())
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .or_else(|| {
+                    value
+                        .get("payload")
+                        .and_then(|item| item.get("cwd"))
+                        .and_then(|item| item.as_str())
+                        .map(|item| item.trim().to_string())
+                        .filter(|item| !item.is_empty())
+                });
+        }
+
+        if let Some(timestamp) = value.get("timestamp").and_then(|item| item.as_str()) {
+            let formatted = format_timestamp_text(timestamp);
+            if created_at.is_none() {
+                created_at = formatted.clone();
+            }
+            updated_at = formatted.or(updated_at);
+        } else if let Some(ts) = value.get("ts").and_then(|item| item.as_i64()) {
+            let formatted = format_unix_timestamp(ts);
+            if created_at.is_none() {
+                created_at = formatted.clone();
+            }
+            updated_at = formatted.or(updated_at);
+        }
+
+        let mut texts = Vec::new();
+        preferred_texts_from_value(&value, &mut texts, 0);
+        if let Some(text) = texts.into_iter().find(|item| !item.trim().is_empty()) {
+            message_count += 1;
+            if preview.is_none() {
+                preview = Some(truncate_session_text(&text, 180));
+            }
+            if title.is_none() {
+                title = Some(truncate_session_text(&text, 80));
+            }
+        }
+    }
+
+    let preview = preview.unwrap_or_else(|| title.clone().unwrap_or_else(|| file_stem.clone()));
+    let title = title.unwrap_or_else(|| truncate_session_text(&preview, 80));
+    let search_values = vec![
+        title.clone(),
+        preview.clone(),
+        cwd.clone().unwrap_or_default(),
+        session_id.clone(),
+    ];
+    let search_hit_count = count_query_hits(query, &search_values);
+    if !query.is_empty() && search_hit_count == 0 {
+        return None;
+    }
+
+    Some(SessionSummary {
+        id: session_id,
+        tool_id: tool_id.to_string(),
+        tool_name: tool_label(tool_id).to_string(),
+        title,
+        cwd,
+        source_kind: format!("{tool_id}_jsonl"),
+        source_backend: "jsonl".to_string(),
+        source_path: path.to_string_lossy().to_string(),
+        created_at,
+        updated_at,
+        preview,
+        message_count,
+        search_hit_count,
+        can_resume: tool_supports_session_resume(tool_id),
+        can_delete: true,
+    })
+}
+
+fn sqlite_table_columns(
+    conn: &rusqlite::Connection,
+    table_name: &str,
+) -> Result<HashSet<String>, String> {
+    let sql = format!("PRAGMA table_info({table_name})");
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| e.to_string())?;
+
+    let mut columns = HashSet::new();
+    for row in rows {
+        columns.insert(row.map_err(|e| e.to_string())?.to_ascii_lowercase());
+    }
+    Ok(columns)
+}
+
+fn select_sqlite_expr(columns: &HashSet<String>, names: &[&str], fallback: &str) -> String {
+    for name in names {
+        if columns.contains(&name.to_ascii_lowercase()) {
+            return format!("CAST({name} AS TEXT)");
+        }
+    }
+    fallback.to_string()
+}
+
+fn scan_generic_sqlite_sessions(
+    tool_id: &str,
+    db_path: &std::path::Path,
+    query: &str,
+) -> Vec<SessionSummary> {
+    let external = match rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(conn) => conn,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut sessions = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    for table_name in ["threads", "sessions", "conversations"] {
+        let columns = match sqlite_table_columns(&external, table_name) {
+            Ok(columns) if !columns.is_empty() => columns,
+            _ => continue,
+        };
+
+        let id_column = if columns.contains("id") {
+            "id"
+        } else if columns.contains("session_id") {
+            "session_id"
+        } else if columns.contains("thread_id") {
+            "thread_id"
+        } else {
+            continue;
+        };
+        let title_expr = select_sqlite_expr(&columns, &["title", "name"], "''");
+        let cwd_expr = select_sqlite_expr(
+            &columns,
+            &["cwd", "working_directory", "project_path"],
+            "NULL",
+        );
+        let created_expr = select_sqlite_expr(
+            &columns,
+            &["created_at", "created_ts", "timestamp", "ts"],
+            "NULL",
+        );
+        let updated_expr = select_sqlite_expr(
+            &columns,
+            &[
+                "updated_at",
+                "updated_ts",
+                "last_updated_at",
+                "timestamp",
+                "ts",
+            ],
+            "NULL",
+        );
+        let sort_column = if columns.contains("updated_at") {
+            "updated_at"
+        } else if columns.contains("timestamp") {
+            "timestamp"
+        } else if columns.contains("created_at") {
+            "created_at"
+        } else {
+            "rowid"
+        };
+
+        let sql = format!(
+            "SELECT CAST({id_column} AS TEXT), {title_expr}, {cwd_expr}, {created_expr}, {updated_expr}
+             FROM {table_name}
+             ORDER BY {sort_column} DESC
+             LIMIT 200"
+        );
+        let mut stmt = match external.prepare(&sql) {
+            Ok(stmt) => stmt,
+            Err(_) => continue,
+        };
+
+        let rows = match stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        }) {
+            Ok(rows) => rows,
+            Err(_) => continue,
+        };
+
+        for row in rows.flatten() {
+            let (id, title_raw, cwd_raw, created_raw, updated_raw) = row;
+            if !seen_ids.insert(id.clone()) {
+                continue;
+            }
+            let title = title_raw
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{table_name} {id}"));
+            let cwd = cwd_raw
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let preview = cwd
+                .as_ref()
+                .map(|value| truncate_session_text(value, 180))
+                .unwrap_or_else(|| truncate_session_text(&title, 180));
+            let search_values = vec![
+                title.clone(),
+                preview.clone(),
+                cwd.clone().unwrap_or_default(),
+            ];
+            let search_hit_count = count_query_hits(query, &search_values);
+            if !query.is_empty() && search_hit_count == 0 {
+                continue;
+            }
+
+            sessions.push(SessionSummary {
+                id,
+                tool_id: tool_id.to_string(),
+                tool_name: tool_label(tool_id).to_string(),
+                title,
+                cwd,
+                source_kind: format!("{tool_id}_sqlite"),
+                source_backend: "sqlite".to_string(),
+                source_path: db_path.to_string_lossy().to_string(),
+                created_at: created_raw.as_deref().and_then(format_timestamp_text),
+                updated_at: updated_raw.as_deref().and_then(format_timestamp_text),
+                preview,
+                message_count: 0,
+                search_hit_count,
+                can_resume: tool_supports_session_resume(tool_id),
+                can_delete: false,
+            });
+        }
+    }
+
+    sessions
+}
+
+fn scan_generic_tool_sessions(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    query: &str,
+) -> Result<Vec<SessionSummary>, String> {
+    let mut jsonl_files = Vec::new();
+    let mut sqlite_files = Vec::new();
+    let mut seen_jsonl = HashSet::new();
+    let mut seen_sqlite = HashSet::new();
+
+    for root in session_roots_for_tool(conn, tool_id)? {
+        collect_session_candidate_files(
+            tool_id,
+            &root,
+            &root,
+            &mut jsonl_files,
+            &mut sqlite_files,
+            0,
+        );
+    }
+
+    let mut sessions = Vec::new();
+    for path in jsonl_files {
+        let key = path.to_string_lossy().to_string();
+        if !seen_jsonl.insert(key) {
+            continue;
+        }
+        if let Some(summary) = parse_generic_jsonl_session_summary(tool_id, &path, query) {
+            sessions.push(summary);
+        }
+    }
+
+    for path in sqlite_files {
+        let key = path.to_string_lossy().to_string();
+        if !seen_sqlite.insert(key) {
+            continue;
+        }
+        sessions.extend(scan_generic_sqlite_sessions(tool_id, &path, query));
+    }
+
+    Ok(sessions)
+}
+
+fn scan_sessions_from_conn(
+    conn: &rusqlite::Connection,
+    tool_id: Option<String>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<SessionSummary>, String> {
+    let query = normalize_session_query(query);
+    let max_results = limit.unwrap_or(200).clamp(1, 500);
+    let requested_tool = tool_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let tool_ids: Vec<&str> = match requested_tool {
+        Some("claude") => vec!["claude"],
+        Some("codex") => vec!["codex"],
+        Some("gemini") => vec!["gemini"],
+        Some("opencode") => vec!["opencode"],
+        Some("openclaw") => vec!["openclaw"],
+        _ => vec!["claude", "codex", "gemini", "opencode", "openclaw"],
+    };
+
+    let mut sessions = Vec::new();
+    for tool in tool_ids {
+        if tool == "codex" {
+            sessions.extend(scan_codex_sessions(conn, &query)?);
+        } else {
+            sessions.extend(scan_generic_tool_sessions(conn, tool, &query)?);
+        }
+    }
+
+    sessions.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| left.title.to_lowercase().cmp(&right.title.to_lowercase()))
+    });
+    sessions.truncate(max_results);
+    Ok(sessions)
+}
+
+fn codex_message_content(content: Option<&serde_json::Value>) -> String {
+    let mut texts = Vec::new();
+    if let Some(content) = content {
+        preferred_texts_from_value(content, &mut texts, 0);
+    }
+    texts.join("\n\n")
+}
+
+fn parse_codex_session_entries(path: &std::path::Path) -> Result<Vec<SessionEntry>, String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+
+    for (index, line) in BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .enumerate()
+    {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let timestamp = value
+            .get("timestamp")
+            .and_then(|item| item.as_str())
+            .and_then(format_timestamp_text);
+        let item_type = value
+            .get("type")
+            .and_then(|item| item.as_str())
+            .unwrap_or_default();
+
+        match item_type {
+            "response_item" => {
+                let Some(payload) = value.get("payload") else {
+                    continue;
+                };
+                let payload_type = payload
+                    .get("type")
+                    .and_then(|item| item.as_str())
+                    .unwrap_or_default();
+                match payload_type {
+                    "message" => {
+                        let role = payload
+                            .get("role")
+                            .and_then(|item| item.as_str())
+                            .unwrap_or("assistant");
+                        if matches!(role, "developer" | "system") {
+                            continue;
+                        }
+                        let content = codex_message_content(payload.get("content"));
+                        if content.trim().is_empty() {
+                            continue;
+                        }
+                        entries.push(SessionEntry {
+                            id: format!("entry-{index}"),
+                            kind: role.to_string(),
+                            title: match role {
+                                "user" => "User".to_string(),
+                                "assistant" => "Assistant".to_string(),
+                                _ => role.to_string(),
+                            },
+                            content,
+                            timestamp,
+                        });
+                    }
+                    "function_call" => {
+                        let name = payload
+                            .get("name")
+                            .and_then(|item| item.as_str())
+                            .unwrap_or("tool");
+                        let content = payload
+                            .get("arguments")
+                            .and_then(|item| item.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        entries.push(SessionEntry {
+                            id: format!("entry-{index}"),
+                            kind: "tool_call".to_string(),
+                            title: format!("Call {name}"),
+                            content,
+                            timestamp,
+                        });
+                    }
+                    "function_call_output" => {
+                        let content = payload
+                            .get("output")
+                            .and_then(|item| item.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if content.trim().is_empty() {
+                            continue;
+                        }
+                        entries.push(SessionEntry {
+                            id: format!("entry-{index}"),
+                            kind: "tool_output".to_string(),
+                            title: "Tool Output".to_string(),
+                            content,
+                            timestamp,
+                        });
+                    }
+                    "reasoning" => {
+                        let mut texts = Vec::new();
+                        if let Some(summary) = payload.get("summary") {
+                            preferred_texts_from_value(summary, &mut texts, 0);
+                        }
+                        if texts.is_empty() {
+                            continue;
+                        }
+                        entries.push(SessionEntry {
+                            id: format!("entry-{index}"),
+                            kind: "reasoning".to_string(),
+                            title: "Reasoning".to_string(),
+                            content: texts.join("\n\n"),
+                            timestamp,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            "event_msg" => {
+                let Some(payload_type) = value
+                    .get("payload")
+                    .and_then(|item| item.get("type"))
+                    .and_then(|item| item.as_str())
+                else {
+                    continue;
+                };
+                if payload_type == "token_count" {
+                    continue;
+                }
+                entries.push(SessionEntry {
+                    id: format!("entry-{index}"),
+                    kind: "event".to_string(),
+                    title: payload_type.replace('_', " "),
+                    content: payload_type.to_string(),
+                    timestamp,
+                });
+            }
+            "turn_context" => {
+                let mut lines = Vec::new();
+                if let Some(cwd) = value
+                    .get("payload")
+                    .and_then(|item| item.get("cwd"))
+                    .and_then(|item| item.as_str())
+                {
+                    lines.push(format!("cwd: {cwd}"));
+                }
+                if let Some(model) = value
+                    .get("payload")
+                    .and_then(|item| item.get("model"))
+                    .and_then(|item| item.as_str())
+                {
+                    lines.push(format!("model: {model}"));
+                }
+                if let Some(approval) = value
+                    .get("payload")
+                    .and_then(|item| item.get("approval_policy"))
+                    .and_then(|item| item.as_str())
+                {
+                    lines.push(format!("approval: {approval}"));
+                }
+                if lines.is_empty() {
+                    continue;
+                }
+                entries.push(SessionEntry {
+                    id: format!("entry-{index}"),
+                    kind: "note".to_string(),
+                    title: "Context".to_string(),
+                    content: lines.join("\n"),
+                    timestamp,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Ok(entries)
+}
+
+fn parse_generic_jsonl_session_entries(
+    path: &std::path::Path,
+) -> Result<Vec<SessionEntry>, String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+
+    for (index, line) in BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .enumerate()
+    {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let mut texts = Vec::new();
+        preferred_texts_from_value(&value, &mut texts, 0);
+        let content = texts.join("\n\n");
+        if content.trim().is_empty() {
+            continue;
+        }
+        let kind = value
+            .get("role")
+            .and_then(|item| item.as_str())
+            .or_else(|| value.get("type").and_then(|item| item.as_str()))
+            .unwrap_or("entry")
+            .to_string();
+        let timestamp = value
+            .get("timestamp")
+            .and_then(|item| item.as_str())
+            .and_then(format_timestamp_text)
+            .or_else(|| {
+                value
+                    .get("ts")
+                    .and_then(|item| item.as_i64())
+                    .and_then(format_unix_timestamp)
+            });
+        entries.push(SessionEntry {
+            id: format!("entry-{index}"),
+            kind: kind.clone(),
+            title: kind.replace('_', " "),
+            content,
+            timestamp,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn load_generic_sqlite_entries(
+    db_path: &std::path::Path,
+    session_id: &str,
+) -> Result<Vec<SessionEntry>, String> {
+    let external =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| e.to_string())?;
+
+    for table_name in ["messages", "entries", "events"] {
+        let columns = match sqlite_table_columns(&external, table_name) {
+            Ok(columns) if !columns.is_empty() => columns,
+            _ => continue,
+        };
+        let session_column = if columns.contains("session_id") {
+            "session_id"
+        } else if columns.contains("thread_id") {
+            "thread_id"
+        } else if columns.contains("conversation_id") {
+            "conversation_id"
+        } else {
+            continue;
+        };
+        let role_expr = select_sqlite_expr(&columns, &["role", "kind", "type"], "'entry'");
+        let content_expr =
+            select_sqlite_expr(&columns, &["content", "text", "body", "message"], "''");
+        let timestamp_expr = select_sqlite_expr(
+            &columns,
+            &["created_at", "updated_at", "timestamp", "ts"],
+            "NULL",
+        );
+        let sort_column = if columns.contains("created_at") {
+            "created_at"
+        } else if columns.contains("timestamp") {
+            "timestamp"
+        } else {
+            "rowid"
+        };
+
+        let sql = format!(
+            "SELECT {role_expr}, {content_expr}, {timestamp_expr}
+             FROM {table_name}
+             WHERE CAST({session_column} AS TEXT) = ?1
+             ORDER BY {sort_column} ASC
+             LIMIT 400"
+        );
+        let mut stmt = match external.prepare(&sql) {
+            Ok(stmt) => stmt,
+            Err(_) => continue,
+        };
+
+        let rows = match stmt.query_map(rusqlite::params![session_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        }) {
+            Ok(rows) => rows,
+            Err(_) => continue,
+        };
+
+        let mut entries = Vec::new();
+        for (index, row) in rows.flatten().enumerate() {
+            let (role, content, timestamp) = row;
+            let content = content.unwrap_or_default();
+            if content.trim().is_empty() {
+                continue;
+            }
+            let kind = role.unwrap_or_else(|| "entry".to_string());
+            entries.push(SessionEntry {
+                id: format!("sqlite-entry-{index}"),
+                kind: kind.clone(),
+                title: kind.replace('_', " "),
+                content,
+                timestamp: timestamp.as_deref().and_then(format_timestamp_text),
+            });
+        }
+        if !entries.is_empty() {
+            return Ok(entries);
+        }
+    }
+
+    Ok(vec![SessionEntry {
+        id: "sqlite-fallback".to_string(),
+        kind: "note".to_string(),
+        title: "Metadata".to_string(),
+        content: format!("Session metadata is stored in {}", db_path.display()),
+        timestamp: None,
+    }])
+}
+
+fn load_session_detail(session: &SessionSummary) -> Result<SessionDetail, String> {
+    let source_path = std::path::PathBuf::from(&session.source_path);
+    let entries = if session.tool_id == "codex" && session.source_kind == "codex_jsonl" {
+        parse_codex_session_entries(&source_path)?
+    } else if session.source_backend == "jsonl" {
+        parse_generic_jsonl_session_entries(&source_path)?
+    } else {
+        load_generic_sqlite_entries(&source_path, &session.id)?
+    };
+
+    Ok(SessionDetail {
+        session: session.clone(),
+        entries,
+    })
+}
+
+fn is_valid_session_source_path(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    source_path: &str,
+) -> bool {
+    let source = PathBuf::from(source_path);
+    let normalized_source = source.canonicalize().unwrap_or(source);
+    let Ok(roots) = session_roots_for_tool(conn, tool_id) else {
+        return false;
+    };
+
+    roots.into_iter().any(|root| {
+        let normalized_root = root.canonicalize().unwrap_or(root);
+        normalized_source.starts_with(&normalized_root)
+    })
+}
+
+fn scrub_codex_history(root: &std::path::Path, session_id: &str) -> Result<(), String> {
+    let history_path = root.join("history.jsonl");
+    if !history_path.exists() {
+        return Ok(());
+    }
+
+    let file = std::fs::File::open(&history_path).map_err(|e| e.to_string())?;
+    let mut kept_lines = Vec::new();
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let keep = serde_json::from_str::<serde_json::Value>(&line)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("session_id")
+                    .and_then(|item| item.as_str())
+                    .map(|id| id != session_id)
+            })
+            .unwrap_or(true);
+        if keep {
+            kept_lines.push(line);
+        }
+    }
+
+    let content = if kept_lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", kept_lines.join("\n"))
+    };
+    crate::utils::atomic_write_string(&history_path, &content).map_err(|e| e.to_string())
+}
+
+fn delete_codex_session_records(root: &std::path::Path, session_id: &str) -> Result<(), String> {
+    scrub_codex_history(root, session_id)?;
+
+    for db_path in codex_state_databases(root) {
+        let conn = match rusqlite::Connection::open(&db_path) {
+            Ok(conn) => conn,
+            Err(_) => continue,
+        };
+        let _ = conn.execute(
+            "DELETE FROM thread_dynamic_tools WHERE thread_id = ?1",
+            rusqlite::params![session_id],
+        );
+        let _ = conn.execute(
+            "DELETE FROM thread_spawn_edges WHERE child_thread_id = ?1 OR parent_thread_id = ?1",
+            rusqlite::params![session_id],
+        );
+        let _ = conn.execute(
+            "DELETE FROM agent_job_items WHERE assigned_thread_id = ?1",
+            rusqlite::params![session_id],
+        );
+        let _ = conn.execute(
+            "DELETE FROM threads WHERE id = ?1",
+            rusqlite::params![session_id],
+        );
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_sessions(
+    tool_id: Option<String>,
+    query: Option<String>,
+    limit: Option<usize>,
+    db: State<'_, DbState>,
+) -> Result<Vec<SessionSummary>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    scan_sessions_from_conn(&conn, tool_id, query, limit)
+}
+
+#[tauri::command]
+pub fn get_session_detail(
+    tool_id: String,
+    session_id: String,
+    source_path: String,
+    source_kind: String,
+    source_backend: String,
+    cwd: Option<String>,
+    title: String,
+    preview: String,
+    created_at: Option<String>,
+    updated_at: Option<String>,
+    message_count: usize,
+    can_resume: bool,
+    can_delete: bool,
+    db: State<'_, DbState>,
+) -> Result<SessionDetail, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    if !is_valid_session_source_path(&conn, &tool_id, &source_path) {
+        return Err("Invalid session source path".to_string());
+    }
+
+    let summary = SessionSummary {
+        id: session_id,
+        tool_id: tool_id.clone(),
+        tool_name: tool_label(&tool_id).to_string(),
+        title,
+        cwd,
+        source_kind,
+        source_backend,
+        source_path,
+        created_at,
+        updated_at,
+        preview,
+        message_count,
+        search_hit_count: 0,
+        can_resume,
+        can_delete,
+    };
+    load_session_detail(&summary)
+}
+
+#[tauri::command]
+pub fn delete_session(
+    tool_id: String,
+    session_id: String,
+    source_path: String,
+    source_backend: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    if !is_valid_session_source_path(&conn, &tool_id, &source_path) {
+        return Err("Invalid session source path".to_string());
+    }
+    let root = resolve_tool_config_dir(&conn, &tool_id)?;
+    drop(conn);
+
+    if tool_id == "codex" {
+        delete_codex_session_records(&root, &session_id)?;
+    }
+
+    if source_backend == "jsonl" {
+        let path = PathBuf::from(source_path);
+        if path.exists() {
+            std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Write a tool's config file content
+#[tauri::command]
+pub fn write_tool_config(
+    tool_id: String,
+    content: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    apply_tool_snapshot(&conn, &tool_id, &content)?;
+    crate::utils::append_runtime_log(
+        "info",
+        "tools",
+        &format!("Updated tool config for {tool_id}"),
+    );
+    Ok(())
+}
+
 /// Get Claude Code permissions level (0=strict, 1=standard, 2=relaxed, 3=bypass)
 #[tauri::command]
 pub fn get_claude_permissions_level() -> Result<u32, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".claude").join("settings.json");
-    if !path.exists() { return Ok(0); }
+    if !path.exists() {
+        return Ok(0);
+    }
 
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
-    let mode = settings.get("permissions")
+    let mode = settings
+        .get("permissions")
         .and_then(|p| p.get("defaultMode"))
         .and_then(|m| m.as_str())
         .unwrap_or("");
@@ -1772,7 +5911,8 @@ pub fn get_claude_permissions_level() -> Result<u32, String> {
         return Ok(3);
     }
 
-    let allow = settings.get("permissions")
+    let allow = settings
+        .get("permissions")
         .and_then(|p| p.get("allow"))
         .and_then(|a| a.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
@@ -1802,18 +5942,44 @@ pub fn set_claude_permissions_level(level: u32) -> Result<(), String> {
 
     let (allow, mode, skip_prompt): (Vec<&str>, &str, bool) = match level {
         0 => (vec![], "normal", false),
-        1 => (vec![
-            "Read(*)", "Glob(*)", "Grep(*)", "WebSearch(*)",
-        ], "normal", false),
-        2 => (vec![
-            "Read(*)", "Write(*)", "Edit(*)", "Glob(*)", "Grep(*)",
-            "WebFetch(*)", "WebSearch(*)", "Agent(*)", "NotebookEdit(*)",
-        ], "normal", false),
-        3 => (vec![
-            "Bash(*)", "Read(*)", "Write(*)", "Edit(*)", "Glob(*)", "Grep(*)",
-            "WebFetch(*)", "WebSearch(*)", "Agent(*)", "NotebookEdit(*)",
-            "Skill(*)", "mcp__*",
-        ], "bypassPermissions", true),
+        1 => (
+            vec!["Read(*)", "Glob(*)", "Grep(*)", "WebSearch(*)"],
+            "normal",
+            false,
+        ),
+        2 => (
+            vec![
+                "Read(*)",
+                "Write(*)",
+                "Edit(*)",
+                "Glob(*)",
+                "Grep(*)",
+                "WebFetch(*)",
+                "WebSearch(*)",
+                "Agent(*)",
+                "NotebookEdit(*)",
+            ],
+            "normal",
+            false,
+        ),
+        3 => (
+            vec![
+                "Bash(*)",
+                "Read(*)",
+                "Write(*)",
+                "Edit(*)",
+                "Glob(*)",
+                "Grep(*)",
+                "WebFetch(*)",
+                "WebSearch(*)",
+                "Agent(*)",
+                "NotebookEdit(*)",
+                "Skill(*)",
+                "mcp__*",
+            ],
+            "bypassPermissions",
+            true,
+        ),
         _ => return Err("Invalid level".to_string()),
     };
 
@@ -1838,10 +6004,16 @@ pub fn set_claude_permissions_level(level: u32) -> Result<(), String> {
 pub fn get_claude_auto_update() -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".claude").join("settings.json");
-    if !path.exists() { return Ok("latest".to_string()); }
+    if !path.exists() {
+        return Ok("latest".to_string());
+    }
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    Ok(settings.get("autoUpdatesChannel").and_then(|v| v.as_str()).unwrap_or("latest").to_string())
+    Ok(settings
+        .get("autoUpdatesChannel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("latest")
+        .to_string())
 }
 
 /// Set Claude Code auto-update channel
@@ -1852,9 +6024,13 @@ pub fn set_claude_auto_update(channel: String) -> Result<(), String> {
     let mut settings: serde_json::Value = if path.exists() {
         let c = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         serde_json::from_str(&c).map_err(|e| e.to_string())?
-    } else { serde_json::json!({}) };
+    } else {
+        serde_json::json!({})
+    };
     if channel == "disabled" {
-        settings.as_object_mut().map(|o| o.remove("autoUpdatesChannel"));
+        settings
+            .as_object_mut()
+            .map(|o| o.remove("autoUpdatesChannel"));
     } else {
         settings["autoUpdatesChannel"] = serde_json::json!(channel);
     }
@@ -1869,24 +6045,49 @@ pub fn get_codex_settings() -> Result<serde_json::Value, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".codex").join("config.toml");
     if !path.exists() {
-        return Ok(serde_json::json!({ "approval_mode": "suggest", "reasoning_effort": "medium", "disable_response_storage": false }));
+        return Ok(serde_json::json!({
+            "approval_mode": "suggest",
+            "reasoning_effort": "medium",
+            "disable_response_storage": false,
+            "context_window_1m": false,
+        }));
     }
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let doc: toml::Value = content.parse().map_err(|e: toml::de::Error| e.to_string())?;
+    let doc: toml::Value = content
+        .parse()
+        .map_err(|e: toml::de::Error| e.to_string())?;
 
     // Read approval mode from personality or dedicated field
-    let personality = doc.get("personality").and_then(|v| v.as_str()).unwrap_or("pragmatic");
-    let approval_mode = if personality == "full-auto" { "full-auto" }
-        else if personality == "auto-edit" { "auto-edit" }
-        else { "suggest" };
+    let personality = doc
+        .get("personality")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pragmatic");
+    let approval_mode = if personality == "full-auto" {
+        "full-auto"
+    } else if personality == "auto-edit" {
+        "auto-edit"
+    } else {
+        "suggest"
+    };
 
-    let reasoning = doc.get("model_reasoning_effort").and_then(|v| v.as_str()).unwrap_or("medium");
-    let disable_storage = doc.get("disable_response_storage").and_then(|v| v.as_bool()).unwrap_or(false);
+    let reasoning = doc
+        .get("model_reasoning_effort")
+        .and_then(|v| v.as_str())
+        .unwrap_or("medium");
+    let disable_storage = doc
+        .get("disable_response_storage")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let context_window_1m = doc
+        .get("model_context_window")
+        .and_then(|v| v.as_integer())
+        .is_some_and(|value| value == 1_000_000);
 
     Ok(serde_json::json!({
         "approval_mode": approval_mode,
         "reasoning_effort": reasoning,
         "disable_response_storage": disable_storage,
+        "context_window_1m": context_window_1m,
     }))
 }
 
@@ -1898,9 +6099,13 @@ pub fn set_codex_setting(key: String, value: String) -> Result<(), String> {
 
     let content = if path.exists() {
         std::fs::read_to_string(&path).unwrap_or_default()
-    } else { String::new() };
+    } else {
+        String::new()
+    };
 
-    let mut doc: toml_edit::DocumentMut = content.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let mut doc: toml_edit::DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
 
     match key.as_str() {
         "approval_mode" => {
@@ -1912,6 +6117,13 @@ pub fn set_codex_setting(key: String, value: String) -> Result<(), String> {
         }
         "disable_response_storage" => {
             doc["disable_response_storage"] = toml_edit::value(value == "true");
+        }
+        "context_window_1m" => {
+            if value == "true" {
+                doc["model_context_window"] = toml_edit::value(1_000_000);
+            } else {
+                doc.remove("model_context_window");
+            }
         }
         _ => return Err(format!("Unknown setting: {}", key)),
     }
@@ -1928,10 +6140,16 @@ pub fn set_codex_setting(key: String, value: String) -> Result<(), String> {
 pub fn get_claude_model() -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".claude").join("settings.json");
-    if !path.exists() { return Ok("".to_string()); }
+    if !path.exists() {
+        return Ok("".to_string());
+    }
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    Ok(settings.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string())
+    Ok(settings
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string())
 }
 
 /// Set Claude Code model
@@ -1942,7 +6160,9 @@ pub fn set_claude_model(model: String) -> Result<(), String> {
     let mut settings: serde_json::Value = if path.exists() {
         let c = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         serde_json::from_str(&c).map_err(|e| e.to_string())?
-    } else { serde_json::json!({}) };
+    } else {
+        serde_json::json!({})
+    };
     settings["model"] = serde_json::json!(model);
     let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
@@ -1954,10 +6174,13 @@ pub fn set_claude_model(model: String) -> Result<(), String> {
 pub fn get_claude_tool_search() -> Result<bool, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".claude").join("settings.local.json");
-    if !path.exists() { return Ok(false); }
+    if !path.exists() {
+        return Ok(false);
+    }
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    let enabled = settings.get("env")
+    let enabled = settings
+        .get("env")
         .and_then(|e| e.get("ENABLE_TOOL_SEARCH"))
         .and_then(|v| v.as_str())
         .map(|s| s == "true")
@@ -1974,7 +6197,9 @@ pub fn set_claude_tool_search(enabled: bool) -> Result<(), String> {
     let mut settings: serde_json::Value = if path.exists() {
         let c = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         serde_json::from_str(&c).unwrap_or(serde_json::json!({}))
-    } else { serde_json::json!({}) };
+    } else {
+        serde_json::json!({})
+    };
 
     if settings.get("env").is_none() {
         settings["env"] = serde_json::json!({});
@@ -2001,7 +6226,12 @@ pub fn set_claude_tool_search(enabled: bool) -> Result<(), String> {
 #[tauri::command]
 pub fn get_claude_hud_status() -> Result<serde_json::Value, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let cache_dir = home.join(".claude").join("plugins").join("cache").join("claude-hud").join("claude-hud");
+    let cache_dir = home
+        .join(".claude")
+        .join("plugins")
+        .join("cache")
+        .join("claude-hud")
+        .join("claude-hud");
 
     // Find installed version by looking for dist/index.js
     let mut installed = false;
@@ -2027,14 +6257,23 @@ pub fn get_claude_hud_status() -> Result<serde_json::Value, String> {
     let settings_path = home.join(".claude").join("settings.json");
     let statusline_enabled = if settings_path.exists() {
         let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
-        let settings: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
-        settings.get("statusLine").and_then(|s| s.get("command")).and_then(|c| c.as_str()).is_some()
+        let settings: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+        settings
+            .get("statusLine")
+            .and_then(|s| s.get("command"))
+            .and_then(|c| c.as_str())
+            .is_some()
     } else {
         false
     };
 
     // Read claude-hud config
-    let hud_config_path = home.join(".claude").join("plugins").join("claude-hud").join("config.json");
+    let hud_config_path = home
+        .join(".claude")
+        .join("plugins")
+        .join("claude-hud")
+        .join("config.json");
     let hud_config = if hud_config_path.exists() {
         let content = std::fs::read_to_string(&hud_config_path).unwrap_or_default();
         serde_json::from_str::<serde_json::Value>(&content).unwrap_or(serde_json::json!({}))
@@ -2058,16 +6297,23 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
 
     // Create plugin directory structure
     let version = "0.0.6";
-    let dist_dir = home.join(".claude").join("plugins").join("cache")
-        .join("claude-hud").join("claude-hud").join(version).join("dist");
+    let dist_dir = home
+        .join(".claude")
+        .join("plugins")
+        .join("cache")
+        .join("claude-hud")
+        .join("claude-hud")
+        .join(version)
+        .join("dist");
     std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
 
     // Build HTTP client with proxy support
     let proxy_url = get_proxy(db);
     let client = if !proxy_url.is_empty() {
-        let proxy = reqwest::Proxy::all(&proxy_url)
-            .map_err(|e| format!("Invalid proxy: {}", e))?;
-        reqwest::Client::builder().proxy(proxy).build()
+        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
+        reqwest::Client::builder()
+            .proxy(proxy)
+            .build()
             .map_err(|e| format!("Client build failed: {}", e))?
     } else {
         reqwest::Client::new()
@@ -2075,22 +6321,35 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
 
     // Try official npm registry first, fallback to China mirror
     let registries = [
-        format!("https://registry.npmjs.org/claude-hud/-/claude-hud-{}.tgz", version),
-        format!("https://registry.npmmirror.com/claude-hud/-/claude-hud-{}.tgz", version),
+        format!(
+            "https://registry.npmjs.org/claude-hud/-/claude-hud-{}.tgz",
+            version
+        ),
+        format!(
+            "https://registry.npmmirror.com/claude-hud/-/claude-hud-{}.tgz",
+            version
+        ),
     ];
 
     let mut bytes = None;
     let mut last_err = String::new();
     for url in &registries {
         match client.get(url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.bytes().await {
-                    Ok(b) => { bytes = Some(b); break; }
-                    Err(e) => { last_err = format!("Read failed: {}", e); }
+            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                Ok(b) => {
+                    bytes = Some(b);
+                    break;
                 }
+                Err(e) => {
+                    last_err = format!("Read failed: {}", e);
+                }
+            },
+            Ok(resp) => {
+                last_err = format!("HTTP {} from {}", resp.status(), url);
             }
-            Ok(resp) => { last_err = format!("HTTP {} from {}", resp.status(), url); }
-            Err(e) => { last_err = format!("Download failed: {}", e); }
+            Err(e) => {
+                last_err = format!("Download failed: {}", e);
+            }
         }
     }
     let bytes = bytes.ok_or(format!("All registries failed: {}", last_err))?;
@@ -2098,17 +6357,26 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
     // Extract tgz: decompress gzip then untar
     let gz = flate2::read::GzDecoder::new(&bytes[..]);
     let mut archive = tar::Archive::new(gz);
-    let entries = archive.entries().map_err(|e| format!("Tar read failed: {}", e))?;
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("Tar read failed: {}", e))?;
 
     for entry in entries {
         let mut entry = entry.map_err(|e| format!("Tar entry error: {}", e))?;
-        let entry_path = entry.path().map_err(|e| format!("Path error: {}", e))?.to_path_buf();
+        let entry_path = entry
+            .path()
+            .map_err(|e| format!("Path error: {}", e))?
+            .to_path_buf();
         let entry_str = entry_path.to_string_lossy().to_string();
 
         // npm tarballs have files under package/dist/
         if entry_str.starts_with("package/dist/") {
-            let relative = entry_str.strip_prefix("package/dist/").unwrap_or(&entry_str);
-            if relative.is_empty() { continue; }
+            let relative = entry_str
+                .strip_prefix("package/dist/")
+                .unwrap_or(&entry_str);
+            if relative.is_empty() {
+                continue;
+            }
             let target = dist_dir.join(relative);
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -2151,11 +6419,203 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
                 "showTodos": true
             }
         });
-        let config_str = serde_json::to_string_pretty(&default_config).map_err(|e| e.to_string())?;
-        crate::utils::atomic_write_string(&hud_config_path, &config_str).map_err(|e| e.to_string())?;
+        let config_str =
+            serde_json::to_string_pretty(&default_config).map_err(|e| e.to_string())?;
+        crate::utils::atomic_write_string(&hud_config_path, &config_str)
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(())
+}
+
+/// Check if there's a newer version of claude-hud on npm
+#[tauri::command]
+pub async fn check_claude_hud_update(
+    db: State<'_, crate::db::DbState>,
+) -> Result<serde_json::Value, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let cache_dir = home
+        .join(".claude")
+        .join("plugins")
+        .join("cache")
+        .join("claude-hud")
+        .join("claude-hud");
+
+    // Get current installed version
+    let mut current_version = String::new();
+    if cache_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+            for entry in entries.flatten() {
+                let candidate = entry.path().join("dist").join("index.js");
+                if candidate.exists() {
+                    current_version = entry.file_name().to_string_lossy().to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    if current_version.is_empty() {
+        return Err("claude-hud not installed".to_string());
+    }
+
+    // Check latest version from npm
+    let proxy_url = get_proxy(db);
+    let latest_version =
+        crate::updater::checker::check_npm_version_with_proxy("claude-hud", &proxy_url).await?;
+
+    let has_update = latest_version != current_version;
+
+    Ok(serde_json::json!({
+        "currentVersion": current_version,
+        "latestVersion": latest_version,
+        "hasUpdate": has_update,
+    }))
+}
+
+/// Update claude-hud to the latest npm version
+#[tauri::command]
+pub async fn update_claude_hud(
+    db: State<'_, crate::db::DbState>,
+) -> Result<serde_json::Value, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let cache_dir = home
+        .join(".claude")
+        .join("plugins")
+        .join("cache")
+        .join("claude-hud")
+        .join("claude-hud");
+
+    // Get latest version
+    let proxy_url = get_proxy(db);
+    let version =
+        crate::updater::checker::check_npm_version_with_proxy("claude-hud", &proxy_url).await?;
+
+    let dist_dir = cache_dir.join(&version).join("dist");
+
+    // Skip if already installed
+    if dist_dir.join("index.js").exists() {
+        return Ok(serde_json::json!({ "version": version, "skipped": true }));
+    }
+
+    std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
+
+    // Build HTTP client with proxy
+    let client = if !proxy_url.is_empty() {
+        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
+        reqwest::Client::builder()
+            .proxy(proxy)
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?
+    } else {
+        reqwest::Client::new()
+    };
+
+    // Download tgz
+    let registries = [
+        format!(
+            "https://registry.npmjs.org/claude-hud/-/claude-hud-{}.tgz",
+            version
+        ),
+        format!(
+            "https://registry.npmmirror.com/claude-hud/-/claude-hud-{}.tgz",
+            version
+        ),
+    ];
+
+    let mut bytes = None;
+    let mut last_err = String::new();
+    for url in &registries {
+        match client.get(url).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                Ok(b) => {
+                    bytes = Some(b);
+                    break;
+                }
+                Err(e) => {
+                    last_err = format!("Read failed: {}", e);
+                }
+            },
+            Ok(resp) => {
+                last_err = format!("HTTP {} from {}", resp.status(), url);
+            }
+            Err(e) => {
+                last_err = format!("Download failed: {}", e);
+            }
+        }
+    }
+    let bytes = bytes.ok_or(format!("All registries failed: {}", last_err))?;
+
+    // Extract tgz
+    let gz = flate2::read::GzDecoder::new(&bytes[..]);
+    let mut archive = tar::Archive::new(gz);
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("Tar read failed: {}", e))?;
+
+    for entry in entries {
+        let mut entry = entry.map_err(|e| format!("Tar entry error: {}", e))?;
+        let entry_path = entry
+            .path()
+            .map_err(|e| format!("Path error: {}", e))?
+            .to_path_buf();
+        let entry_str = entry_path.to_string_lossy().to_string();
+
+        if entry_str.starts_with("package/dist/") {
+            let relative = entry_str
+                .strip_prefix("package/dist/")
+                .unwrap_or(&entry_str);
+            if relative.is_empty() {
+                continue;
+            }
+            let target = dist_dir.join(relative);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut file = std::fs::File::create(&target).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Verify
+    if !dist_dir.join("index.js").exists() {
+        return Err("Update failed: index.js not found after extraction".to_string());
+    }
+
+    // Remove old version directories
+    if let Ok(dir_entries) = std::fs::read_dir(&cache_dir) {
+        for entry in dir_entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name != version {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+
+    // Update statusLine path in settings.json if enabled
+    let settings_path = home.join(".claude").join("settings.json");
+    if settings_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&settings_path) {
+            if let Ok(mut settings) = serde_json::from_str::<serde_json::Value>(&content) {
+                if settings
+                    .get("statusLine")
+                    .and_then(|s| s.get("command"))
+                    .is_some()
+                {
+                    let new_cmd = format!(
+                        "node ~/.claude/plugins/cache/claude-hud/claude-hud/{}/dist/index.js",
+                        version
+                    );
+                    settings["statusLine"]["command"] = serde_json::Value::String(new_cmd);
+                    let out = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+                    crate::utils::atomic_write_string(&settings_path, &out)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({ "version": version, "skipped": false }))
 }
 
 /// Enable or disable statusLine in settings.json
@@ -2173,7 +6633,12 @@ pub fn set_claude_statusline(enabled: bool) -> Result<(), String> {
 
     if enabled {
         // Find the index.js path
-        let cache_dir = home.join(".claude").join("plugins").join("cache").join("claude-hud").join("claude-hud");
+        let cache_dir = home
+            .join(".claude")
+            .join("plugins")
+            .join("cache")
+            .join("claude-hud")
+            .join("claude-hud");
         let mut index_path = String::new();
         if cache_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&cache_dir) {
@@ -2182,7 +6647,10 @@ pub fn set_claude_statusline(enabled: bool) -> Result<(), String> {
                     if candidate.exists() {
                         // Use ~ relative path for cross-platform compatibility
                         let ver = entry.file_name().to_string_lossy().to_string();
-                        index_path = format!("~/.claude/plugins/cache/claude-hud/claude-hud/{}/dist/index.js", ver);
+                        index_path = format!(
+                            "~/.claude/plugins/cache/claude-hud/claude-hud/{}/dist/index.js",
+                            ver
+                        );
                         break;
                     }
                 }
@@ -2206,7 +6674,10 @@ pub fn set_claude_statusline(enabled: bool) -> Result<(), String> {
         if let Some(obj) = settings.as_object_mut() {
             obj.remove("statusLine");
         }
-        if let Some(plugins) = settings.get_mut("enabledPlugins").and_then(|p| p.as_object_mut()) {
+        if let Some(plugins) = settings
+            .get_mut("enabledPlugins")
+            .and_then(|p| p.as_object_mut())
+        {
             plugins.remove("claude-hud@claude-hud");
         }
     }
@@ -2313,7 +6784,9 @@ fn discover_project_roots(conn: &rusqlite::Connection) -> Vec<PathBuf> {
         }
     };
 
-    if let Ok(mut stmt) = conn.prepare("SELECT base_path FROM workspaces WHERE base_path IS NOT NULL AND trim(base_path) != ''") {
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT base_path FROM workspaces WHERE base_path IS NOT NULL AND trim(base_path) != ''",
+    ) {
         if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
             for row in rows.flatten() {
                 push_root(row);
@@ -2347,6 +6820,192 @@ fn discover_project_roots(conn: &rusqlite::Connection) -> Vec<PathBuf> {
     roots
 }
 
+fn is_openclaw_daily_memory_candidate(path: &std::path::Path, base_dir: &std::path::Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase());
+    let extension_allowed = match extension.as_deref() {
+        None => true,
+        Some("md" | "txt" | "json" | "jsonl" | "yaml" | "yml" | "log") => true,
+        _ => false,
+    };
+    if !extension_allowed {
+        return false;
+    }
+
+    let relative = match path.strip_prefix(base_dir) {
+        Ok(relative) => relative,
+        Err(_) => return false,
+    };
+
+    let mut components = relative
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .map(|component| component.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if components.is_empty() {
+        return false;
+    }
+
+    let file_name = components.pop().unwrap_or_default();
+    if file_name.contains("memory") || file_name.contains("journal") || file_name.contains("diary")
+    {
+        return true;
+    }
+
+    components.iter().any(|component| {
+        component.contains("memory")
+            || component.contains("journal")
+            || component.contains("daily")
+            || component.contains("diary")
+    })
+}
+
+fn format_local_datetime(time: std::time::SystemTime) -> String {
+    let datetime: chrono::DateTime<chrono::Local> = time.into();
+    datetime.format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn condense_openclaw_memory_preview(text: &str) -> Option<String> {
+    let condensed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if condensed.is_empty() {
+        None
+    } else {
+        Some(condensed.chars().take(220).collect::<String>())
+    }
+}
+
+fn build_openclaw_memory_preview(content: &str, query: Option<&str>) -> Option<String> {
+    let normalized = content.replace('\r', "");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(query) = query {
+        let query = query.trim();
+        if !query.is_empty() {
+            let lowered_content = trimmed.to_lowercase();
+            let lowered_query = query.to_lowercase();
+            if !lowered_content.contains(&lowered_query) {
+                return None;
+            }
+            if let Some(line_preview) = trimmed
+                .lines()
+                .find(|line| line.to_lowercase().contains(&lowered_query))
+                .and_then(condense_openclaw_memory_preview)
+            {
+                return Some(line_preview);
+            }
+        }
+    }
+
+    condense_openclaw_memory_preview(trimmed)
+}
+
+fn is_valid_openclaw_daily_memory_path(
+    path: &std::path::Path,
+    conn: &rusqlite::Connection,
+) -> bool {
+    let canonical_path = match std::fs::canonicalize(path) {
+        Ok(path) if path.is_file() => path,
+        _ => return false,
+    };
+
+    let mut roots = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        let global_dir = home.join(".openclaw");
+        if let Ok(global_root) = std::fs::canonicalize(&global_dir) {
+            roots.push(global_root);
+        }
+    }
+
+    for project_root in discover_project_roots(conn) {
+        let openclaw_root = project_root.join(".openclaw");
+        if let Ok(root) = std::fs::canonicalize(&openclaw_root) {
+            roots.push(root);
+        }
+    }
+
+    roots.into_iter().any(|root| {
+        canonical_path.starts_with(&root)
+            && is_openclaw_daily_memory_candidate(&canonical_path, &root)
+    })
+}
+
+fn collect_openclaw_daily_memory_files(
+    current_dir: &std::path::Path,
+    base_dir: &std::path::Path,
+    source: &str,
+    project_name: Option<&str>,
+    query: Option<&str>,
+    entries: &mut Vec<OpenClawDailyMemoryEntry>,
+    depth: usize,
+) {
+    if depth > 5 {
+        return;
+    }
+
+    let read_dir = match std::fs::read_dir(current_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_openclaw_daily_memory_files(
+                &path,
+                base_dir,
+                source,
+                project_name,
+                query,
+                entries,
+                depth + 1,
+            );
+            continue;
+        }
+
+        if !is_openclaw_daily_memory_candidate(&path, base_dir) {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        let preview = match build_openclaw_memory_preview(&content, query) {
+            Some(preview) => preview,
+            None => continue,
+        };
+
+        let modified_at = std::fs::metadata(&path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .map(format_local_datetime);
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+
+        entries.push(OpenClawDailyMemoryEntry {
+            path: path.to_string_lossy().to_string(),
+            file_name,
+            source: source.to_string(),
+            project_name: project_name.map(str::to_string),
+            modified_at,
+            preview,
+        });
+    }
+}
+
 fn normalize_project_root_path(path: &str) -> Option<&str> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -2359,7 +7018,10 @@ fn normalize_project_root_path(path: &str) -> Option<&str> {
 fn project_root_paths_match(left: &str, right: &str) -> bool {
     normalize_project_root_path(left)
         .zip(normalize_project_root_path(right))
-        .is_some_and(|(left, right)| left.replace('\\', "/").eq_ignore_ascii_case(&right.replace('\\', "/")))
+        .is_some_and(|(left, right)| {
+            left.replace('\\', "/")
+                .eq_ignore_ascii_case(&right.replace('\\', "/"))
+        })
 }
 
 fn sync_known_project_root(
@@ -2385,7 +7047,10 @@ fn sync_known_project_root(
     }
 
     if let Some(next_path) = next_path.and_then(normalize_project_root_path) {
-        if !roots.iter().any(|value| project_root_paths_match(value, next_path)) {
+        if !roots
+            .iter()
+            .any(|value| project_root_paths_match(value, next_path))
+        {
             roots.push(next_path.to_string());
         }
     }
@@ -2546,7 +7211,10 @@ fn get_pending_imported_project_roots_from_conn(
 
 fn project_root_match_key(path: &str) -> Option<String> {
     let normalized = normalize_project_root_path(path)?;
-    let file_name = PathBuf::from(normalized).file_name()?.to_string_lossy().to_string();
+    let file_name = PathBuf::from(normalized)
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
     if file_name.trim().is_empty() {
         None
     } else {
@@ -2590,8 +7258,15 @@ fn best_project_root_candidate<'a>(
     let pending_key = project_root_match_key(pending_path)?;
     let mut scored: Vec<(&String, usize)> = candidates
         .iter()
-        .filter(|candidate| project_root_match_key(candidate).as_deref() == Some(pending_key.as_str()))
-        .map(|candidate| (candidate, shared_trailing_segment_count(pending_path, candidate)))
+        .filter(|candidate| {
+            project_root_match_key(candidate).as_deref() == Some(pending_key.as_str())
+        })
+        .map(|candidate| {
+            (
+                candidate,
+                shared_trailing_segment_count(pending_path, candidate),
+            )
+        })
         .collect();
 
     if scored.is_empty() {
@@ -2624,14 +7299,22 @@ fn build_tool_environment_report_from_conn(
 
     for tool in tools {
         let cli_command = tool_cli_command(&tool.id).to_string();
-        let config_path = resolve_tool_config_path(conn, &tool.id)?.to_string_lossy().to_string();
+        let config_path = resolve_tool_config_path(conn, &tool.id)?
+            .to_string_lossy()
+            .to_string();
         let mcp_config_path = if tool.id == "claude" {
             resolve_claude_paths(conn)?.0.to_string_lossy().to_string()
         } else {
-            resolve_tool_config_path(conn, &tool.id)?.to_string_lossy().to_string()
+            resolve_tool_config_path(conn, &tool.id)?
+                .to_string_lossy()
+                .to_string()
         };
-        let skills_dir = resolve_tool_skills_dir(conn, &tool.id)?.to_string_lossy().to_string();
-        let config_dir = resolve_tool_config_dir(conn, &tool.id)?.to_string_lossy().to_string();
+        let skills_dir = resolve_tool_skills_dir(conn, &tool.id)?
+            .to_string_lossy()
+            .to_string();
+        let config_dir = resolve_tool_config_dir(conn, &tool.id)?
+            .to_string_lossy()
+            .to_string();
 
         let custom_row: Option<(Option<String>, Option<String>, Option<String>)> = conn
             .query_row(
@@ -2814,7 +7497,8 @@ fn auto_remap_imported_project_roots_from_conn(
             continue;
         };
 
-        let Some(best_candidate) = best_project_root_candidate(&pending.project_root, candidates) else {
+        let Some(best_candidate) = best_project_root_candidate(&pending.project_root, candidates)
+        else {
             skipped_roots += 1;
             continue;
         };
@@ -2919,10 +7603,7 @@ fn get_main_db_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
+            Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
         })
         .map_err(|e| e.to_string())?;
 
@@ -3010,7 +7691,9 @@ fn restore_imported_artifacts(
     let mut full_files_restored = 0;
     let mut pending_project_files = 0;
 
-    if let Ok(mut stmt) = conn.prepare("SELECT tool_id, config_path, config_content FROM _tool_configs") {
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT tool_id, config_path, config_content FROM _tool_configs")
+    {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -3026,10 +7709,12 @@ fn restore_imported_artifacts(
                         if let Some(parent) = settings_json_path.parent() {
                             let _ = std::fs::create_dir_all(parent);
                         }
-                        crate::utils::atomic_write_string(&settings_json_path, &config_content).is_ok()
+                        crate::utils::atomic_write_string(&settings_json_path, &config_content)
+                            .is_ok()
                     }
                     "claude" => {
-                        let parsed = serde_json::from_str::<serde_json::Value>(&config_content).ok();
+                        let parsed =
+                            serde_json::from_str::<serde_json::Value>(&config_content).ok();
                         let is_snapshot = parsed
                             .as_ref()
                             .and_then(|value| value.as_object())
@@ -3045,7 +7730,8 @@ fn restore_imported_artifacts(
                             if let Some(parent) = claude_json_path.parent() {
                                 let _ = std::fs::create_dir_all(parent);
                             }
-                            crate::utils::atomic_write_string(&claude_json_path, &config_content).is_ok()
+                            crate::utils::atomic_write_string(&claude_json_path, &config_content)
+                                .is_ok()
                         }
                     }
                     "codex" | "gemini" | "opencode" | "openclaw" => {
@@ -3084,14 +7770,17 @@ fn restore_imported_artifacts(
                     Err(_) => continue,
                 };
                 let _ = std::fs::create_dir_all(&skills_dir);
-                if crate::utils::atomic_write_string(&skills_dir.join(&name), &file_content).is_ok() {
+                if crate::utils::atomic_write_string(&skills_dir.join(&name), &file_content).is_ok()
+                {
                     skills_restored += 1;
                 }
             }
         }
     }
 
-    if let Ok(mut stmt) = conn.prepare("SELECT root_key, relative_path, content_base64 FROM _backup_files ORDER BY id") {
+    if let Ok(mut stmt) = conn
+        .prepare("SELECT root_key, relative_path, content_base64 FROM _backup_files ORDER BY id")
+    {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -3102,7 +7791,12 @@ fn restore_imported_artifacts(
             for row in rows.flatten() {
                 let (root_key, relative_path, content_base64) = row;
                 if let Some(project_root) = root_key.strip_prefix("project:") {
-                    store_imported_project_file(conn, project_root, &relative_path, &content_base64)?;
+                    store_imported_project_file(
+                        conn,
+                        project_root,
+                        &relative_path,
+                        &content_base64,
+                    )?;
                     if !PathBuf::from(project_root).exists() {
                         pending_project_files += 1;
                         continue;
@@ -3148,14 +7842,17 @@ fn restore_imported_artifacts(
 }
 
 /// Generate complete .sql backup content
-fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> String {
+pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> String {
     let mut sql = String::new();
 
     // Header
     sql.push_str("-- ═══════════════════════════════════════════════════════\n");
     sql.push_str("-- CCHub Database Backup (.sql)\n");
     sql.push_str(&format!("-- Version: {}\n", env!("CARGO_PKG_VERSION")));
-    sql.push_str(&format!("-- Created: {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+    sql.push_str(&format!(
+        "-- Created: {}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    ));
     sql.push_str("-- ═══════════════════════════════════════════════════════\n\n");
 
     // Schema (CREATE TABLE IF NOT EXISTS)
@@ -3165,9 +7862,14 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
 
     // Backup metadata table
     sql.push_str("CREATE TABLE IF NOT EXISTS _backup_meta (key TEXT PRIMARY KEY, value TEXT);\n");
-    sql.push_str(&format!("INSERT OR REPLACE INTO _backup_meta VALUES ('version', '{}');\n", env!("CARGO_PKG_VERSION")));
-    sql.push_str(&format!("INSERT OR REPLACE INTO _backup_meta VALUES ('created_at', '{}');\n\n",
-        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+    sql.push_str(&format!(
+        "INSERT OR REPLACE INTO _backup_meta VALUES ('version', '{}');\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    sql.push_str(&format!(
+        "INSERT OR REPLACE INTO _backup_meta VALUES ('created_at', '{}');\n\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    ));
 
     // Tool configs table
     sql.push_str("CREATE TABLE IF NOT EXISTS _tool_configs (tool_id TEXT PRIMARY KEY, config_path TEXT, config_content TEXT);\n");
@@ -3178,15 +7880,29 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
 
     // Data dump for all 12 business tables
     sql.push_str("-- ── Data ──\n\n");
-    let tables = ["mcp_servers", "plugins", "skills", "hooks", "activity_logs", "mcp_clients",
-                   "workspaces", "custom_paths", "config_profiles", "app_settings",
-                   "imported_project_files", "update_history", "metrics"];
+    let tables = [
+        "mcp_servers",
+        "plugins",
+        "skills",
+        "hooks",
+        "activity_logs",
+        "mcp_clients",
+        "workspaces",
+        "custom_paths",
+        "config_profiles",
+        "app_settings",
+        "imported_project_files",
+        "update_history",
+        "metrics",
+    ];
 
     for table in tables {
         let query = format!("SELECT * FROM {}", table);
         if let Ok(mut stmt) = conn.prepare(&query) {
             let col_count = stmt.column_count();
-            let col_names: Vec<String> = (0..col_count).map(|i| stmt.column_name(i).unwrap_or("").to_string()).collect();
+            let col_names: Vec<String> = (0..col_count)
+                .map(|i| stmt.column_name(i).unwrap_or("").to_string())
+                .collect();
 
             let mut has_rows = false;
             if let Ok(rows) = stmt.query_map([], |row| {
@@ -3217,8 +7933,12 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
                         sql.push_str(&format!("-- Table: {}\n", table));
                         has_rows = true;
                     }
-                    sql.push_str(&format!("INSERT OR REPLACE INTO {} ({}) VALUES ({});\n",
-                        table, col_names.join(", "), row.join(", ")));
+                    sql.push_str(&format!(
+                        "INSERT OR REPLACE INTO {} ({}) VALUES ({});\n",
+                        table,
+                        col_names.join(", "),
+                        row.join(", ")
+                    ));
                 }
             }
             if has_rows {
@@ -3237,7 +7957,12 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
                     .map(|(claude_json, settings_json)| {
                         format!("{} | {}", claude_json.display(), settings_json.display())
                     })
-                    .unwrap_or_else(|_| home.join(".claude").join("settings.json").display().to_string()),
+                    .unwrap_or_else(|_| {
+                        home.join(".claude")
+                            .join("settings.json")
+                            .display()
+                            .to_string()
+                    }),
                 _ => resolve_tool_config_path(conn, tool_id)
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|_| home.join(format!(".{}", tool_id)).display().to_string()),
@@ -3266,7 +7991,11 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
                     let path = entry.path();
                     if path.is_file() {
                         if let Ok(content) = std::fs::read_to_string(&path) {
-                            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            let name = path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
                             sql.push_str(&format!(
                                 "INSERT INTO _skill_files (tool_id, name, content) VALUES ('{}', '{}', '{}');\n",
                                 tool_id, sql_escape(&name), sql_escape(&content)
@@ -3304,7 +8033,12 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
     let mut backup_file_rows = Vec::new();
     for (root_key, root_path) in &backup_roots {
         if root_path.is_dir() {
-            collect_backup_file_rows(root_path, root_key, std::path::Path::new(""), &mut backup_file_rows);
+            collect_backup_file_rows(
+                root_path,
+                root_key,
+                std::path::Path::new(""),
+                &mut backup_file_rows,
+            );
         } else if root_path.is_file() {
             if let Ok(bytes) = std::fs::read(root_path) {
                 let content_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
@@ -3331,14 +8065,24 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
         for relative_file in project_relative_files {
             let relative_path = std::path::Path::new(relative_file);
             let absolute_path = project_root.join(relative_path);
-            collect_backup_entry_row(&absolute_path, &root_key, relative_path, &mut backup_file_rows);
+            collect_backup_entry_row(
+                &absolute_path,
+                &root_key,
+                relative_path,
+                &mut backup_file_rows,
+            );
         }
 
         for relative_dir in project_relative_dirs {
             let relative_path = std::path::Path::new(relative_dir);
             let absolute_path = project_root.join(relative_path);
             if absolute_path.is_dir() {
-                collect_backup_file_rows(&absolute_path, &root_key, relative_path, &mut backup_file_rows);
+                collect_backup_file_rows(
+                    &absolute_path,
+                    &root_key,
+                    relative_path,
+                    &mut backup_file_rows,
+                );
             }
         }
     }
@@ -3356,45 +8100,113 @@ fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> S
     sql
 }
 
-/// Export: generate .sql backup file
-#[tauri::command]
-pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, String> {
+fn managed_backups_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    Ok(home.join(".cchub").join("backups"))
+}
 
-    let sql_content = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        generate_sql_backup(&conn, &home)
-    };
+fn ensure_managed_backups_dir() -> Result<PathBuf, String> {
+    let dir = managed_backups_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
 
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("导出备份")
-        .set_file_name(&format!("cchub-backup-{}.sql", chrono::Local::now().format("%Y%m%d-%H%M%S")))
-        .add_filter("SQL Backup", &["sql"])
-        .save_file()
-        .await;
+fn sanitize_backup_file_name(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            _ => ch,
+        })
+        .collect::<String>()
+}
 
-    match file {
-        Some(f) => {
-            let path = f.path();
-            std::fs::write(path, &sql_content).map_err(|e| e.to_string())?;
-            Ok(path.to_string_lossy().to_string())
-        }
-        None => Err("Cancelled".to_string()),
+fn infer_backup_kind(name: &str) -> String {
+    if name.contains("auto") {
+        "scheduled".to_string()
+    } else {
+        "manual".to_string()
     }
 }
 
-/// Import backup from SQL only.
-#[tauri::command]
-pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, String> {
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("导入备份")
-        .add_filter("CCHub SQL Backup", &["sql"])
-        .pick_file()
-        .await;
+fn map_backup_entry(path: &std::path::Path) -> Result<ManagedBackupFile, String> {
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    let modified = metadata
+        .modified()
+        .unwrap_or_else(|_| std::time::SystemTime::now());
+    let modified_at: chrono::DateTime<chrono::Local> = modified.into();
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("Invalid backup file name: {}", path.display()))?
+        .to_string();
 
-    let file = file.ok_or("Cancelled")?;
-    let file_path = file.path().to_path_buf();
-    let raw_content = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+    Ok(ManagedBackupFile {
+        path: path.to_string_lossy().to_string(),
+        name: name.clone(),
+        created_at: modified_at.to_rfc3339(),
+        size_bytes: metadata.len(),
+        kind: infer_backup_kind(&name),
+        can_restore: path.extension().and_then(|value| value.to_str()) == Some("sql"),
+    })
+}
+
+fn list_managed_backups_from_dir(dir: &std::path::Path) -> Result<Vec<ManagedBackupFile>, String> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("sql") {
+            continue;
+        }
+        items.push(map_backup_entry(&path)?);
+    }
+
+    items.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    Ok(items)
+}
+
+fn prune_managed_backups(dir: &std::path::Path, retention_count: usize) -> Result<(), String> {
+    let retention_count = retention_count.max(1);
+    let backups = list_managed_backups_from_dir(dir)?;
+    for backup in backups.into_iter().skip(retention_count) {
+        let _ = std::fs::remove_file(&backup.path);
+    }
+    Ok(())
+}
+
+fn create_managed_backup_from_conn(
+    conn: &rusqlite::Connection,
+    kind: &str,
+    retention_count: usize,
+) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let backup_dir = ensure_managed_backups_dir()?;
+    let prefix = if kind == "scheduled" {
+        "cchub-auto-backup"
+    } else {
+        "cchub-backup"
+    };
+    let file_path = backup_dir.join(format!(
+        "{prefix}-{}.sql",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    let sql_content = generate_sql_backup(conn, &home);
+    std::fs::write(&file_path, sql_content).map_err(|e| e.to_string())?;
+    prune_managed_backups(&backup_dir, retention_count)?;
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+pub(crate) fn import_backup_from_path_impl(
+    db: &State<'_, DbState>,
+    file_path: &std::path::Path,
+) -> Result<String, String> {
+    let raw_content = std::fs::read_to_string(file_path).map_err(|e| e.to_string())?;
     let content = validate_sql_backup_content(&raw_content)?;
     let restored_count = content.matches("\nINSERT").count();
 
@@ -3429,13 +8241,14 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
             let temp_conn =
                 rusqlite::Connection::open(temp_file.path()).map_err(|e| e.to_string())?;
             configure_database_connection(&temp_conn, false)?;
-            temp_conn.execute_batch(content).map_err(|e| e.to_string())?;
+            temp_conn
+                .execute_batch(content)
+                .map_err(|e| e.to_string())?;
             crate::db::schema::run_migrations(&temp_conn).map_err(|e| e.to_string())?;
             validate_imported_backup_tables(&temp_conn)?;
         }
 
-        let placeholder =
-            rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
+        let placeholder = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
         let old_conn = std::mem::replace(&mut *conn, placeholder);
         drop(conn);
 
@@ -3448,41 +8261,41 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
         temp_file
     };
 
-    let import_result = (|| -> Result<(rusqlite::Connection, usize, usize, usize, usize, usize), String> {
-        remove_db_sidecars(&db_path);
+    let import_result =
+        (|| -> Result<(rusqlite::Connection, usize, usize, usize, usize, usize), String> {
+            remove_db_sidecars(&db_path);
 
-        if db_path.exists() {
-            std::fs::rename(&db_path, &pre_import_path).map_err(|e| e.to_string())?;
-        }
+            if db_path.exists() {
+                std::fs::rename(&db_path, &pre_import_path).map_err(|e| e.to_string())?;
+            }
 
-        temp_file
-            .persist(&db_path)
-            .map_err(|e| e.error.to_string())?;
+            temp_file
+                .persist(&db_path)
+                .map_err(|e| e.error.to_string())?;
 
-        let reopened = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
-        configure_database_connection(&reopened, true)?;
-        let (
-            db_rows_restored,
-            tool_configs_restored,
-            skills_restored,
-            full_files_restored,
-            pending_project_files,
-        ) =
-            restore_imported_artifacts(&reopened, restored_count)?;
-        let now = chrono::Utc::now().to_rfc3339();
-        let imported_counts = sync_profiles_from_compatible_databases(&reopened, &now)?;
-        sync_live_profiles(&reopened, &imported_counts, &now)?;
-        restore_proxy_env_from_conn(&reopened);
+            let reopened = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+            configure_database_connection(&reopened, true)?;
+            let (
+                db_rows_restored,
+                tool_configs_restored,
+                skills_restored,
+                full_files_restored,
+                pending_project_files,
+            ) = restore_imported_artifacts(&reopened, restored_count)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            let imported_counts = sync_profiles_from_compatible_databases(&reopened, &now)?;
+            sync_live_profiles(&reopened, &imported_counts, &now)?;
+            restore_proxy_env_from_conn(&reopened);
 
-        Ok((
-            reopened,
-            db_rows_restored,
-            tool_configs_restored,
-            skills_restored,
-            full_files_restored,
-            pending_project_files,
-        ))
-    })();
+            Ok((
+                reopened,
+                db_rows_restored,
+                tool_configs_restored,
+                skills_restored,
+                full_files_restored,
+                pending_project_files,
+            ))
+        })();
 
     let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     match import_result {
@@ -3524,7 +8337,6 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
             };
             let reopened_conn = db.0.lock().map_err(|e| e.to_string())?;
             set_json_app_setting(&reopened_conn, "last_import_summary", &summary)?;
-            drop(reopened_conn);
             Ok(message)
         }
         Err(err) => {
@@ -3544,6 +8356,167 @@ pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, S
             Err(err)
         }
     }
+}
+
+/// Export: generate .sql backup file
+#[tauri::command]
+pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+
+    let sql_content = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        generate_sql_backup(&conn, &home)
+    };
+
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("导出备份")
+        .set_file_name(&format!(
+            "cchub-backup-{}.sql",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        ))
+        .add_filter("SQL Backup", &["sql"])
+        .save_file()
+        .await;
+
+    match file {
+        Some(f) => {
+            let path = f.path();
+            std::fs::write(path, &sql_content).map_err(|e| e.to_string())?;
+            Ok(path.to_string_lossy().to_string())
+        }
+        None => Err("Cancelled".to_string()),
+    }
+}
+
+/// Import backup from SQL only.
+#[tauri::command]
+pub async fn import_backup_from_file(db: State<'_, DbState>) -> Result<String, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("导入备份")
+        .add_filter("CCHub SQL Backup", &["sql"])
+        .pick_file()
+        .await;
+
+    let file = file.ok_or("Cancelled")?;
+    import_backup_from_path_impl(&db, file.path())
+}
+
+#[tauri::command]
+pub fn get_backup_preferences(db: State<'_, DbState>) -> Result<BackupPreferences, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(read_backup_preferences_from_conn(&conn))
+}
+
+#[tauri::command]
+pub fn set_backup_preferences(
+    preferences: BackupPreferences,
+    db: State<'_, DbState>,
+) -> Result<BackupPreferences, String> {
+    let sanitized = BackupPreferences {
+        auto_backup_enabled: preferences.auto_backup_enabled,
+        retention_count: preferences.retention_count.max(1),
+    };
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    set_json_app_setting(&conn, BACKUP_PREFERENCES_SETTING_KEY, &sanitized)?;
+    Ok(sanitized)
+}
+
+#[tauri::command]
+pub fn list_managed_backups(db: State<'_, DbState>) -> Result<Vec<ManagedBackupFile>, String> {
+    let _conn = db.0.lock().map_err(|e| e.to_string())?;
+    let dir = ensure_managed_backups_dir()?;
+    list_managed_backups_from_dir(&dir)
+}
+
+#[tauri::command]
+pub fn create_managed_backup(
+    kind: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let preferences = read_backup_preferences_from_conn(&conn);
+    create_managed_backup_from_conn(
+        &conn,
+        kind.as_deref().unwrap_or("manual"),
+        preferences.retention_count,
+    )
+}
+
+#[tauri::command]
+pub fn rename_managed_backup(
+    path: String,
+    new_name: String,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let _conn = db.0.lock().map_err(|e| e.to_string())?;
+    let dir = ensure_managed_backups_dir()?;
+    let source = PathBuf::from(&path);
+    if source.parent() != Some(dir.as_path()) {
+        return Err("Backup path must stay within the managed backup directory".to_string());
+    }
+
+    let sanitized = sanitize_backup_file_name(&new_name);
+    if sanitized.trim().is_empty() {
+        return Err("Backup name cannot be empty".to_string());
+    }
+
+    let target_name = if sanitized.ends_with(".sql") {
+        sanitized
+    } else {
+        format!("{sanitized}.sql")
+    };
+    let target = dir.join(target_name);
+    std::fs::rename(&source, &target).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn delete_managed_backup(path: String, db: State<'_, DbState>) -> Result<(), String> {
+    let _conn = db.0.lock().map_err(|e| e.to_string())?;
+    let dir = ensure_managed_backups_dir()?;
+    let target = PathBuf::from(path);
+    if target.parent() != Some(dir.as_path()) {
+        return Err("Backup path must stay within the managed backup directory".to_string());
+    }
+    std::fs::remove_file(&target).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn restore_managed_backup(path: String, db: State<'_, DbState>) -> Result<String, String> {
+    let dir = ensure_managed_backups_dir()?;
+    let target = PathBuf::from(path);
+    if target.parent() != Some(dir.as_path()) {
+        return Err("Backup path must stay within the managed backup directory".to_string());
+    }
+    import_backup_from_path_impl(&db, &target)
+}
+
+#[tauri::command]
+pub fn run_scheduled_backup_if_needed(db: State<'_, DbState>) -> Result<Option<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let preferences = read_backup_preferences_from_conn(&conn);
+    if !preferences.auto_backup_enabled {
+        return Ok(None);
+    }
+
+    let dir = ensure_managed_backups_dir()?;
+    let backups = list_managed_backups_from_dir(&dir)?;
+    let last_auto_backup = backups
+        .into_iter()
+        .find(|backup| backup.kind == "scheduled")
+        .and_then(|backup| chrono::DateTime::parse_from_rfc3339(&backup.created_at).ok())
+        .map(|datetime| datetime.with_timezone(&chrono::Utc));
+
+    let should_create = last_auto_backup
+        .map(|last| chrono::Utc::now().signed_duration_since(last).num_minutes() >= 60)
+        .unwrap_or(true);
+
+    if !should_create {
+        return Ok(None);
+    }
+
+    let path = create_managed_backup_from_conn(&conn, "scheduled", preferences.retention_count)?;
+    Ok(Some(path))
 }
 
 #[tauri::command]
@@ -3599,17 +8572,13 @@ pub fn get_last_import_summary(
 }
 
 #[tauri::command]
-pub fn run_full_rescan(
-    db: State<'_, DbState>,
-) -> Result<FullRescanResult, String> {
+pub fn run_full_rescan(db: State<'_, DbState>) -> Result<FullRescanResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     run_full_rescan_from_conn(&conn)
 }
 
 #[tauri::command]
-pub fn repair_all_migration_issues(
-    db: State<'_, DbState>,
-) -> Result<RepairAllResult, String> {
+pub fn repair_all_migration_issues(db: State<'_, DbState>) -> Result<RepairAllResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let remap = auto_remap_imported_project_roots_from_conn(&conn)?;
     let reports = build_tool_environment_report_from_conn(&conn)?;
@@ -3665,18 +8634,21 @@ mod tests {
 
     #[test]
     fn project_root_key_uses_last_segment() {
-        assert_eq!(project_root_match_key("D:/work/foo-bar").as_deref(), Some("foo-bar"));
-        assert_eq!(project_root_match_key("/tmp/demo/").as_deref(), Some("demo"));
+        assert_eq!(
+            project_root_match_key("D:/work/foo-bar").as_deref(),
+            Some("foo-bar")
+        );
+        assert_eq!(
+            project_root_match_key("/tmp/demo/").as_deref(),
+            Some("demo")
+        );
         assert_eq!(project_root_match_key("   ").as_deref(), None);
     }
 
     #[test]
     fn shared_trailing_segments_counts_suffix_depth() {
         assert_eq!(
-            shared_trailing_segment_count(
-                "D:/old/workspace/acme/app",
-                "E:/new/workspace/acme/app"
-            ),
+            shared_trailing_segment_count("D:/old/workspace/acme/app", "E:/new/workspace/acme/app"),
             3
         );
         assert_eq!(
@@ -3703,13 +8675,10 @@ mod tests {
 
     #[test]
     fn best_candidate_rejects_ambiguous_matches() {
-        let candidates = vec![
-            "E:/new/a/app".to_string(),
-            "F:/new/b/app".to_string(),
-        ];
+        let candidates = vec!["E:/new/a/app".to_string(), "F:/new/b/app".to_string()];
 
-        let best = best_project_root_candidate("D:/old/c/app", &candidates)
-            .map(|value| value.as_str());
+        let best =
+            best_project_root_candidate("D:/old/c/app", &candidates).map(|value| value.as_str());
 
         assert_eq!(best, None);
     }
@@ -3718,7 +8687,12 @@ mod tests {
     fn normalized_segments_ignore_empty_parts() {
         assert_eq!(
             normalized_path_segments("D:\\foo\\\\bar\\baz"),
-            vec!["d:".to_string(), "foo".to_string(), "bar".to_string(), "baz".to_string()]
+            vec![
+                "d:".to_string(),
+                "foo".to_string(),
+                "bar".to_string(),
+                "baz".to_string()
+            ]
         );
     }
 }

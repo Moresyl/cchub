@@ -26,6 +26,9 @@ export default function Workspaces() {
   const [editPath, setEditPath] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
   const locale = getLocale();
+  const uiText = (zhText: string, enText: string, jaText?: string) => (
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  );
 
   useEffect(() => { load(); }, []);
 
@@ -91,8 +94,56 @@ export default function Workspaces() {
     setEditPath(ws.base_path || "");
   }
 
+  function closeCreate() {
+    setShowCreate(false);
+    setNewName("");
+    setNewDesc("");
+    setNewPath("");
+  }
+
+  function cancelEdit() {
+    setEditing(null);
+  }
+
+  const editingWorkspace = editing ? workspaces.find((ws) => ws.id === editing) ?? null : null;
+
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if (showCreate) {
+        void handleCreate();
+        return;
+      }
+      if (editingWorkspace) {
+        void handleSaveEdit(editingWorkspace);
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!showCreate && !editingWorkspace) {
+        setShowCreate(true);
+      }
+    };
+    const handleEscapeShortcut = () => {
+      if (showCreate) {
+        closeCreate();
+        return;
+      }
+      if (editingWorkspace) {
+        cancelEdit();
+      }
+    };
+
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    window.addEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+      window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    };
+  }, [showCreate, editingWorkspace, newName, newDesc, newPath, editName, editDesc, editPath]);
+
   if (loading) {
-    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{locale === "zh" ? "加载中..." : "Loading..."}</span></div>;
+    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{uiText("加载中...", "Loading...", "読み込み中...")}</span></div>;
   }
 
   const activeWs = workspaces.find(w => w.is_active);
@@ -101,15 +152,17 @@ export default function Workspaces() {
     <div className="animate-in">
       <div className="page-header">
         <div>
-          <h2 className="page-title">{locale === "zh" ? "工作区" : "Workspaces"}</h2>
+          <h2 className="page-title">{uiText("工作区", "Workspaces", "ワークスペース")}</h2>
           <p className="page-subtitle">
-            {locale === "zh"
-              ? `${workspaces.length} 个工作区${activeWs ? `，当前: ${activeWs.name}` : ""}`
-              : `${workspaces.length} workspaces${activeWs ? `, active: ${activeWs.name}` : ""}`}
+            {uiText(
+              `${workspaces.length} 个工作区${activeWs ? `，当前: ${activeWs.name}` : ""}`,
+              `${workspaces.length} workspaces${activeWs ? `, active: ${activeWs.name}` : ""}`,
+              `${workspaces.length} 個のワークスペース${activeWs ? `、現在: ${activeWs.name}` : ""}`,
+            )}
           </p>
         </div>
         <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} style={{ gap: 6 }}>
-          <Plus size={14} />{locale === "zh" ? "新建" : "New"}
+          <Plus size={14} />{uiText("新建", "New", "新規")}
         </button>
       </div>
 
@@ -117,14 +170,14 @@ export default function Workspaces() {
       {showCreate && (
         <div className="section-card" style={{ marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600 }}>{locale === "zh" ? "新建工作区" : "New Workspace"}</h3>
-            <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowCreate(false)}><X size={14} /></button>
+            <h3 style={{ fontSize: 14, fontWeight: 600 }}>{uiText("新建工作区", "New Workspace", "ワークスペースを新規作成")}</h3>
+            <button className="btn btn-ghost btn-icon-sm" onClick={closeCreate}><X size={14} /></button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <input className="input" placeholder={locale === "zh" ? "工作区名称" : "Workspace name"} value={newName} onChange={e => setNewName(e.target.value)} />
-            <input className="input" placeholder={locale === "zh" ? "描述（可选）" : "Description (optional)"} value={newDesc} onChange={e => setNewDesc(e.target.value)} />
+            <input className="input" placeholder={uiText("工作区名称", "Workspace name", "ワークスペース名")} value={newName} onChange={e => setNewName(e.target.value)} />
+            <input className="input" placeholder={uiText("描述（可选）", "Description (optional)", "説明（任意）")} value={newDesc} onChange={e => setNewDesc(e.target.value)} />
             <div style={{ display: "flex", gap: 8 }}>
-              <input className="input" placeholder={locale === "zh" ? "项目路径（可选）" : "Project path (optional)"} value={newPath} onChange={e => setNewPath(e.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
+              <input className="input" placeholder={uiText("项目路径（可选）", "Project path (optional)", "プロジェクトパス（任意）")} value={newPath} onChange={e => setNewPath(e.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={async () => {
@@ -139,7 +192,7 @@ export default function Workspaces() {
               </button>
             </div>
             <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={!newName.trim()} style={{ alignSelf: "flex-end" }}>
-              <Plus size={14} />{locale === "zh" ? "创建" : "Create"}
+              <Plus size={14} />{uiText("创建", "Create", "作成")}
             </button>
           </div>
         </div>
@@ -167,14 +220,14 @@ export default function Workspaces() {
                   {editing === ws.id ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <input className="input" style={{ fontSize: 13, padding: "4px 8px" }} value={editName} onChange={e => setEditName(e.target.value)} />
-                      <input className="input" style={{ fontSize: 12, padding: "4px 8px" }} value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder={locale === "zh" ? "描述" : "Description"} />
+                      <input className="input" style={{ fontSize: 12, padding: "4px 8px" }} value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder={uiText("描述", "Description", "説明")} />
                       <div style={{ display: "flex", gap: 6 }}>
                         <input
                           className="input"
                           style={{ fontSize: 12, padding: "4px 8px", fontFamily: "'JetBrains Mono', monospace" }}
                           value={editPath}
                           onChange={e => setEditPath(e.target.value)}
-                          placeholder={locale === "zh" ? "项目路径" : "Project path"}
+                          placeholder={uiText("项目路径", "Project path", "プロジェクトパス")}
                         />
                         <button
                           className="btn btn-secondary btn-icon-sm"
@@ -185,7 +238,7 @@ export default function Workspaces() {
                               if (picked) setEditPath(picked);
                             } catch (err) { console.error(err); }
                           }}
-                          title={locale === "zh" ? "选择目录" : "Pick folder"}
+                          title={uiText("选择目录", "Pick folder", "フォルダを選択")}
                         >
                           <FolderOpen size={14} />
                         </button>
@@ -195,7 +248,7 @@ export default function Workspaces() {
                     <>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 600 }}>{ws.name}</span>
-                        {ws.is_active && <span className="badge badge-success" style={{ fontSize: 10 }}>{locale === "zh" ? "当前" : "Active"}</span>}
+                        {ws.is_active && <span className="badge badge-success" style={{ fontSize: 10 }}>{uiText("当前", "Active", "現在")}</span>}
                       </div>
                       {ws.description && <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{ws.description}</p>}
                       {ws.base_path && (
@@ -211,16 +264,16 @@ export default function Workspaces() {
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 {editing === ws.id ? (
                   <>
-                    <button className="btn btn-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); setEditing(null); }}><X size={14} /></button>
+                    <button className="btn btn-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); cancelEdit(); }}><X size={14} /></button>
                     <button className="btn btn-primary btn-icon-sm" onClick={e => { e.stopPropagation(); handleSaveEdit(ws); }}><Check size={14} /></button>
                   </>
                 ) : (
                   <>
-                    <button className="btn btn-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); startEdit(ws); }} title={locale === "zh" ? "编辑" : "Edit"}>
+                    <button className="btn btn-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); startEdit(ws); }} title={uiText("编辑", "Edit", "編集")}>
                       <Edit3 size={14} />
                     </button>
                     {!ws.is_active && (
-                      <button className="btn btn-danger-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); handleDelete(ws); }} title={locale === "zh" ? "删除" : "Delete"}>
+                      <button className="btn btn-danger-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); handleDelete(ws); }} title={uiText("删除", "Delete", "削除")}>
                         <Trash2 size={14} />
                       </button>
                     )}
@@ -233,9 +286,9 @@ export default function Workspaces() {
       </div>
       <ConfirmDialog
         isOpen={!!pendingDelete}
-        title={locale === "zh" ? "删除工作区" : "Delete Workspace"}
-        message={locale === "zh" ? `确定删除工作区「${pendingDelete?.name}」？` : `Delete workspace "${pendingDelete?.name}"?`}
-        confirmText={locale === "zh" ? "删除" : "Delete"}
+        title={uiText("删除工作区", "Delete Workspace", "ワークスペースを削除")}
+        message={uiText(`确定删除工作区「${pendingDelete?.name}」？`, `Delete workspace "${pendingDelete?.name}"?`, `ワークスペース「${pendingDelete?.name}」を削除しますか？`)}
+        confirmText={uiText("删除", "Delete", "削除")}
         variant="destructive"
         onConfirm={() => { if (pendingDelete) void doDelete(pendingDelete); setPendingDelete(null); }}
         onCancel={() => setPendingDelete(null)}

@@ -1,7 +1,13 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 type AppUpdateSource = "tauri" | "github";
+
+export interface UpdaterEnvironmentState {
+  disabled_by_env: boolean;
+  env_var_value: string | null;
+}
 
 export interface AppUpdateResult {
   update_available: boolean;
@@ -12,6 +18,7 @@ export interface AppUpdateResult {
   can_install: boolean;
   release_url: string | null;
   source: AppUpdateSource | null;
+  disabled_by_env: boolean;
 }
 
 export interface AppUpdateHandle {
@@ -21,6 +28,21 @@ export interface AppUpdateHandle {
 }
 
 const RELEASE_API_URL = "https://api.github.com/repos/Moresl/cchub/releases/latest";
+
+function buildNoUpdateResult(currentVersion: string, overrides?: Partial<AppUpdateResult>): AppUpdateResult {
+  return {
+    update_available: false,
+    latest_version: null,
+    current_version: currentVersion || null,
+    body: null,
+    not_configured: false,
+    can_install: false,
+    release_url: null,
+    source: null,
+    disabled_by_env: false,
+    ...overrides,
+  };
+}
 
 function normalizeVersion(version: string | null | undefined): string {
   return String(version ?? "")
@@ -62,6 +84,17 @@ async function getCurrentAppVersion(): Promise<string> {
   }
 }
 
+export async function getUpdaterEnvironmentState(): Promise<UpdaterEnvironmentState> {
+  try {
+    return await invoke<UpdaterEnvironmentState>("get_updater_environment_state");
+  } catch {
+    return {
+      disabled_by_env: false,
+      env_var_value: null,
+    };
+  }
+}
+
 async function checkGitHubRelease(currentVersion: string): Promise<{
   result: AppUpdateResult;
   handle: AppUpdateHandle | null;
@@ -99,6 +132,7 @@ async function checkGitHubRelease(currentVersion: string): Promise<{
       can_install: false,
       release_url: release.html_url ?? null,
       source: hasUpdate ? "github" : null,
+      disabled_by_env: false,
     },
     handle: hasUpdate
       ? {
@@ -114,36 +148,38 @@ export async function checkAppUpdate(): Promise<{
   handle: AppUpdateHandle | null;
 }> {
   const currentVersion = await getCurrentAppVersion();
+  const updaterEnvironment = await getUpdaterEnvironmentState();
+
+  if (updaterEnvironment.disabled_by_env) {
+    return {
+      result: buildNoUpdateResult(currentVersion, {
+        disabled_by_env: true,
+      }),
+      handle: null,
+    };
+  }
 
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     const update = await check();
     if (!update) {
       return {
-        result: {
-          update_available: false,
-          latest_version: null,
-          current_version: currentVersion || null,
-          body: null,
-          not_configured: false,
-          can_install: false,
-          release_url: null,
-          source: null,
-        },
+        result: buildNoUpdateResult(currentVersion),
         handle: null,
       };
     }
 
     return {
-        result: {
-          update_available: true,
-          latest_version: update.version,
-          current_version: update.currentVersion ?? (currentVersion || null),
-          body: update.body ?? null,
-          not_configured: false,
-          can_install: true,
+      result: {
+        update_available: true,
+        latest_version: update.version,
+        current_version: update.currentVersion ?? (currentVersion || null),
+        body: update.body ?? null,
+        not_configured: false,
+        can_install: true,
         release_url: null,
         source: "tauri",
+        disabled_by_env: false,
       },
       handle: {
         source: "tauri",
@@ -154,16 +190,9 @@ export async function checkAppUpdate(): Promise<{
     const message = String(error);
     if (isUpdaterNotConfigured(message)) {
       return {
-        result: {
-          update_available: false,
-          latest_version: null,
-          current_version: currentVersion || null,
-          body: null,
+        result: buildNoUpdateResult(currentVersion, {
           not_configured: true,
-          can_install: false,
-          release_url: null,
-          source: null,
-        },
+        }),
         handle: null,
       };
     }

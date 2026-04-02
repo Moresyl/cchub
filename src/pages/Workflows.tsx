@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, Save, RotateCcw, Plus, Trash2, Pencil, ArrowLeft, Download, X, GitBranch, Upload } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
+import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
@@ -61,20 +62,55 @@ export default function Workflows() {
   const [installing, setInstalling] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WorkflowFile | null>(null);
   const [togglingPath, setTogglingPath] = useState<string | null>(null);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
   const i = t();
   const zh = (localStorage.getItem("cchub-locale") || "zh") === "zh";
+  const hasChanges = content !== originalContent;
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const handleEscape = () => {
+      if (editingFile) {
+        closeEditor();
+        return;
+      }
+      if (showInstall) {
+        setShowInstall(false);
+      }
+    };
+    window.addEventListener("cchub-shortcut-escape", handleEscape);
+    return () => window.removeEventListener("cchub-shortcut-escape", handleEscape);
+  }, [editingFile, showInstall]);
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if (editingFile && hasChanges && !saving) {
+        void handleSave();
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!editingFile) {
+        setShowInstall(true);
+      }
+    };
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+    };
+  }, [editingFile, hasChanges, saving]);
 
   async function load() {
     setLoading(true);
     try {
-      const [f, tmpl] = await Promise.all([
+      const [f, tmpl, nextVisibleApps] = await Promise.all([
         invoke<WorkflowFile[]>("scan_workflows"),
         invoke<WorkflowTemplate[]>("get_workflow_templates"),
+        fetchVisibleApps(),
       ]);
       setFiles(f);
       setTemplates(tmpl);
+      setVisibleApps(nextVisibleApps);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }
@@ -148,12 +184,14 @@ export default function Workflows() {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
 
-  const filteredFiles = activeTab === "all" ? files : files.filter(f => f.tool_id === activeTab);
-  const hasChanges = content !== originalContent;
+  const visibleToolTabs = TOOL_TABS.filter((tab) => tab.id === "all" || visibleApps.includes(tab.id as ManagedAppId));
+  const visibleFiles = files.filter((file) => visibleApps.includes(file.tool_id as ManagedAppId));
+  const filteredFiles = activeTab === "all" ? visibleFiles : visibleFiles.filter(f => f.tool_id === activeTab);
 
   async function handleImport() {
     try {
-      await invoke<string>("import_workflow_file", { toolId: activeTab === "all" ? "claude" : activeTab });
+      const fallbackTool = visibleApps[0] || "claude";
+      await invoke<string>("import_workflow_file", { toolId: activeTab === "all" ? fallbackTool : activeTab });
       showToast("success", i.workflows.importSuccess);
       await load();
     } catch (e) {
@@ -163,8 +201,18 @@ export default function Workflows() {
   }
 
   const installedIds = new Set(
-    files.filter(f => f.tool_id === installTool).map(f => f.file_name.replace(".md", "").replace(".disabled", ""))
+    visibleFiles.filter(f => f.tool_id === installTool).map(f => f.file_name.replace(".md", "").replace(".disabled", ""))
   );
+
+  useEffect(() => {
+    const firstVisibleTool = visibleApps[0] || "claude";
+    if (activeTab !== "all" && !visibleApps.includes(activeTab as ManagedAppId)) {
+      setActiveTab("all");
+    }
+    if (!visibleApps.includes(installTool as ManagedAppId)) {
+      setInstallTool(firstVisibleTool);
+    }
+  }, [activeTab, installTool, visibleApps]);
 
   if (loading) {
     return (
@@ -226,7 +274,7 @@ export default function Workflows() {
       <div className="page-header">
         <div>
           <h2 className="page-title">{i.workflows.title}</h2>
-          <p className="page-subtitle">{zh ? `共 ${files.length} 个工作流` : `${files.length} workflows`}</p>
+          <p className="page-subtitle">{zh ? `共 ${visibleFiles.length} 个工作流` : `${visibleFiles.length} workflows`}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-secondary btn-sm" onClick={handleImport}>
@@ -254,7 +302,7 @@ export default function Workflows() {
             {/* Tool Selector */}
             <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
               <span style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: "28px" }}>{i.workflows.selectTool}:</span>
-              {TOOL_TABS.filter(tab => tab.id !== "all").map(tab => (
+              {visibleToolTabs.filter(tab => tab.id !== "all").map(tab => (
                 <button
                   key={tab.id}
                   className={`btn btn-xs ${installTool === tab.id ? "btn-primary" : "btn-ghost"}`}
@@ -301,7 +349,7 @@ export default function Workflows() {
 
         {/* Tool Tabs */}
         <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {TOOL_TABS.map(tab => (
+          {visibleToolTabs.map(tab => (
             <button
               key={tab.id}
               className={`btn btn-xs ${activeTab === tab.id ? "btn-primary" : "btn-ghost"}`}
@@ -310,7 +358,7 @@ export default function Workflows() {
               {zh ? tab.label_zh : tab.label_en}
               {tab.id !== "all" && (
                 <span style={{ marginLeft: 4, opacity: 0.7 }}>
-                  ({files.filter(f => f.tool_id === tab.id).length})
+                  ({visibleFiles.filter(f => f.tool_id === tab.id).length})
                 </span>
               )}
             </button>

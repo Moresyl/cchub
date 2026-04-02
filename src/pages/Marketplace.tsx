@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
   Store, Search, Download, CheckCircle, X, ExternalLink, Key, Check,
-  Plug, Zap, Plus, Globe, Tag, Edit3, Trash2, Save,
+  Plug, Zap, Plus, Globe, Tag, Edit3, Trash2, Save, ArrowLeft, RotateCcw, Wand2,
 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
@@ -11,6 +11,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import CodeEditor from "../components/CodeEditor";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
 interface RegistryEntry {
   id: string; name: string; description: string; category: string;
@@ -23,6 +25,17 @@ interface SkillEntry {
   category: string; author: string | null; github_url: string | null;
   cover_url: string | null; tags: string[]; content: string;
   file_path?: string | null;
+}
+
+interface InstalledMcpServer {
+  id: string; name: string; command: string | null; args: string; env: string;
+  status: string; transport: string; source: string; package_name: string | null;
+  version: string | null; config_path: string | null;
+}
+
+interface InstalledSkillRecord {
+  id: string; name: string; description: string | null;
+  plugin_id: string | null; trigger_command: string | null; file_path: string | null;
 }
 
 type MarketTab = "mcp" | "skills";
@@ -59,29 +72,59 @@ export default function Marketplace() {
   const [mcpPage, setMcpPage] = useState(0);
   const [mcpTotal, setMcpTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [installedMcpDetails, setInstalledMcpDetails] = useState<InstalledMcpServer[]>([]);
   const [previewMcp, setPreviewMcp] = useState<RegistryEntry | null>(null);
   const [previewSkill, setPreviewSkill] = useState<SkillEntry | null>(null);
-  const [editingPreview, setEditingPreview] = useState(false);
-  const [editContent, setEditContent] = useState("");
+  const [editingSkill, setEditingSkill] = useState<SkillEntry | null>(null);
+  const [skillContent, setSkillContent] = useState("");
+  const [editSkillContent, setEditSkillContent] = useState("");
+  const [editingMcp, setEditingMcp] = useState<InstalledMcpServer | null>(null);
+  const [editCommand, setEditCommand] = useState("");
+  const [editArgs, setEditArgs] = useState("");
+  const [editEnv, setEditEnv] = useState("");
   const [pendingUninstall, setPendingUninstall] = useState<SkillEntry | null>(null);
   const i = t();
   const locale = localStorage.getItem("cchub-locale") || "zh";
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const localeText = (zhText: string, enText: string, jaText?: string) => (
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  );
 
   useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    const handleSearchShortcut = () => {
+      if (editingSkill || editingMcp) return;
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    };
+    window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
+    return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
+  }, [editingSkill, editingMcp]);
+
+  function formatJson(raw: string): string {
+    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+  }
 
   async function loadAll() {
     setLoading(true);
     try {
       // Load installed MCP servers
       try {
-        const servers = await invoke<{ id: string; name: string }[]>("scan_mcp_servers");
+        const servers = await invoke<InstalledMcpServer[]>("scan_mcp_servers");
+        setInstalledMcpDetails(servers);
         setInstalledIds(new Set(servers.flatMap(s => [s.id, s.name])));
         const scannedEntries: RegistryEntry[] = servers.map(s => ({
-          id: (s as any).id, name: (s as any).name,
-          description: (s as any).command ? `${(s as any).command} ${(() => { try { return JSON.parse((s as any).args || "[]").join(" "); } catch { return ""; } })()}` : "",
-          category: (s as any).source || "local", install_type: "local", package_name: null,
-          github_url: null, command: (s as any).command || "", args: (() => { try { return JSON.parse((s as any).args || "[]"); } catch { return []; } })(),
-          env_keys: (() => { try { return Object.keys(JSON.parse((s as any).env || "{}")); } catch { return []; } })(), source: "local",
+          id: s.id,
+          name: s.name,
+          description: s.command ? `${s.command} ${(() => { try { return JSON.parse(s.args || "[]").join(" "); } catch { return ""; } })()}` : "",
+          category: s.source || "local",
+          install_type: "local",
+          package_name: s.package_name,
+          github_url: null,
+          command: s.command || "",
+          args: (() => { try { return JSON.parse(s.args || "[]"); } catch { return []; } })(),
+          env_keys: (() => { try { return Object.keys(JSON.parse(s.env || "{}")); } catch { return []; } })(),
+          source: "local",
         }));
         setEntries(scannedEntries);
       } catch { /* ignore */ }
@@ -89,7 +132,7 @@ export default function Marketplace() {
       // Load installed skills
       let localSkillEntries: SkillEntry[] = [];
       try {
-        const skills = await invoke<{ id: string; name: string; description: string | null; plugin_id: string | null; trigger_command: string | null; file_path: string | null }[]>("scan_skills");
+        const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
         setInstalledSkills(new Set(skills.map(s => s.name.toLowerCase())));
         localSkillEntries = skills.map(s => ({
           id: `local-${s.name}`,
@@ -131,6 +174,137 @@ export default function Marketplace() {
       } catch { /* ignore */ }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
+  }
+
+  async function refreshInstalledMcpDetails() {
+    const servers = await invoke<InstalledMcpServer[]>("scan_mcp_servers");
+    setInstalledMcpDetails(servers);
+    setInstalledIds(new Set(servers.flatMap(s => [s.id, s.name])));
+    return servers;
+  }
+
+  async function findInstalledSkill(skill: SkillEntry) {
+    const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
+    return skills.find((item) => (
+      item.name.toLowerCase() === skill.name.toLowerCase() ||
+      item.name.toLowerCase() === skill.id.toLowerCase()
+    )) || null;
+  }
+
+  async function openSkillPreview(skill: SkillEntry) {
+    if (!skill.content && skill.file_path) {
+      try {
+        const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
+        const updated = { ...skill, content };
+        setSkillEntries(prev => prev.map(s => s.id === skill.id ? updated : s));
+        setPreviewSkill(updated);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    setPreviewSkill(skill);
+  }
+
+  async function startSkillEdit(skill: SkillEntry) {
+    try {
+      const installed = await findInstalledSkill(skill);
+      if (!installed?.file_path) {
+        showToast("error", locale === "zh" ? "未找到已安装的技能文件" : "Installed skill file not found");
+        return;
+      }
+      const content = await invoke<string>("read_skill_content", { filePath: installed.file_path });
+      const updatedSkill = { ...skill, file_path: installed.file_path, content };
+      setSkillEntries(prev => prev.map(s => (
+        s.id === skill.id || s.name.toLowerCase() === skill.name.toLowerCase()
+          ? { ...s, file_path: installed.file_path, content }
+          : s
+      )));
+      setPreviewSkill(null);
+      setEditingSkill(updatedSkill);
+      setSkillContent(content);
+      setEditSkillContent(content);
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? "打开技能编辑器失败" : "Failed to open skill editor");
+    }
+  }
+
+  async function handleSaveSkillContent() {
+    if (!editingSkill?.file_path) return;
+    try {
+      await invoke("write_skill_content", { filePath: editingSkill.file_path, content: editSkillContent });
+      setSkillContent(editSkillContent);
+      setEditingSkill(prev => prev ? { ...prev, content: editSkillContent } : prev);
+      setSkillEntries(prev => prev.map(s => (
+        s.id === editingSkill.id || s.name.toLowerCase() === editingSkill.name.toLowerCase()
+          ? { ...s, file_path: editingSkill.file_path, content: editSkillContent }
+          : s
+      )));
+      showToast("success", locale === "zh" ? "技能已保存" : "Skill saved");
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? "技能保存失败" : "Failed to save skill");
+    }
+  }
+
+  async function startMcpEdit(entry: RegistryEntry) {
+    try {
+      let installed = installedMcpDetails.find(server => server.id === entry.id || server.name === entry.name) || null;
+      if (!installed) {
+        const refreshed = await refreshInstalledMcpDetails();
+        installed = refreshed.find(server => server.id === entry.id || server.name === entry.name) || null;
+      }
+      if (!installed) {
+        showToast("error", locale === "zh" ? "未找到已安装的 MCP 配置" : "Installed MCP config not found");
+        return;
+      }
+      setPreviewMcp(null);
+      setEditingMcp(installed);
+      setEditCommand(installed.command || "");
+      setEditArgs(formatJson(installed.args || "[]"));
+      setEditEnv(formatJson(installed.env || "{}"));
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? "打开 MCP 编辑器失败" : "Failed to open MCP editor");
+    }
+  }
+
+  async function handleSaveMcpConfig() {
+    if (!editingMcp) return;
+    try {
+      const args = JSON.parse(editArgs);
+      const env = JSON.parse(editEnv);
+      await invoke("update_mcp_server_config", {
+        name: editingMcp.name,
+        command: editCommand,
+        args,
+        env,
+      });
+      const refreshed = await refreshInstalledMcpDetails();
+      const updated = refreshed.find(server => server.id === editingMcp.id || server.name === editingMcp.name) || null;
+      setEditingMcp(updated || {
+        ...editingMcp,
+        command: editCommand,
+        args: JSON.stringify(args),
+        env: JSON.stringify(env),
+      });
+      setEntries(prev => prev.map(entry => (
+        entry.id === editingMcp.id || entry.name === editingMcp.name
+          ? {
+              ...entry,
+              command: editCommand,
+              args,
+              env_keys: Object.keys(env),
+              description: `${editCommand} ${Array.isArray(args) ? args.join(" ") : ""}`.trim(),
+            }
+          : entry
+      )));
+      showToast("success", locale === "zh" ? "MCP 配置已保存" : "MCP config saved");
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? "JSON 格式错误，请检查参数和环境变量" : "Invalid JSON format");
+    }
   }
 
   async function handleSearch() {
@@ -196,7 +370,7 @@ export default function Marketplace() {
   }
   async function doUninstallSkill(skill: SkillEntry) {
     try {
-      const skills = await invoke<{ name: string; file_path: string | null }[]>("scan_skills");
+      const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
       const installed = skills.find(s => s.name.toLowerCase() === skill.name.toLowerCase() || s.name.toLowerCase() === skill.id.toLowerCase());
       if (installed?.file_path) {
         await invoke("uninstall_skill_file", { path: installed.file_path });
@@ -205,20 +379,17 @@ export default function Marketplace() {
           next.delete(skill.name.toLowerCase());
           return next;
         });
+        setSkillEntries(prev => prev.map(item => (
+          item.id === skill.id || item.name.toLowerCase() === skill.name.toLowerCase()
+            ? { ...item, file_path: null, content: "" }
+            : item
+        )));
+        if (editingSkill && editingSkill.name.toLowerCase() === skill.name.toLowerCase()) {
+          setEditingSkill(null);
+          setSkillContent("");
+          setEditSkillContent("");
+        }
       }
-    } catch (e) { console.error(e); }
-  }
-
-  async function handleSaveSkillContent() {
-    if (!previewSkill) return;
-    try {
-      // Find the installed file path
-      const skills = await invoke<{ name: string; file_path: string | null }[]>("scan_skills");
-      const installed = skills.find(s => s.name.toLowerCase() === previewSkill.name.toLowerCase() || s.name.toLowerCase() === previewSkill.id.toLowerCase());
-      if (installed?.file_path) {
-        await invoke("write_skill_content", { filePath: installed.file_path, content: editContent });
-      }
-      setEditingPreview(false);
     } catch (e) { console.error(e); }
   }
 
@@ -287,6 +458,147 @@ export default function Marketplace() {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.marketplace.loading}</span></div>;
   }
 
+  const hasSkillChanges = editSkillContent !== skillContent;
+  const originalMcpCommand = editingMcp?.command || "";
+  const originalMcpArgs = editingMcp ? formatJson(editingMcp.args || "[]") : "";
+  const originalMcpEnv = editingMcp ? formatJson(editingMcp.env || "{}") : "";
+  const hasMcpChanges = !!editingMcp && (
+    editCommand !== originalMcpCommand ||
+    editArgs !== originalMcpArgs ||
+    editEnv !== originalMcpEnv
+  );
+
+  if (editingSkill) {
+    return (
+      <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <div className="page-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button className="btn btn-ghost btn-icon-sm" onClick={() => setEditingSkill(null)}>
+              <ArrowLeft size={16} />
+            </button>
+            <Zap size={18} style={{ color: "var(--warning)" }} />
+            <h2 className="page-title" style={{ margin: 0 }}>{editingSkill.name}</h2>
+            {hasSkillChanges && (
+              <span className="badge badge-warning">{locale === "zh" ? "未保存" : "Unsaved"}</span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {hasSkillChanges && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditSkillContent(skillContent)}>
+                <RotateCcw size={14} />{locale === "zh" ? "撤销" : "Revert"}
+              </button>
+            )}
+            <button className="btn btn-primary btn-sm" onClick={handleSaveSkillContent} disabled={!hasSkillChanges}>
+              <Save size={14} />{i.common.save}
+            </button>
+          </div>
+        </div>
+
+        {editingSkill.file_path && (
+          <div style={{ marginBottom: 16 }}>
+            <div className="code-block" style={{ fontSize: 11 }}>{editingSkill.file_path}</div>
+          </div>
+        )}
+
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <Suspense fallback={
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 40, justifyContent: "center" }}>
+              <div className="spinner" style={{ width: 18, height: 18 }} />
+            </div>
+          }>
+            <MarkdownEditor
+              value={editSkillContent}
+              onChange={setEditSkillContent}
+              minHeight={500}
+            />
+          </Suspense>
+        </div>
+      </div>
+    );
+  }
+
+  if (editingMcp) {
+    return (
+      <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <div className="page-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button className="btn btn-ghost btn-icon-sm" onClick={() => setEditingMcp(null)} title={locale === "zh" ? "返回" : "Back"}>
+              <ArrowLeft size={16} />
+            </button>
+            <div>
+              <h2 className="page-title">{editingMcp.name}</h2>
+              <p className="page-subtitle">{locale === "zh" ? "编辑 MCP 服务器配置" : "Edit MCP server configuration"}</p>
+            </div>
+          </div>
+          {hasMcpChanges && (
+            <span className="badge badge-warning">{locale === "zh" ? "未保存" : "Unsaved"}</span>
+          )}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, paddingBottom: 20 }}>
+          <div>
+            <span className="field-label">{locale === "zh" ? "命令" : "Command"}</span>
+            <input
+              className="input"
+              style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+              value={editCommand}
+              onChange={(e) => setEditCommand(e.target.value)}
+              placeholder="npx, node, python..."
+            />
+          </div>
+
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span className="field-label" style={{ marginBottom: 0 }}>{locale === "zh" ? "参数" : "Arguments"}</span>
+              <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
+                try { setEditArgs(JSON.stringify(JSON.parse(editArgs), null, 2)); } catch { /* ignore */ }
+              }}><Wand2 size={12} /></button>
+            </div>
+            <CodeEditor
+              value={editArgs}
+              onChange={setEditArgs}
+              language="json"
+              minHeight={160}
+            />
+          </div>
+
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span className="field-label" style={{ marginBottom: 0 }}>{locale === "zh" ? "环境变量" : "Environment"}</span>
+              <button className="btn btn-ghost btn-icon-sm" title="Format" onClick={() => {
+                try { setEditEnv(JSON.stringify(JSON.parse(editEnv), null, 2)); } catch { /* ignore */ }
+              }}><Wand2 size={12} /></button>
+            </div>
+            <CodeEditor
+              value={editEnv}
+              onChange={setEditEnv}
+              language="json"
+              minHeight={160}
+            />
+          </div>
+        </div>
+
+        <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          {hasMcpChanges && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setEditCommand(originalMcpCommand);
+                setEditArgs(originalMcpArgs);
+                setEditEnv(originalMcpEnv);
+              }}
+            >
+              <RotateCcw size={14} />{locale === "zh" ? "撤销" : "Revert"}
+            </button>
+          )}
+          <button className="btn btn-primary btn-sm" onClick={handleSaveMcpConfig} disabled={!hasMcpChanges}>
+            <Save size={14} />{i.common.save}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Header */}
@@ -330,9 +642,10 @@ export default function Marketplace() {
           <div style={{ position: "relative", flex: 1 }}>
             <Search size={15} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
             <input
+              ref={searchInputRef}
               className="input"
               style={{ paddingLeft: 40, paddingRight: search ? 36 : 12 }}
-              placeholder={tab === "mcp" ? i.marketplace.searchPlaceholder : (locale === "zh" ? "搜索技能..." : "Search skills...")}
+              placeholder={tab === "mcp" ? i.marketplace.searchPlaceholder : localeText("搜索技能...", "Search skills...", "スキルを検索...")}
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSearch()}
@@ -403,9 +716,18 @@ export default function Marketplace() {
                         )}
                       </div>
                       {isInstalled ? (
-                        <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <CheckCircle size={12} />{i.marketplace.installed}
-                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <button
+                            className="btn btn-ghost btn-icon-sm"
+                            onClick={e => { e.stopPropagation(); void startMcpEdit(entry); }}
+                            title={locale === "zh" ? "编辑" : "Edit"}
+                          >
+                            <Edit3 size={13} style={{ color: "var(--text-muted)" }} />
+                          </button>
+                          <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <CheckCircle size={12} />{i.marketplace.installed}
+                          </span>
+                        </div>
                       ) : (
                         <button className="btn btn-primary btn-sm" onClick={e => { e.stopPropagation(); handleInstallMcp(entry); }} disabled={isInstalling}>
                           <Download size={13} />{isInstalling ? i.marketplace.installing : i.marketplace.install}
@@ -478,18 +800,7 @@ export default function Marketplace() {
                 const desc = showTranslation && locale === "zh" && skill.description_zh ? skill.description_zh : skill.description;
                 return (
                   <div key={skill.id} className="card card-hover" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10, cursor: "pointer" }}
-                    onClick={async () => {
-                      if (!skill.content && skill.file_path) {
-                        try {
-                          const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
-                          const updated = { ...skill, content };
-                          setSkillEntries(prev => prev.map(s => s.id === skill.id ? updated : s));
-                          setPreviewSkill(updated);
-                        } catch { setPreviewSkill(skill); }
-                      } else {
-                        setPreviewSkill(skill);
-                      }
-                    }}>
+                    onClick={() => { void openSkillPreview(skill); }}>
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                           <span style={{ fontSize: 14, fontWeight: 600 }}>{skill.name}</span>
@@ -522,7 +833,7 @@ export default function Marketplace() {
                         </div>
                         {isInstalled ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <button className="btn btn-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); setPreviewSkill(skill); setEditingPreview(true); setEditContent(skill.content); }}
+                            <button className="btn btn-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); void startSkillEdit(skill); }}
                               title={locale === "zh" ? "编辑" : "Edit"}>
                               <Edit3 size={13} style={{ color: "var(--text-muted)" }} />
                             </button>
@@ -731,8 +1042,8 @@ export default function Marketplace() {
       {/* Skill Preview Modal */}
       {previewSkill && (
         <div style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
-          onClick={() => { setPreviewSkill(null); setEditingPreview(false); }}>
-          <div className="section-card" style={{ width: editingPreview ? "90vw" : 720, maxWidth: editingPreview ? 1200 : 720, maxHeight: "85vh", display: "flex", flexDirection: "column" }}
+          onClick={() => setPreviewSkill(null)}>
+          <div className="section-card" style={{ width: 720, maxWidth: 720, maxHeight: "85vh", display: "flex", flexDirection: "column" }}
             onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
               <div>
@@ -741,7 +1052,7 @@ export default function Marketplace() {
                   {showTranslation && locale === "zh" && previewSkill.description_zh ? previewSkill.description_zh : previewSkill.description}
                 </p>
               </div>
-              <button className="btn btn-ghost btn-icon-sm" onClick={() => { setPreviewSkill(null); setEditingPreview(false); }}><X size={16} /></button>
+              <button className="btn btn-ghost btn-icon-sm" onClick={() => setPreviewSkill(null)}><X size={16} /></button>
             </div>
             {/* Tags & meta */}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
@@ -758,50 +1069,23 @@ export default function Marketplace() {
                 </button>
               )}
             </div>
-            {/* Content preview / editor */}
+            {/* Content preview */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span className="field-label" style={{ marginBottom: 0 }}>{locale === "zh" ? "技能内容" : "Content"}</span>
-              {installedSkills.has(previewSkill.name.toLowerCase()) && !editingPreview && (
-                <button className="btn btn-secondary btn-xs" onClick={() => { setEditingPreview(true); setEditContent(previewSkill.content); }} style={{ gap: 5 }}>
+              {installedSkills.has(previewSkill.name.toLowerCase()) && (
+                <button className="btn btn-secondary btn-xs" onClick={() => void startSkillEdit(previewSkill)} style={{ gap: 5 }}>
                   <Edit3 size={12} />{locale === "zh" ? "编辑" : "Edit"}
                 </button>
               )}
-              {editingPreview && (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button className="btn btn-secondary btn-xs" onClick={() => setEditingPreview(false)}><X size={12} />{locale === "zh" ? "取消" : "Cancel"}</button>
-                  <button className="btn btn-primary btn-xs" onClick={handleSaveSkillContent}><Save size={12} />{locale === "zh" ? "保存" : "Save"}</button>
-                </div>
-              )}
             </div>
-            {editingPreview ? (
-              <div style={{ flex: 1, display: "flex", gap: 12, minHeight: 0 }}>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Markdown</div>
-                  <CodeEditor
-                    value={editContent}
-                    onChange={setEditContent}
-                    language="markdown"
-                    minHeight={280}
-                    maxHeight={420}
-                  />
-                </div>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>{locale === "zh" ? "预览" : "Preview"}</div>
-                  <div className="markdown-preview" style={{ flex: 1, overflowY: "auto", fontSize: 13, lineHeight: 1.8, minHeight: 0 }}>
-                    <Markdown remarkPlugins={[remarkGfm]}>{editContent}</Markdown>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="markdown-preview" style={{ flex: 1, overflowY: "auto", fontSize: 13, lineHeight: 1.8, minHeight: 200 }}>
-                <Markdown remarkPlugins={[remarkGfm]}>{previewSkill.content}</Markdown>
-              </div>
-            )}
+            <div className="markdown-preview" style={{ flex: 1, overflowY: "auto", fontSize: 13, lineHeight: 1.8, minHeight: 200 }}>
+              <Markdown remarkPlugins={[remarkGfm]}>{previewSkill.content}</Markdown>
+            </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => { setPreviewSkill(null); setEditingPreview(false); }}>{i.common.cancel}</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPreviewSkill(null)}>{i.common.cancel}</button>
               {installedSkills.has(previewSkill.name.toLowerCase()) ? (
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button className="btn btn-danger-ghost btn-sm" onClick={() => { handleUninstallSkill(previewSkill); setPreviewSkill(null); setEditingPreview(false); }} style={{ gap: 5 }}>
+                  <button className="btn btn-danger-ghost btn-sm" onClick={() => { handleUninstallSkill(previewSkill); setPreviewSkill(null); }} style={{ gap: 5 }}>
                     <Trash2 size={13} />{locale === "zh" ? "卸载" : "Uninstall"}
                   </button>
                   <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px" }}>
@@ -868,9 +1152,14 @@ export default function Marketplace() {
                   {locale === "zh" ? "关闭" : "Close"}
                 </button>
                 {isInstalled ? (
-                  <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px" }}>
-                    <CheckCircle size={12} />{i.marketplace.installed}
-                  </span>
+                  <>
+                    <button className="btn btn-secondary btn-sm" onClick={() => void startMcpEdit(previewMcp)} style={{ gap: 5 }}>
+                      <Edit3 size={13} />{locale === "zh" ? "编辑" : "Edit"}
+                    </button>
+                    <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px" }}>
+                      <CheckCircle size={12} />{i.marketplace.installed}
+                    </span>
+                  </>
                 ) : (
                   <button className="btn btn-primary btn-sm" onClick={() => { handleInstallMcp(previewMcp); setPreviewMcp(null); }} style={{ gap: 5 }}>
                     <Download size={13} />{i.marketplace.install}

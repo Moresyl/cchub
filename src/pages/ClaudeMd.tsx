@@ -1,9 +1,10 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, FileText, Save, RotateCcw, Plus, X, Check, Trash2, Pencil, ArrowLeft } from "lucide-react";
+import { RefreshCw, FileText, Save, RotateCcw, Plus, X, Check, Trash2, Pencil, ArrowLeft, Search } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import CodeEditor from "../components/CodeEditor";
+import { fetchVisibleApps, toolNameToAppId } from "../lib/appPreferences";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
@@ -28,6 +29,19 @@ interface ClaudeMdTemplate {
   tool_name: string;
 }
 
+interface PromptPreset {
+  id: string;
+  name: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PromptPresetState {
+  presets: PromptPreset[];
+  active_preset_id: string | null;
+}
+
 export default function ClaudeMd() {
   const [files, setFiles] = useState<ClaudeMdFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,21 +56,114 @@ export default function ClaudeMd() {
   const [newDirPath, setNewDirPath] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<ClaudeMdFile | null>(null);
   const [togglingPath, setTogglingPath] = useState<string | null>(null);
+  const [promptPresets, setPromptPresets] = useState<PromptPreset[]>([]);
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  const [showPresetEditor, setShowPresetEditor] = useState(false);
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const [presetName, setPresetName] = useState("");
+  const [presetContent, setPresetContent] = useState("");
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [activatingPresetId, setActivatingPresetId] = useState<string | null>(null);
+  const [confirmPresetDelete, setConfirmPresetDelete] = useState<PromptPreset | null>(null);
+  const [search, setSearch] = useState("");
   const i = t();
+  const hasChanges = content !== originalContent;
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const handleEscape = () => {
+      if (confirmDelete) {
+        setConfirmDelete(null);
+        return;
+      }
+      if (confirmPresetDelete) {
+        setConfirmPresetDelete(null);
+        return;
+      }
+      if (showCreate) {
+        setShowCreate(false);
+        return;
+      }
+      if (showPresetEditor) {
+        setShowPresetEditor(false);
+        setEditingPresetId(null);
+        return;
+      }
+      if (editingFile) {
+        closeEditor();
+      }
+    };
+    window.addEventListener("cchub-shortcut-escape", handleEscape);
+    return () => window.removeEventListener("cchub-shortcut-escape", handleEscape);
+  }, [confirmDelete, confirmPresetDelete, editingFile, showCreate, showPresetEditor]);
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if (editingFile && hasChanges && !saving) {
+        void handleSave();
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!editingFile && !showPresetEditor) {
+        setShowCreate(true);
+      }
+    };
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+    };
+  }, [editingFile, hasChanges, saving, showPresetEditor]);
 
   async function load() {
     setLoading(true);
     try {
-      const [f, tmpl] = await Promise.all([
+      const [f, tmpl, nextVisibleApps, presetState] = await Promise.all([
         invoke<ClaudeMdFile[]>("scan_claude_md"),
         invoke<ClaudeMdTemplate[]>("get_claude_md_templates"),
+        fetchVisibleApps(),
+        invoke<PromptPresetState>("get_prompt_presets").catch(() => ({ presets: [], active_preset_id: null })),
       ]);
-      setFiles(f);
-      setTemplates(tmpl);
+      setFiles(f.filter((file) => {
+        const appId = toolNameToAppId(file.tool_name);
+        return appId ? nextVisibleApps.includes(appId) : true;
+      }));
+      setTemplates(tmpl.filter((template) => {
+        const appId = toolNameToAppId(template.tool_name);
+        return appId ? nextVisibleApps.includes(appId) : true;
+      }));
+      setPromptPresets(presetState.presets);
+      setActivePresetId(presetState.active_preset_id);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
+  }
+
+  function openPresetEditor(preset?: PromptPreset) {
+    setShowPresetEditor(true);
+    setEditingPresetId(preset?.id || null);
+    setPresetName(preset?.name || "");
+    setPresetContent(preset?.content || "");
+  }
+
+  function closePresetEditor() {
+    setShowPresetEditor(false);
+    setEditingPresetId(null);
+    setPresetName("");
+    setPresetContent("");
+  }
+
+  async function savePreset() {
+    setSavingPreset(true);
+    try {
+      await invoke("save_prompt_preset", { id: editingPresetId, name: presetName, content: presetContent });
+      await load();
+      closePresetEditor();
+      showToast("success", locale === "zh" ? "预设已保存" : "Preset saved");
+    } catch (e: any) {
+      showToast("error", e?.toString() || "Failed to save preset");
+    } finally {
+      setSavingPreset(false);
+    }
   }
 
   async function openEditor(file: ClaudeMdFile) {
@@ -165,7 +272,18 @@ export default function ClaudeMd() {
     return path.endsWith(".md") || path.endsWith(".md.bak");
   }
 
-  const hasChanges = content !== originalContent;
+  const filteredFiles = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return files;
+    return files.filter((file) => (
+      file.project_name.toLowerCase().includes(keyword)
+      || file.tool_name.toLowerCase().includes(keyword)
+      || file.file_name.toLowerCase().includes(keyword)
+      || file.path.toLowerCase().includes(keyword)
+      || file.content_preview.toLowerCase().includes(keyword)
+    ));
+  }, [files, search]);
+
   const locale = localStorage.getItem("cchub-locale") || "zh";
 
   if (loading) {
@@ -271,6 +389,125 @@ export default function ClaudeMd() {
         </div>
       </div>
 
+      <div className="section-card" style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap" }}>
+          <div>
+            <div className="section-card-title" style={{ marginBottom: 4 }}>
+              <Pencil size={16} style={{ color: "var(--text-secondary)" }} />
+              {locale === "zh" ? "Prompt 预设" : "Prompt Presets"}
+            </div>
+            <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              {locale === "zh"
+                ? "创建多套通用指令预设，并一键同步写入 Claude / Codex / Gemini / OpenCode / OpenClaw 的全局指令文档。"
+                : "Create reusable instruction presets and sync them into the global docs for Claude, Codex, Gemini, OpenCode, and OpenClaw."}
+            </p>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={() => openPresetEditor()} style={{ gap: 6 }}>
+            <Plus size={14} />{locale === "zh" ? "新建预设" : "New Preset"}
+          </button>
+        </div>
+
+        {showPresetEditor && (
+          <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, background: "var(--bg-input)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {editingPresetId ? (locale === "zh" ? "编辑预设" : "Edit Preset") : (locale === "zh" ? "新建预设" : "Create Preset")}
+              </div>
+              <button className="btn btn-ghost btn-icon-sm" onClick={closePresetEditor}>
+                <X size={14} />
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input
+                className="input"
+                placeholder={locale === "zh" ? "预设名称" : "Preset name"}
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+              />
+              <CodeEditor
+                value={presetContent}
+                onChange={setPresetContent}
+                language="markdown"
+                minHeight={220}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn btn-secondary btn-sm" onClick={closePresetEditor}>
+                  <X size={14} />{locale === "zh" ? "取消" : "Cancel"}
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={savePreset} disabled={savingPreset || !presetName.trim()}>
+                  <Save size={14} />{savingPreset ? (locale === "zh" ? "保存中..." : "Saving...") : (locale === "zh" ? "保存预设" : "Save Preset")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {promptPresets.length === 0 ? (
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {locale === "zh" ? "暂无预设。创建后可一键激活并同步到多个工具。" : "No presets yet. Create one and activate it across multiple tools."}
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+            {promptPresets.map((preset) => {
+              const isActive = activePresetId === preset.id;
+              return (
+                <div key={preset.id} className="card" style={{ padding: "14px 16px", background: isActive ? "var(--bg-elevated)" : "var(--bg-card)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", marginBottom: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 14, fontWeight: 700 }}>{preset.name}</span>
+                        {isActive && <span className="badge badge-success" style={{ fontSize: 10 }}>{locale === "zh" ? "当前激活" : "Active"}</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                        {preset.updated_at.replace("T", " ").slice(0, 19)}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      <button className="btn btn-ghost btn-icon-sm" onClick={() => openPresetEditor(preset)} title={locale === "zh" ? "编辑预设" : "Edit preset"}>
+                        <Pencil size={14} />
+                      </button>
+                      <button className="btn btn-ghost btn-icon-sm" onClick={() => setConfirmPresetDelete(preset)} title={locale === "zh" ? "删除预设" : "Delete preset"}>
+                        <Trash2 size={14} style={{ color: "var(--danger)" }} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="code-block" style={{ fontSize: 11, maxHeight: 120, overflow: "auto", marginBottom: 10 }}>
+                    {preset.content}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      {locale === "zh" ? "激活后将写入所有全局指令文档" : "Activation writes all global instruction docs"}
+                    </div>
+                    <button
+                      className={`btn btn-sm ${isActive ? "btn-secondary" : "btn-primary"}`}
+                      disabled={activatingPresetId === preset.id}
+                      onClick={async () => {
+                        setActivatingPresetId(preset.id);
+                        try {
+                          await invoke("activate_prompt_preset", { id: preset.id });
+                          await load();
+                          showToast("success", locale === "zh" ? "预设已激活并同步到全局文档" : "Preset activated and synced to global docs");
+                        } catch (e: any) {
+                          showToast("error", e?.toString() || "Failed to activate preset");
+                        } finally {
+                          setActivatingPresetId((current) => current === preset.id ? null : current);
+                        }
+                      }}
+                    >
+                      {activatingPresetId === preset.id
+                        ? (locale === "zh" ? "同步中..." : "Syncing...")
+                        : isActive
+                          ? (locale === "zh" ? "重新同步" : "Resync")
+                          : (locale === "zh" ? "激活" : "Activate")}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {files.length === 0 && !showCreate ? (
         <div className="card empty-state" style={{ flex: 1 }}>
           <div className="empty-icon"><FileText size={28} style={{ color: "var(--text-muted)" }} /></div>
@@ -282,6 +519,26 @@ export default function ClaudeMd() {
         </div>
       ) : (
         <div style={{ flex: 1, overflowY: "auto" }}>
+          <div style={{ position: "relative", marginBottom: 16 }}>
+            <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+            <input
+              className="input"
+              style={{ paddingLeft: 36, paddingRight: search ? 36 : undefined }}
+              placeholder={locale === "zh" ? "搜索指令文档、路径或预览内容..." : "Search docs, paths, or preview content..."}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
+                onClick={() => setSearch("")}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
           {/* New File Panel */}
           {showCreate && (
             <div className="section-card" style={{ marginBottom: 16 }}>
@@ -319,7 +576,16 @@ export default function ClaudeMd() {
 
           {/* File List */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
-            {files.map((file) => (
+            {filteredFiles.length === 0 ? (
+              <div className="card" style={{ padding: "24px 20px", textAlign: "center" }}>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>
+                  {locale === "zh" ? "没有匹配的指令文档" : "No matching instruction docs"}
+                </p>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6 }}>
+                  {locale === "zh" ? "尝试修改关键字，或清空搜索查看全部文件。" : "Try another keyword or clear the search to view all files."}
+                </p>
+              </div>
+            ) : filteredFiles.map((file) => (
               <div
                 key={file.path}
                 className="card"
@@ -433,6 +699,52 @@ export default function ClaudeMd() {
                 onClick={() => handleDelete(confirmDelete)}
               >
                 <Trash2 size={14} />{i.claudeMd.delete}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmPresetDelete && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "var(--bg-overlay)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          }}
+          onClick={() => setConfirmPresetDelete(null)}
+        >
+          <div
+            className="card"
+            style={{ padding: 24, maxWidth: 460, width: "90%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{locale === "zh" ? "删除预设" : "Delete Preset"}</h3>
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>
+              {locale === "zh"
+                ? `确定删除「${confirmPresetDelete.name}」？如果它当前处于激活状态，只会删除预设记录，不会删除已写入的全局文档。`
+                : `Delete "${confirmPresetDelete.name}"? If it is currently active, only the preset record will be removed and the written global docs will remain.`}
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setConfirmPresetDelete(null)}>
+                {i.common.cancel}
+              </button>
+              <button
+                className="btn btn-sm"
+                style={{ background: "var(--danger)", color: "#fff" }}
+                onClick={async () => {
+                  const preset = confirmPresetDelete;
+                  if (!preset) return;
+                  try {
+                    await invoke("delete_prompt_preset", { id: preset.id });
+                    setConfirmPresetDelete(null);
+                    await load();
+                    showToast("success", locale === "zh" ? "预设已删除" : "Preset deleted");
+                  } catch (e: any) {
+                    showToast("error", e?.toString() || "Failed to delete preset");
+                  }
+                }}
+              >
+                <Trash2 size={14} />{locale === "zh" ? "删除预设" : "Delete Preset"}
               </button>
             </div>
           </div>

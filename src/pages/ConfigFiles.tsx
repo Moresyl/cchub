@@ -23,6 +23,14 @@ import type { FolderNode } from "../types/skills";
 import { showToast } from "../components/Toast";
 import CodeEditor from "../components/CodeEditor";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import {
+  isCodexConfigToml,
+  parseCodexStructuredConfig,
+  repairCodexConfigContent,
+  updateCodexStructuredContent,
+  validateCodexStructuredConfig,
+} from "../lib/codexConfig";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
@@ -87,28 +95,62 @@ export default function ConfigFiles() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
 
   const hasChanges = content !== originalContent;
-  const activeRootMeta = useMemo(() => roots.find((root) => root.id === activeRoot) || null, [roots, activeRoot]);
+  const visibleRoots = useMemo(
+    () => roots.filter((root) => visibleApps.includes(root.id as ManagedAppId)),
+    [roots, visibleApps],
+  );
+  const activeRootMeta = useMemo(() => visibleRoots.find((root) => root.id === activeRoot) || null, [visibleRoots, activeRoot]);
   const activeLanguage = activeFile ? detectLanguage(activeFile) : "text";
+  const structuredCodexFile = useMemo(() => isCodexConfigToml(activeRoot, activeFile), [activeRoot, activeFile]);
+  const codexStructuredConfig = useMemo(
+    () => (structuredCodexFile ? parseCodexStructuredConfig(content) : null),
+    [structuredCodexFile, content],
+  );
+  const codexValidation = useMemo(
+    () => (codexStructuredConfig ? validateCodexStructuredConfig(codexStructuredConfig) : null),
+    [codexStructuredConfig],
+  );
 
   useEffect(() => {
     loadRoots();
   }, []);
+  useEffect(() => {
+    if (visibleRoots.length === 0) return;
+    if (!visibleRoots.some((root) => root.id === activeRoot && root.exists)) {
+      const firstExisting = visibleRoots.find((root) => root.exists);
+      setActiveRoot(firstExisting?.id || visibleRoots[0].id);
+    }
+  }, [activeRoot, visibleRoots]);
 
   useEffect(() => {
     if (activeRoot) {
       loadTree(activeRoot);
     }
   }, [activeRoot]);
+  useEffect(() => {
+    const handleSave = () => {
+      if (activeFile && hasChanges && !saving) {
+        void saveFile();
+      }
+    };
+    window.addEventListener("cchub-shortcut-save", handleSave);
+    return () => window.removeEventListener("cchub-shortcut-save", handleSave);
+  }, [activeFile, hasChanges, saving, content]);
 
   async function loadRoots() {
     setLoading(true);
     try {
-      const result = await invoke<ConfigRoot[]>("get_config_roots");
+      const [result, nextVisibleApps] = await Promise.all([
+        invoke<ConfigRoot[]>("get_config_roots"),
+        fetchVisibleApps(),
+      ]);
       setRoots(result);
-      const currentRoot = result.find((root) => root.id === activeRoot && root.exists);
-      const firstExisting = result.find((root) => root.exists);
+      setVisibleApps(nextVisibleApps);
+      const currentRoot = result.find((root) => root.id === activeRoot && root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
+      const firstExisting = result.find((root) => root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
       setActiveRoot(currentRoot?.id || firstExisting?.id || "");
     } catch (error) {
       console.error(error);
@@ -166,6 +208,15 @@ export default function ConfigFiles() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function updateCodexConfig(patch: Parameters<typeof updateCodexStructuredContent>[1]) {
+    setContent((current) => updateCodexStructuredContent(current, patch));
+  }
+
+  function repairCodexConfig() {
+    setContent((current) => repairCodexConfigContent(current));
+    showToast("success", zh ? "已修复 Codex MCP 表结构" : "Codex MCP table repaired");
   }
 
   function toggleExpand(path: string) {
@@ -282,7 +333,7 @@ export default function ConfigFiles() {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {roots.map((root) => {
+        {visibleRoots.map((root) => {
           const Icon = ROOT_ICONS[root.id] || FolderOpen;
           return (
             <button
@@ -360,6 +411,146 @@ export default function ConfigFiles() {
             ) : loadingFile ? (
               <div className="loading-center" style={{ height: "100%" }}>
                 <div className="spinner" />
+              </div>
+            ) : structuredCodexFile && codexStructuredConfig ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div className="section-card" style={{ padding: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>
+                        {zh ? "Codex 结构化编辑" : "Codex Structured Editor"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                        {zh
+                          ? "字段级编辑会直接同步到下方的 config.toml，原始内容仍可继续手动修改。"
+                          : "Field edits write back into the TOML below, while preserving raw editing for advanced cases."}
+                      </div>
+                    </div>
+                    <button className="btn btn-secondary btn-sm" onClick={repairCodexConfig} style={{ gap: 6 }}>
+                      <RefreshCw size={14} />
+                      {zh ? "修复 MCP 表" : "Repair MCP Table"}
+                    </button>
+                  </div>
+
+                  {codexValidation && (codexValidation.errors.length > 0 || codexValidation.warnings.length > 0) && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                      {codexValidation.errors.map((message) => (
+                        <div key={`error:${message}`} className="card" style={{ padding: "10px 12px", borderColor: "var(--danger)", background: "color-mix(in srgb, var(--danger) 8%, var(--bg-card))", fontSize: 12 }}>
+                          {zh ? `错误：${message}` : `Error: ${message}`}
+                        </div>
+                      ))}
+                      {codexValidation.warnings.map((message) => (
+                        <div key={`warning:${message}`} className="card" style={{ padding: "10px 12px", borderColor: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, var(--bg-card))", fontSize: 12 }}>
+                          {zh ? `提示：${message}` : `Warning: ${message}`}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+                    <div>
+                      <label className="field-label">{zh ? "模型 Provider" : "Model Provider"}</label>
+                      <input
+                        className="input"
+                        value={codexStructuredConfig.modelProvider}
+                        onChange={(event) => updateCodexConfig({ modelProvider: event.target.value || "custom" })}
+                        placeholder="custom"
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">{zh ? "Provider 显示名" : "Provider Label"}</label>
+                      <input
+                        className="input"
+                        value={codexStructuredConfig.providerLabel}
+                        onChange={(event) => updateCodexConfig({ providerLabel: event.target.value })}
+                        placeholder="custom"
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">{zh ? "模型 ID" : "Model ID"}</label>
+                      <input
+                        className="input"
+                        value={codexStructuredConfig.model}
+                        onChange={(event) => updateCodexConfig({ model: event.target.value })}
+                        placeholder="gpt-5.4"
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">{zh ? "Base URL" : "Base URL"}</label>
+                      <input
+                        className="input"
+                        value={codexStructuredConfig.baseUrl}
+                        onChange={(event) => updateCodexConfig({ baseUrl: event.target.value })}
+                        placeholder="https://api.example.com/v1"
+                      />
+                    </div>
+                    <div>
+                      <label className="field-label">{zh ? "推理强度" : "Reasoning Effort"}</label>
+                      <select
+                        className="input"
+                        value={codexStructuredConfig.reasoningEffort}
+                        onChange={(event) => updateCodexConfig({ reasoningEffort: event.target.value })}
+                      >
+                        {["low", "medium", "high", "xhigh"].map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label">{zh ? "Wire API" : "Wire API"}</label>
+                      <select
+                        className="input"
+                        value={codexStructuredConfig.wireApi}
+                        onChange={(event) => updateCodexConfig({ wireApi: event.target.value })}
+                      >
+                        {["responses", "chat"].map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label">{zh ? "执行人格" : "Personality"}</label>
+                      <select
+                        className="input"
+                        value={codexStructuredConfig.personality}
+                        onChange={(event) => updateCodexConfig({ personality: event.target.value })}
+                      >
+                        {["pragmatic", "full-auto", "auto-edit", "explain"].map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label">{zh ? "上下文窗口" : "Context Window"}</label>
+                      <input
+                        className="input"
+                        value={codexStructuredConfig.modelContextWindow}
+                        onChange={(event) => updateCodexConfig({ modelContextWindow: event.target.value.replace(/[,_\s]/g, "") })}
+                        placeholder="1000000"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 14, flexWrap: "wrap" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={codexStructuredConfig.disableResponseStorage}
+                        onChange={(event) => updateCodexConfig({ disableResponseStorage: event.target.checked })}
+                      />
+                      {zh ? "禁用响应存储" : "Disable Response Storage"}
+                    </label>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {codexStructuredConfig.mcpServers.length > 0
+                        ? (zh
+                          ? `已检测到 ${codexStructuredConfig.mcpServers.length} 个 MCP Server: ${codexStructuredConfig.mcpServers.join(", ")}`
+                          : `${codexStructuredConfig.mcpServers.length} MCP server(s): ${codexStructuredConfig.mcpServers.join(", ")}`)
+                        : (zh ? "当前未配置 MCP Server 表项。" : "No MCP server sections detected yet.")}
+                    </div>
+                  </div>
+                </div>
+
+                <CodeEditor value={content} onChange={setContent} language={activeLanguage} minHeight={520} />
               </div>
             ) : activeLanguage === "markdown" ? (
               <Suspense fallback={<div className="loading-center" style={{ height: "100%" }}><div className="spinner" /></div>}>

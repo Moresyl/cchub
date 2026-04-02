@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch } from "lucide-react";
+import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch, History } from "lucide-react";
 import { t } from "../../lib/i18n";
 import { useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
@@ -15,6 +15,7 @@ const navItems = [
   { path: "/hooks", key: "hooks" as const, icon: Webhook },
   { path: "/workspaces", key: "workspaces" as const, icon: Layers },
   { path: "/profiles", key: "profiles" as const, icon: ArrowRightLeft },
+  { path: "/sessions", key: "sessions" as const, icon: History },
   { path: "/claude-md", key: "claudeMd" as const, icon: FileText },
   { path: "/config-files", key: "configFiles" as const, icon: FolderOpen },
   { path: "/tools", key: "tools" as const, icon: Wrench },

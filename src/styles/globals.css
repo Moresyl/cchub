@@ -214,6 +214,16 @@ body {
   gap: 8px;
 }
 
+.env-warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid rgba(234, 179, 8, 0.2);
+  background: linear-gradient(90deg, rgba(234, 179, 8, 0.08), rgba(234, 179, 8, 0.03));
+}
+
 .page-content {
   flex: 1;
   overflow-y: auto;
@@ -689,6 +699,9 @@ textarea.input {
   border: 2px solid var(--border-default);
   border-top-color: var(--text-primary);
   border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.spin {
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }

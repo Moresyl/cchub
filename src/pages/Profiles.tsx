@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw, Save, Trash2, Check, X, ArrowRightLeft,
   Search, Terminal, Code, Monitor, Sparkles, Globe,
   Edit3, Plus, Eye, EyeOff, Copy, Cat,
+  Activity, GripVertical, Wifi,
 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import {
@@ -27,16 +28,51 @@ import {
 import { showToast } from "../components/Toast";
 import CodeEditor from "../components/CodeEditor";
 import ConfirmDialog from "../components/ConfirmDialog";
+import CopilotAuthSection from "../components/CopilotAuthSection";
 
 interface ConfigProfile {
   id: string;
   name: string;
   tool_id: string;
   config_snapshot: string;
+  sort_order: number;
   source_type?: string | null;
   source_key?: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+interface ProviderConfigFragment {
+  id: string;
+  name: string;
+  targetTools: string[];
+  fields: Partial<StructuredDraftFields>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ProviderProbeResult {
+  profile_id: string;
+  tool_id: string;
+  provider_name: string;
+  base_url: string | null;
+  status: string;
+  latency_ms: number | null;
+  http_status: number | null;
+  checked_at: string;
+  message: string;
+}
+
+interface ProviderStreamCheckResult {
+  profile_id: string;
+  tool_id: string;
+  provider_name: string;
+  base_url: string | null;
+  status: string;
+  latency_ms: number | null;
+  http_status: number | null;
+  checked_at: string;
+  message: string;
 }
 
 interface DetectedTool {
@@ -219,6 +255,73 @@ function SelectField({ value, onChange, options }: { value: string; onChange: (v
   );
 }
 
+function mergeSharedDraftFields(
+  current: StructuredDraftFields,
+  toolId: string,
+  parsed: StructuredDraftFields,
+  includeCommon: boolean,
+  includeToolSpecific = true,
+): StructuredDraftFields {
+  const next = { ...current };
+
+  if (includeCommon) {
+    next.baseUrl = parsed.baseUrl || next.baseUrl;
+    next.apiKey = parsed.apiKey || next.apiKey;
+    next.model = parsed.model || next.model;
+    next.websiteUrl = parsed.websiteUrl || next.websiteUrl;
+    next.apiKeyUrl = parsed.apiKeyUrl || next.apiKeyUrl;
+    next.category = parsed.category || next.category;
+    next.endpointCandidates = parsed.endpointCandidates || next.endpointCandidates;
+    next.costMultiplier = parsed.costMultiplier || next.costMultiplier;
+    next.requiresOAuth = parsed.requiresOAuth || next.requiresOAuth;
+    next.providerType = parsed.providerType || next.providerType;
+    next.oauthAccountId = parsed.oauthAccountId || next.oauthAccountId;
+  }
+
+  if (!includeToolSpecific) {
+    return next;
+  }
+
+  if (toolId === "claude") {
+    next.reasoningModel = parsed.reasoningModel;
+    next.haikuModel = parsed.haikuModel;
+    next.sonnetModel = parsed.sonnetModel;
+    next.opusModel = parsed.opusModel;
+    next.authField = parsed.authField;
+    next.apiFormat = parsed.apiFormat;
+    next.hideAttribution = parsed.hideAttribution;
+    next.effortHigh = parsed.effortHigh;
+    next.enableTeammates = parsed.enableTeammates;
+  } else if (toolId === "codex") {
+    next.codexWireApi = parsed.codexWireApi;
+    next.codexReasoningEffort = parsed.codexReasoningEffort;
+  } else if (toolId === "openclaw") {
+    next.apiProtocol = parsed.apiProtocol;
+    next.modelName = parsed.modelName;
+    next.openClawContextWindow = parsed.openClawContextWindow;
+    next.openClawCostInput = parsed.openClawCostInput;
+    next.openClawCostOutput = parsed.openClawCostOutput;
+    next.suggestedPrimaryModel = parsed.suggestedPrimaryModel;
+    next.suggestedFallbackModels = parsed.suggestedFallbackModels;
+    next.modelCatalogAlias = parsed.modelCatalogAlias;
+  } else if (toolId === "opencode") {
+    next.npm = parsed.npm;
+    next.modelName = parsed.modelName || next.modelName;
+    next.openCodeContextLimit = parsed.openCodeContextLimit;
+    next.openCodeOutputLimit = parsed.openCodeOutputLimit;
+    next.openCodeInputModalities = parsed.openCodeInputModalities;
+    next.openCodeOutputModalities = parsed.openCodeOutputModalities;
+    next.openCodeVariantName = parsed.openCodeVariantName;
+    next.openCodeIncludeThoughts = parsed.openCodeIncludeThoughts;
+    next.openCodeThinkingBudget = parsed.openCodeThinkingBudget;
+    next.openCodeThinkingLevel = parsed.openCodeThinkingLevel;
+    next.openCodeReasoningEffort = parsed.openCodeReasoningEffort;
+    next.openCodeEffort = parsed.openCodeEffort;
+  }
+
+  return next;
+}
+
 export default function Profiles() {
   const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
   const [tools, setTools] = useState<DetectedTool[]>([]);
@@ -231,6 +334,7 @@ export default function Profiles() {
   const [editingProfile, setEditingProfile] = useState<ConfigProfile | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftTool, setDraftTool] = useState("claude");
+  const [draftTargetTools, setDraftTargetTools] = useState<string[]>(["claude"]);
   const [draftContent, setDraftContent] = useState("");
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftPresetId, setDraftPresetId] = useState("custom");
@@ -250,9 +354,11 @@ export default function Profiles() {
   const [draftApiKeyUrl, setDraftApiKeyUrl] = useState("");
   const [draftCategory, setDraftCategory] = useState("");
   const [draftEndpointCandidates, setDraftEndpointCandidates] = useState("");
+  const [draftCostMultiplier, setDraftCostMultiplier] = useState("");
   const [draftTemplateValues, setDraftTemplateValues] = useState("");
   const [draftRequiresOAuth, setDraftRequiresOAuth] = useState(false);
   const [draftProviderType, setDraftProviderType] = useState<PresetProviderType | "">("");
+  const [draftOauthAccountId, setDraftOauthAccountId] = useState("");
   const [draftHideAttribution, setDraftHideAttribution] = useState(false);
   const [draftEffortHigh, setDraftEffortHigh] = useState(false);
   const [draftEnableTeammates, setDraftEnableTeammates] = useState(false);
@@ -274,27 +380,71 @@ export default function Profiles() {
   const [draftOpenCodeThinkingLevel, setDraftOpenCodeThinkingLevel] = useState<OpenCodeThinkingLevel | "">("");
   const [draftOpenCodeReasoningEffort, setDraftOpenCodeReasoningEffort] = useState<OpenCodeReasoningEffort | "">("");
   const [draftOpenCodeEffort, setDraftOpenCodeEffort] = useState<OpenCodeReasoningEffort | "">("");
+  const [providerFragments, setProviderFragments] = useState<ProviderConfigFragment[]>([]);
+  const [draftFragmentName, setDraftFragmentName] = useState("");
+  const [savingFragment, setSavingFragment] = useState(false);
+  const [deletingFragmentId, setDeletingFragmentId] = useState<string | null>(null);
+  const [confirmFragmentDelete, setConfirmFragmentDelete] = useState<ProviderConfigFragment | null>(null);
   const [filterTool, setFilterTool] = useState("claude");
   const [search, setSearch] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  const [draggingProfileId, setDraggingProfileId] = useState<string | null>(null);
+  const [dragOverProfileId, setDragOverProfileId] = useState<string | null>(null);
+  const [probingId, setProbingId] = useState<string | null>(null);
+  const [probeResults, setProbeResults] = useState<Record<string, ProviderProbeResult>>({});
+  const [streamCheckingId, setStreamCheckingId] = useState<string | null>(null);
+  const [streamCheckResults, setStreamCheckResults] = useState<Record<string, ProviderStreamCheckResult>>({});
+  const [streamCheckConfirmProfile, setStreamCheckConfirmProfile] = useState<ConfigProfile | null>(null);
 
   const [confirmAction, setConfirmAction] = useState<{ type: string; profile: ConfigProfile } | null>(null);
   const locale = getLocale();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const localeText = (zhText: string, enText: string, jaText?: string) => (
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  );
 
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if ((showCreateModal || editingProfile) && draftName.trim() && !saving) {
+        void handleSaveModal();
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!showCreateModal && !editingProfile) {
+        void openCreateModal();
+      }
+    };
+    const handleSearchShortcut = () => {
+      if (showCreateModal || editingProfile) return;
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    };
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+      window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
+    };
+  }, [showCreateModal, editingProfile, draftName, saving, draftContent, draftTool]);
 
   async function load() {
     setLoading(true);
     try {
       await invoke("sync_config_profiles");
-      const [nextProfiles, nextTools, nextActiveIds] = await Promise.all([
+      const [nextProfiles, nextTools, nextActiveIds, nextFragments] = await Promise.all([
         invoke<ConfigProfile[]>("get_config_profiles"),
         invoke<DetectedTool[]>("detect_tools"),
         invoke<string[]>("get_active_config_profile_ids"),
+        invoke<ProviderConfigFragment[]>("get_provider_config_fragments").catch(() => [] as ProviderConfigFragment[]),
       ]);
       setProfiles(nextProfiles);
       setTools(nextTools);
       setActiveIds(nextActiveIds);
+      setProviderFragments(nextFragments);
+      await invoke("refresh_tray_provider_menu").catch(() => undefined);
       setNewTool((prev) => {
         const installed = nextTools.filter((tool) => tool.installed);
         if (installed.some((tool) => tool.id === prev)) return prev;
@@ -326,9 +476,11 @@ export default function Profiles() {
     setDraftApiKeyUrl(fields.apiKeyUrl);
     setDraftCategory(fields.category);
     setDraftEndpointCandidates(fields.endpointCandidates);
+    setDraftCostMultiplier(fields.costMultiplier);
     setDraftTemplateValues(fields.templateValues);
     setDraftRequiresOAuth(fields.requiresOAuth);
     setDraftProviderType(fields.providerType);
+    setDraftOauthAccountId(fields.oauthAccountId);
     setDraftHideAttribution(fields.hideAttribution);
     setDraftEffortHigh(fields.effortHigh);
     setDraftEnableTeammates(fields.enableTeammates);
@@ -371,9 +523,11 @@ export default function Profiles() {
       apiKeyUrl: next.apiKeyUrl ?? draftApiKeyUrl,
       category: next.category ?? draftCategory,
       endpointCandidates: next.endpointCandidates ?? draftEndpointCandidates,
+      costMultiplier: next.costMultiplier ?? draftCostMultiplier,
       templateValues: next.templateValues ?? draftTemplateValues,
       requiresOAuth: next.requiresOAuth ?? draftRequiresOAuth,
       providerType: next.providerType ?? draftProviderType,
+      oauthAccountId: next.oauthAccountId ?? draftOauthAccountId,
       hideAttribution: next.hideAttribution ?? draftHideAttribution,
       effortHigh: next.effortHigh ?? draftEffortHigh,
       enableTeammates: next.enableTeammates ?? draftEnableTeammates,
@@ -404,6 +558,19 @@ export default function Profiles() {
     setDraftContent(buildStructuredConfig(toolId, fields));
   }
 
+  function sortProviderFragments(fragments: ProviderConfigFragment[]) {
+    return [...fragments].sort((a, b) =>
+      b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name),
+    );
+  }
+
+  function normalizeFragmentFields(fragment: ProviderConfigFragment): StructuredDraftFields {
+    return {
+      ...createDefaultStructuredFields(draftTool),
+      ...(fragment.fields || {}),
+    };
+  }
+
   function resetStructuredDraft(toolId: string) {
     const defaults = createDefaultStructuredFields(toolId);
     setDraftFields(defaults);
@@ -420,6 +587,7 @@ export default function Profiles() {
     setEditingProfile(null);
     setDraftName("");
     setDraftTool(selectedTool);
+    setDraftTargetTools([selectedTool]);
     setDraftContent("");
     setShowCreateModal(true);
     setSaving(false);
@@ -444,15 +612,36 @@ export default function Profiles() {
   }
 
   function openEditModal(profile: ConfigProfile) {
+    const sharedProfiles = profile.source_type === "shared" && profile.source_key
+      ? profiles.filter((item) => item.source_type === "shared" && item.source_key === profile.source_key)
+      : [profile];
+    const otherProfiles = sharedProfiles.filter((item) => item.id !== profile.id);
     setEditingProfile(profile);
     setShowCreateModal(false);
     setDraftName(profile.name);
     setDraftTool(profile.tool_id);
+    setDraftTargetTools(sharedProfiles.map((item) => item.tool_id));
     setDraftContent(prettyJson(profile.config_snapshot));
     setShowApiKey(false);
     if (supportsStructuredConfig(profile.tool_id)) {
-      const parsed = parseStructuredConfig(profile.tool_id, profile.config_snapshot);
-      setDraftFields(parsed);
+      let merged = createDefaultStructuredFields(profile.tool_id);
+      for (const item of otherProfiles) {
+        if (!supportsStructuredConfig(item.tool_id)) continue;
+        merged = mergeSharedDraftFields(
+          merged,
+          item.tool_id,
+          parseStructuredConfig(item.tool_id, item.config_snapshot),
+          false,
+        );
+      }
+      merged = mergeSharedDraftFields(
+        merged,
+        profile.tool_id,
+        parseStructuredConfig(profile.tool_id, profile.config_snapshot),
+        true,
+      );
+      setDraftFields(merged);
+      setDraftContent(buildStructuredConfig(profile.tool_id, merged));
     } else {
       resetStructuredDraft("claude");
     }
@@ -463,18 +652,123 @@ export default function Profiles() {
     setShowCreateModal(false);
     setEditingProfile(null);
     setDraftName("");
+    setDraftTargetTools(["claude"]);
     setDraftContent("");
     setDraftLoading(false);
     setDraftFields(createDefaultStructuredFields("claude"));
+    setDraftFragmentName("");
     setSaving(false);
     setShowApiKey(false);
+  }
+
+  function handleToggleDraftTargetTool(toolId: string) {
+    if (!supportsStructuredConfig(toolId)) return;
+    const alreadySelected = draftTargetTools.includes(toolId);
+    if (alreadySelected && draftTargetTools.length === 1) {
+      return;
+    }
+
+    const structuredToolIds = structuredInstalledTools.map((tool) => tool.id);
+    const nextTargets = structuredToolIds.filter((id) => {
+      if (id === toolId) return !alreadySelected;
+      return draftTargetTools.includes(id);
+    });
+
+    if (nextTargets.length === 0) {
+      return;
+    }
+
+    setDraftTargetTools(nextTargets);
+    if (!nextTargets.includes(draftTool)) {
+      setDraftTool(nextTargets[0]);
+      setDraftContent(buildStructuredConfig(nextTargets[0], buildCurrentFields()));
+    }
+  }
+
+  async function handleSaveFragment() {
+    if (!isStructured || savingFragment || !draftFragmentName.trim()) return;
+    setSavingFragment(true);
+    try {
+      const saved = await invoke<ProviderConfigFragment>("save_provider_config_fragment", {
+        name: draftFragmentName.trim(),
+        targetTools: draftTargetTools.filter((toolId) => supportsStructuredConfig(toolId)),
+        fields: buildCurrentFields(),
+      });
+      setProviderFragments((current) => sortProviderFragments([
+        saved,
+        ...current.filter((fragment) => fragment.id !== saved.id),
+      ]));
+      setDraftFragmentName("");
+      showToast(
+        "success",
+        localeText("配置片段已保存", "Provider fragment saved", "Provider フラグメントを保存しました"),
+      );
+    } catch (e) {
+      console.error(e);
+      showToast(
+        "error",
+        localeText(`保存片段失败: ${e}`, `Failed to save fragment: ${e}`, `フラグメントの保存に失敗しました: ${e}`),
+      );
+    } finally {
+      setSavingFragment(false);
+    }
+  }
+
+  function handleApplyFragment(fragment: ProviderConfigFragment) {
+    const includeToolSpecific = fragment.targetTools.includes(draftTool);
+    const merged = mergeSharedDraftFields(
+      buildCurrentFields(),
+      draftTool,
+      normalizeFragmentFields(fragment),
+      true,
+      includeToolSpecific,
+    );
+    setDraftFields(merged);
+    setDraftContent(buildStructuredConfig(draftTool, merged));
+    showToast(
+      "success",
+      localeText("已应用配置片段", "Provider fragment applied", "Provider フラグメントを適用しました"),
+    );
+  }
+
+  async function doDeleteFragment(fragment: ProviderConfigFragment) {
+    setDeletingFragmentId(fragment.id);
+    try {
+      await invoke("delete_provider_config_fragment", { id: fragment.id });
+      setProviderFragments((current) => current.filter((item) => item.id !== fragment.id));
+      showToast(
+        "success",
+        localeText("配置片段已删除", "Provider fragment deleted", "Provider フラグメントを削除しました"),
+      );
+    } catch (e) {
+      console.error(e);
+      showToast(
+        "error",
+        localeText(`删除片段失败: ${e}`, `Failed to delete fragment: ${e}`, `フラグメントの削除に失敗しました: ${e}`),
+      );
+    } finally {
+      setDeletingFragmentId((current) => current === fragment.id ? null : current);
+    }
   }
 
   async function handleSaveModal() {
     if (!draftName.trim() || saving) return;
     setSaving(true);
     try {
-      if (editingProfile) {
+      if (isStructured && (draftTargetTools.length > 1 || editingProfile?.source_type === "shared")) {
+        const targetTools = draftTargetTools.filter((toolId) => supportsStructuredConfig(toolId));
+        const profilesPayload = targetTools.map((toolId) => ({
+          toolId,
+          configSnapshot: buildStructuredConfig(toolId, buildCurrentFields()),
+        }));
+        await invoke<string>("save_shared_config_profiles", {
+          name: draftName.trim(),
+          profiles: profilesPayload,
+          groupKey: editingProfile?.source_type === "shared" ? editingProfile.source_key : null,
+          replaceProfileId: editingProfile && editingProfile.source_type !== "shared" ? editingProfile.id : null,
+        });
+        showToast("success", localeText("共享配置已保存", "Shared provider saved", "共有 Provider を保存しました"));
+      } else if (editingProfile) {
         await invoke("update_config_profile", {
           id: editingProfile.id,
           name: draftName.trim(),
@@ -523,6 +817,21 @@ export default function Profiles() {
 
   async function doDelete(profile: ConfigProfile) {
     try {
+      if (profile.source_type === "shared" && profile.source_key) {
+        const removedCount = await invoke<number>("delete_config_profile_group", {
+          sourceKey: profile.source_key,
+        });
+        await load();
+        showToast(
+          "success",
+          localeText(
+            `共享配置组已删除（${removedCount} 个 App）`,
+            `Shared provider group deleted (${removedCount} apps)`,
+            `共有 Provider グループを削除しました（${removedCount} 件の App）`,
+          ),
+        );
+        return;
+      }
       if (profile.source_type !== "manual") {
         showToast("error", locale === "zh" ? "当前配置/同步配置不支持删除" : "Live or synced profiles cannot be deleted");
         return;
@@ -552,14 +861,123 @@ export default function Profiles() {
     }
   }
 
+  async function handleProbe(profile: ConfigProfile) {
+    setProbingId(profile.id);
+    try {
+      const result = await invoke<ProviderProbeResult>("probe_config_profile", { id: profile.id });
+      setProbeResults((current) => ({ ...current, [profile.id]: result }));
+      if (result.status === "healthy" || result.status === "reachable") {
+        showToast(
+          "success",
+          locale === "zh"
+            ? `已探测 ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`
+            : `Probed ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`,
+        );
+      } else {
+        showToast("error", result.message);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? `探测失败: ${e}` : `Probe failed: ${e}`);
+    } finally {
+      setProbingId((current) => current === profile.id ? null : current);
+    }
+  }
+
+  async function runStreamCheck(profile: ConfigProfile) {
+    setStreamCheckingId(profile.id);
+    try {
+      const result = await invoke<ProviderStreamCheckResult>("stream_check_config_profile", { id: profile.id });
+      setStreamCheckResults((current) => ({ ...current, [profile.id]: result }));
+      if (result.status === "healthy" || result.status === "reachable") {
+        showToast(
+          "success",
+          locale === "zh"
+            ? `流式检查完成：${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`
+            : `Stream check finished: ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`,
+        );
+      } else {
+        showToast("error", result.message);
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? `流式检查失败: ${e}` : `Stream check failed: ${e}`);
+    } finally {
+      setStreamCheckingId((current) => current === profile.id ? null : current);
+    }
+  }
+
+  function handleStreamCheck(profile: ConfigProfile) {
+    if (localStorage.getItem("cchub-stream-check-confirmed") === "1") {
+      void runStreamCheck(profile);
+      return;
+    }
+    setStreamCheckConfirmProfile(profile);
+  }
+
+  async function reorderProfiles(sourceId: string, targetId: string) {
+    if (!filterTool || sourceId === targetId || search.trim()) return;
+    const orderedProfiles = filteredProfiles.filter((profile) => profile.tool_id === filterTool);
+    const fromIndex = orderedProfiles.findIndex((profile) => profile.id === sourceId);
+    const toIndex = orderedProfiles.findIndex((profile) => profile.id === targetId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+
+    const nextOrdered = [...orderedProfiles];
+    const [moved] = nextOrdered.splice(fromIndex, 1);
+    nextOrdered.splice(toIndex, 0, moved);
+    const nextOrderMap = new Map(nextOrdered.map((profile, index) => [profile.id, index]));
+
+    setProfiles((current) =>
+      current.map((profile) =>
+        profile.tool_id === filterTool && nextOrderMap.has(profile.id)
+          ? { ...profile, sort_order: nextOrderMap.get(profile.id) ?? profile.sort_order }
+          : profile,
+      ),
+    );
+
+    try {
+      await invoke("reorder_config_profiles", {
+        toolId: filterTool,
+        orderedIds: nextOrdered.map((profile) => profile.id),
+      });
+      await invoke("refresh_tray_provider_menu").catch(() => undefined);
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? `排序失败: ${e}` : `Reorder failed: ${e}`);
+      await load();
+    } finally {
+      setDraggingProfileId(null);
+      setDragOverProfileId(null);
+    }
+  }
+
   const activeIdSet = useMemo(() => new Set(activeIds), [activeIds]);
   const installedTools = useMemo(() => tools.filter((tool) => tool.installed), [tools]);
   const presetCategories = useMemo(() => getPresetCategories(draftTool), [draftTool]);
+  const reorderEnabled = Boolean(filterTool) && search.trim().length === 0;
+  const structuredInstalledTools = useMemo(
+    () => tools.filter((tool) => tool.installed && supportsStructuredConfig(tool.id)),
+    [tools],
+  );
+  const toolNameMap = useMemo(
+    () => Object.fromEntries(tools.map((tool) => [tool.id, tool.name])),
+    [tools],
+  );
 
   const toolCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const profile of profiles) {
       counts[profile.tool_id] = (counts[profile.tool_id] || 0) + 1;
+    }
+    return counts;
+  }, [profiles]);
+
+  const sharedGroupCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const profile of profiles) {
+      if (profile.source_type === "shared" && profile.source_key) {
+        counts[profile.source_key] = (counts[profile.source_key] || 0) + 1;
+      }
     }
     return counts;
   }, [profiles]);
@@ -577,11 +995,17 @@ export default function Profiles() {
         );
       })
       .sort((a, b) => {
-        const activeDiff = Number(activeIdSet.has(b.id)) - Number(activeIdSet.has(a.id));
-        if (activeDiff !== 0) return activeDiff;
+        const toolDiff = a.tool_id.localeCompare(b.tool_id);
+        if (!filterTool && toolDiff !== 0) return toolDiff;
+        const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+        if (orderDiff !== 0) return orderDiff;
         const aTime = a.updated_at || a.created_at || "";
         const bTime = b.updated_at || b.created_at || "";
-        return bTime.localeCompare(aTime);
+        const timeDiff = bTime.localeCompare(aTime);
+        if (timeDiff !== 0) return timeDiff;
+        const activeDiff = Number(activeIdSet.has(b.id)) - Number(activeIdSet.has(a.id));
+        if (activeDiff !== 0) return activeDiff;
+        return a.name.localeCompare(b.name);
       });
   }, [profiles, filterTool, search, activeIdSet]);
 
@@ -626,14 +1050,22 @@ export default function Profiles() {
                 <select
                   className="input"
                   value={draftTool}
-                  disabled={!!editingProfile}
+                  disabled={!!editingProfile && !(draftTargetTools.length > 1 || editingProfile.source_type === "shared")}
                   onChange={async (e) => {
                     const toolId = e.target.value;
                     setDraftTool(toolId);
                     setNewTool(toolId);
                     setDraftApiFormat("anthropic");
                     if (supportsStructuredConfig(toolId)) {
-                      resetStructuredDraft(toolId);
+                      if (draftTargetTools.length > 1 || editingProfile?.source_type === "shared") {
+                        if (!draftTargetTools.includes(toolId)) {
+                          setDraftTargetTools((current) => [...current, toolId]);
+                        }
+                        setDraftContent(buildStructuredConfig(toolId, buildCurrentFields()));
+                      } else {
+                        resetStructuredDraft(toolId);
+                        setDraftTargetTools([toolId]);
+                      }
                     } else {
                       setDraftContent("");
                       setDraftLoading(true);
@@ -663,6 +1095,43 @@ export default function Profiles() {
                 />
               </Field>
             </div>
+            {isStructured && (
+              <div style={{ marginTop: 16 }}>
+                <Field label={localeText("同步到 App", "Sync to Apps", "App へ同期")}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {structuredInstalledTools.map((tool) => {
+                      const selected = draftTargetTools.includes(tool.id);
+                      return (
+                        <button
+                          key={tool.id}
+                          type="button"
+                          className={`btn btn-sm ${selected ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => handleToggleDraftTargetTool(tool.id)}
+                          disabled={selected && draftTargetTools.length === 1}
+                          style={{ gap: 6 }}
+                        >
+                          {tool.name}
+                          {selected && <Check size={12} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                    {draftTargetTools.length > 1
+                      ? localeText(
+                        "保存后会把同名 Provider 作为共享组同步到所选 App，编辑任一成员时会联动更新整组。",
+                        "Saving will sync this provider as a shared group across the selected apps. Editing any member updates the whole group.",
+                        "保存すると、選択した App に共有グループとして同期されます。任意のメンバーを編集するとグループ全体が更新されます。",
+                      )
+                      : localeText(
+                        "当前仅保存到单个 App。选择多个 App 后会启用共享 Provider 同步。",
+                        "This will save to a single app. Select multiple apps to enable shared provider syncing.",
+                        "現在は単一 App にのみ保存されます。複数 App を選ぶと共有 Provider 同期が有効になります。",
+                      )}
+                  </div>
+                </Field>
+              </div>
+            )}
           </div>
 
           {isStructured && (
@@ -696,11 +1165,114 @@ export default function Profiles() {
               </div>
 
               <div>
+                <SectionTitle>{localeText("公共配置片段", "Shared Fragments", "共有フラグメント")}</SectionTitle>
+                <div className="card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
+                    <Field label={localeText("片段名称", "Fragment Name", "フラグメント名")}>
+                      <TextInput
+                        value={draftFragmentName}
+                        onChange={(e) => setDraftFragmentName(e.target.value)}
+                        placeholder={localeText("例如：OpenAI 兼容基础参数", "e.g. OpenAI-compatible defaults", "例: OpenAI 互換の基本設定")}
+                      />
+                    </Field>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => void handleSaveFragment()}
+                      disabled={!draftFragmentName.trim() || savingFragment}
+                      style={{ gap: 6 }}
+                    >
+                      {savingFragment ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Save size={14} />}
+                      {localeText("保存当前表单", "Save Current Form", "現在のフォームを保存")}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {localeText(
+                      "会保存当前结构化字段，后续可在不同 Provider 草稿间复用；应用时保留当前编辑中的 App 同步目标。",
+                      "This saves the current structured fields for reuse across provider drafts. Applying a fragment keeps the current app sync targets.",
+                      "現在の構造化フィールドを保存し、別の Provider 下書きにも再利用できます。適用しても現在の App 同期先は維持されます。",
+                    )}
+                  </div>
+                  {providerFragments.length === 0 ? (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {localeText(
+                        "还没有公共配置片段。保存一份当前表单后，就可以在这里一键复用。",
+                        "No shared fragments yet. Save the current form to reuse it here.",
+                        "共有フラグメントはまだありません。現在のフォームを保存すると、ここから再利用できます。",
+                      )}
+                    </div>
+                  ) : (
+                    providerFragments.map((fragment) => {
+                      const currentToolCompatible = fragment.targetTools.includes(draftTool);
+                      return (
+                        <div
+                          key={fragment.id}
+                          className="card"
+                          style={{ padding: 12, background: "var(--bg-elevated)", display: "flex", gap: 12, justifyContent: "space-between", alignItems: "flex-start" }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                              <span style={{ fontSize: 14, fontWeight: 600 }}>{fragment.name}</span>
+                              {fragment.targetTools.map((toolId) => (
+                                <span key={`${fragment.id}-${toolId}`} className="badge badge-muted" style={{ fontSize: 10 }}>
+                                  {toolNameMap[toolId] || toolId}
+                                </span>
+                              ))}
+                              <span className={`badge ${currentToolCompatible ? "badge-success" : "badge-warning"}`} style={{ fontSize: 10 }}>
+                                {currentToolCompatible
+                                  ? localeText("含当前工具字段", "Includes current tool fields", "現在のツール向け字段あり")
+                                  : localeText("仅应用通用字段", "Common fields only", "共通フィールドのみ")}
+                              </span>
+                            </div>
+                            <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                              {localeText("最近更新", "Updated", "更新日時")}: {formatTime(fragment.updatedAt)}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                            <button className="btn btn-secondary btn-sm" type="button" onClick={() => handleApplyFragment(fragment)} style={{ gap: 6 }}>
+                              <ArrowRightLeft size={14} />
+                              {localeText("应用", "Apply", "適用")}
+                            </button>
+                            <button
+                              className="btn btn-danger-ghost btn-icon-sm"
+                              type="button"
+                              onClick={() => setConfirmFragmentDelete(fragment)}
+                              disabled={deletingFragmentId === fragment.id}
+                              title={localeText("删除片段", "Delete fragment", "フラグメントを削除")}
+                            >
+                              {deletingFragmentId === fragment.id ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Trash2 size={14} />}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div>
                 <SectionTitle>{locale === "zh" ? "连接配置" : "Connection"}</SectionTitle>
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {draftProviderType === "github_copilot" && (
+                    <CopilotAuthSection
+                      selectedAccountId={draftOauthAccountId || null}
+                      onAccountSelect={(accountId) => updateStructuredDraft(draftTool, { oauthAccountId: accountId || "" })}
+                      showDescription={false}
+                    />
+                  )}
                   {draftRequiresOAuth && (
                     <div className="card" style={{ padding: 12, fontSize: 12, color: "var(--text-muted)" }}>
-                      {locale === "zh" ? "当前预设使用 OAuth 模式，无需填写 API Key。" : "This preset uses OAuth mode and does not require an API key."}
+                      {draftProviderType === "github_copilot"
+                        ? localeText(
+                          "当前预设使用 GitHub Copilot OAuth。无需填写 API Key；请先登录 GitHub 账号，并在需要时绑定指定账号。实际使用时建议在 Settings 中启用 Claude 的本地代理。",
+                          "This preset uses GitHub Copilot OAuth. No API key is required; sign in with GitHub and optionally bind a specific account. Enable the Claude local proxy in Settings when using the provider.",
+                          "このプリセットは GitHub Copilot OAuth を使用します。API Key は不要です。GitHub にログインし、必要なら特定アカウントを紐付けてください。利用時は Settings で Claude のローカルプロキシを有効にすることを推奨します。",
+                        )
+                        : localeText(
+                          "当前预设使用 OAuth 模式，无需填写 API Key。",
+                          "This preset uses OAuth mode and does not require an API key.",
+                          "このプリセットは OAuth モードのため API Key は不要です。",
+                        )}
                     </div>
                   )}
                   {!draftRequiresOAuth && (
@@ -725,8 +1297,31 @@ export default function Profiles() {
                     </Field>
                   )}
 
-                  <Field label={locale === "zh" ? "接口地址" : "Base URL"}>
-                    <TextInput value={draftBaseUrl} onChange={(e) => updateStructuredDraft(draftTool, { baseUrl: e.target.value })} placeholder="https://api.example.com" />
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(180px, 240px)", gap: 16 }}>
+                    <Field label={locale === "zh" ? "接口地址" : "Base URL"}>
+                      <TextInput value={draftBaseUrl} onChange={(e) => updateStructuredDraft(draftTool, { baseUrl: e.target.value })} placeholder="https://api.example.com" />
+                    </Field>
+                    <Field label={localeText("成本倍率", "Cost Multiplier", "コスト倍率")}>
+                      <TextInput
+                        value={draftCostMultiplier}
+                        onChange={(e) => updateStructuredDraft(draftTool, { costMultiplier: e.target.value })}
+                        placeholder="1.0"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label={localeText("候选端点", "Endpoint Candidates", "候補エンドポイント")}>
+                    <textarea
+                      className="input"
+                      value={draftEndpointCandidates}
+                      onChange={(e) => updateStructuredDraft(draftTool, { endpointCandidates: e.target.value })}
+                      placeholder={localeText(
+                        "每行一个备用地址，例如：\nhttps://api.example.com\nhttps://backup.example.com",
+                        "One backup URL per line, for example:\nhttps://api.example.com\nhttps://backup.example.com",
+                        "1 行につき 1 つの予備 URL を入力します。例:\nhttps://api.example.com\nhttps://backup.example.com",
+                      )}
+                      style={{ minHeight: 88, resize: "vertical", fontSize: 13 }}
+                    />
                   </Field>
 
                   {draftTool === "claude" && (
@@ -887,7 +1482,7 @@ export default function Profiles() {
       <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 360 }}>
           <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
-          <input className="input" style={{ paddingLeft: 36 }} placeholder={locale === "zh" ? "搜索配置..." : "Search..."} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input ref={searchInputRef} className="input" style={{ paddingLeft: 36 }} placeholder={localeText("搜索配置...", "Search...", "設定を検索...")} value={search} onChange={(e) => setSearch(e.target.value)} />
           {search && (
             <button className="btn btn-ghost btn-icon-sm" style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }} onClick={() => setSearch("")}>
               <X size={14} />
@@ -922,24 +1517,106 @@ export default function Profiles() {
             const Icon = TOOL_ICONS[profile.tool_id] || Monitor;
             const isActive = activeIdSet.has(profile.id);
             const summary = extractConfigSummary(profile.tool_id, profile.config_snapshot);
+            const probe = probeResults[profile.id];
+            const streamCheck = streamCheckResults[profile.id];
+            const sharedCount = profile.source_type === "shared" && profile.source_key
+              ? sharedGroupCounts[profile.source_key] || 1
+              : 0;
+            const probeTone = probe?.status === "healthy"
+              ? "badge-success"
+              : probe?.status === "reachable"
+                ? "badge-warning"
+                : probe?.status === "error"
+                  ? "badge-danger"
+                  : "badge-muted";
+            const streamTone = streamCheck?.status === "healthy"
+              ? "badge-success"
+              : streamCheck?.status === "reachable"
+                ? "badge-warning"
+                : streamCheck?.status === "unsupported"
+                  ? "badge-muted"
+                  : streamCheck?.status === "unconfigured"
+                    ? "badge-muted"
+                    : "badge-danger";
             return (
               <div
                 key={profile.id}
                 className="card card-hover"
+                draggable={reorderEnabled}
+                onDragStart={() => setDraggingProfileId(profile.id)}
+                onDragEnter={() => {
+                  if (reorderEnabled && draggingProfileId && draggingProfileId !== profile.id) {
+                    setDragOverProfileId(profile.id);
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (!reorderEnabled) return;
+                  event.preventDefault();
+                }}
+                onDragEnd={() => {
+                  setDraggingProfileId(null);
+                  setDragOverProfileId(null);
+                }}
+                onDrop={(event) => {
+                  if (!reorderEnabled || !draggingProfileId) return;
+                  event.preventDefault();
+                  void reorderProfiles(draggingProfileId, profile.id);
+                }}
                 style={{
                   padding: "16px 18px",
                   borderColor: isActive ? "var(--success)" : undefined,
                   boxShadow: isActive ? "0 0 0 1px color-mix(in srgb, var(--success) 30%, transparent)" : undefined,
+                  opacity: draggingProfileId === profile.id ? 0.65 : 1,
+                  transform: dragOverProfileId === profile.id ? "translateY(-2px)" : undefined,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1, alignItems: "center" }}>
+                    <button
+                      className="btn btn-ghost btn-icon-sm"
+                      type="button"
+                      title={reorderEnabled ? (locale === "zh" ? "拖拽调整顺序" : "Drag to reorder") : (locale === "zh" ? "先选择单个工具并清空搜索后再排序" : "Filter to one tool and clear search to reorder")}
+                      style={{ cursor: reorderEnabled ? "grab" : "default", opacity: reorderEnabled ? 1 : 0.45 }}
+                    >
+                      <GripVertical size={14} />
+                    </button>
                     <div className="icon-box" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }}><Icon size={16} /></div>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 14, fontWeight: 600 }}>{profile.name}</span>
                         <span className="badge badge-muted" style={{ textTransform: "capitalize", fontSize: 10 }}>{profile.tool_id}</span>
                         {isActive && <span className="badge badge-success" style={{ fontSize: 10 }}>{locale === "zh" ? "当前生效" : "Active"}</span>}
+                        {sharedCount > 1 && (
+                          <span className="badge badge-accent" style={{ fontSize: 10 }}>
+                            {localeText(`共享 ${sharedCount} App`, `Shared ${sharedCount} apps`, `${sharedCount} App 共有`)}
+                          </span>
+                        )}
+                        {probe && (
+                          <span className={`badge ${probeTone}`} style={{ fontSize: 10 }}>
+                            {probe.status === "healthy"
+                              ? (locale === "zh" ? "健康" : "Healthy")
+                              : probe.status === "reachable"
+                                ? (locale === "zh" ? "可达" : "Reachable")
+                                : probe.status === "error"
+                                  ? (locale === "zh" ? "异常" : "Error")
+                                  : (locale === "zh" ? "未配置" : "Unconfigured")}
+                            {probe.latency_ms != null ? ` · ${probe.latency_ms}ms` : ""}
+                          </span>
+                        )}
+                        {streamCheck && (
+                          <span className={`badge ${streamTone}`} style={{ fontSize: 10 }}>
+                            {streamCheck.status === "healthy"
+                              ? (locale === "zh" ? "流检通过" : "Stream OK")
+                              : streamCheck.status === "reachable"
+                                ? (locale === "zh" ? "流检可达" : "Stream Reachable")
+                                : streamCheck.status === "unsupported"
+                                  ? (locale === "zh" ? "流检暂不支持" : "Stream Unsupported")
+                                  : streamCheck.status === "unconfigured"
+                                    ? (locale === "zh" ? "流检未配置" : "Stream Unconfigured")
+                                    : (locale === "zh" ? "流检异常" : "Stream Error")}
+                            {streamCheck.latency_ms != null ? ` · ${streamCheck.latency_ms}ms` : ""}
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: "flex", gap: 16, marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
                         {summary.baseUrl && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{summary.baseUrl}</span>}
@@ -950,6 +1627,12 @@ export default function Profiles() {
                   </div>
 
                   <div className="card-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                    <button className="btn btn-ghost btn-icon-sm" onClick={() => void handleProbe(profile)} title={locale === "zh" ? "探测端点" : "Probe endpoint"}>
+                      {probingId === profile.id ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Activity size={14} />}
+                    </button>
+                    <button className="btn btn-ghost btn-icon-sm" onClick={() => handleStreamCheck(profile)} title={locale === "zh" ? "流式健康检查" : "Stream health check"}>
+                      {streamCheckingId === profile.id ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Wifi size={14} />}
+                    </button>
                     <button className={`btn btn-xs ${isActive ? "btn-secondary" : "btn-primary"}`} onClick={() => void handleApply(profile)} disabled={applying === profile.id} style={{ gap: 5 }}>
                       {applying === profile.id ? <div className="spinner" style={{ width: 11, height: 11 }} /> : isActive ? <Check size={11} /> : <ArrowRightLeft size={11} />}
                       {locale === "zh" ? (isActive ? "已生效" : "切换") : (isActive ? "Active" : "Apply")}
@@ -967,15 +1650,65 @@ export default function Profiles() {
 
       <ConfirmDialog
         isOpen={!!confirmAction}
-        title={locale === "zh" ? "删除配置" : "Delete Configuration"}
-        message={locale === "zh" ? `确定删除配置「${confirmAction?.profile.name}」？此操作不可撤销。` : `Delete "${confirmAction?.profile.name}"? This cannot be undone.`}
-        confirmText={locale === "zh" ? "删除" : "Delete"}
+        title={confirmAction?.profile.source_type === "shared"
+          ? localeText("删除共享配置", "Delete Shared Provider", "共有 Provider を削除")
+          : (locale === "zh" ? "删除配置" : "Delete Configuration")}
+        message={confirmAction?.profile.source_type === "shared" && confirmAction.profile.source_key
+          ? localeText(
+            `确定删除共享配置「${confirmAction.profile.name}」？这会同时删除 ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 个 App 上的联动配置。`,
+            `Delete shared provider "${confirmAction.profile.name}"? This also removes the linked profiles across ${sharedGroupCounts[confirmAction.profile.source_key] || 1} apps.`,
+            `共有 Provider「${confirmAction.profile.name}」を削除しますか？ ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 個の App にある連動プロファイルも同時に削除されます。`,
+          )
+          : (locale === "zh" ? `确定删除配置「${confirmAction?.profile.name}」？此操作不可撤销。` : `Delete "${confirmAction?.profile.name}"? This cannot be undone.`)}
+        confirmText={localeText("删除", "Delete", "削除")}
         variant="destructive"
         onConfirm={() => {
           if (confirmAction) void doDelete(confirmAction.profile);
           setConfirmAction(null);
         }}
         onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmDialog
+        isOpen={!!confirmFragmentDelete}
+        title={localeText("删除配置片段", "Delete Provider Fragment", "Provider フラグメントを削除")}
+        message={confirmFragmentDelete
+          ? localeText(
+            `确定删除配置片段「${confirmFragmentDelete.name}」？删除后将无法继续复用这组字段。`,
+            `Delete provider fragment "${confirmFragmentDelete.name}"? You will no longer be able to reuse this field set.`,
+            `Provider フラグメント「${confirmFragmentDelete.name}」を削除しますか？ このフィールドセットは再利用できなくなります。`,
+          )
+          : ""}
+        confirmText={localeText("删除", "Delete", "削除")}
+        variant="destructive"
+        onConfirm={() => {
+          const fragment = confirmFragmentDelete;
+          setConfirmFragmentDelete(null);
+          if (!fragment) return;
+          void doDeleteFragment(fragment);
+        }}
+        onCancel={() => setConfirmFragmentDelete(null)}
+      />
+      <ConfirmDialog
+        isOpen={!!streamCheckConfirmProfile}
+        title={localeText("流式健康检查", "Stream Health Check", "ストリームヘルスチェック")}
+        message={
+          localeText(
+            "将向 Provider 发送一条最小化的流式请求，用于验证端点是否能成功返回首个流式分片。\n\n首次确认后，后续将直接执行。",
+            "CCHub will send a minimal streaming request to verify that this provider endpoint can return the first stream chunk successfully.\n\nAfter you confirm once, future checks will run immediately.",
+            "Provider に最小限のストリーミングリクエストを送り、最初のストリームチャンクを正しく返せるか確認します。\n\n一度確認すると、以後はすぐに実行されます。",
+          )
+        }
+        confirmText={localeText("继续检查", "Run Check", "チェックを実行")}
+        cancelText={localeText("取消", "Cancel", "キャンセル")}
+        variant="info"
+        onConfirm={() => {
+          const profile = streamCheckConfirmProfile;
+          setStreamCheckConfirmProfile(null);
+          if (!profile) return;
+          localStorage.setItem("cchub-stream-check-confirmed", "1");
+          void runStreamCheck(profile);
+        }}
+        onCancel={() => setStreamCheckConfirmProfile(null)}
       />
     </div>
   );

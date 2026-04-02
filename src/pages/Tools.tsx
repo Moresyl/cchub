@@ -17,8 +17,10 @@ interface HudStatus {
 }
 
 interface HudConfig {
-  layout?: string;
+  lineLayout?: "compact" | "expanded";
+  showSeparators?: boolean;
   pathLevels?: number;
+  elementOrder?: string[];
   gitStatus?: {
     enabled?: boolean;
     showDirty?: boolean;
@@ -27,23 +29,36 @@ interface HudConfig {
   };
   display?: {
     showModel?: boolean;
+    showProject?: boolean;
     showContextBar?: boolean;
+    contextValue?: "percent" | "tokens" | "remaining" | "both";
     showConfigCounts?: boolean;
     showDuration?: boolean;
+    showSpeed?: boolean;
     showUsage?: boolean;
     usageBarEnabled?: boolean;
     showTokenBreakdown?: boolean;
     showTools?: boolean;
     showAgents?: boolean;
     showTodos?: boolean;
+    showSessionName?: boolean;
+    showClaudeCodeVersion?: boolean;
+    showMemoryUsage?: boolean;
   };
 }
 
 const DEFAULT_HUD_CONFIG: HudConfig = {
-  layout: "separators",
-  pathLevels: 2,
+  lineLayout: "expanded",
+  showSeparators: false,
+  pathLevels: 1,
   gitStatus: { enabled: true, showDirty: true, showAheadBehind: false, showFileStats: false },
-  display: { showModel: true, showContextBar: true, showConfigCounts: true, showDuration: true, showUsage: true, usageBarEnabled: true, showTokenBreakdown: true, showTools: true, showAgents: true, showTodos: true },
+  display: {
+    showModel: true, showProject: true, showContextBar: true, contextValue: "percent",
+    showConfigCounts: false, showDuration: false, showSpeed: false,
+    showUsage: true, usageBarEnabled: true, showTokenBreakdown: true,
+    showTools: false, showAgents: false, showTodos: false,
+    showSessionName: false, showClaudeCodeVersion: false, showMemoryUsage: false,
+  },
 };
 
 const PERM_LEVELS = [
@@ -111,7 +126,7 @@ export default function Tools() {
       setCodexDisableStorage(codexSettings.disable_response_storage);
       setCodexContextWindow1M(codexSettings.context_window_1m);
       setTools(detectedTools);
-      setHudStatus(hud);
+      setHudStatus(migrateHudConfig(hud));
       setVisibleApps(nextVisibleApps);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -137,7 +152,7 @@ export default function Tools() {
     try {
       await invoke("install_claude_hud");
       const hud = await invoke<HudStatus>("get_claude_hud_status");
-      setHudStatus(hud);
+      setHudStatus(migrateHudConfig(hud));
       showToast("success", uiText("claude-hud 安装成功", "claude-hud installed", "claude-hud をインストールしました"));
     } catch (e) {
       showToast("error", uiText(`安装失败: ${e}`, `Install failed: ${e}`, `インストールに失敗しました: ${e}`));
@@ -166,7 +181,7 @@ export default function Tools() {
     try {
       const result = await invoke<{ version: string; skipped: boolean }>("update_claude_hud");
       const hud = await invoke<HudStatus>("get_claude_hud_status");
-      setHudStatus(hud);
+      setHudStatus(migrateHudConfig(hud));
       setHudUpdateInfo(null);
       if (result.skipped) {
         showToast("success", uiText("已是最新版本", "Already up to date", "すでに最新です"));
@@ -180,11 +195,28 @@ export default function Tools() {
     }
   }
 
+  /** Migrate legacy `layout` field to `lineLayout` + `showSeparators` */
+  function migrateHudConfig(status: HudStatus | null): HudStatus | null {
+    if (!status?.hudConfig) return status;
+    const cfg = status.hudConfig as HudConfig & { layout?: string };
+    if ("layout" in cfg && !cfg.lineLayout) {
+      if (cfg.layout === "separators") {
+        cfg.lineLayout = "compact";
+        cfg.showSeparators = true;
+      } else {
+        cfg.lineLayout = "compact";
+        cfg.showSeparators = false;
+      }
+      delete cfg.layout;
+    }
+    return { ...status, hudConfig: cfg };
+  }
+
   async function toggleStatusLine(enabled: boolean) {
     try {
       await invoke("set_claude_statusline", { enabled });
       const hud = await invoke<HudStatus>("get_claude_hud_status");
-      setHudStatus(hud);
+      setHudStatus(migrateHudConfig(hud));
       showToast("success", uiText("已更新", "Updated", "更新しました"));
     } catch (e) { showToast("error", `${e}`); }
   }
@@ -430,21 +462,33 @@ export default function Tools() {
                   {/* Layout */}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("布局", "Layout", "レイアウト")}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("布局模式", "Layout Mode", "レイアウトモード")}</span>
                     </div>
                     <div style={{ display: "flex", gap: 4 }}>
-                      {(["default", "separators"] as const).map(layout => (
-                        <button key={layout}
-                          className={`btn btn-xs ${(hc.layout || "separators") === layout ? "btn-primary" : "btn-secondary"}`}
-                          onClick={() => void updateHudConfig({ layout })}
+                      {(["expanded", "compact"] as const).map(mode => (
+                        <button key={mode}
+                          className={`btn btn-xs ${(hc.lineLayout || "expanded") === mode ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => void updateHudConfig({ lineLayout: mode })}
                           style={{ fontSize: 11 }}
                         >
-                          {layout === "default"
-                            ? uiText("紧凑", "Compact", "コンパクト")
-                            : uiText("分隔线", "Separators", "区切り線")}
+                          {mode === "expanded"
+                            ? uiText("多行展开", "Expanded", "展開表示")
+                            : uiText("单行紧凑", "Compact", "コンパクト")}
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Separators */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("分隔线", "Separators", "区切り線")}</span>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+                      <input type="checkbox" checked={hc.showSeparators === true}
+                        onChange={e => void updateHudConfig({ showSeparators: e.target.checked })} />
+                      {uiText("活动区域前显示分隔线", "Show separator before activity", "アクティビティの前に区切り線を表示")}
+                    </label>
                   </div>
 
                   {/* Path Levels */}
@@ -455,11 +499,29 @@ export default function Tools() {
                     <div style={{ display: "flex", gap: 4 }}>
                       {[1, 2, 3].map(n => (
                         <button key={n}
-                          className={`btn btn-xs ${(hc.pathLevels || 2) === n ? "btn-primary" : "btn-secondary"}`}
+                          className={`btn btn-xs ${(hc.pathLevels || 1) === n ? "btn-primary" : "btn-secondary"}`}
                           onClick={() => void updateHudConfig({ pathLevels: n })}
                           style={{ fontSize: 11, minWidth: 24 }}
                         >
                           {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Context Value Format */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("上下文格式", "Context Format", "コンテキスト形式")}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {(["percent", "tokens", "remaining", "both"] as const).map(mode => (
+                        <button key={mode}
+                          className={`btn btn-xs ${(hc.display?.contextValue || "percent") === mode ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => void updateHudConfig({ display: { ...hc.display, contextValue: mode } })}
+                          style={{ fontSize: 11 }}
+                        >
+                          {mode === "percent" ? "45%" : mode === "tokens" ? "45k/200k" : mode === "remaining" ? uiText("剩余", "Remain", "残り") : uiText("全部", "Both", "両方")}
                         </button>
                       ))}
                     </div>
@@ -470,13 +532,13 @@ export default function Tools() {
                     <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Git Status</span>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px 16px", marginTop: 8 }}>
                       {([
-                        ["enabled", uiText("显示分支", "Branch", "ブランチ表示"), hc.gitStatus?.enabled],
-                        ["showDirty", uiText("未提交标记", "Dirty Mark", "変更あり表示"), hc.gitStatus?.showDirty],
-                        ["showAheadBehind", uiText("领先/落后", "Ahead/Behind", "先行/遅延"), hc.gitStatus?.showAheadBehind],
-                        ["showFileStats", uiText("文件统计", "File Stats", "ファイル統計"), hc.gitStatus?.showFileStats],
-                      ] as [string, string, boolean | undefined][]).map(([key, label, value]) => (
+                        ["enabled", uiText("显示分支", "Branch", "ブランチ表示"), hc.gitStatus?.enabled, true],
+                        ["showDirty", uiText("未提交标记", "Dirty Mark", "変更あり表示"), hc.gitStatus?.showDirty, true],
+                        ["showAheadBehind", uiText("领先/落后", "Ahead/Behind", "先行/遅延"), hc.gitStatus?.showAheadBehind, false],
+                        ["showFileStats", uiText("文件统计", "File Stats", "ファイル統計"), hc.gitStatus?.showFileStats, false],
+                      ] as [string, string, boolean | undefined, boolean][]).map(([key, label, value, defaultVal]) => (
                         <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
-                          <input type="checkbox" checked={value !== false}
+                          <input type="checkbox" checked={value ?? defaultVal}
                             onChange={e => void updateHudConfig({ gitStatus: { ...hc.gitStatus, [key]: e.target.checked } })} />
                           {label}
                         </label>
@@ -489,19 +551,24 @@ export default function Tools() {
                     <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{uiText("显示选项", "Display", "表示項目")}</span>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px 16px", marginTop: 8 }}>
                       {([
-                        ["showModel", uiText("模型名", "Model", "モデル名"), hc.display?.showModel],
-                        ["showContextBar", uiText("上下文进度条", "Context Bar", "コンテキストバー"), hc.display?.showContextBar],
-                        ["showConfigCounts", uiText("配置计数", "Config Counts", "設定数"), hc.display?.showConfigCounts],
-                        ["showDuration", uiText("会话时长", "Duration", "継続時間"), hc.display?.showDuration],
-                        ["showUsage", uiText("用量限制", "Usage", "使用量"), hc.display?.showUsage],
-                        ["usageBarEnabled", uiText("用量进度条", "Usage Bar", "使用量バー"), hc.display?.usageBarEnabled],
-                        ["showTokenBreakdown", uiText("Token 明细", "Token Detail", "トークン詳細"), hc.display?.showTokenBreakdown],
-                        ["showTools", uiText("工具活动", "Tools", "ツール活動"), hc.display?.showTools],
-                        ["showAgents", uiText("Agent 活动", "Agents", "Agent 活動"), hc.display?.showAgents],
-                        ["showTodos", uiText("Todo 进度", "Todos", "Todo 進捗"), hc.display?.showTodos],
-                      ] as [string, string, boolean | undefined][]).map(([key, label, value]) => (
+                        ["showModel", uiText("模型名", "Model", "モデル名"), hc.display?.showModel, true],
+                        ["showProject", uiText("项目路径", "Project Path", "プロジェクトパス"), hc.display?.showProject, true],
+                        ["showContextBar", uiText("上下文进度条", "Context Bar", "コンテキストバー"), hc.display?.showContextBar, true],
+                        ["showConfigCounts", uiText("配置计数", "Config Counts", "設定数"), hc.display?.showConfigCounts, false],
+                        ["showDuration", uiText("会话时长", "Duration", "継続時間"), hc.display?.showDuration, false],
+                        ["showSpeed", uiText("输出速度", "Output Speed", "出力速度"), hc.display?.showSpeed, false],
+                        ["showUsage", uiText("用量限制", "Usage", "使用量"), hc.display?.showUsage, true],
+                        ["usageBarEnabled", uiText("用量进度条", "Usage Bar", "使用量バー"), hc.display?.usageBarEnabled, true],
+                        ["showTokenBreakdown", uiText("Token 明细", "Token Detail", "トークン詳細"), hc.display?.showTokenBreakdown, true],
+                        ["showTools", uiText("工具活动", "Tools", "ツール活動"), hc.display?.showTools, false],
+                        ["showAgents", uiText("Agent 活动", "Agents", "Agent 活動"), hc.display?.showAgents, false],
+                        ["showTodos", uiText("Todo 进度", "Todos", "Todo 進捗"), hc.display?.showTodos, false],
+                        ["showSessionName", uiText("会话名称", "Session Name", "セッション名"), hc.display?.showSessionName, false],
+                        ["showClaudeCodeVersion", uiText("CC 版本号", "CC Version", "CC バージョン"), hc.display?.showClaudeCodeVersion, false],
+                        ["showMemoryUsage", uiText("内存占用", "Memory Usage", "メモリ使用量"), hc.display?.showMemoryUsage, false],
+                      ] as [string, string, boolean | undefined, boolean][]).map(([key, label, value, defaultVal]) => (
                         <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
-                          <input type="checkbox" checked={value !== false}
+                          <input type="checkbox" checked={value ?? defaultVal}
                             onChange={e => void updateHudConfig({ display: { ...hc.display, [key]: e.target.checked } })} />
                           {label}
                         </label>

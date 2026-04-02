@@ -7170,22 +7170,159 @@ pub fn get_claude_hud_status() -> Result<serde_json::Value, String> {
     }))
 }
 
-/// Install claude-hud plugin by creating the necessary directory structure and downloading
-#[tauri::command]
-pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(), String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+/// Write env-entry.ts (for bun) and env-entry.mjs (for node) into the plugin version directory.
+/// These entry points read stdin from the CLAUDE_HUD_STDIN env var instead of piped stdin,
+/// which avoids Windows pipe timing issues with Claude Code's statusline renderer.
+fn write_hud_env_entries(version_dir: &std::path::Path) -> Result<(), String> {
+    // env-entry.ts — for bun (native TypeScript support)
+    let ts_content = r#"// Entry point that reads stdin from env var instead of piped stdin
+// This avoids the Windows pipe timing issue with Claude Code's statusline renderer
+import { main } from './src/index.ts';
 
-    // Create plugin directory structure
-    let version = "0.0.6";
-    let dist_dir = home
+const stdinRaw = process.env.CLAUDE_HUD_STDIN || '';
+let stdinData = null;
+try {
+  if (stdinRaw.trim()) {
+    stdinData = JSON.parse(stdinRaw);
+  }
+} catch {}
+
+await main({
+  readStdin: async () => stdinData,
+});
+"#;
+
+    // env-entry.mjs — for node (compiled JS fallback)
+    let mjs_content = r#"// Entry point that reads stdin from env var instead of piped stdin
+// Node.js fallback version using compiled dist/index.js
+const { main } = await import('./dist/index.js');
+
+const stdinRaw = process.env.CLAUDE_HUD_STDIN || '';
+let stdinData = null;
+try {
+  if (stdinRaw.trim()) {
+    stdinData = JSON.parse(stdinRaw);
+  }
+} catch {}
+
+await main({
+  readStdin: async () => stdinData,
+});
+"#;
+
+    let ts_path = version_dir.join("env-entry.ts");
+    let mjs_path = version_dir.join("env-entry.mjs");
+
+    std::fs::write(&ts_path, ts_content).map_err(|e| format!("Write env-entry.ts failed: {}", e))?;
+    std::fs::write(&mjs_path, mjs_content)
+        .map_err(|e| format!("Write env-entry.mjs failed: {}", e))?;
+
+    Ok(())
+}
+
+/// Build the statusLine command string for Windows-compatible multi-line claude-hud output.
+/// Uses env var stdin + tr -d '\r' to fix Windows line ending issues.
+fn build_hud_statusline_command(home: &std::path::Path) -> Result<String, String> {
+    let cache_dir = home
         .join(".claude")
         .join("plugins")
         .join("cache")
         .join("claude-hud")
-        .join("claude-hud")
-        .join(version)
-        .join("dist");
-    std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
+        .join("claude-hud");
+
+    // Find the installed version directory
+    let mut version = String::new();
+    if cache_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+            for entry in entries.flatten() {
+                let candidate = entry.path().join("dist").join("index.js");
+                if candidate.exists() {
+                    version = entry.file_name().to_string_lossy().to_string();
+                    break;
+                }
+            }
+        }
+    }
+    if version.is_empty() {
+        return Err("claude-hud not installed".to_string());
+    }
+
+    // Detect bun path
+    let bun_path = find_bun_path(home);
+
+    // Build the command:
+    // 1. Read stdin to env var (avoids pipe timing issues)
+    // 2. Find latest plugin version dir
+    // 3. Run with bun (preferred) or node
+    // 4. Strip \r from output (Windows line ending fix)
+    let cmd = if let Some(bun) = &bun_path {
+        // Use bun with env-entry.ts (native TypeScript)
+        format!(
+            "bash -c 'export CLAUDE_HUD_STDIN=$(cat); \
+plugin_dir=$(ls -d \"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\"/plugins/cache/claude-hud/claude-hud/*/ 2>/dev/null \
+| awk -F/ '\"'\"'{{ print $(NF-1) \"\\t\" $(0) }}'\"'\"' \
+| sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | cut -f2-); \
+\"{}\" --env-file /dev/null \"${{plugin_dir}}env-entry.ts\" 2>/dev/null | tr -d \"\\r\"'",
+            bun
+        )
+    } else {
+        // Fallback to node with env-entry.mjs
+        format!(
+            "bash -c 'export CLAUDE_HUD_STDIN=$(cat); \
+plugin_dir=$(ls -d \"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\"/plugins/cache/claude-hud/claude-hud/*/ 2>/dev/null \
+| awk -F/ '\"'\"'{{ print $(NF-1) \"\\t\" $(0) }}'\"'\"' \
+| sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | cut -f2-); \
+node \"${{plugin_dir}}env-entry.mjs\" 2>/dev/null | tr -d \"\\r\"'"
+        )
+    };
+
+    Ok(cmd)
+}
+
+/// Find bun executable path, checking common locations
+fn find_bun_path(home: &std::path::Path) -> Option<String> {
+    // Check common bun install locations on Windows (Git Bash paths)
+    let candidates = [
+        home.join(".bun").join("bin").join("bun"),
+        home.join(".bun").join("bin").join("bun.exe"),
+    ];
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            // Convert to Git Bash compatible path: C:\Users\xxx -> /c/Users/xxx
+            let path_str = candidate.to_string_lossy().replace('\\', "/");
+            if let Some(rest) = path_str
+                .strip_prefix("C:")
+                .or_else(|| path_str.strip_prefix("c:"))
+            {
+                return Some(format!("/c{}", rest));
+            }
+            // Other drive letters
+            if path_str.len() >= 2 && path_str.as_bytes()[1] == b':' {
+                let drive = path_str.as_bytes()[0].to_ascii_lowercase() as char;
+                return Some(format!("/{}{}", drive, &path_str[2..]));
+            }
+            return Some(path_str.to_string());
+        }
+    }
+
+    // Also check if bun is in PATH via which
+    if let Ok(output) = std::process::Command::new("which").arg("bun").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(path);
+            }
+        }
+    }
+
+    None
+}
+
+/// Install claude-hud plugin from GitHub repository
+#[tauri::command]
+pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
 
     // Build HTTP client with proxy support
     let proxy_url = get_proxy(db);
@@ -7193,53 +7330,96 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
         let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
         reqwest::Client::builder()
             .proxy(proxy)
+            .user_agent("CCHub")
             .build()
             .map_err(|e| format!("Client build failed: {}", e))?
     } else {
-        reqwest::Client::new()
+        reqwest::Client::builder()
+            .user_agent("CCHub")
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?
     };
 
-    // Try official npm registry first, fallback to China mirror
-    let registries = [
-        format!(
-            "https://registry.npmjs.org/claude-hud/-/claude-hud-{}.tgz",
-            version
-        ),
-        format!(
-            "https://registry.npmmirror.com/claude-hud/-/claude-hud-{}.tgz",
-            version
-        ),
+    // Fetch plugin version from GitHub
+    let plugin_json_urls = [
+        "https://raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
+        "https://ghgo.xyz/raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
+    ];
+
+    let mut version = String::new();
+    for url in &plugin_json_urls {
+        if let Ok(resp) = client.get(*url).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(v) = json.get("version").and_then(|v| v.as_str()) {
+                            version = v.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if version.is_empty() {
+        version = "0.0.11".to_string(); // fallback
+    }
+
+    let cache_dir = home
+        .join(".claude")
+        .join("plugins")
+        .join("cache")
+        .join("claude-hud")
+        .join("claude-hud");
+    let version_dir = cache_dir.join(&version);
+    let dist_dir = version_dir.join("dist");
+
+    // Skip if already installed
+    if dist_dir.join("index.js").exists() {
+        // Ensure env-entry files exist even for existing installs
+        write_hud_env_entries(&version_dir)?;
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
+
+    // Download tarball from GitHub
+    let tarball_urls = [
+        "https://github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
+        "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
     ];
 
     let mut bytes = None;
     let mut last_err = String::new();
-    for url in &registries {
-        match client.get(url).send().await {
+    for url in &tarball_urls {
+        match client.get(*url).send().await {
             Ok(resp) if resp.status().is_success() => match resp.bytes().await {
                 Ok(b) => {
                     bytes = Some(b);
                     break;
                 }
-                Err(e) => {
-                    last_err = format!("Read failed: {}", e);
-                }
+                Err(e) => last_err = format!("Read failed: {}", e),
             },
-            Ok(resp) => {
-                last_err = format!("HTTP {} from {}", resp.status(), url);
-            }
-            Err(e) => {
-                last_err = format!("Download failed: {}", e);
-            }
+            Ok(resp) => last_err = format!("HTTP {} from {}", resp.status(), url),
+            Err(e) => last_err = format!("Download failed: {}", e),
         }
     }
-    let bytes = bytes.ok_or(format!("All registries failed: {}", last_err))?;
+    let bytes = bytes.ok_or(format!("All sources failed: {}", last_err))?;
 
-    // Extract tgz: decompress gzip then untar
+    // Extract tarball: GitHub format is claude-hud-main/{dist,src}/*
     let gz = flate2::read::GzDecoder::new(&bytes[..]);
     let mut archive = tar::Archive::new(gz);
     let entries = archive
         .entries()
         .map_err(|e| format!("Tar read failed: {}", e))?;
+
+    // Extract both dist/ and src/ (src/ needed for bun TypeScript support)
+    let prefix_candidates = [
+        "claude-hud-main/dist/",
+        "claude-hud-master/dist/",
+        "claude-hud-main/src/",
+        "claude-hud-master/src/",
+    ];
 
     for entry in entries {
         let mut entry = entry.map_err(|e| format!("Tar entry error: {}", e))?;
@@ -7247,30 +7427,36 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
             .path()
             .map_err(|e| format!("Path error: {}", e))?
             .to_path_buf();
-        let entry_str = entry_path.to_string_lossy().to_string();
+        let entry_str = entry_path.to_string_lossy().replace('\\', "/");
 
-        // npm tarballs have files under package/dist/
-        if entry_str.starts_with("package/dist/") {
-            let relative = entry_str
-                .strip_prefix("package/dist/")
-                .unwrap_or(&entry_str);
-            if relative.is_empty() {
-                continue;
+        for prefix in &prefix_candidates {
+            if entry_str.starts_with(prefix) {
+                // Strip the GitHub prefix (e.g., "claude-hud-main/") to get "dist/..." or "src/..."
+                let repo_prefix = prefix.split('/').next().unwrap_or("claude-hud-main");
+                let relative = entry_str
+                    .strip_prefix(&format!("{}/", repo_prefix))
+                    .unwrap_or(&entry_str);
+                if relative.is_empty() || relative.ends_with('/') {
+                    continue;
+                }
+                let target = version_dir.join(relative);
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut file = std::fs::File::create(&target).map_err(|e| e.to_string())?;
+                std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+                break;
             }
-            let target = dist_dir.join(relative);
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut file = std::fs::File::create(&target).map_err(|e| e.to_string())?;
-            std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
         }
     }
 
     // Verify index.js exists
-    let index_js = dist_dir.join("index.js");
-    if !index_js.exists() {
+    if !dist_dir.join("index.js").exists() {
         return Err("Installation failed: index.js not found after extraction".to_string());
     }
+
+    // Write env-entry files (for Windows stdin pipe fix)
+    write_hud_env_entries(&version_dir)?;
 
     // Create default hud config
     let hud_config_dir = home.join(".claude").join("plugins").join("claude-hud");
@@ -7278,8 +7464,9 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
     let hud_config_path = hud_config_dir.join("config.json");
     if !hud_config_path.exists() {
         let default_config = serde_json::json!({
-            "layout": "separators",
-            "pathLevels": 2,
+            "lineLayout": "expanded",
+            "showSeparators": false,
+            "pathLevels": 1,
             "gitStatus": {
                 "enabled": true,
                 "showDirty": true,
@@ -7289,14 +7476,9 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
             "display": {
                 "showModel": true,
                 "showContextBar": true,
-                "showConfigCounts": true,
-                "showDuration": true,
                 "showUsage": true,
                 "usageBarEnabled": true,
-                "showTokenBreakdown": true,
-                "showTools": true,
-                "showAgents": true,
-                "showTodos": true
+                "showTokenBreakdown": true
             }
         });
         let config_str =
@@ -7308,7 +7490,7 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
     Ok(())
 }
 
-/// Check if there's a newer version of claude-hud on npm
+/// Check if there's a newer version of claude-hud on GitHub
 #[tauri::command]
 pub async fn check_claude_hud_update(
     db: State<'_, crate::db::DbState>,
@@ -7339,10 +7521,46 @@ pub async fn check_claude_hud_update(
         return Err("claude-hud not installed".to_string());
     }
 
-    // Check latest version from npm
+    // Check latest version from GitHub plugin.json
     let proxy_url = get_proxy(db);
-    let latest_version =
-        crate::updater::checker::check_npm_version_with_proxy("claude-hud", &proxy_url).await?;
+    let client = if !proxy_url.is_empty() {
+        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
+        reqwest::Client::builder()
+            .proxy(proxy)
+            .user_agent("CCHub")
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?
+    } else {
+        reqwest::Client::builder()
+            .user_agent("CCHub")
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?
+    };
+
+    let plugin_json_urls = [
+        "https://raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
+        "https://ghgo.xyz/raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
+    ];
+
+    let mut latest_version = String::new();
+    for url in &plugin_json_urls {
+        if let Ok(resp) = client.get(*url).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(v) = json.get("version").and_then(|v| v.as_str()) {
+                            latest_version = v.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if latest_version.is_empty() {
+        return Err("Failed to check latest version from GitHub".to_string());
+    }
 
     let has_update = latest_version != current_version;
 
@@ -7353,7 +7571,7 @@ pub async fn check_claude_hud_update(
     }))
 }
 
-/// Update claude-hud to the latest npm version
+/// Update claude-hud to the latest GitHub version
 #[tauri::command]
 pub async fn update_claude_hud(
     db: State<'_, crate::db::DbState>,
@@ -7366,10 +7584,47 @@ pub async fn update_claude_hud(
         .join("claude-hud")
         .join("claude-hud");
 
-    // Get latest version
+    // Build HTTP client with proxy
     let proxy_url = get_proxy(db);
-    let version =
-        crate::updater::checker::check_npm_version_with_proxy("claude-hud", &proxy_url).await?;
+    let client = if !proxy_url.is_empty() {
+        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
+        reqwest::Client::builder()
+            .proxy(proxy)
+            .user_agent("CCHub")
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?
+    } else {
+        reqwest::Client::builder()
+            .user_agent("CCHub")
+            .build()
+            .map_err(|e| format!("Client build failed: {}", e))?
+    };
+
+    // Get latest version from GitHub plugin.json
+    let plugin_json_urls = [
+        "https://raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
+        "https://ghgo.xyz/raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
+    ];
+
+    let mut version = String::new();
+    for url in &plugin_json_urls {
+        if let Ok(resp) = client.get(*url).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(v) = json.get("version").and_then(|v| v.as_str()) {
+                            version = v.to_string();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if version.is_empty() {
+        return Err("Failed to get latest version from GitHub".to_string());
+    }
 
     let dist_dir = cache_dir.join(&version).join("dist");
 
@@ -7380,58 +7635,45 @@ pub async fn update_claude_hud(
 
     std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
 
-    // Build HTTP client with proxy
-    let client = if !proxy_url.is_empty() {
-        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
-        reqwest::Client::builder()
-            .proxy(proxy)
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    } else {
-        reqwest::Client::new()
-    };
-
-    // Download tgz
-    let registries = [
-        format!(
-            "https://registry.npmjs.org/claude-hud/-/claude-hud-{}.tgz",
-            version
-        ),
-        format!(
-            "https://registry.npmmirror.com/claude-hud/-/claude-hud-{}.tgz",
-            version
-        ),
+    // Download tarball from GitHub
+    let tarball_urls = [
+        "https://github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
+        "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
     ];
 
     let mut bytes = None;
     let mut last_err = String::new();
-    for url in &registries {
-        match client.get(url).send().await {
+    for url in &tarball_urls {
+        match client.get(*url).send().await {
             Ok(resp) if resp.status().is_success() => match resp.bytes().await {
                 Ok(b) => {
                     bytes = Some(b);
                     break;
                 }
-                Err(e) => {
-                    last_err = format!("Read failed: {}", e);
-                }
+                Err(e) => last_err = format!("Read failed: {}", e),
             },
-            Ok(resp) => {
-                last_err = format!("HTTP {} from {}", resp.status(), url);
-            }
-            Err(e) => {
-                last_err = format!("Download failed: {}", e);
-            }
+            Ok(resp) => last_err = format!("HTTP {} from {}", resp.status(), url),
+            Err(e) => last_err = format!("Download failed: {}", e),
         }
     }
-    let bytes = bytes.ok_or(format!("All registries failed: {}", last_err))?;
+    let bytes = bytes.ok_or(format!("All sources failed: {}", last_err))?;
 
-    // Extract tgz
+    // Extract tarball
     let gz = flate2::read::GzDecoder::new(&bytes[..]);
     let mut archive = tar::Archive::new(gz);
     let entries = archive
         .entries()
         .map_err(|e| format!("Tar read failed: {}", e))?;
+
+    // Extract both dist/ and src/ (src/ needed for bun TypeScript support)
+    let prefix_candidates = [
+        "claude-hud-main/dist/",
+        "claude-hud-master/dist/",
+        "claude-hud-main/src/",
+        "claude-hud-master/src/",
+    ];
+
+    let version_dir = cache_dir.join(&version);
 
     for entry in entries {
         let mut entry = entry.map_err(|e| format!("Tar entry error: {}", e))?;
@@ -7439,21 +7681,25 @@ pub async fn update_claude_hud(
             .path()
             .map_err(|e| format!("Path error: {}", e))?
             .to_path_buf();
-        let entry_str = entry_path.to_string_lossy().to_string();
+        let entry_str = entry_path.to_string_lossy().replace('\\', "/");
 
-        if entry_str.starts_with("package/dist/") {
-            let relative = entry_str
-                .strip_prefix("package/dist/")
-                .unwrap_or(&entry_str);
-            if relative.is_empty() {
-                continue;
+        for prefix in &prefix_candidates {
+            if entry_str.starts_with(prefix) {
+                let repo_prefix = prefix.split('/').next().unwrap_or("claude-hud-main");
+                let relative = entry_str
+                    .strip_prefix(&format!("{}/", repo_prefix))
+                    .unwrap_or(&entry_str);
+                if relative.is_empty() || relative.ends_with('/') {
+                    continue;
+                }
+                let target = version_dir.join(relative);
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut file = std::fs::File::create(&target).map_err(|e| e.to_string())?;
+                std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+                break;
             }
-            let target = dist_dir.join(relative);
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut file = std::fs::File::create(&target).map_err(|e| e.to_string())?;
-            std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
         }
     }
 
@@ -7461,6 +7707,9 @@ pub async fn update_claude_hud(
     if !dist_dir.join("index.js").exists() {
         return Err("Update failed: index.js not found after extraction".to_string());
     }
+
+    // Write env-entry files (for Windows stdin pipe fix)
+    write_hud_env_entries(&version_dir)?;
 
     // Remove old version directories
     if let Ok(dir_entries) = std::fs::read_dir(&cache_dir) {
@@ -7472,7 +7721,7 @@ pub async fn update_claude_hud(
         }
     }
 
-    // Update statusLine path in settings.json if enabled
+    // Update statusLine in settings.json with Windows-compatible command
     let settings_path = home.join(".claude").join("settings.json");
     if settings_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&settings_path) {
@@ -7482,10 +7731,7 @@ pub async fn update_claude_hud(
                     .and_then(|s| s.get("command"))
                     .is_some()
                 {
-                    let new_cmd = format!(
-                        "node ~/.claude/plugins/cache/claude-hud/claude-hud/{}/dist/index.js",
-                        version
-                    );
+                    let new_cmd = build_hud_statusline_command(&home)?;
                     settings["statusLine"]["command"] = serde_json::Value::String(new_cmd);
                     let out = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
                     crate::utils::atomic_write_string(&settings_path, &out)
@@ -7512,37 +7758,11 @@ pub fn set_claude_statusline(enabled: bool) -> Result<(), String> {
     };
 
     if enabled {
-        // Find the index.js path
-        let cache_dir = home
-            .join(".claude")
-            .join("plugins")
-            .join("cache")
-            .join("claude-hud")
-            .join("claude-hud");
-        let mut index_path = String::new();
-        if cache_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-                for entry in entries.flatten() {
-                    let candidate = entry.path().join("dist").join("index.js");
-                    if candidate.exists() {
-                        // Use ~ relative path for cross-platform compatibility
-                        let ver = entry.file_name().to_string_lossy().to_string();
-                        index_path = format!(
-                            "~/.claude/plugins/cache/claude-hud/claude-hud/{}/dist/index.js",
-                            ver
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-        if index_path.is_empty() {
-            return Err("claude-hud not installed".to_string());
-        }
+        let cmd = build_hud_statusline_command(&home)?;
 
         settings["statusLine"] = serde_json::json!({
             "type": "command",
-            "command": format!("node {}", index_path)
+            "command": cmd
         });
 
         // Also enable the plugin

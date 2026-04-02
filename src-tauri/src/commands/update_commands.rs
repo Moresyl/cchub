@@ -11,7 +11,8 @@ pub async fn check_updates(db: State<'_, DbState>) -> Result<Vec<UpdateInfo>, St
             .prepare("SELECT id, name, package_name, version FROM mcp_servers WHERE package_name IS NOT NULL")
             .map_err(|e| e.to_string())?;
 
-        let result = stmt.query_map([], |row| {
+        let result = stmt
+            .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,

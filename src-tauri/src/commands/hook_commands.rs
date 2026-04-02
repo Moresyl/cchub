@@ -9,7 +9,10 @@ fn remember_project_root(
     conn: &rusqlite::Connection,
     project_path: Option<&str>,
 ) -> Result<(), String> {
-    let Some(project_path) = project_path.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(project_path) = project_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return Ok(());
     };
 
@@ -26,7 +29,10 @@ fn remember_project_root(
         .and_then(|value| serde_json::from_str(value).ok())
         .unwrap_or_default();
 
-    if !roots.iter().any(|value| value.eq_ignore_ascii_case(project_path)) {
+    if !roots
+        .iter()
+        .any(|value| value.eq_ignore_ascii_case(project_path))
+    {
         roots.push(project_path.to_string());
         let payload = serde_json::to_string(&roots).map_err(|e| e.to_string())?;
         conn.execute(
@@ -117,20 +123,32 @@ pub fn update_hook(
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
     if let Some(event) = event {
-        conn.execute("UPDATE hooks SET event = ?1 WHERE id = ?2", rusqlite::params![event, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE hooks SET event = ?1 WHERE id = ?2",
+            rusqlite::params![event, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(matcher) = matcher {
-        conn.execute("UPDATE hooks SET matcher = ?1 WHERE id = ?2", rusqlite::params![matcher, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE hooks SET matcher = ?1 WHERE id = ?2",
+            rusqlite::params![matcher, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(command) = command {
-        conn.execute("UPDATE hooks SET command = ?1 WHERE id = ?2", rusqlite::params![command, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE hooks SET command = ?1 WHERE id = ?2",
+            rusqlite::params![command, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(enabled) = enabled {
-        conn.execute("UPDATE hooks SET enabled = ?1 WHERE id = ?2", rusqlite::params![enabled, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE hooks SET enabled = ?1 WHERE id = ?2",
+            rusqlite::params![enabled, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -181,12 +199,7 @@ pub fn delete_hook_from_settings(
     project_path: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
-    manager::delete_hook_from_settings(
-        &event,
-        index,
-        &scope,
-        project_path.as_deref(),
-    )?;
+    manager::delete_hook_from_settings(&event, index, &scope, project_path.as_deref())?;
 
     if scope == "project" {
         let conn = db.0.lock().map_err(|e| e.to_string())?;

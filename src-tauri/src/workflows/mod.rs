@@ -54,7 +54,11 @@ pub fn scan_workflow_files() -> Vec<WorkflowFile> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let fname = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
 
             let is_md = fname.ends_with(".md") && !fname.ends_with(".md.disabled");
             let is_disabled = fname.ends_with(".md.disabled");
@@ -121,7 +125,11 @@ pub fn delete_workflow(path: &str) -> Result<(), String> {
     if !p.exists() {
         return Err(format!("File not found: {}", path));
     }
-    let fname = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let fname = p
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     if !fname.ends_with(".md") && !fname.ends_with(".md.disabled") {
         return Err("Can only delete workflow .md files".to_string());
     }

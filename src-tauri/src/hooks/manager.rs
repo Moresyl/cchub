@@ -4,7 +4,11 @@ use rusqlite::Connection;
 use std::collections::HashSet;
 
 /// Read hooks from a settings.json file at the given path
-fn read_hooks_from_file(path: &std::path::Path, scope: &str, project_path: Option<&str>) -> Vec<Hook> {
+fn read_hooks_from_file(
+    path: &std::path::Path,
+    scope: &str,
+    project_path: Option<&str>,
+) -> Vec<Hook> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
@@ -22,15 +26,16 @@ fn read_hooks_from_file(path: &std::path::Path, scope: &str, project_path: Optio
             for (event, hook_configs) in obj {
                 if let Some(arr) = hook_configs.as_array() {
                     for (i, hook_config) in arr.iter().enumerate() {
-                        let matcher = hook_config.get("matcher")
+                        let matcher = hook_config
+                            .get("matcher")
                             .and_then(|v| v.as_str())
                             .map(String::from);
-                        let command = hook_config.get("command")
+                        let command = hook_config
+                            .get("command")
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let timeout = hook_config.get("timeout")
-                            .and_then(|v| v.as_u64());
+                        let timeout = hook_config.get("timeout").and_then(|v| v.as_u64());
 
                         if command.is_empty() {
                             continue;
@@ -78,7 +83,9 @@ fn discover_project_roots(conn: &Connection) -> Vec<String> {
         }
     };
 
-    if let Ok(mut stmt) = conn.prepare("SELECT base_path FROM workspaces WHERE base_path IS NOT NULL AND trim(base_path) != ''") {
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT base_path FROM workspaces WHERE base_path IS NOT NULL AND trim(base_path) != ''",
+    ) {
         if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
             for row in rows.flatten() {
                 push_root(row);
@@ -151,9 +158,11 @@ pub fn read_hooks_from_settings(conn: &Connection) -> Vec<Hook> {
 /// Get the settings.json path for a given scope
 fn get_settings_path(scope: &str, project_path: Option<&str>) -> Option<std::path::PathBuf> {
     match scope {
-        "project" => {
-            project_path.map(|p| std::path::PathBuf::from(p).join(".claude").join("settings.json"))
-        }
+        "project" => project_path.map(|p| {
+            std::path::PathBuf::from(p)
+                .join(".claude")
+                .join("settings.json")
+        }),
         _ => dirs::home_dir().map(|h| h.join(".claude").join("settings.json")),
     }
 }
@@ -196,7 +205,8 @@ pub fn save_hook_to_settings(
     }
 
     // Get or create the event array
-    let hooks_obj = settings["hooks"].as_object_mut()
+    let hooks_obj = settings["hooks"]
+        .as_object_mut()
         .ok_or_else(|| "hooks is not an object".to_string())?;
 
     if let Some(index) = edit_index {
@@ -246,18 +256,25 @@ pub fn delete_hook_from_settings(
     }
 
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
-    let hooks_obj = settings.get_mut("hooks")
+    let hooks_obj = settings
+        .get_mut("hooks")
         .and_then(|v| v.as_object_mut())
         .ok_or_else(|| "No hooks object in settings".to_string())?;
 
-    let arr = hooks_obj.get_mut(event)
+    let arr = hooks_obj
+        .get_mut(event)
         .and_then(|v| v.as_array_mut())
         .ok_or_else(|| format!("Event '{}' not found", event))?;
 
     if index >= arr.len() {
-        return Err(format!("Hook index {} out of range (total: {})", index, arr.len()));
+        return Err(format!(
+            "Hook index {} out of range (total: {})",
+            index,
+            arr.len()
+        ));
     }
 
     arr.remove(index);

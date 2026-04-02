@@ -29,7 +29,15 @@ pub fn audit_server(
 
     // 1. Check for sensitive environment variables
     if let Ok(env) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(env_json) {
-        let sensitive_patterns = ["API_KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL", "PRIVATE_KEY", "AUTH"];
+        let sensitive_patterns = [
+            "API_KEY",
+            "SECRET",
+            "TOKEN",
+            "PASSWORD",
+            "CREDENTIAL",
+            "PRIVATE_KEY",
+            "AUTH",
+        ];
         for key in env.keys() {
             let upper = key.to_uppercase();
             for pattern in &sensitive_patterns {
@@ -83,7 +91,9 @@ pub fn audit_server(
             category: "network_access".to_string(),
             severity: "info".to_string(),
             title: "External URL in arguments".to_string(),
-            description: "Server arguments contain external URLs. Verify these endpoints are trusted.".to_string(),
+            description:
+                "Server arguments contain external URLs. Verify these endpoints are trusted."
+                    .to_string(),
         });
     }
 

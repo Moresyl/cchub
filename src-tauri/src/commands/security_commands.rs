@@ -3,7 +3,9 @@ use crate::security::audit;
 use tauri::State;
 
 #[tauri::command]
-pub fn run_security_audit(db: State<'_, DbState>) -> Result<Vec<audit::SecurityAuditResult>, String> {
+pub fn run_security_audit(
+    db: State<'_, DbState>,
+) -> Result<Vec<audit::SecurityAuditResult>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, name, command, args, env FROM mcp_servers")
@@ -47,5 +49,7 @@ pub fn get_server_audit(
         )
         .map_err(|e| format!("Server not found: {}", e))?;
 
-    Ok(audit::audit_server(&server_id, &name, &command, &args, &env))
+    Ok(audit::audit_server(
+        &server_id, &name, &command, &args, &env,
+    ))
 }

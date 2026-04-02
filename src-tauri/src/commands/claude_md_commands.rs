@@ -25,6 +25,35 @@ pub fn get_claude_md_templates() -> Result<Vec<manager::ClaudeMdTemplate>, Strin
 }
 
 #[command]
+pub fn get_prompt_presets(db: State<'_, DbState>) -> Result<manager::PromptPresetState, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    manager::get_prompt_preset_state(&conn)
+}
+
+#[command]
+pub fn save_prompt_preset(
+    id: Option<String>,
+    name: String,
+    content: String,
+    db: State<'_, DbState>,
+) -> Result<manager::PromptPreset, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    manager::save_prompt_preset(&conn, id, name, content)
+}
+
+#[command]
+pub fn delete_prompt_preset(id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    manager::delete_prompt_preset(&conn, &id)
+}
+
+#[command]
+pub fn activate_prompt_preset(id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    manager::activate_prompt_preset(&conn, &id)
+}
+
+#[command]
 pub fn create_new_claude_md(dir_path: String, content: String) -> Result<String, String> {
     manager::create_claude_md(&dir_path, &content)
 }

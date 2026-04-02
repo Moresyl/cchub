@@ -53,8 +53,8 @@ pub async fn import_workflow_file(tool_id: String) -> Result<String, String> {
         .to_string_lossy()
         .to_string();
 
-    let content = std::fs::read_to_string(source_path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let content =
+        std::fs::read_to_string(source_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let hidden_dir = match tool_id.as_str() {

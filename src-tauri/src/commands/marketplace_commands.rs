@@ -1,5 +1,5 @@
 use crate::db::models::McpServer;
-use crate::db::{DbState, record_activity};
+use crate::db::{record_activity, DbState};
 use crate::mcp::registry;
 use crate::skills::scanner;
 use std::collections::HashMap;
@@ -12,7 +12,11 @@ pub fn get_marketplace_entries() -> Result<Vec<registry::RegistryEntry>, String>
 }
 
 #[tauri::command]
-pub async fn search_marketplace(query: String, page: Option<u32>, page_size: Option<u32>) -> Result<serde_json::Value, String> {
+pub async fn search_marketplace(
+    query: String,
+    page: Option<u32>,
+    page_size: Option<u32>,
+) -> Result<serde_json::Value, String> {
     if query.trim().is_empty() {
         return Ok(serde_json::json!({ "entries": [], "total": 0 }));
     }
@@ -58,7 +62,12 @@ pub fn install_from_marketplace(
         env: env_json,
         status: "active".to_string(),
         source: "marketplace".to_string(),
-        config_path: dirs::home_dir().map(|h| h.join(".claude").join("settings.json").to_string_lossy().to_string()),
+        config_path: dirs::home_dir().map(|h| {
+            h.join(".claude")
+                .join("settings.json")
+                .to_string_lossy()
+                .to_string()
+        }),
         installed_at: Some(now.clone()),
         updated_at: Some(now),
     })
@@ -73,19 +82,29 @@ pub fn get_skills_marketplace() -> Vec<registry::SkillRegistryEntry> {
 }
 
 #[tauri::command]
-pub async fn fetch_custom_skill_source(url: String) -> Result<Vec<registry::SkillRegistryEntry>, String> {
+pub async fn fetch_custom_skill_source(
+    url: String,
+) -> Result<Vec<registry::SkillRegistryEntry>, String> {
     registry::fetch_custom_source(&url).await
 }
 
 #[tauri::command]
-pub async fn fetch_skills_from_repo(owner: String, repo: String, branch: String) -> Result<Vec<registry::SkillRegistryEntry>, String> {
+pub async fn fetch_skills_from_repo(
+    owner: String,
+    repo: String,
+    branch: String,
+) -> Result<Vec<registry::SkillRegistryEntry>, String> {
     registry::fetch_skills_from_github_repo(&owner, &repo, &branch).await
 }
 
 // ── SkillHub API ──
 
 #[tauri::command]
-pub async fn get_skillhub_catalog(page: u32, limit: u32, category: String) -> Result<serde_json::Value, String> {
+pub async fn get_skillhub_catalog(
+    page: u32,
+    limit: u32,
+    category: String,
+) -> Result<serde_json::Value, String> {
     let (entries, total) = registry::fetch_skillhub_catalog(page, limit, &category).await?;
     Ok(serde_json::json!({
         "skills": entries,
@@ -94,7 +113,10 @@ pub async fn get_skillhub_catalog(page: u32, limit: u32, category: String) -> Re
 }
 
 #[tauri::command]
-pub async fn search_skillhub_skills(query: String, limit: u32) -> Result<Vec<registry::SkillRegistryEntry>, String> {
+pub async fn search_skillhub_skills(
+    query: String,
+    limit: u32,
+) -> Result<Vec<registry::SkillRegistryEntry>, String> {
     registry::search_skillhub(query.trim(), limit).await
 }
 

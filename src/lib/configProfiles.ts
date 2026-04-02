@@ -44,6 +44,7 @@ export interface ConfigPreset {
   websiteUrl?: string;
   apiKeyUrl?: string;
   endpointCandidates?: string[];
+  costMultiplier?: string;
   templateValues?: Record<string, TemplateValueConfig>;
   requiresOAuth?: boolean;
   apiFormat?: ApiFormat;
@@ -86,9 +87,11 @@ export interface StructuredDraftFields {
   apiKeyUrl: string;
   category: string;
   endpointCandidates: string;
+  costMultiplier: string;
   templateValues: string;
   requiresOAuth: boolean;
   providerType: PresetProviderType | "";
+  oauthAccountId: string;
   hideAttribution: boolean;
   effortHigh: boolean;
   enableTeammates: boolean;
@@ -271,9 +274,11 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
     apiKeyUrl: preset?.apiKeyUrl || "",
     category: preset?.category || "",
     endpointCandidates: (preset?.endpointCandidates || []).join("\n"),
+    costMultiplier: preset?.costMultiplier || "",
     templateValues: stringifyTemplateValues(preset?.templateValues),
     requiresOAuth: preset?.requiresOAuth || false,
     providerType: preset?.providerType || "",
+    oauthAccountId: "",
     hideAttribution: false,
     effortHigh: false,
     enableTeammates: false,
@@ -324,9 +329,11 @@ export function applyPresetToFields(
       apiKeyUrl: current?.apiKeyUrl || "",
       category: current?.category || "",
       endpointCandidates: current?.endpointCandidates || "",
+      costMultiplier: current?.costMultiplier || "",
       templateValues: current?.templateValues || "",
       requiresOAuth: current?.requiresOAuth || false,
       providerType: current?.providerType || "",
+      oauthAccountId: current?.oauthAccountId || "",
       hideAttribution: current?.hideAttribution || false,
       effortHigh: current?.effortHigh || false,
       enableTeammates: current?.enableTeammates || false,
@@ -369,9 +376,11 @@ export function applyPresetToFields(
     apiKeyUrl: preset.apiKeyUrl || current?.apiKeyUrl || "",
     category: preset.category || current?.category || "",
     endpointCandidates: (preset.endpointCandidates || []).join("\n") || current?.endpointCandidates || "",
+    costMultiplier: preset.costMultiplier || current?.costMultiplier || "",
     templateValues: stringifyTemplateValues(preset.templateValues) || current?.templateValues || "",
     requiresOAuth: preset.requiresOAuth || false,
     providerType: preset.providerType || current?.providerType || "",
+    oauthAccountId: current?.oauthAccountId || "",
     hideAttribution: current?.hideAttribution || false,
     effortHigh: current?.effortHigh || false,
     enableTeammates: current?.enableTeammates || false,
@@ -434,9 +443,22 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
         websiteUrl: fields.websiteUrl,
         apiKeyUrl: fields.apiKeyUrl,
         endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+        costMultiplier: fields.costMultiplier.trim() || undefined,
         templateValues: parseTemplateValues(fields.templateValues),
         requiresOAuth: fields.requiresOAuth,
         providerType: fields.providerType || undefined,
+        authBinding:
+          fields.providerType === "github_copilot"
+            ? {
+                source: "managed_account",
+                authProvider: "github_copilot",
+                accountId: fields.oauthAccountId.trim() || undefined,
+              }
+            : undefined,
+        githubAccountId:
+          fields.providerType === "github_copilot" && fields.oauthAccountId.trim()
+            ? fields.oauthAccountId.trim()
+            : undefined,
       },
     };
     if (fields.hideAttribution) {
@@ -474,6 +496,7 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           websiteUrl: fields.websiteUrl,
           apiKeyUrl: fields.apiKeyUrl,
           endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+          costMultiplier: fields.costMultiplier.trim() || undefined,
         },
       },
       null,
@@ -517,6 +540,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           category: fields.category,
           websiteUrl: fields.websiteUrl,
           apiKeyUrl: fields.apiKeyUrl,
+          endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+          costMultiplier: fields.costMultiplier.trim() || undefined,
         },
       },
       null,
@@ -570,6 +595,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           category: fields.category,
           websiteUrl: fields.websiteUrl,
           apiKeyUrl: fields.apiKeyUrl,
+          endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+          costMultiplier: fields.costMultiplier.trim() || undefined,
         },
         options: {
           baseURL: fields.baseUrl.trim(),
@@ -598,6 +625,7 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
         websiteUrl: fields.websiteUrl,
         apiKeyUrl: fields.apiKeyUrl,
         endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+        costMultiplier: fields.costMultiplier.trim() || undefined,
         requiresOAuth: fields.requiresOAuth,
         providerType: fields.providerType || undefined,
       },
@@ -637,9 +665,14 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
         category: metadata.category || defaults.category,
         endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
+        costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
         templateValues: stringifyTemplateValues(metadata.templateValues),
         requiresOAuth: Boolean(metadata.requiresOAuth),
         providerType: metadata.providerType || defaults.providerType,
+        oauthAccountId:
+          (metadata.authBinding?.authProvider === "github_copilot"
+            ? metadata.authBinding?.accountId
+            : undefined) || metadata.githubAccountId || "",
       };
     }
 
@@ -657,6 +690,7 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
         category: metadata.category || defaults.category,
         endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
+        costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
       };
     }
 
@@ -678,6 +712,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
         category: metadata.category || defaults.category,
+        endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
+        costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
         openClawContextWindow: firstModel?.contextWindow ? String(firstModel.contextWindow) : "",
         openClawCostInput: firstModel?.cost?.input !== undefined ? String(firstModel.cost.input) : "",
         openClawCostOutput: firstModel?.cost?.output !== undefined ? String(firstModel.cost.output) : "",
@@ -709,6 +745,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
         category: metadata.category || defaults.category,
+        endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
+        costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
         openCodeContextLimit: firstModel.contextLimit !== undefined ? String(firstModel.contextLimit) : "",
         openCodeOutputLimit: firstModel.outputLimit !== undefined ? String(firstModel.outputLimit) : "",
         openCodeInputModalities: Array.isArray(modalities.input) ? modalities.input.join(",") : "",
@@ -732,8 +770,13 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
       category: metadata.category || defaults.category,
       endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
+      costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
       requiresOAuth: Boolean(metadata.requiresOAuth),
       providerType: metadata.providerType || defaults.providerType,
+      oauthAccountId:
+        (metadata.authBinding?.authProvider === "github_copilot"
+          ? metadata.authBinding?.accountId
+          : undefined) || metadata.githubAccountId || "",
     };
   } catch {
     return defaults;

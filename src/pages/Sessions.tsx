@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   Clock3,
   Copy,
-  Database,
   FileText,
   FolderOpen,
   History,
@@ -256,11 +255,6 @@ export default function Sessions() {
     [detail?.entries, detailQuery],
   );
 
-  const tocEntries = useMemo(
-    () => filteredEntries.filter((entry) => entry.kind !== "tool_output" || entry.content.length < 8000),
-    [filteredEntries],
-  );
-
   if (loading) {
     return (
       <div className="loading-center">
@@ -435,55 +429,46 @@ export default function Sessions() {
               </div>
             ) : detail ? (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
+                {/* Header: badges + title + delete */}
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                       <span className="badge badge-accent" style={{ fontSize: 10 }}>{detail.session.tool_name}</span>
                       <span className="badge badge-muted" style={{ fontSize: 10 }}>{detail.session.source_kind}</span>
                       {detail.session.created_at && <span className="badge badge-muted" style={{ fontSize: 10 }}>{detail.session.created_at}</span>}
                     </div>
-                    <h3 style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.3 }}>{detail.session.title}</h3>
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>
-                      {detail.session.cwd && (
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                          <FolderOpen size={13} />
-                          {detail.session.cwd}
-                        </span>
-                      )}
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                        <Database size={13} />
-                        {detail.session.source_path}
-                      </span>
-                    </div>
+                    <h3 style={{
+                      fontSize: 15, fontWeight: 700, lineHeight: 1.35,
+                      overflow: "hidden", textOverflow: "ellipsis",
+                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                    }}>
+                      {detail.session.title}
+                    </h3>
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => setPendingDelete(detail.session)}
-                      disabled={!detail.session.can_delete || deletingId === detail.session.id}
-                    >
-                      <Trash2 size={14} />
-                      {uiText("删除", "Delete", "削除")}
-                    </button>
-                  </div>
+                  <button
+                    className="btn btn-danger btn-xs"
+                    onClick={() => setPendingDelete(detail.session)}
+                    disabled={!detail.session.can_delete || deletingId === detail.session.id}
+                    style={{ flexShrink: 0 }}
+                  >
+                    <Trash2 size={12} />
+                    {uiText("删除", "Delete", "削除")}
+                  </button>
                 </div>
 
-                {/* Resume command & directory */}
+                {/* Resume command & directory — compact single bar */}
                 <div style={{
-                  display: "flex", flexDirection: "column", gap: 10, marginBottom: 14,
-                  padding: "12px 14px", borderRadius: 8,
+                  display: "flex", flexDirection: "column", gap: 6, marginBottom: 12,
+                  padding: "8px 12px", borderRadius: 6,
                   background: "var(--bg-elevated)", border: "1px solid var(--border-default)",
-                  fontSize: 12, color: "var(--text-muted)",
+                  fontSize: 11, color: "var(--text-muted)",
                 }}>
                   {buildResumeCommand(detail.session.tool_id, detail.session.id) && (
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 600, color: "var(--text-secondary)", flexShrink: 0 }}>
-                        {uiText("恢复命令", "Resume Command", "復元コマンド")}:
-                      </span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <code style={{
                         fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                        background: "var(--bg-card)", padding: "4px 10px", borderRadius: 4,
-                        userSelect: "all", cursor: "text", flex: 1, minWidth: 0,
+                        flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        userSelect: "all", cursor: "text",
                       }}>
                         {buildResumeCommand(detail.session.tool_id, detail.session.id)}
                       </code>
@@ -495,25 +480,21 @@ export default function Sessions() {
                             showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
                           );
                         }}
-                        style={{ padding: "2px 6px" }}
+                        style={{ padding: "2px 5px", flexShrink: 0 }}
                       >
-                        <Copy size={12} />
+                        <Copy size={11} />
                       </button>
                     </div>
                   )}
                   {detail.session.cwd && (
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 600, color: "var(--text-secondary)", flexShrink: 0 }}>
-                        {uiText("项目目录", "Directory", "ディレクトリ")}:
-                      </span>
-                      <code style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                        background: "var(--bg-card)", padding: "4px 10px", borderRadius: 4,
-                        userSelect: "all", cursor: "text", flex: 1, minWidth: 0,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <FolderOpen size={11} style={{ flexShrink: 0, opacity: 0.6 }} />
+                      <span style={{
+                        flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        userSelect: "all", cursor: "text",
                       }}>
                         {detail.session.cwd}
-                      </code>
+                      </span>
                       <button
                         className="btn btn-ghost btn-xs"
                         onClick={() => {
@@ -521,110 +502,75 @@ export default function Sessions() {
                             showToast("success", uiText("已复制目录路径", "Directory path copied", "ディレクトリパスをコピーしました")),
                           );
                         }}
-                        style={{ padding: "2px 6px" }}
+                        style={{ padding: "2px 5px", flexShrink: 0 }}
                       >
-                        <Copy size={12} />
+                        <Copy size={11} />
                       </button>
                     </div>
                   )}
                 </div>
 
-                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-                  <div style={{ flex: "1 1 280px", minWidth: 220, position: "relative" }}>
-                    <Search size={14} style={{ position: "absolute", top: 11, left: 12, color: "var(--text-muted)" }} />
+                {/* Search bar */}
+                <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ flex: 1, position: "relative" }}>
+                    <Search size={13} style={{ position: "absolute", top: 10, left: 10, color: "var(--text-muted)" }} />
                     <input
                       className="input"
                       value={detailQuery}
                       onChange={(event) => setDetailQuery(event.target.value)}
                       placeholder={uiText("会话内搜索...", "Search within this session...", "この会話内を検索...")}
-                      style={{ paddingLeft: 34 }}
+                      style={{ paddingLeft: 30, height: 34, fontSize: 12 }}
                     />
                   </div>
-                  <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                    {uiText(`${filteredEntries.length} 条可见记录`, `${filteredEntries.length} visible entries`, `${filteredEntries.length} 件を表示`)}
+                  <span className="badge badge-muted" style={{ fontSize: 10, flexShrink: 0 }}>
+                    {filteredEntries.length}
                   </span>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 260px) minmax(0, 1fr)", gap: 16, flex: 1, minHeight: 0 }}>
-                  <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 12, minHeight: 0, overflowY: "auto" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
-                      {uiText("目录导航", "TOC", "目次")}
+                {/* Entries — full width, no TOC sidebar */}
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                  {filteredEntries.length === 0 ? (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: 13 }}>
+                      {uiText("没有匹配的记录", "No entries matched", "一致する記録はありません")}
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {tocEntries.length === 0 ? (
-                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                          {uiText("没有匹配当前搜索的目录项", "No TOC entries match the current search", "現在の検索に一致する目次項目はありません")}
-                        </div>
-                      ) : tocEntries.map((entry, index) => (
-                        <button
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {filteredEntries.map((entry) => (
+                        <section
                           key={entry.id}
-                          className="btn btn-ghost"
-                          onClick={() => {
-                            const target = document.getElementById(`session-entry-${entry.id}`);
-                            target?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          id={`session-entry-${entry.id}`}
+                          style={{
+                            border: "1px solid var(--border-default)",
+                            borderRadius: 8,
+                            padding: 12,
+                            background: "var(--bg-card)",
                           }}
-                          style={{ justifyContent: "flex-start", padding: "8px 10px", height: "auto", textAlign: "left" }}
                         >
-                          <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-                            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                              {index + 1}. {entry.timestamp || entry.kind}
-                            </span>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.4 }}>
-                              {entry.title}
-                            </span>
-                          </span>
-                        </button>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                              <span className={`badge ${entryBadgeColor(entry.kind)}`} style={{ fontSize: 10 }}>
+                                {entry.kind}
+                              </span>
+                              <span style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {entry.title}
+                              </span>
+                            </div>
+                            {entry.timestamp && (
+                              <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>{entry.timestamp}</span>
+                            )}
+                          </div>
+                          <pre style={{
+                            margin: 0, fontSize: 11, lineHeight: 1.5,
+                            color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                            fontFamily: "'JetBrains Mono', monospace",
+                            maxHeight: 320, overflow: "auto",
+                          }}>
+                            {entry.content}
+                          </pre>
+                        </section>
                       ))}
                     </div>
-                  </div>
-
-                  <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 12, minHeight: 0, overflowY: "auto" }}>
-                    {filteredEntries.length === 0 ? (
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: 13 }}>
-                        {uiText("没有匹配当前会话内搜索的记录", "No session entries matched the current search", "会話内検索に一致する記録はありません")}
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                        {filteredEntries.map((entry) => (
-                          <section
-                            key={entry.id}
-                            id={`session-entry-${entry.id}`}
-                            style={{
-                              border: "1px solid var(--border-default)",
-                              borderRadius: 10,
-                              padding: 14,
-                              background: "var(--bg-card)",
-                            }}
-                          >
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                <span className={`badge ${entryBadgeColor(entry.kind)}`} style={{ fontSize: 10 }}>
-                                  {entry.kind}
-                                </span>
-                                <span style={{ fontSize: 13, fontWeight: 700 }}>{entry.title}</span>
-                              </div>
-                              {entry.timestamp && (
-                                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{entry.timestamp}</span>
-                              )}
-                            </div>
-                            <pre
-                              style={{
-                                margin: 0,
-                                fontSize: 12,
-                                lineHeight: 1.55,
-                                color: "var(--text-secondary)",
-                                whiteSpace: "pre-wrap",
-                                wordBreak: "break-word",
-                                fontFamily: "'JetBrains Mono', monospace",
-                              }}
-                            >
-                              {entry.content}
-                            </pre>
-                          </section>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
               </>
             ) : (

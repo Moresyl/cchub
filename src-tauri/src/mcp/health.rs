@@ -57,7 +57,11 @@ fn get_command_version(command: &str, version_flag: &str) -> Option<String> {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if stdout.is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.is_empty() { None } else { Some(stderr.lines().next().unwrap_or("").to_string()) }
+        if stderr.is_empty() {
+            None
+        } else {
+            Some(stderr.lines().next().unwrap_or("").to_string())
+        }
     } else {
         Some(stdout.lines().next().unwrap_or("").to_string())
     }
@@ -123,7 +127,11 @@ pub fn try_spawn_server(
                     if status.success() {
                         (true, Some(elapsed), None)
                     } else {
-                        (false, Some(elapsed), Some(format!("Process exited with code {}", status)))
+                        (
+                            false,
+                            Some(elapsed),
+                            Some(format!("Process exited with code {}", status)),
+                        )
                     }
                 }
                 Ok(None) => {
@@ -134,13 +142,21 @@ pub fn try_spawn_server(
                 }
                 Err(e) => {
                     let _ = child.kill();
-                    (false, Some(elapsed), Some(format!("Error checking process: {}", e)))
+                    (
+                        false,
+                        Some(elapsed),
+                        Some(format!("Error checking process: {}", e)),
+                    )
                 }
             }
         }
         Err(e) => {
             let elapsed = start.elapsed().as_millis() as u64;
-            (false, Some(elapsed), Some(format!("Failed to spawn: {}", e)))
+            (
+                false,
+                Some(elapsed),
+                Some(format!("Failed to spawn: {}", e)),
+            )
         }
     }
 }

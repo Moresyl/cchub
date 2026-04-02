@@ -1024,7 +1024,20 @@ fn is_session_candidate_path(
     .any(|keyword| relative.contains(keyword));
 
     match extension.as_deref() {
-        Some("jsonl") => has_keyword,
+        Some("jsonl") => {
+            if !has_keyword {
+                return false;
+            }
+            // Skip Claude agent sub-sessions (e.g. agent-a54b9a9c979dbd77c.jsonl)
+            if tool_id == "claude" {
+                if let Some(stem) = path.file_stem().and_then(|v| v.to_str()) {
+                    if stem.starts_with("agent-") {
+                        return false;
+                    }
+                }
+            }
+            true
+        }
         Some("sqlite" | "db") => has_keyword || tool_id == "opencode",
         _ => false,
     }
@@ -5836,7 +5849,11 @@ fn parse_generic_jsonl_session_summary(
             continue;
         };
 
-        if let Some(found_id) = value.get("session_id").and_then(|item| item.as_str()) {
+        if let Some(found_id) = value
+            .get("sessionId")
+            .or_else(|| value.get("session_id"))
+            .and_then(|item| item.as_str())
+        {
             if !found_id.trim().is_empty() {
                 session_id = found_id.trim().to_string();
             }

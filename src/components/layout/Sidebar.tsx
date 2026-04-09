@@ -1,8 +1,9 @@
+import { memo, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch, History } from "lucide-react";
 import { t } from "../../lib/i18n";
-import { useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import type { LucideIcon } from "lucide-react";
 
 const navItems = [
   { path: "/", key: "dashboard" as const, icon: LayoutDashboard },
@@ -23,10 +24,37 @@ const navItems = [
   { path: "/settings", key: "settings" as const, icon: Settings },
 ];
 
-export default function Sidebar() {
+interface SidebarNavItemProps {
+  path: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+function SidebarNavItemComponent({
+  path,
+  label,
+  icon: Icon,
+}: SidebarNavItemProps) {
+  return (
+    <NavLink
+      to={path}
+      end={path === "/"}
+      className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
+    >
+      <Icon size={15} />
+      <span>{label}</span>
+    </NavLink>
+  );
+}
+
+const SidebarNavItem = memo(SidebarNavItemComponent);
+
+function SidebarComponent() {
   const i = t();
   const [version, setVersion] = useState("");
-  useEffect(() => { getVersion().then(setVersion).catch(() => {}); }, []);
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+  }, []);
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -45,15 +73,12 @@ export default function Sidebar() {
       </div>
       <nav className="sidebar-nav">
         {navItems.map((item) => (
-          <NavLink
+          <SidebarNavItem
             key={item.path}
-            to={item.path}
-            end={item.path === "/"}
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
-          >
-            <item.icon size={15} />
-            <span>{i.nav[item.key]}</span>
-          </NavLink>
+            path={item.path}
+            label={i.nav[item.key]}
+            icon={item.icon}
+          />
         ))}
       </nav>
       <div className="sidebar-footer">
@@ -82,3 +107,5 @@ export default function Sidebar() {
     </aside>
   );
 }
+
+export default memo(SidebarComponent);

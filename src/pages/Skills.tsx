@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense, useRef } from "react";
+import { memo, useCallback, useEffect, lazy, Suspense, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw, Zap, Package, FileText, ExternalLink, Search,
@@ -10,16 +10,14 @@ import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
+import SkillCard, { type SkillCardSkill } from "../components/SkillCard";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
-interface Skill {
-  id: string; name: string; description: string | null;
-  tool_id: string | null; plugin_id: string | null; trigger_command: string | null; file_path: string | null;
-}
+type Skill = SkillCardSkill;
 
 interface Plugin {
   id: string; name: string; description: string | null;
@@ -84,7 +82,155 @@ export default function Skills() {
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sk, pl, dt, syncMethod, nextVisibleApps, backups] = await Promise.all([
+        invoke<Skill[]>("scan_skills"),
+        invoke<Plugin[]>("get_plugins"),
+        invoke<DetectedTool[]>("detect_tools"),
+        invoke<string>("get_skill_sync_method").catch(() => "copy"),
+        fetchVisibleApps(),
+        invoke<SkillBackup[]>("get_skill_backups").catch(() => []),
+      ]);
+      setSkills(sk);
+      setPlugins(pl);
+      setTools(dt);
+      setSkillSyncMethod(syncMethod);
+      setVisibleApps(nextVisibleApps);
+      setSkillBackups(backups);
+      const firstInstalled = dt.find((t) => t.installed && nextVisibleApps.includes(t.id as ManagedAppId));
+      if (firstInstalled) setActiveTool(firstInstalled.id);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
+
+  const handleImportSkill = useCallback(async () => {
+    const tool = tools.find((t) => t.id === activeTool);
+    if (!tool?.skills_dir) return;
+    try {
+      await invoke<string>("import_skill_file", { targetSkillsDir: tool.skills_dir, method: skillSyncMethod });
+      showToast("success", i.skills.importSuccess);
+      await load();
+    } catch (e) {
+      const msg = String(e);
+      if (msg !== "Cancelled") showToast("error", msg);
+    }
+  }, [activeTool, i.skills.importSuccess, load, skillSyncMethod, tools]);
+
+  const viewSkill = useCallback(async (skill: Skill) => {
+    setSelectedSkill(skill);
+    setSkillContent(null);
+    if (skill.file_path) {
+      setLoadingContent(true);
+      try {
+        const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
+        setSkillContent(content);
+      } catch (e) { console.error(e); setSkillContent("Failed to load content"); }
+      finally { setLoadingContent(false); }
+    }
+  }, []);
+
+  const openEditSkill = useCallback(async (skill: Skill) => {
+    setSelectedSkill(skill);
+    if (skill.file_path) {
+      try {
+        const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
+        setSkillContent(content);
+        setEditContent(content);
+        setEditingSkill(true);
+      } catch (e) { console.error(e); }
+    }
+  }, []);
+
+  const openExplorer = useCallback(async () => {
+    const tool = tools.find((t) => t.id === activeTool);
+    if (!tool) return;
+    setShowExplorer(true);
+    setExplorerPreview(null);
+    setExplorerFile(null);
+    try {
+      const tree = await invoke<FolderNode>("get_skill_folder_tree", { baseDir: tool.skills_dir });
+      setFolderTree(tree);
+    } catch {
+      setFolderTree(null);
+    }
+  }, [activeTool, tools]);
+
+  const previewExplorerFile = useCallback(async (path: string) => {
+    setExplorerFile(path);
+    try {
+      const content = await invoke<string>("read_skill_content", { filePath: path });
+      setExplorerPreview(content);
+    } catch {
+      setExplorerPreview("Failed to load file");
+    }
+  }, []);
+
+  const startEditSkill = useCallback(() => {
+    if (!skillContent) return;
+    setEditingSkill(true);
+    setEditContent(skillContent);
+  }, [skillContent]);
+
+  const handleSaveSkill = useCallback(async () => {
+    if (!selectedSkill?.file_path) return;
+    try {
+      await invoke("write_skill_content", { filePath: selectedSkill.file_path, content: editContent });
+      setSkillContent(editContent);
+      setEditingSkill(false);
+    } catch (e) { console.error(e); }
+  }, [editContent, selectedSkill]);
+
+  const handleDeleteSkill = useCallback((skill: Skill) => {
+    if (!skill.file_path) return;
+    setPendingDelete({ type: "skill", item: skill });
+  }, []);
+
+  const doDeleteSkill = useCallback(async (skill: Skill) => {
+    if (!skill.file_path) return;
+    try {
+      await invoke("uninstall_skill_file", { path: skill.file_path });
+      if (selectedSkill?.id === skill.id) {
+        setSelectedSkill(null);
+        setSkillContent(null);
+        setEditingSkill(false);
+      }
+      await load();
+      showToast("success", locale === "zh" ? "技能已删除，并已自动备份" : "Skill deleted and backed up");
+    } catch (e) { console.error(e); }
+  }, [load, locale, selectedSkill]);
+
+  const handleToggleSkill = useCallback(async (skill: Skill) => {
+    if (!skill.file_path) return;
+    const isDisabled = skill.file_path.endsWith(".disabled");
+    try {
+      await invoke<string>("toggle_skill_file", { filePath: skill.file_path, enabled: isDisabled });
+      await load();
+    } catch (e) { console.error(e); }
+  }, [load]);
+
+  const handleDeletePlugin = useCallback((plugin: Plugin) => {
+    setPendingDelete({ type: "plugin", item: plugin });
+  }, []);
+
+  const doDeletePlugin = useCallback(async (plugin: Plugin) => {
+    try {
+      await invoke("delete_plugin_dir", { pluginName: plugin.id });
+      await invoke("uninstall_plugin", { pluginId: plugin.id });
+      await load();
+    } catch (e) { console.error(e); }
+  }, [load]);
+
+  const handleViewSkill = useCallback((skill: Skill) => {
+    void viewSkill(skill);
+  }, [viewSkill]);
+
+  const handleOpenEditSkill = useCallback((skill: Skill) => {
+    void openEditSkill(skill);
+  }, [openEditSkill]);
+
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (visibleApps.includes(activeTool as ManagedAppId)) return;
     const nextTool = tools.find((tool) => tool.installed && visibleApps.includes(tool.id as ManagedAppId));
@@ -117,145 +263,6 @@ export default function Skills() {
     window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
     return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
   }, [editingSkill, showExplorer]);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const [sk, pl, dt, syncMethod, nextVisibleApps, backups] = await Promise.all([
-        invoke<Skill[]>("scan_skills"),
-        invoke<Plugin[]>("get_plugins"),
-        invoke<DetectedTool[]>("detect_tools"),
-        invoke<string>("get_skill_sync_method").catch(() => "copy"),
-        fetchVisibleApps(),
-        invoke<SkillBackup[]>("get_skill_backups").catch(() => []),
-      ]);
-      setSkills(sk);
-      setPlugins(pl);
-      setTools(dt);
-      setSkillSyncMethod(syncMethod);
-      setVisibleApps(nextVisibleApps);
-      setSkillBackups(backups);
-      // Auto-select first installed tool
-      const firstInstalled = dt.find((t) => t.installed && nextVisibleApps.includes(t.id as ManagedAppId));
-      if (firstInstalled) setActiveTool(firstInstalled.id);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  }
-
-  async function handleImportSkill() {
-    const tool = tools.find((t) => t.id === activeTool);
-    if (!tool?.skills_dir) return;
-    try {
-      await invoke<string>("import_skill_file", { targetSkillsDir: tool.skills_dir, method: skillSyncMethod });
-      showToast("success", i.skills.importSuccess);
-      await load();
-    } catch (e) {
-      const msg = String(e);
-      if (msg !== "Cancelled") showToast("error", msg);
-    }
-  }
-
-  async function viewSkill(skill: Skill) {
-    setSelectedSkill(skill);
-    setSkillContent(null);
-    if (skill.file_path) {
-      setLoadingContent(true);
-      try {
-        const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
-        setSkillContent(content);
-      } catch (e) { console.error(e); setSkillContent("Failed to load content"); }
-      finally { setLoadingContent(false); }
-    }
-  }
-
-  async function openEditSkill(skill: Skill) {
-    setSelectedSkill(skill);
-    if (skill.file_path) {
-      try {
-        const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
-        setSkillContent(content);
-        setEditContent(content);
-        setEditingSkill(true);
-      } catch (e) { console.error(e); }
-    }
-  }
-
-  async function openExplorer() {
-    const tool = tools.find((t) => t.id === activeTool);
-    if (!tool) return;
-    setShowExplorer(true);
-    setExplorerPreview(null);
-    setExplorerFile(null);
-    try {
-      const tree = await invoke<FolderNode>("get_skill_folder_tree", { baseDir: tool.skills_dir });
-      setFolderTree(tree);
-    } catch {
-      setFolderTree(null);
-    }
-  }
-
-  async function previewExplorerFile(path: string) {
-    setExplorerFile(path);
-    try {
-      const content = await invoke<string>("read_skill_content", { filePath: path });
-      setExplorerPreview(content);
-    } catch {
-      setExplorerPreview("Failed to load file");
-    }
-  }
-
-  function startEditSkill() {
-    if (!skillContent) return;
-    setEditingSkill(true);
-    setEditContent(skillContent);
-  }
-
-  async function handleSaveSkill() {
-    if (!selectedSkill?.file_path) return;
-    try {
-      await invoke("write_skill_content", { filePath: selectedSkill.file_path, content: editContent });
-      setSkillContent(editContent);
-      setEditingSkill(false);
-    } catch (e) { console.error(e); }
-  }
-
-  async function handleDeleteSkill(skill: Skill) {
-    if (!skill.file_path) return;
-    setPendingDelete({ type: "skill", item: skill });
-  }
-  async function doDeleteSkill(skill: Skill) {
-    if (!skill.file_path) return;
-    try {
-      await invoke("uninstall_skill_file", { path: skill.file_path });
-      if (selectedSkill?.id === skill.id) {
-        setSelectedSkill(null);
-        setSkillContent(null);
-        setEditingSkill(false);
-      }
-      await load();
-      showToast("success", locale === "zh" ? "技能已删除，并已自动备份" : "Skill deleted and backed up");
-    } catch (e) { console.error(e); }
-  }
-
-  async function handleToggleSkill(skill: Skill) {
-    if (!skill.file_path) return;
-    const isDisabled = skill.file_path.endsWith(".disabled");
-    try {
-      await invoke<string>("toggle_skill_file", { filePath: skill.file_path, enabled: isDisabled });
-      await load();
-    } catch (e) { console.error(e); }
-  }
-
-  async function handleDeletePlugin(plugin: Plugin) {
-    setPendingDelete({ type: "plugin", item: plugin });
-  }
-  async function doDeletePlugin(plugin: Plugin) {
-    try {
-      await invoke("delete_plugin_dir", { pluginName: plugin.id });
-      await invoke("uninstall_plugin", { pluginId: plugin.id });
-      await load();
-    } catch (e) { console.error(e); }
-  }
 
   const visibleSkills = skills.filter((skill) => {
     if (skill.tool_id) return skill.tool_id === activeTool;
@@ -591,78 +598,21 @@ export default function Skills() {
                   </span>
                 </div>
               )}
-              {filteredSkills.map((skill) => (
-                <div
+            {filteredSkills.map((skill) => (
+                <SkillCard
                   key={skill.id}
-                  className={`card card-interactive ${selectedSkill?.id === skill.id ? "selected" : ""}`}
-                  style={{ padding: "14px 18px", marginBottom: 6, opacity: skill.file_path?.endsWith(".disabled") ? 0.5 : 1 }}
-                  onClick={() => viewSkill(skill)}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
-                      <div className="icon-box" style={{ background: "var(--warning-subtle)", width: 34, height: 34, borderRadius: 6 }}>
-                        <Zap size={15} style={{ color: "var(--warning)" }} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>{skill.name}</span>
-                          {skill.plugin_id && <span className="badge badge-muted" style={{ fontSize: 10 }}>{skill.plugin_id}</span>}
-                          {skill.file_path?.endsWith(".disabled") && (
-                            <span className="badge badge-muted" style={{ fontSize: 10 }}>{locale === "zh" ? "已禁用" : "Disabled"}</span>
-                          )}
-                        </div>
-                        {skill.description && (
-                          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{skill.description}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                      {skill.trigger_command && (
-                        <code className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{skill.trigger_command}</code>
-                      )}
-                      {skill.file_path && (
-                        <>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleToggleSkill(skill); }}
-                            title={skill.file_path.endsWith(".disabled") ? (locale === "zh" ? "启用" : "Enable") : (locale === "zh" ? "禁用" : "Disable")}
-                            style={{
-                              position: "relative",
-                              width: 40,
-                              height: 22,
-                              borderRadius: 11,
-                              border: "none",
-                              cursor: "pointer",
-                              background: skill.file_path.endsWith(".disabled") ? "var(--border-strong)" : "var(--success)",
-                              transition: "background 0.2s",
-                              padding: 0,
-                              flexShrink: 0,
-                            }}
-                          >
-                            <span style={{
-                              position: "absolute",
-                              top: 2,
-                              left: skill.file_path.endsWith(".disabled") ? 2 : 20,
-                              width: 18,
-                              height: 18,
-                              borderRadius: "50%",
-                              background: "#fff",
-                              transition: "left 0.2s",
-                              boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                            }} />
-                          </button>
-                          <button className="btn btn-ghost btn-icon-sm" onClick={(e) => { e.stopPropagation(); openEditSkill(skill); }}
-                            title={locale === "zh" ? "编辑" : "Edit"}>
-                            <Edit3 size={13} />
-                          </button>
-                          <button className="btn btn-ghost btn-icon-sm" onClick={(e) => { e.stopPropagation(); handleDeleteSkill(skill); }}
-                            title={locale === "zh" ? "删除" : "Delete"}>
-                            <Trash2 size={14} style={{ color: "var(--danger)" }} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  skill={skill}
+                  selected={selectedSkill?.id === skill.id}
+                  disabledLabel={locale === "zh" ? "已禁用" : "Disabled"}
+                  editTitle={locale === "zh" ? "编辑" : "Edit"}
+                  deleteTitle={locale === "zh" ? "删除" : "Delete"}
+                  enableTitle={locale === "zh" ? "启用" : "Enable"}
+                  disableTitle={locale === "zh" ? "禁用" : "Disable"}
+                  onView={handleViewSkill}
+                  onToggle={handleToggleSkill}
+                  onEdit={handleOpenEditSkill}
+                  onDelete={handleDeleteSkill}
+                />
               ))}
             </div>
           )}
@@ -949,10 +899,24 @@ export default function Skills() {
   );
 }
 
-function TreeNode({ node, onSelect, selectedPath, depth = 0 }: {
-  node: FolderNode; onSelect: (path: string) => void; selectedPath: string | null; depth?: number;
+const TreeNode = memo(function TreeNode({
+  node,
+  onSelect,
+  selectedPath,
+  depth = 0,
+}: {
+  node: FolderNode;
+  onSelect: (path: string) => void;
+  selectedPath: string | null;
+  depth?: number;
 }) {
   const [open, setOpen] = useState(depth < 1);
+  const handleToggleOpen = useCallback(() => {
+    setOpen((current) => !current);
+  }, []);
+  const handleSelectNode = useCallback(() => {
+    onSelect(node.path);
+  }, [node.path, onSelect]);
 
   if (node.is_dir) {
     return (
@@ -962,7 +926,7 @@ function TreeNode({ node, onSelect, selectedPath, depth = 0 }: {
             display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", paddingLeft: depth * 16 + 8,
             cursor: "pointer", borderRadius: 4, fontSize: 13, color: "var(--text-secondary)",
           }}
-          onClick={() => setOpen(!open)}
+          onClick={handleToggleOpen}
         >
           <ChevronDown size={13} style={{ transform: open ? "none" : "rotate(-90deg)", transition: "transform 0.15s", flexShrink: 0 }} />
           <Folder size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
@@ -983,10 +947,10 @@ function TreeNode({ node, onSelect, selectedPath, depth = 0 }: {
         color: selectedPath === node.path ? "var(--text-primary)" : "var(--text-muted)",
         background: selectedPath === node.path ? "var(--bg-card-hover)" : "transparent",
       }}
-      onClick={() => onSelect(node.path)}
+      onClick={handleSelectNode}
     >
       <File size={13} style={{ flexShrink: 0 }} />
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
     </div>
   );
-}
+});

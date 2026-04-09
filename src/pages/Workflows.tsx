@@ -1,9 +1,10 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useCallback, useState, useEffect, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Save, RotateCcw, Plus, Trash2, Pencil, ArrowLeft, Download, X, GitBranch, Upload } from "lucide-react";
+import { RefreshCw, Save, RotateCcw, Plus, Trash2, ArrowLeft, Download, X, GitBranch, Upload } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import WorkflowCard from "../components/WorkflowCard";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
@@ -115,7 +116,7 @@ export default function Workflows() {
     finally { setLoading(false); }
   }
 
-  async function openEditor(file: WorkflowFile) {
+  const openEditor = useCallback(async (file: WorkflowFile) => {
     setEditingFile(file);
     setLoadingContent(true);
     try {
@@ -128,13 +129,13 @@ export default function Workflows() {
       setOriginalContent("");
     }
     finally { setLoadingContent(false); }
-  }
+  }, []);
 
-  function closeEditor() {
+  const closeEditor = useCallback(() => {
     setEditingFile(null);
     setContent("");
     setOriginalContent("");
-  }
+  }, []);
 
   async function handleSave() {
     if (!editingFile) return;
@@ -149,7 +150,7 @@ export default function Workflows() {
     finally { setSaving(false); }
   }
 
-  async function handleDelete(file: WorkflowFile) {
+  const handleDelete = useCallback(async (file: WorkflowFile) => {
     try {
       await invoke("delete_workflow", { path: file.path });
       showToast("success", zh ? "已删除" : "Deleted");
@@ -157,9 +158,9 @@ export default function Workflows() {
       setConfirmDelete(null);
       await load();
     } catch (e) { showToast("error", `${e}`); }
-  }
+  }, [editingFile]);
 
-  async function handleToggle(file: WorkflowFile) {
+  const handleToggle = useCallback(async (file: WorkflowFile) => {
     setTogglingPath(file.path);
     try {
       await invoke<string>("toggle_workflow", { path: file.path, enabled: file.disabled });
@@ -167,7 +168,7 @@ export default function Workflows() {
       await load();
     } catch (e) { showToast("error", `${e}`); }
     finally { setTogglingPath(null); }
-  }
+  }, [zh]);
 
   async function handleInstall(templateId: string) {
     setInstalling(templateId);
@@ -183,6 +184,18 @@ export default function Workflows() {
     if (bytes < 1024) return `${bytes} B`;
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
+
+  const handleOpenEditor = useCallback((file: WorkflowFile) => {
+    void openEditor(file);
+  }, [openEditor]);
+
+  const handleToggleWorkflow = useCallback((file: WorkflowFile) => {
+    void handleToggle(file);
+  }, [handleToggle]);
+
+  const handleRequestDelete = useCallback((file: WorkflowFile) => {
+    setConfirmDelete(file);
+  }, []);
 
   const visibleToolTabs = TOOL_TABS.filter((tab) => tab.id === "all" || visibleApps.includes(tab.id as ManagedAppId));
   const visibleFiles = files.filter((file) => visibleApps.includes(file.tool_id as ManagedAppId));
@@ -378,78 +391,20 @@ export default function Workflows() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
             {filteredFiles.map(file => (
-              <div
+              <WorkflowCard
                 key={file.path}
-                className="card"
-                style={{ padding: "16px 20px", opacity: file.disabled ? 0.55 : 1, transition: "opacity 0.2s" }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div className="icon-box" style={{ background: "var(--bg-elevated)", width: 36, height: 36, borderRadius: 6 }}>
-                    <GitBranch size={16} style={{ color: file.disabled ? "var(--text-muted)" : TOOL_COLORS[file.tool_id] || "var(--text-secondary)" }} />
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {file.name}
-                      </span>
-                      <span style={{
-                        fontSize: 10, padding: "1px 6px", borderRadius: 4, fontWeight: 600,
-                        background: `${TOOL_COLORS[file.tool_id] || "#666"}15`,
-                        color: TOOL_COLORS[file.tool_id] || "#666",
-                      }}>{file.tool_name}</span>
-                      {file.disabled && (
-                        <span className="badge badge-muted" style={{ fontSize: 10, padding: "1px 6px" }}>
-                          {i.workflows.disabled}
-                        </span>
-                      )}
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatSize(file.size_bytes)}</span>
-                      {file.modified_at && (
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{file.modified_at}</span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {file.path}
-                    </div>
-                  </div>
-
-                  {/* Actions — matches ClaudeMd pattern */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => void openEditor(file)}>
-                      <Pencil size={13} />{i.workflows.edit}
-                    </button>
-
-                    {/* Toggle switch */}
-                    <button
-                      onClick={() => void handleToggle(file)}
-                      disabled={togglingPath === file.path}
-                      title={file.disabled ? i.workflows.enable : i.workflows.disable}
-                      style={{
-                        position: "relative", width: 40, height: 22, borderRadius: 11,
-                        border: "none", padding: 0, flexShrink: 0,
-                        cursor: togglingPath === file.path ? "wait" : "pointer",
-                        background: file.disabled ? "var(--border-strong)" : "var(--success)",
-                        transition: "background 0.2s",
-                      }}
-                    >
-                      <span style={{
-                        position: "absolute", top: 2,
-                        left: file.disabled ? 2 : 20,
-                        width: 18, height: 18, borderRadius: "50%",
-                        background: "#fff", transition: "left 0.2s",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                      }} />
-                    </button>
-
-                    <button
-                      className="btn btn-ghost btn-icon-sm"
-                      title={i.workflows.delete}
-                      onClick={() => setConfirmDelete(file)}
-                    >
-                      <Trash2 size={14} style={{ color: "var(--danger)" }} />
-                    </button>
-                  </div>
-                </div>
-              </div>
+                file={file}
+                toolColor={TOOL_COLORS[file.tool_id] || "var(--text-secondary)"}
+                disabledLabel={i.workflows.disabled}
+                editLabel={i.workflows.edit}
+                deleteLabel={i.workflows.delete}
+                toggleTitle={file.disabled ? i.workflows.enable : i.workflows.disable}
+                toggling={togglingPath === file.path}
+                formatSize={formatSize}
+                onEdit={handleOpenEditor}
+                onToggle={handleToggleWorkflow}
+                onDelete={handleRequestDelete}
+              />
             ))}
           </div>
         )}

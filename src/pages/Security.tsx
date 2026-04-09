@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Shield, ShieldCheck, AlertTriangle, AlertCircle, Info, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertCircle, AlertTriangle, Info, RefreshCw, Shield, ShieldCheck } from "lucide-react";
 import { t, tReplace } from "../lib/i18n";
+import SecurityAuditCard, { type SecurityAuditCardResult } from "../components/SecurityAuditCard";
 
 interface SecurityFinding {
   category: string;
@@ -19,7 +20,7 @@ interface SecurityAuditResult {
 }
 
 export default function Security() {
-  const [results, setResults] = useState<SecurityAuditResult[]>([]);
+  const [results, setResults] = useState<SecurityAuditCardResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -29,7 +30,7 @@ export default function Security() {
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
   );
 
-  async function runAudit() {
+  const runAudit = useCallback(async () => {
     setLoading(true);
     try {
       const r = await invoke<SecurityAuditResult[]>("run_security_audit");
@@ -43,36 +44,36 @@ export default function Security() {
       setExpanded(exp);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, []);
 
-  useEffect(() => { runAudit(); }, []);
+  useEffect(() => { void runAudit(); }, [runAudit]);
 
   const highCount = results.filter((r) => r.risk_level === "high").length;
   const mediumCount = results.filter((r) => r.risk_level === "medium").length;
   const lowCount = results.filter((r) => r.risk_level === "low").length;
   const totalFindings = results.reduce((sum, r) => sum + r.findings.length, 0);
 
-  function toggleExpand(id: string) {
+  const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
-  }
+  }, []);
 
-  function getSeverityIcon(severity: string) {
+  const getSeverityIcon = useCallback((severity: string) => {
     switch (severity) {
       case "critical": return <AlertTriangle size={14} style={{ color: "var(--danger)" }} />;
       case "warning": return <AlertCircle size={14} style={{ color: "var(--warning)" }} />;
       default: return <Info size={14} style={{ color: "var(--text-muted)" }} />;
     }
-  }
+  }, []);
 
-  function getRiskBadge(risk: string) {
+  const getRiskBadge = useCallback((risk: string) => {
     switch (risk) {
       case "high": return <span className="badge badge-danger">{i.security.riskHigh}</span>;
       case "medium": return <span className="badge badge-warning">{i.security.riskMedium}</span>;
       default: return <span className="badge badge-success">{i.security.riskLow}</span>;
     }
-  }
+  }, [i.security.riskHigh, i.security.riskLow, i.security.riskMedium]);
 
-  function getCategoryLabel(cat: string): string {
+  const getCategoryLabel = useCallback((cat: string): string => {
     const labels: Record<string, string> = {
       env_secrets: uiText("敏感环境变量", "Env Secrets", "機密環境変数"),
       shell_exec: uiText("Shell 执行", "Shell Execution", "Shell 実行"),
@@ -82,7 +83,7 @@ export default function Security() {
       config_changed: uiText("配置变更", "Config Changed", "設定変更"),
     };
     return labels[cat] || cat;
-  }
+  }, [locale]);
 
   if (loading && !scanned) {
     return (
@@ -103,7 +104,7 @@ export default function Security() {
             {totalFindings > 0 && ` · ${totalFindings} ${uiText("个发现", "findings", "件の検出")}`}
           </p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={runAudit} disabled={loading}>
+        <button className="btn btn-secondary btn-sm" onClick={() => { void runAudit(); }} disabled={loading}>
           <RefreshCw size={14} />{loading ? i.security.scanning : i.security.runAudit}
         </button>
       </div>
@@ -152,54 +153,17 @@ export default function Security() {
         ) : (
           <div className="stagger" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {results.map((result) => (
-              <div key={result.server_id} className="card" style={{ padding: "20px 24px" }}>
-                <div
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-                  onClick={() => toggleExpand(result.server_id)}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ cursor: "pointer" }}>
-                      {expanded[result.server_id] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </div>
-                    <Shield size={18} style={{
-                      color: result.risk_level === "high" ? "var(--danger)" : result.risk_level === "medium" ? "var(--warning)" : "var(--success)"
-                    }} />
-                    <span style={{ fontSize: 14, fontWeight: 600 }}>{result.server_name}</span>
-                    {getRiskBadge(result.risk_level)}
-                    {result.findings.length > 0 && (
-                      <span className="badge badge-muted">{result.findings.length} {uiText("项", "findings", "件")}</span>
-                    )}
-                  </div>
-                </div>
-
-                {expanded[result.server_id] && result.findings.length > 0 && (
-                  <div style={{ marginTop: 16, paddingLeft: 28, display: "flex", flexDirection: "column", gap: 10 }}>
-                    {result.findings.map((finding, idx) => (
-                      <div key={idx} style={{
-                        display: "flex", gap: 10, padding: "12px 16px",
-                        borderRadius: 6, background: "var(--bg-elevated)",
-                      }}>
-                        {getSeverityIcon(finding.severity)}
-                        <div style={{ flex: 1 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600 }}>{finding.title}</span>
-                            <span className="badge badge-muted" style={{ fontSize: 10 }}>{getCategoryLabel(finding.category)}</span>
-                          </div>
-                          <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>{finding.description}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {expanded[result.server_id] && result.findings.length === 0 && (
-                  <div style={{ marginTop: 12, paddingLeft: 28 }}>
-                    <p style={{ fontSize: 12, color: "var(--success)" }}>
-                      {uiText("未发现安全问题", "No security issues found", "セキュリティ問題は見つかりませんでした")}
-                    </p>
-                  </div>
-                )}
-              </div>
+              <SecurityAuditCard
+                key={result.server_id}
+                result={result}
+                expanded={!!expanded[result.server_id]}
+                findingsCountLabel={`${result.findings.length} ${uiText("项", "findings", "件")}`}
+                noIssuesLabel={uiText("未发现安全问题", "No security issues found", "セキュリティ問題は見つかりませんでした")}
+                riskBadge={getRiskBadge(result.risk_level)}
+                onToggle={toggleExpand}
+                getFindingIcon={getSeverityIcon}
+                getCategoryLabel={getCategoryLabel}
+              />
             ))}
           </div>
         )}

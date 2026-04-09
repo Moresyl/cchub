@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::utils::configure_background_command;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HealthCheckResult {
     pub server_id: String,
@@ -33,7 +35,10 @@ pub fn check_command_exists(command: &str) -> bool {
     // Extract the actual command (first part, ignore arguments)
     let cmd = command.split_whitespace().next().unwrap_or(command);
 
-    std::process::Command::new(check_cmd)
+    let mut process = std::process::Command::new(check_cmd);
+    configure_background_command(&mut process);
+
+    process
         .arg(cmd)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -43,7 +48,10 @@ pub fn check_command_exists(command: &str) -> bool {
 }
 
 fn get_command_version(command: &str, version_flag: &str) -> Option<String> {
-    let output = std::process::Command::new(command)
+    let mut process = std::process::Command::new(command);
+    configure_background_command(&mut process);
+
+    let output = process
         .arg(version_flag)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -111,6 +119,7 @@ pub fn try_spawn_server(
     let start = Instant::now();
 
     let mut cmd = std::process::Command::new(command);
+    configure_background_command(&mut cmd);
     cmd.args(args);
     for (k, v) in env {
         cmd.env(k, v);

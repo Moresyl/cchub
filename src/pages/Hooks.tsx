@@ -1,16 +1,12 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Webhook, Plus, Edit3, Trash2, X, Save, FolderOpen } from "lucide-react";
+import { FolderOpen, Plus, RefreshCw, Save, Webhook, X } from "lucide-react";
 import { t, tReplace } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
+import HookCard, { type HookCardHook } from "../components/HookCard";
 
-interface Hook {
-  id: string; event: string; matcher: string | null;
-  command: string; scope: string; project_path: string | null;
-  source_event: string | null; source_index: number | null;
-  enabled: boolean; timeout: number | null;
-}
+type Hook = HookCardHook;
 
 const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Notification", "Stop", "SubagentStop"];
 
@@ -33,42 +29,16 @@ export default function Hooks() {
   const [saving, setSaving] = useState(false);
   const i = t();
 
-  useEffect(() => { load(); }, []);
-  useEffect(() => {
-    const handleSaveShortcut = () => {
-      if (editing && !saving) {
-        void handleSave();
-      }
-    };
-    const handleNewShortcut = () => {
-      if (!editing) {
-        startCreate();
-      }
-    };
-    const handleEscapeShortcut = () => {
-      if (editing) {
-        cancelEdit();
-      }
-    };
-
-    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
-    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
-    window.addEventListener("cchub-shortcut-escape", handleEscapeShortcut);
-    return () => {
-      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
-      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
-      window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
-    };
-  }, [editing, saving, editCommand, editEvent, editMatcher, editTimeout, editScope, editProjectPath, editOriginalEvent, editOriginalIndex, editOriginalScope, editOriginalProjectPath]);
-
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try { setHooks(await invoke<Hook[]>("scan_hooks")); }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, []);
 
-  function startCreate() {
+  useEffect(() => { void load(); }, [load]);
+
+  const startCreate = useCallback(() => {
     setEditing(true);
     setEditIndex(null);
     setEditEvent(HOOK_EVENTS[0]);
@@ -81,9 +51,9 @@ export default function Hooks() {
     setEditOriginalIndex(null);
     setEditOriginalScope("global");
     setEditOriginalProjectPath(null);
-  }
+  }, []);
 
-  function startEdit(hook: Hook) {
+  const startEdit = useCallback((hook: Hook) => {
     setEditing(true);
     setEditEvent(hook.event);
     setEditMatcher(hook.matcher || "");
@@ -96,14 +66,14 @@ export default function Hooks() {
     setEditOriginalScope(hook.scope === "project" ? "project" : "global");
     setEditOriginalProjectPath(hook.project_path || null);
     setEditIndex(hook.source_index ?? 0);
-  }
+  }, []);
 
-  function cancelEdit() {
+  const cancelEdit = useCallback(() => {
     setEditing(false);
     setEditIndex(null);
-  }
+  }, []);
 
-  async function handleSave() {
+  const handleSave = useCallback(async () => {
     if (!editCommand.trim()) {
       showToast("error", i.hooks.commandRequired);
       return;
@@ -181,9 +151,24 @@ export default function Hooks() {
     } finally {
       setSaving(false);
     }
-  }
+  }, [
+    editCommand,
+    editEvent,
+    editMatcher,
+    editOriginalEvent,
+    editOriginalIndex,
+    editOriginalProjectPath,
+    editOriginalScope,
+    editProjectPath,
+    editScope,
+    editTimeout,
+    i.hooks.commandRequired,
+    i.hooks.projectPathRequired,
+    i.hooks.saveSuccess,
+    load,
+  ]);
 
-  async function doDelete(hook: Hook) {
+  const doDelete = useCallback(async (hook: Hook) => {
     const event = hook.source_event || hook.event;
     const index = hook.source_index;
     if (index === null || index === undefined) {
@@ -202,7 +187,53 @@ export default function Hooks() {
     } catch (e) {
       showToast("error", String(e));
     }
-  }
+  }, [i.hooks.deleteSuccess, i.hooks.hookMetaInvalid, load]);
+
+  const handleDeleteClick = useCallback((hook: Hook) => {
+    setPendingDelete(hook);
+  }, []);
+
+  const handlePickProjectPath = useCallback(async () => {
+    try {
+      const picked = await invoke<string | null>("pick_folder");
+      if (picked) setEditProjectPath(picked);
+    } catch (e) { console.error(e); }
+  }, []);
+
+  const handlePickProjectPathClick = useCallback(() => {
+    void handlePickProjectPath();
+  }, [handlePickProjectPath]);
+
+  const handleRefresh = useCallback(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if (editing && !saving) {
+        void handleSave();
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!editing) {
+        startCreate();
+      }
+    };
+    const handleEscapeShortcut = () => {
+      if (editing) {
+        cancelEdit();
+      }
+    };
+
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    window.addEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+      window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    };
+  }, [cancelEdit, editing, handleSave, saving, startCreate]);
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.hooks.loading}</span></div>;
@@ -257,12 +288,7 @@ export default function Hooks() {
                   />
                   <button
                     className="btn btn-secondary btn-icon-sm"
-                    onClick={async () => {
-                      try {
-                        const picked = await invoke<string | null>("pick_folder");
-                        if (picked) setEditProjectPath(picked);
-                      } catch (e) { console.error(e); }
-                    }}
+                    onClick={handlePickProjectPathClick}
                     type="button"
                     title={i.hooks.projectPath}
                   >
@@ -310,7 +336,7 @@ export default function Hooks() {
           <button className="btn btn-primary btn-sm" onClick={startCreate} style={{ gap: 6 }}>
             <Plus size={14} />{i.hooks.newHook}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={load}><RefreshCw size={14} />{i.common.refresh}</button>
+          <button className="btn btn-secondary btn-sm" onClick={handleRefresh}><RefreshCw size={14} />{i.common.refresh}</button>
         </div>
       </div>
 
@@ -323,40 +349,18 @@ export default function Hooks() {
       ) : (
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }} className="stagger">
           {hooks.map((hook) => (
-            <div key={hook.id} className="card card-hover" style={{ padding: "20px 24px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <span className="dot dot-active" />
-                  <span className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{hook.event}</span>
-                  {hook.matcher && (
-                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                      {i.hooks.matcher}: <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{hook.matcher}</span>
-                    </span>
-                  )}
-                  {hook.timeout && (
-                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {i.hooks.timeout}: {hook.timeout}ms
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="badge badge-muted">{hook.scope === "global" ? i.hooks.global : i.hooks.project}</span>
-                  <button className="btn btn-ghost btn-icon-sm" onClick={() => startEdit(hook)} title={i.hooks.editHook}>
-                    <Edit3 size={14} />
-                  </button>
-                  <button className="btn btn-ghost btn-icon-sm" onClick={() => setPendingDelete(hook)} title={i.common.delete}
-                    style={{ color: "var(--danger)" }}>
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-              <div className="code-block" style={{ marginTop: 14 }}>{hook.command}</div>
-              {hook.project_path && (
-                <p style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-muted)", marginTop: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {hook.project_path}
-                </p>
-              )}
-            </div>
+            <HookCard
+              key={hook.id}
+              hook={hook}
+              matcherLabel={i.hooks.matcher}
+              timeoutLabel={i.hooks.timeout}
+              globalLabel={i.hooks.global}
+              projectLabel={i.hooks.project}
+              editTitle={i.hooks.editHook}
+              deleteTitle={i.common.delete}
+              onEdit={startEdit}
+              onDelete={handleDeleteClick}
+            />
           ))}
         </div>
       )}
@@ -366,7 +370,7 @@ export default function Hooks() {
         title={i.hooks.deleteConfirm}
         message={i.hooks.deleteConfirmDesc}
         variant="destructive"
-        onConfirm={() => { if (pendingDelete) doDelete(pendingDelete); setPendingDelete(null); }}
+        onConfirm={() => { if (pendingDelete) void doDelete(pendingDelete); setPendingDelete(null); }}
         onCancel={() => setPendingDelete(null)}
       />
     </div>

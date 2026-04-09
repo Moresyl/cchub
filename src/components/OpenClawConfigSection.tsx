@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Download, RefreshCw, Search } from "lucide-react";
 import { getLocale } from "../lib/i18n";
@@ -28,11 +28,133 @@ const OPENCLAW_PROTOCOL_OPTIONS: OpenClawApiProtocol[] = [
   "bedrock-converse-stream",
 ];
 
-export default function OpenClawConfigSection() {
-  const locale = getLocale();
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+type OpenClawTextFieldKey =
+  | "baseUrl"
+  | "apiKey"
+  | "modelCatalogAlias"
+  | "model"
+  | "modelName"
+  | "openClawContextWindow"
+  | "suggestedPrimaryModel"
+  | "openClawCostInput"
+  | "openClawCostOutput"
+  | "suggestedFallbackModels";
+
+interface OpenClawTextFieldProps {
+  fieldKey: OpenClawTextFieldKey;
+  label: string;
+  value: string;
+  placeholder?: string;
+  type?: "text" | "password";
+  onValueChange: (fieldKey: OpenClawTextFieldKey, value: string) => void;
+}
+
+interface OpenClawSelectFieldProps {
+  label: string;
+  value: OpenClawApiProtocol;
+  options: OpenClawApiProtocol[];
+  onValueChange: (value: OpenClawApiProtocol) => void;
+}
+
+interface OpenClawMemoryEntryCardProps {
+  entry: OpenClawDailyMemoryEntry;
+  active: boolean;
+  globalLabel: string;
+  projectLabel: string;
+  onSelect: (entry: OpenClawDailyMemoryEntry) => void;
+}
+
+function OpenClawTextFieldComponent({
+  fieldKey,
+  label,
+  value,
+  placeholder,
+  type = "text",
+  onValueChange,
+}: OpenClawTextFieldProps) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label className="field-label">{label}</label>
+      <input
+        className="input"
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event: ChangeEvent<HTMLInputElement>) => onValueChange(fieldKey, event.target.value)}
+      />
+    </div>
   );
+}
+
+const OpenClawTextField = memo(OpenClawTextFieldComponent);
+
+function OpenClawSelectFieldComponent({
+  label,
+  value,
+  options,
+  onValueChange,
+}: OpenClawSelectFieldProps) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label className="field-label">{label}</label>
+      <select
+        className="input"
+        value={value}
+        onChange={(event: ChangeEvent<HTMLSelectElement>) => onValueChange(event.target.value as OpenClawApiProtocol)}
+      >
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </div>
+  );
+}
+
+const OpenClawSelectField = memo(OpenClawSelectFieldComponent);
+
+function OpenClawMemoryEntryCardComponent({
+  entry,
+  active,
+  globalLabel,
+  projectLabel,
+  onSelect,
+}: OpenClawMemoryEntryCardProps) {
+  return (
+    <button
+      type="button"
+      className="card"
+      onClick={() => onSelect(entry)}
+      style={{
+        padding: "14px 16px",
+        textAlign: "left",
+        border: active ? "1px solid var(--accent-primary)" : "1px solid var(--border-color)",
+        background: active ? "color-mix(in srgb, var(--accent-primary) 10%, var(--bg-secondary))" : "var(--bg-secondary)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", wordBreak: "break-word" }}>{entry.file_name}</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+            {entry.source === "global" ? globalLabel : projectLabel}
+            {entry.project_name ? ` · ${entry.project_name}` : ""}
+          </div>
+        </div>
+        {entry.modified_at ? <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{entry.modified_at}</span> : null}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.6 }}>{entry.preview}</div>
+      <div style={{ fontSize: 10, color: "var(--text-muted)", wordBreak: "break-all" }}>{entry.path}</div>
+    </button>
+  );
+}
+
+const OpenClawMemoryEntryCard = memo(OpenClawMemoryEntryCardComponent);
+
+function OpenClawConfigSectionComponent() {
+  const locale = getLocale();
+  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  ), [locale]);
 
   const [draft, setDraft] = useState<StructuredDraftFields>(() => createDefaultStructuredFields("openclaw"));
   const [loading, setLoading] = useState(false);
@@ -44,16 +166,11 @@ export default function OpenClawConfigSection() {
   const [memoryContent, setMemoryContent] = useState("");
   const [memoryLoadingContent, setMemoryLoadingContent] = useState(false);
 
-  useEffect(() => {
-    void loadConfig();
-    void loadDailyMemory();
+  const updateDraft = useCallback((next: Partial<StructuredDraftFields>) => {
+    setDraft((current) => ({ ...current, ...next }));
   }, []);
 
-  function updateDraft(next: Partial<StructuredDraftFields>) {
-    setDraft((current) => ({ ...current, ...next }));
-  }
-
-  async function loadConfig() {
+  const loadConfig = useCallback(async () => {
     setLoading(true);
     try {
       const content = await invoke<string>("read_tool_config", { toolId: "openclaw" });
@@ -65,9 +182,9 @@ export default function OpenClawConfigSection() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [uiText]);
 
-  async function saveConfig() {
+  const saveConfig = useCallback(async () => {
     setSaving(true);
     try {
       await invoke("write_tool_config", {
@@ -80,9 +197,9 @@ export default function OpenClawConfigSection() {
     } finally {
       setSaving(false);
     }
-  }
+  }, [draft, uiText]);
 
-  async function openMemoryEntry(entry: OpenClawDailyMemoryEntry) {
+  const openMemoryEntry = useCallback(async (entry: OpenClawDailyMemoryEntry) => {
     setMemorySelectedPath(entry.path);
     setMemoryLoadingContent(true);
     try {
@@ -94,9 +211,9 @@ export default function OpenClawConfigSection() {
     } finally {
       setMemoryLoadingContent(false);
     }
-  }
+  }, [uiText]);
 
-  async function loadDailyMemory(query = memoryQuery) {
+  const loadDailyMemory = useCallback(async (query = memoryQuery) => {
     setMemoryLoading(true);
     try {
       const entries = await invoke<OpenClawDailyMemoryEntry[]>("search_openclaw_daily_memory", { query, limit: 40 });
@@ -117,7 +234,117 @@ export default function OpenClawConfigSection() {
     } finally {
       setMemoryLoading(false);
     }
-  }
+  }, [memoryQuery, memorySelectedPath, openMemoryEntry, uiText]);
+
+  useEffect(() => {
+    void loadConfig();
+    void loadDailyMemory();
+  }, [loadConfig, loadDailyMemory]);
+
+  const handleChangeDraftField = useCallback((fieldKey: OpenClawTextFieldKey, value: string) => {
+    updateDraft({ [fieldKey]: value } as Partial<StructuredDraftFields>);
+  }, [updateDraft]);
+
+  const handleChangeApiProtocol = useCallback((value: OpenClawApiProtocol) => {
+    updateDraft({ apiProtocol: value });
+  }, [updateDraft]);
+
+  const handleReloadConfigClick = useCallback(() => {
+    void loadConfig();
+  }, [loadConfig]);
+
+  const handleSaveConfigClick = useCallback(() => {
+    void saveConfig();
+  }, [saveConfig]);
+
+  const handleRefreshMemoryClick = useCallback(() => {
+    void loadDailyMemory();
+  }, [loadDailyMemory]);
+
+  const handleChangeMemoryQuery = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setMemoryQuery(event.target.value);
+  }, []);
+
+  const handleMemoryQueryKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void loadDailyMemory();
+    }
+  }, [loadDailyMemory]);
+
+  const handleSelectMemoryEntry = useCallback((entry: OpenClawDailyMemoryEntry) => {
+    void openMemoryEntry(entry);
+  }, [openMemoryEntry]);
+
+  const configTextFields = useMemo(
+    () => [
+      {
+        fieldKey: "baseUrl" as const,
+        label: uiText("接口地址", "Base URL", "Base URL"),
+        value: draft.baseUrl,
+        placeholder: "https://api.example.com/v1",
+      },
+      {
+        fieldKey: "apiKey" as const,
+        label: "API Key",
+        value: draft.apiKey,
+        placeholder: uiText("填写 API Key", "Enter API Key", "API Key を入力"),
+        type: "password" as const,
+      },
+      {
+        fieldKey: "modelCatalogAlias" as const,
+        label: uiText("模型别名", "Model Alias", "モデル別名"),
+        value: draft.modelCatalogAlias,
+        placeholder: "Claude Sonnet 4.6",
+      },
+      {
+        fieldKey: "model" as const,
+        label: uiText("模型 ID", "Model ID", "モデル ID"),
+        value: draft.model,
+        placeholder: "anthropic/claude-sonnet-4-6",
+      },
+      {
+        fieldKey: "modelName" as const,
+        label: uiText("显示名", "Display Name", "表示名"),
+        value: draft.modelName,
+        placeholder: uiText("可选，默认同模型 ID", "Optional, defaults to model ID", "任意。未入力ならモデル ID を使います"),
+      },
+      {
+        fieldKey: "openClawContextWindow" as const,
+        label: uiText("上下文窗口", "Context Window", "コンテキストウィンドウ"),
+        value: draft.openClawContextWindow,
+        placeholder: "1000000",
+      },
+      {
+        fieldKey: "suggestedPrimaryModel" as const,
+        label: uiText("主推荐模型", "Suggested Primary", "推奨プライマリ"),
+        value: draft.suggestedPrimaryModel,
+        placeholder: "anthropic/claude-sonnet-4-6",
+      },
+      {
+        fieldKey: "openClawCostInput" as const,
+        label: uiText("输入成本", "Input Cost", "入力コスト"),
+        value: draft.openClawCostInput,
+        placeholder: "0.003",
+      },
+      {
+        fieldKey: "openClawCostOutput" as const,
+        label: uiText("输出成本", "Output Cost", "出力コスト"),
+        value: draft.openClawCostOutput,
+        placeholder: "0.015",
+      },
+      {
+        fieldKey: "suggestedFallbackModels" as const,
+        label: uiText("备用模型", "Fallback Models", "フォールバックモデル"),
+        value: draft.suggestedFallbackModels,
+        placeholder: uiText("逗号分隔，例如 model-a, model-b", "Comma-separated, e.g. model-a, model-b", "カンマ区切り。例: model-a, model-b"),
+      },
+    ],
+    [draft, uiText],
+  );
+
+  const globalMemoryLabel = uiText("全局", "Global", "グローバル");
+  const projectMemoryLabel = uiText("项目", "Project", "プロジェクト");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -135,11 +362,11 @@ export default function OpenClawConfigSection() {
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => void loadConfig()} disabled={loading} style={{ gap: 6 }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleReloadConfigClick} disabled={loading} style={{ gap: 6 }}>
               {loading ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
               {uiText("重新读取", "Reload", "再読み込み")}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => void saveConfig()} disabled={saving} style={{ gap: 6 }}>
+            <button className="btn btn-primary btn-sm" onClick={handleSaveConfigClick} disabled={saving} style={{ gap: 6 }}>
               {saving ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Download size={14} />}
               {uiText("保存配置", "Save Config", "設定を保存")}
             </button>
@@ -151,25 +378,43 @@ export default function OpenClawConfigSection() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
-              <FieldCard label={uiText("接口地址", "Base URL", "Base URL")} input={<input className="input" value={draft.baseUrl} onChange={(e) => updateDraft({ baseUrl: e.target.value })} placeholder="https://api.example.com/v1" />} />
-              <FieldCard label="API Key" input={<input className="input" type="password" value={draft.apiKey} onChange={(e) => updateDraft({ apiKey: e.target.value })} placeholder={uiText("填写 API Key", "Enter API Key", "API Key を入力")} />} />
-              <FieldCard
+              {configTextFields.slice(0, 2).map((field) => (
+                <OpenClawTextField
+                  key={field.fieldKey}
+                  fieldKey={field.fieldKey}
+                  label={field.label}
+                  value={field.value}
+                  placeholder={field.placeholder}
+                  type={field.type}
+                  onValueChange={handleChangeDraftField}
+                />
+              ))}
+              <OpenClawSelectField
                 label={uiText("API 协议", "API Protocol", "API プロトコル")}
-                input={
-                  <select className="input" value={draft.apiProtocol} onChange={(e) => updateDraft({ apiProtocol: e.target.value as OpenClawApiProtocol })}>
-                    {OPENCLAW_PROTOCOL_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                  </select>
-                }
+                value={draft.apiProtocol}
+                options={OPENCLAW_PROTOCOL_OPTIONS}
+                onValueChange={handleChangeApiProtocol}
               />
-              <FieldCard label={uiText("模型别名", "Model Alias", "モデル別名")} input={<input className="input" value={draft.modelCatalogAlias} onChange={(e) => updateDraft({ modelCatalogAlias: e.target.value })} placeholder="Claude Sonnet 4.6" />} />
-              <FieldCard label={uiText("模型 ID", "Model ID", "モデル ID")} input={<input className="input" value={draft.model} onChange={(e) => updateDraft({ model: e.target.value })} placeholder="anthropic/claude-sonnet-4-6" />} />
-              <FieldCard label={uiText("显示名", "Display Name", "表示名")} input={<input className="input" value={draft.modelName} onChange={(e) => updateDraft({ modelName: e.target.value })} placeholder={uiText("可选，默认同模型 ID", "Optional, defaults to model ID", "任意。未入力ならモデル ID を使います")} />} />
-              <FieldCard label={uiText("上下文窗口", "Context Window", "コンテキストウィンドウ")} input={<input className="input" value={draft.openClawContextWindow} onChange={(e) => updateDraft({ openClawContextWindow: e.target.value })} placeholder="1000000" />} />
-              <FieldCard label={uiText("主推荐模型", "Suggested Primary", "推奨プライマリ")} input={<input className="input" value={draft.suggestedPrimaryModel} onChange={(e) => updateDraft({ suggestedPrimaryModel: e.target.value })} placeholder="anthropic/claude-sonnet-4-6" />} />
-              <FieldCard label={uiText("输入成本", "Input Cost", "入力コスト")} input={<input className="input" value={draft.openClawCostInput} onChange={(e) => updateDraft({ openClawCostInput: e.target.value })} placeholder="0.003" />} />
-              <FieldCard label={uiText("输出成本", "Output Cost", "出力コスト")} input={<input className="input" value={draft.openClawCostOutput} onChange={(e) => updateDraft({ openClawCostOutput: e.target.value })} placeholder="0.015" />} />
+              {configTextFields.slice(2, 9).map((field) => (
+                <OpenClawTextField
+                  key={field.fieldKey}
+                  fieldKey={field.fieldKey}
+                  label={field.label}
+                  value={field.value}
+                  placeholder={field.placeholder}
+                  type={field.type}
+                  onValueChange={handleChangeDraftField}
+                />
+              ))}
             </div>
-            <FieldCard label={uiText("备用模型", "Fallback Models", "フォールバックモデル")} input={<input className="input" value={draft.suggestedFallbackModels} onChange={(e) => updateDraft({ suggestedFallbackModels: e.target.value })} placeholder={uiText("逗号分隔，例如 model-a, model-b", "Comma-separated, e.g. model-a, model-b", "カンマ区切り。例: model-a, model-b")} />} />
+            <OpenClawTextField
+              fieldKey={configTextFields[9].fieldKey}
+              label={configTextFields[9].label}
+              value={configTextFields[9].value}
+              placeholder={configTextFields[9].placeholder}
+              type={configTextFields[9].type}
+              onValueChange={handleChangeDraftField}
+            />
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text-secondary)" }}>
                 {uiText("生成后的配置预览", "Generated Config Preview", "生成された設定プレビュー")}
@@ -195,7 +440,7 @@ export default function OpenClawConfigSection() {
               )}
             </p>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={() => void loadDailyMemory()} disabled={memoryLoading} style={{ gap: 6 }}>
+          <button className="btn btn-secondary btn-sm" onClick={handleRefreshMemoryClick} disabled={memoryLoading} style={{ gap: 6 }}>
             {memoryLoading ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
             {uiText("刷新结果", "Refresh", "再読み込み")}
           </button>
@@ -205,12 +450,12 @@ export default function OpenClawConfigSection() {
           <input
             className="input"
             value={memoryQuery}
-            onChange={(e) => setMemoryQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void loadDailyMemory(); } }}
+            onChange={handleChangeMemoryQuery}
+            onKeyDown={handleMemoryQueryKeyDown}
             placeholder={uiText("输入关键词，留空则显示最近记录", "Enter a keyword, or leave empty for recent entries", "キーワードを入力。空欄なら最近の記録を表示")}
             style={{ flex: "1 1 280px" }}
           />
-          <button className="btn btn-primary btn-sm" onClick={() => void loadDailyMemory()} disabled={memoryLoading} style={{ gap: 6 }}>
+          <button className="btn btn-primary btn-sm" onClick={handleRefreshMemoryClick} disabled={memoryLoading} style={{ gap: 6 }}>
             {memoryLoading ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Search size={14} />}
             {memoryQuery.trim() ? uiText("搜索", "Search", "検索") : uiText("最近记录", "Recent Entries", "最近の記録")}
           </button>
@@ -228,27 +473,16 @@ export default function OpenClawConfigSection() {
                 </div>
               </div>
             ) : (
-              memoryEntries.map((entry) => {
-                const active = entry.path === memorySelectedPath;
-                return (
-                  <button key={entry.path} type="button" className="card" onClick={() => void openMemoryEntry(entry)}
-                    style={{ padding: "14px 16px", textAlign: "left", border: active ? "1px solid var(--accent-primary)" : "1px solid var(--border-color)", background: active ? "color-mix(in srgb, var(--accent-primary) 10%, var(--bg-secondary))" : "var(--bg-secondary)", display: "flex", flexDirection: "column", gap: 8 }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", wordBreak: "break-word" }}>{entry.file_name}</div>
-                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                          {entry.source === "global" ? uiText("全局", "Global", "グローバル") : uiText("项目", "Project", "プロジェクト")}
-                          {entry.project_name ? ` · ${entry.project_name}` : ""}
-                        </div>
-                      </div>
-                      {entry.modified_at && <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{entry.modified_at}</span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.6 }}>{entry.preview}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-muted)", wordBreak: "break-all" }}>{entry.path}</div>
-                  </button>
-                );
-              })
+              memoryEntries.map((entry) => (
+                <OpenClawMemoryEntryCard
+                  key={entry.path}
+                  entry={entry}
+                  active={entry.path === memorySelectedPath}
+                  globalLabel={globalMemoryLabel}
+                  projectLabel={projectMemoryLabel}
+                  onSelect={handleSelectMemoryEntry}
+                />
+              ))
             )}
           </div>
 
@@ -273,11 +507,4 @@ export default function OpenClawConfigSection() {
   );
 }
 
-function FieldCard({ label, input }: { label: string; input: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <label className="field-label">{label}</label>
-      {input}
-    </div>
-  );
-}
+export default memo(OpenClawConfigSectionComponent);

@@ -1,9 +1,10 @@
 # Dependencies
 node_modules/
 .pnpm-store/
-
+.autopilot
 # Build output
 dist/
+codex_autopilot.py
 src-tauri/target/
 *.claude
 .claude

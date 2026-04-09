@@ -1,18 +1,15 @@
-import { useState, useEffect } from "react";
+import { lazy, useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Trash2, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2, Wand2, MonitorCheck, Upload, PackagePlus, ArrowLeft, ArrowRight } from "lucide-react";
+import { RefreshCw, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2, Wand2, MonitorCheck, Upload, PackagePlus, ArrowLeft, ArrowRight } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
-import CodeEditor from "../components/CodeEditor";
+import McpServerCard, { type McpServerCardServer } from "../components/McpServerCard";
 import type { DetectedTool } from "../types/skills";
 import { useMcpValidation, type McpWizardDraft } from "../hooks/useMcpValidation";
+const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
-interface McpServer {
-  id: string; name: string; command: string | null; args: string; env: string;
-  status: string; transport: string; source: string; package_name: string | null;
-  version: string | null; config_path: string | null;
-}
+type McpServer = McpServerCardServer;
 
 interface HealthCheckResult {
   server_id: string; server_name: string; status: string;
@@ -38,6 +35,10 @@ const WIZARD_PRESETS: WizardPreset[] = [
   { id: "docker", labelZh: "Docker", labelEn: "Docker", command: "docker", args: ["run", "--rm", "mcp/server-example"] },
   { id: "node", labelZh: "本地脚本", labelEn: "Local Script", command: "node", args: ["/path/to/server.js"] },
 ];
+
+function formatJson(raw: string): string {
+  try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+}
 
 export default function McpServers() {
   const [servers, setServers] = useState<McpServer[]>([]);
@@ -73,62 +74,30 @@ export default function McpServers() {
   const wizardValidation = useMcpValidation(wizardDraft);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
 
-  useEffect(() => { loadServers(); loadTools(); }, []);
-  useEffect(() => {
-    const handleSaveShortcut = () => {
-      if (editing && selected) {
-        void handleSave();
-      }
-    };
-    const handleNewShortcut = () => {
-      if (!editing && !wizardOpen) {
-        openWizard();
-      }
-    };
-    const handleEscapeShortcut = () => {
-      if (wizardOpen) {
-        closeWizard();
-        return;
-      }
-      if (editing) {
-        setEditing(false);
-      }
-    };
-
-    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
-    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
-    window.addEventListener("cchub-shortcut-escape", handleEscapeShortcut);
-    return () => {
-      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
-      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
-      window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
-    };
-  }, [editing, selected, editCommand, editArgs, editEnv, wizardOpen]);
-
-  async function loadServers() {
+  const loadServers = useCallback(async () => {
     setLoading(true);
     try { setServers(await invoke<McpServer[]>("scan_mcp_servers")); }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, []);
 
-  async function loadTools() {
+  const loadTools = useCallback(async () => {
     try {
       const dt = await invoke<DetectedTool[]>("detect_tools");
       setInstalledTools(dt.filter((t) => t.installed && t.id !== "openclaw"));
     } catch (e) { console.error(e); }
-  }
+  }, []);
 
-  async function checkDeps() {
+  const checkDeps = useCallback(async () => {
     setCheckingDeps(true);
     setShowDeps(true);
     try {
       setRuntimeDeps(await invoke<RuntimeDepStatus[]>("check_runtime_dependencies"));
     } catch (e) { console.error(e); }
     finally { setCheckingDeps(false); }
-  }
+  }, []);
 
-  async function checkHealth() {
+  const checkHealth = useCallback(async () => {
     setCheckingHealth(true);
     try {
       const results = await invoke<HealthCheckResult[]>("check_all_mcp_health");
@@ -137,9 +106,9 @@ export default function McpServers() {
       setHealthResults(map);
     } catch (e) { console.error(e); }
     finally { setCheckingHealth(false); }
-  }
+  }, []);
 
-  async function handleToggle(server: McpServer) {
+  const handleToggle = useCallback(async (server: McpServer) => {
     const newEnabled = server.status === "disabled";
     try {
       await invoke("toggle_mcp_server", { id: server.id, enabled: newEnabled });
@@ -147,32 +116,29 @@ export default function McpServers() {
       setServers((prev) => prev.map((s) => s.id === server.id ? { ...s, status: newStatus } : s));
       if (selected?.id === server.id) setSelected({ ...server, status: newStatus });
     } catch (e) { console.error(e); }
-  }
+  }, [selected]);
 
-  async function handleDelete(server: McpServer) {
+  const handleDelete = useCallback((server: McpServer) => {
     setPendingDelete(server);
-  }
-  async function doDelete(server: McpServer) {
+  }, []);
+
+  const doDelete = useCallback(async (server: McpServer) => {
     try {
       await invoke("uninstall_mcp_server", { name: server.name });
       setServers((prev) => prev.filter((s) => s.id !== server.id));
       if (selected?.id === server.id) setSelected(null);
     } catch (e) { console.error(e); }
-  }
+  }, [selected]);
 
-  function formatJson(raw: string): string {
-    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
-  }
-
-  function startEdit(server: McpServer) {
+  const startEdit = useCallback((server: McpServer) => {
     setEditing(true);
     setSaveSuccess(false);
     setEditCommand(server.command || "");
     setEditArgs(formatJson(server.args));
     setEditEnv(formatJson(server.env));
-  }
+  }, []);
 
-  async function handleSave() {
+  const handleSave = useCallback(async () => {
     if (!selected) return;
     try {
       const args = JSON.parse(editArgs);
@@ -186,9 +152,9 @@ export default function McpServers() {
       console.error(e);
       showToast("error", zh ? "JSON 格式错误，请检查参数和环境变量" : "Invalid JSON format");
     }
-  }
+  }, [editArgs, editCommand, editEnv, loadServers, selected, zh]);
 
-  function openWizard() {
+  const openWizard = useCallback(() => {
     setWizardDraft({
       name: "",
       command: "",
@@ -198,22 +164,22 @@ export default function McpServers() {
     setWizardSyncTargets([]);
     setWizardStep(1);
     setWizardOpen(true);
-  }
+  }, []);
 
-  function applyWizardPreset(preset: WizardPreset) {
+  const applyWizardPreset = useCallback((preset: WizardPreset) => {
     setWizardDraft((current) => ({
       ...current,
       command: preset.command,
       argsText: preset.args.join("\n"),
     }));
-  }
+  }, []);
 
-  function closeWizard() {
+  const closeWizard = useCallback(() => {
     setWizardOpen(false);
     setWizardInstalling(false);
-  }
+  }, []);
 
-  async function handleWizardInstall() {
+  const handleWizardInstall = useCallback(async () => {
     if (!wizardValidation.isValid || wizardInstalling) return;
 
     setWizardInstalling(true);
@@ -249,9 +215,9 @@ export default function McpServers() {
     } finally {
       setWizardInstalling(false);
     }
-  }
+  }, [closeWizard, loadServers, wizardDraft, wizardInstalling, wizardSyncTargets, wizardValidation, zh]);
 
-  async function toggleToolSync(toolId: string) {
+  const toggleToolSync = useCallback(async (toolId: string) => {
     if (!selected) return;
     const isSynced = toolSyncStatus[toolId];
     setSyncingTo(toolId);
@@ -261,12 +227,12 @@ export default function McpServers() {
       } else {
         await invoke("sync_mcp_server_to_tool", { serverName: selected.name, targetTool: toolId });
       }
-      setToolSyncStatus(prev => ({ ...prev, [toolId]: !isSynced }));
+      setToolSyncStatus((prev) => ({ ...prev, [toolId]: !isSynced }));
     } catch (e) { console.error(e); }
     finally { setSyncingTo(null); }
-  }
+  }, [selected, toolSyncStatus]);
 
-  function copyConfig() {
+  const copyConfig = useCallback(() => {
     if (!selected) return;
     const config = {
       command: selected.command,
@@ -276,19 +242,72 @@ export default function McpServers() {
     navigator.clipboard.writeText(JSON.stringify(config, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
+  }, [selected]);
 
-  function getHealthDot(serverId: string) {
-    const h = healthResults[serverId];
-    if (!h) return null;
-    const color = h.status === "healthy" ? "var(--success)" : h.status === "unhealthy" ? "var(--danger)" : "var(--text-muted)";
-    return (
-      <span
-        title={h.status === "healthy" ? i.mcp.healthy : h.status === "unhealthy" ? i.mcp.unhealthy : i.mcp.unknown}
-        style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block" }}
-      />
-    );
-  }
+  const handleSelectServer = useCallback((server: McpServer) => {
+    setSelected(server);
+    setEditing(false);
+    setSaveSuccess(false);
+    invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: server.name })
+      .then(setToolSyncStatus)
+      .catch(() => setToolSyncStatus({}));
+  }, []);
+
+  const handleEditServer = useCallback((server: McpServer) => {
+    setSelected(server);
+    startEdit(server);
+  }, [startEdit]);
+
+  const handleDeleteServer = useCallback((server: McpServer) => {
+    handleDelete(server);
+  }, [handleDelete]);
+
+  const handleImportServers = useCallback(async () => {
+    try {
+      const count = await invoke<number>("import_mcp_servers_from_file");
+      showToast("success", `${i.mcp.importSuccess} (${count})`);
+      await loadServers();
+    } catch (e) {
+      const msg = String(e);
+      if (msg !== "Cancelled") showToast("error", msg);
+    }
+  }, [i.mcp.importSuccess, loadServers]);
+
+  useEffect(() => {
+    void loadServers();
+    void loadTools();
+  }, [loadServers, loadTools]);
+
+  useEffect(() => {
+    const handleSaveShortcut = () => {
+      if (editing && selected) {
+        void handleSave();
+      }
+    };
+    const handleNewShortcut = () => {
+      if (!editing && !wizardOpen) {
+        openWizard();
+      }
+    };
+    const handleEscapeShortcut = () => {
+      if (wizardOpen) {
+        closeWizard();
+        return;
+      }
+      if (editing) {
+        setEditing(false);
+      }
+    };
+
+    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
+    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
+    window.addEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    return () => {
+      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
+      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
+      window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
+    };
+  }, [closeWizard, editing, handleSave, openWizard, selected, wizardOpen]);
 
   function getSourceLabel(source: string) {
     switch (source) {
@@ -397,25 +416,16 @@ export default function McpServers() {
           <button className="btn btn-primary btn-sm" onClick={openWizard} style={{ gap: 6 }}>
             <PackagePlus size={14} />{zh ? "安装向导" : "Install Wizard"}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={checkDeps} disabled={checkingDeps} style={{ gap: 6 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => void checkDeps()} disabled={checkingDeps} style={{ gap: 6 }}>
             <MonitorCheck size={14} />{zh ? "环境检查" : "Env Check"}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={async () => {
-            try {
-              const count = await invoke<number>("import_mcp_servers_from_file");
-              showToast("success", `${i.mcp.importSuccess} (${count})`);
-              await loadServers();
-            } catch (e) {
-              const msg = String(e);
-              if (msg !== "Cancelled") showToast("error", msg);
-            }
-          }} style={{ gap: 6 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => void handleImportServers()} style={{ gap: 6 }}>
             <Upload size={14} />{i.mcp.importServer}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={checkHealth} disabled={checkingHealth}>
+          <button className="btn btn-secondary btn-sm" onClick={() => void checkHealth()} disabled={checkingHealth}>
             <Activity size={14} />{checkingHealth ? i.mcp.checking : i.mcp.checkHealth}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={loadServers}>
+          <button className="btn btn-secondary btn-sm" onClick={() => void loadServers()}>
             <RefreshCw size={14} />{i.mcp.refresh}
           </button>
         </div>
@@ -686,48 +696,28 @@ export default function McpServers() {
           {/* Server List */}
           <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
             {servers.map((server) => (
-              <div
+              <McpServerCard
                 key={server.id}
-                className={`card card-interactive ${selected?.id === server.id ? "selected" : ""}`}
-                style={{ padding: "16px 20px", opacity: server.status === "disabled" ? 0.5 : 1 }}
-                onClick={() => {
-                  setSelected(server); setEditing(false); setSaveSuccess(false);
-                  invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: server.name })
-                    .then(setToolSyncStatus).catch(() => setToolSyncStatus({}));
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span className={`dot ${server.status === "active" ? "dot-active" : server.status === "error" ? "dot-error" : "dot-disabled"}`} />
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 13, fontWeight: 600 }}>{server.name}</span>
-                        {server.version && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>v{server.version}</span>}
-                        {getHealthDot(server.id)}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span className={`badge ${getSourceBadge(server.source)}`}>
-                      {getSourceLabel(server.source)}
-                    </span>
-                    <div className="btn btn-ghost btn-icon-sm" onClick={(e) => { e.stopPropagation(); handleToggle(server); }} title={server.status === "disabled" ? i.mcp.enable : i.mcp.disable} style={{ cursor: "pointer" }}>
-                      <div className={`toggle toggle-sm ${server.status === "disabled" ? "off" : "on"}`}><div className="toggle-knob" /></div>
-                    </div>
-                    <button className="btn btn-ghost btn-icon-sm" onClick={(e) => { e.stopPropagation(); setSelected(server); startEdit(server); }} title={i.mcp.edit}>
-                      <Edit3 size={15} />
-                    </button>
-                    <button className="btn btn-danger-ghost btn-icon-sm" onClick={(e) => { e.stopPropagation(); handleDelete(server); }} title={i.mcp.remove}>
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-                {server.command && (
-                  <p style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-muted)", marginTop: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {server.command} {(() => { try { return JSON.parse(server.args).join(" "); } catch { return ""; } })()}
-                  </p>
-                )}
-              </div>
+                server={server}
+                selected={selected?.id === server.id}
+                sourceBadge={getSourceBadge(server.source)}
+                sourceLabel={getSourceLabel(server.source)}
+                healthStatus={healthResults[server.id]?.status ?? null}
+                healthTitle={healthResults[server.id]
+                  ? (healthResults[server.id]?.status === "healthy"
+                    ? i.mcp.healthy
+                    : healthResults[server.id]?.status === "unhealthy"
+                      ? i.mcp.unhealthy
+                      : i.mcp.unknown)
+                  : null}
+                toggleTitle={server.status === "disabled" ? i.mcp.enable : i.mcp.disable}
+                editTitle={i.mcp.edit}
+                deleteTitle={i.mcp.remove}
+                onSelect={handleSelectServer}
+                onToggle={handleToggle}
+                onEdit={handleEditServer}
+                onDelete={handleDeleteServer}
+              />
             ))}
           </div>
 

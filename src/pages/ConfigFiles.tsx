@@ -1,33 +1,22 @@
-import { useEffect, useMemo, useState, lazy, Suspense, startTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  ChevronDown,
-  ChevronRight,
-  Code2,
   Eye,
   EyeOff,
-  File,
-  FileCode2,
-  FileJson,
   FileText,
-  Folder,
-  FolderOpen,
-  Globe,
-  Monitor,
   RefreshCw,
   RotateCcw,
   Save,
-  Sparkles,
-  Terminal,
 } from "lucide-react";
+import ConfigFilesRootTabs from "../components/ConfigFilesRootTabs";
+import ConfigFilesTreePanel from "../components/ConfigFilesTreePanel";
 import { getLocale, t } from "../lib/i18n";
-import type { FolderNode } from "../types/skills";
 import { showToast } from "../components/Toast";
-import CodeEditor from "../components/CodeEditor";
 import ConfirmDialog from "../components/ConfirmDialog";
 import OmoConfigSection from "../components/OmoConfigSection";
 import OpenClawConfigSection from "../components/OpenClawConfigSection";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import { useConfigFiles } from "../hooks/queries";
 import {
   isCodexConfigToml,
   parseCodexStructuredConfig,
@@ -37,6 +26,7 @@ import {
 } from "../lib/codexConfig";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
+const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
 interface ConfigRoot {
   id: string;
@@ -75,14 +65,6 @@ type PendingAction =
   | { type: "switchRoot"; rootId: string }
   | null;
 
-const ROOT_ICONS: Record<string, typeof Terminal> = {
-  claude: Terminal,
-  codex: Code2,
-  gemini: Sparkles,
-  opencode: Globe,
-  openclaw: Monitor,
-};
-
 function detectLanguage(path: string): EditorLanguage {
   const lower = path.toLowerCase();
   if (lower.endsWith(".json")) return "json";
@@ -92,34 +74,17 @@ function detectLanguage(path: string): EditorLanguage {
   return "text";
 }
 
-function fileIcon(path: string) {
-  const language = detectLanguage(path);
-  switch (language) {
-    case "json":
-      return FileJson;
-    case "toml":
-    case "yaml":
-      return FileCode2;
-    case "markdown":
-      return FileText;
-    default:
-      return File;
-  }
-}
-
 export default function ConfigFiles() {
   const i = t();
   const locale = getLocale();
   const zh = locale === "zh";
   const [roots, setRoots] = useState<ConfigRoot[]>([]);
   const [activeRoot, setActiveRoot] = useState("");
-  const [tree, setTree] = useState<FolderNode | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [loading, setLoading] = useState(true);
-  const [loadingTree, setLoadingTree] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
@@ -129,6 +94,7 @@ export default function ConfigFiles() {
   const [claudeToggles, setClaudeToggles] = useState<ClaudeConfigToggles | null>(null);
   const [loadingClaudeToggles, setLoadingClaudeToggles] = useState(false);
   const [writingClaudeToggleKey, setWritingClaudeToggleKey] = useState<string | null>(null);
+  const { data: tree, isLoading: loadingTree, error: treeError, refetch: refetchTree } = useConfigFiles(activeRoot, Boolean(activeRoot));
 
   const hasChanges = content !== originalContent;
   const visibleRoots = useMemo(
@@ -151,74 +117,7 @@ export default function ConfigFiles() {
     [codexStructuredConfig],
   );
 
-  useEffect(() => {
-    loadRoots();
-  }, []);
-  useEffect(() => {
-    if (visibleRoots.length === 0) return;
-    if (!visibleRoots.some((root) => root.id === activeRoot && root.exists)) {
-      const firstExisting = visibleRoots.find((root) => root.exists);
-      setActiveRoot(firstExisting?.id || visibleRoots[0].id);
-    }
-  }, [activeRoot, visibleRoots]);
-
-  useEffect(() => {
-    if (activeRoot) {
-      loadTree(activeRoot);
-    }
-  }, [activeRoot]);
-  useEffect(() => {
-    const handleSave = () => {
-      if (activeFile && hasChanges && !saving) {
-        void saveFile();
-      }
-    };
-    window.addEventListener("cchub-shortcut-save", handleSave);
-    return () => window.removeEventListener("cchub-shortcut-save", handleSave);
-  }, [activeFile, hasChanges, saving, content]);
-
-  async function loadRoots() {
-    setLoading(true);
-    try {
-      const [result, nextVisibleApps] = await Promise.all([
-        invoke<ConfigRoot[]>("get_config_roots"),
-        fetchVisibleApps(),
-      ]);
-      setRoots(result);
-      setVisibleApps(nextVisibleApps);
-      const currentRoot = result.find((root) => root.id === activeRoot && root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
-      const firstExisting = result.find((root) => root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
-      setActiveRoot(currentRoot?.id || firstExisting?.id || "");
-    } catch (error) {
-      console.error(error);
-      showToast("error", String(error));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadTree(rootId: string) {
-    setLoadingTree(true);
-    setTree(null);
-    setActiveFile(null);
-    setContent("");
-    setOriginalContent("");
-    setCodexApiKey("");
-    setShowCodexApiKey(false);
-    setClaudeToggles(null);
-    try {
-      const nextTree = await invoke<FolderNode>("get_config_file_tree", { rootId });
-      setTree(nextTree);
-      setExpanded({ [nextTree.path]: true });
-    } catch (error) {
-      console.error(error);
-      showToast("error", String(error));
-    } finally {
-      setLoadingTree(false);
-    }
-  }
-
-  async function openFile(path: string) {
+  const openFile = useCallback(async (path: string) => {
     setLoadingFile(true);
     setActiveFile(path);
     try {
@@ -251,6 +150,86 @@ export default function ConfigFiles() {
     } finally {
       setLoadingFile(false);
       setLoadingClaudeToggles(false);
+    }
+  }, [activeRoot]);
+
+  const toggleExpand = useCallback((path: string) => {
+    setExpanded((current) => ({ ...current, [path]: !current[path] }));
+  }, []);
+
+  const requestOpenFile = useCallback((path: string) => {
+    if (hasChanges) {
+      setPendingAction({ type: "openFile", path });
+      return;
+    }
+    void openFile(path);
+  }, [hasChanges, openFile]);
+
+  const requestSwitchRoot = useCallback((rootId: string) => {
+    if (hasChanges) {
+      setPendingAction({ type: "switchRoot", rootId });
+      return;
+    }
+    setActiveRoot(rootId);
+  }, [hasChanges]);
+
+  useEffect(() => {
+    loadRoots();
+  }, []);
+  useEffect(() => {
+    if (visibleRoots.length === 0) return;
+    if (!visibleRoots.some((root) => root.id === activeRoot && root.exists)) {
+      const firstExisting = visibleRoots.find((root) => root.exists);
+      setActiveRoot(firstExisting?.id || visibleRoots[0].id);
+    }
+  }, [activeRoot, visibleRoots]);
+
+  useEffect(() => {
+    setActiveFile(null);
+    setContent("");
+    setOriginalContent("");
+    setCodexApiKey("");
+    setShowCodexApiKey(false);
+    setClaudeToggles(null);
+  }, [activeRoot]);
+  useEffect(() => {
+    if (tree) {
+      setExpanded({ [tree.path]: true });
+    }
+  }, [tree]);
+  useEffect(() => {
+    if (treeError) {
+      console.error(treeError);
+      showToast("error", String(treeError));
+    }
+  }, [treeError]);
+  useEffect(() => {
+    const handleSave = () => {
+      if (activeFile && hasChanges && !saving) {
+        void saveFile();
+      }
+    };
+    window.addEventListener("cchub-shortcut-save", handleSave);
+    return () => window.removeEventListener("cchub-shortcut-save", handleSave);
+  }, [activeFile, hasChanges, saving, content]);
+
+  async function loadRoots() {
+    setLoading(true);
+    try {
+      const [result, nextVisibleApps] = await Promise.all([
+        invoke<ConfigRoot[]>("get_config_roots"),
+        fetchVisibleApps(),
+      ]);
+      setRoots(result);
+      setVisibleApps(nextVisibleApps);
+      const currentRoot = result.find((root) => root.id === activeRoot && root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
+      const firstExisting = result.find((root) => root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
+      setActiveRoot(currentRoot?.id || firstExisting?.id || "");
+    } catch (error) {
+      console.error(error);
+      showToast("error", String(error));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -331,26 +310,6 @@ export default function ConfigFiles() {
     }
   }
 
-  function toggleExpand(path: string) {
-    setExpanded((current) => ({ ...current, [path]: !current[path] }));
-  }
-
-  function requestOpenFile(path: string) {
-    if (hasChanges) {
-      setPendingAction({ type: "openFile", path });
-      return;
-    }
-    void openFile(path);
-  }
-
-  function requestSwitchRoot(rootId: string) {
-    if (hasChanges) {
-      setPendingAction({ type: "switchRoot", rootId });
-      return;
-    }
-    setActiveRoot(rootId);
-  }
-
   function handleConfirmPendingAction() {
     const action = pendingAction;
     setPendingAction(null);
@@ -360,60 +319,6 @@ export default function ConfigFiles() {
       return;
     }
     setActiveRoot(action.rootId);
-  }
-
-  function renderTree(node: FolderNode, depth = 0) {
-    const isExpanded = expanded[node.path] ?? depth < 1;
-    const isSelected = activeFile === node.path;
-
-    if (node.is_dir) {
-      return (
-        <div key={node.path}>
-          <button
-            className="btn btn-ghost"
-            onClick={() => toggleExpand(node.path)}
-            style={{
-              width: "100%",
-              justifyContent: "flex-start",
-              padding: "6px 8px",
-              paddingLeft: 8 + depth * 14,
-              borderRadius: 6,
-              color: "var(--text-secondary)",
-              gap: 8,
-            }}
-          >
-            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            {isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />}
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
-          </button>
-          {isExpanded && node.children.map((child) => renderTree(child, depth + 1))}
-        </div>
-      );
-    }
-
-    const Icon = fileIcon(node.path);
-    return (
-      <button
-        key={node.path}
-        className="btn btn-ghost"
-        onClick={() => requestOpenFile(node.path)}
-        style={{
-          width: "100%",
-          justifyContent: "flex-start",
-          padding: "6px 8px",
-          paddingLeft: 36 + depth * 14,
-          borderRadius: 6,
-          gap: 8,
-          color: isSelected ? "var(--text-primary)" : "var(--text-secondary)",
-          background: isSelected ? "var(--bg-card-hover)" : "transparent",
-          border: isSelected ? "1px solid var(--border-default)" : "1px solid transparent",
-        }}
-        title={node.path}
-      >
-        <Icon size={14} />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
-      </button>
-    );
   }
 
   if (loading) {
@@ -433,7 +338,7 @@ export default function ConfigFiles() {
           <p className="page-subtitle">{i.configFiles.subtitle}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={loadRoots}>
+          <button className="btn btn-secondary btn-sm" onClick={() => { void loadRoots(); void refetchTree(); }}>
             <RefreshCw size={14} />
             {i.common.refresh}
           </button>
@@ -444,54 +349,28 @@ export default function ConfigFiles() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {visibleRoots.map((root) => {
-          const Icon = ROOT_ICONS[root.id] || FolderOpen;
-          return (
-            <button
-              key={root.id}
-              className={`btn btn-sm ${activeRoot === root.id ? "btn-primary" : "btn-secondary"}`}
-              disabled={!root.exists}
-              onClick={() => requestSwitchRoot(root.id)}
-              style={{ opacity: root.exists ? 1 : 0.45 }}
-              title={root.path}
-            >
-              <Icon size={14} />
-              {root.name}
-            </button>
-          );
-        })}
-      </div>
+      <ConfigFilesRootTabs
+        roots={visibleRoots}
+        activeRoot={activeRoot}
+        onSelectRoot={requestSwitchRoot}
+      />
 
       {activeRoot === "opencode" && <OmoConfigSection />}
       {activeRoot === "openclaw" && <OpenClawConfigSection />}
 
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "320px minmax(0, 1fr)", gap: 16 }}>
-        <div className="card" style={{ minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border-default)" }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>{i.configFiles.folders}</div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-              {activeRootMeta?.path || i.common.na}
-            </div>
-          </div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 10 }}>
-            {loadingTree ? (
-              <div className="loading-center" style={{ height: "100%" }}>
-                <div className="spinner" />
-              </div>
-            ) : tree ? (
-              renderTree(tree)
-            ) : (
-              <div className="empty-state" style={{ minHeight: 260 }}>
-                <div className="empty-icon">
-                  <FolderOpen size={28} style={{ color: "var(--text-muted)" }} />
-                </div>
-                <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>{i.configFiles.noRoot}</p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, maxWidth: 240 }}>{i.configFiles.noRootTip}</p>
-              </div>
-            )}
-          </div>
-        </div>
+        <ConfigFilesTreePanel
+          title={i.configFiles.folders}
+          rootPath={activeRootMeta?.path || i.common.na}
+          loading={loadingTree}
+          tree={tree}
+          activeFile={activeFile}
+          expanded={expanded}
+          noRootLabel={i.configFiles.noRoot}
+          noRootTip={i.configFiles.noRootTip}
+          onToggleExpand={toggleExpand}
+          onOpenFile={requestOpenFile}
+        />
 
         <div className="card" style={{ minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border-default)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

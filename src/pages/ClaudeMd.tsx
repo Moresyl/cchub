@@ -1,12 +1,15 @@
-import { useState, useEffect, lazy, Suspense, useMemo } from "react";
+import { useState, useEffect, lazy, Suspense, useMemo, useCallback, type ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, FileText, Save, RotateCcw, Plus, X, Check, Trash2, Pencil, ArrowLeft, Search } from "lucide-react";
 import { t } from "../lib/i18n";
+import ClaudeMdFileCard from "../components/ClaudeMdFileCard";
+import ClaudeMdPresetCard from "../components/ClaudeMdPresetCard";
+import ClaudeMdTemplateCard from "../components/ClaudeMdTemplateCard";
 import { showToast } from "../components/Toast";
-import CodeEditor from "../components/CodeEditor";
 import { fetchVisibleApps, toolNameToAppId } from "../lib/appPreferences";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
+const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
 interface ClaudeMdFile {
   path: string;
@@ -67,9 +70,220 @@ export default function ClaudeMd() {
   const [confirmPresetDelete, setConfirmPresetDelete] = useState<PromptPreset | null>(null);
   const [search, setSearch] = useState("");
   const i = t();
+  const locale = localStorage.getItem("cchub-locale") || "zh";
   const hasChanges = content !== originalContent;
 
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [f, tmpl, nextVisibleApps, presetState] = await Promise.all([
+        invoke<ClaudeMdFile[]>("scan_claude_md"),
+        invoke<ClaudeMdTemplate[]>("get_claude_md_templates"),
+        fetchVisibleApps(),
+        invoke<PromptPresetState>("get_prompt_presets").catch(() => ({ presets: [], active_preset_id: null })),
+      ]);
+      setFiles(f.filter((file) => {
+        const appId = toolNameToAppId(file.tool_name);
+        return appId ? nextVisibleApps.includes(appId) : true;
+      }));
+      setTemplates(tmpl.filter((template) => {
+        const appId = toolNameToAppId(template.tool_name);
+        return appId ? nextVisibleApps.includes(appId) : true;
+      }));
+      setPromptPresets(presetState.presets);
+      setActivePresetId(presetState.active_preset_id);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const openPresetEditor = useCallback((preset?: PromptPreset) => {
+    setShowPresetEditor(true);
+    setEditingPresetId(preset?.id || null);
+    setPresetName(preset?.name || "");
+    setPresetContent(preset?.content || "");
+  }, []);
+
+  const closePresetEditor = useCallback(() => {
+    setShowPresetEditor(false);
+    setEditingPresetId(null);
+    setPresetName("");
+    setPresetContent("");
+  }, []);
+
+  const openEditor = useCallback(async (file: ClaudeMdFile) => {
+    setEditingFile(file);
+    setLoadingContent(true);
+    try {
+      const c = await invoke<string>("read_claude_md_content", { path: file.path });
+      setContent(c);
+      setOriginalContent(c);
+    } catch (e) {
+      console.error(e);
+      setContent("Failed to load file");
+      setOriginalContent("");
+    } finally {
+      setLoadingContent(false);
+    }
+  }, []);
+
+  const closeEditor = useCallback(() => {
+    setEditingFile(null);
+    setContent("");
+    setOriginalContent("");
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!editingFile) return;
+    setSaving(true);
+    try {
+      await invoke("write_claude_md_content", { path: editingFile.path, content });
+      setOriginalContent(content);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      console.error(e);
+      showToast("error", "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }, [content, editingFile]);
+
+  const handleRevert = useCallback(() => {
+    setContent(originalContent);
+  }, [originalContent]);
+
+  const handleRequestCreate = useCallback(() => {
+    setShowCreate(true);
+  }, []);
+
+  const handleCloseCreate = useCallback(() => {
+    setShowCreate(false);
+  }, []);
+
+  const handleRequestDelete = useCallback((file: ClaudeMdFile) => {
+    setConfirmDelete(file);
+  }, []);
+
+  const handleRequestPresetDelete = useCallback((preset: PromptPreset) => {
+    setConfirmPresetDelete(preset);
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearch("");
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    void load();
+  }, [load]);
+
+  const handlePresetNameChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setPresetName(event.target.value);
+  }, []);
+
+  const handlePresetContentChange = useCallback((value: string) => {
+    setPresetContent(value);
+  }, []);
+
+  const handleSearchChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setSearch(event.target.value);
+  }, []);
+
+  const handleNewDirPathChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setNewDirPath(event.target.value);
+  }, []);
+
+  const savePreset = useCallback(async () => {
+    setSavingPreset(true);
+    try {
+      await invoke("save_prompt_preset", { id: editingPresetId, name: presetName, content: presetContent });
+      await load();
+      closePresetEditor();
+      showToast("success", locale === "zh" ? "预设已保存" : "Preset saved");
+    } catch (e: any) {
+      showToast("error", e?.toString() || "Failed to save preset");
+    } finally {
+      setSavingPreset(false);
+    }
+  }, [closePresetEditor, editingPresetId, load, locale, presetContent, presetName]);
+
+  const handleCreate = useCallback(async (template: ClaudeMdTemplate) => {
+    if (!newDirPath.trim()) return;
+    try {
+      const dirPath = newDirPath.trim();
+      const path = await invoke<string>("create_instruction_doc_file", {
+        dirPath,
+        fileName: template.file_name,
+        content: template.content,
+      });
+      setShowCreate(false);
+      setNewDirPath("");
+      await load();
+      const newFile: ClaudeMdFile = {
+        path,
+        project_name: dirPath.split(/[/\\]/).pop() || dirPath,
+        size_bytes: template.content.length,
+        modified_at: new Date().toISOString().slice(0, 16).replace("T", " "),
+        content_preview: template.content.slice(0, 200),
+        disabled: false,
+        tool_name: template.tool_name,
+        file_name: template.file_name,
+        scope: "project",
+      };
+      void openEditor(newFile);
+    } catch (e: any) {
+      showToast("error", e?.toString() || "Failed to create file");
+    }
+  }, [load, newDirPath, openEditor]);
+
+  const handleDelete = useCallback(async (file: ClaudeMdFile) => {
+    try {
+      await invoke("delete_claude_md_file", { path: file.path });
+      showToast("success", i.claudeMd.deleteSuccess);
+      if (editingFile?.path === file.path) {
+        closeEditor();
+      }
+      setConfirmDelete(null);
+      await load();
+    } catch (e: any) {
+      showToast("error", e?.toString() || "Failed to delete");
+    }
+  }, [closeEditor, editingFile?.path, i.claudeMd.deleteSuccess, load]);
+
+  const handleToggle = useCallback(async (file: ClaudeMdFile) => {
+    setTogglingPath(file.path);
+    try {
+      if (file.disabled) {
+        await invoke<string>("enable_claude_md_file", { path: file.path });
+        showToast("success", i.claudeMd.enableSuccess);
+      } else {
+        await invoke<string>("disable_claude_md_file", { path: file.path });
+        showToast("success", i.claudeMd.disableSuccess);
+      }
+      await load();
+    } catch (e: any) {
+      showToast("error", e?.toString() || "Failed to toggle");
+    } finally {
+      setTogglingPath(null);
+    }
+  }, [i.claudeMd.disableSuccess, i.claudeMd.enableSuccess, load]);
+
+  const handleActivatePreset = useCallback(async (presetId: string) => {
+    setActivatingPresetId(presetId);
+    try {
+      await invoke("activate_prompt_preset", { id: presetId });
+      await load();
+      showToast("success", locale === "zh" ? "预设已激活并同步到全局文档" : "Preset activated and synced to global docs");
+    } catch (e: any) {
+      showToast("error", e?.toString() || "Failed to activate preset");
+    } finally {
+      setActivatingPresetId((current) => current === presetId ? null : current);
+    }
+  }, [load, locale]);
+
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const handleEscape = () => {
       if (confirmDelete) {
@@ -113,155 +327,7 @@ export default function ClaudeMd() {
       window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
       window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
     };
-  }, [editingFile, hasChanges, saving, showPresetEditor]);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const [f, tmpl, nextVisibleApps, presetState] = await Promise.all([
-        invoke<ClaudeMdFile[]>("scan_claude_md"),
-        invoke<ClaudeMdTemplate[]>("get_claude_md_templates"),
-        fetchVisibleApps(),
-        invoke<PromptPresetState>("get_prompt_presets").catch(() => ({ presets: [], active_preset_id: null })),
-      ]);
-      setFiles(f.filter((file) => {
-        const appId = toolNameToAppId(file.tool_name);
-        return appId ? nextVisibleApps.includes(appId) : true;
-      }));
-      setTemplates(tmpl.filter((template) => {
-        const appId = toolNameToAppId(template.tool_name);
-        return appId ? nextVisibleApps.includes(appId) : true;
-      }));
-      setPromptPresets(presetState.presets);
-      setActivePresetId(presetState.active_preset_id);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  }
-
-  function openPresetEditor(preset?: PromptPreset) {
-    setShowPresetEditor(true);
-    setEditingPresetId(preset?.id || null);
-    setPresetName(preset?.name || "");
-    setPresetContent(preset?.content || "");
-  }
-
-  function closePresetEditor() {
-    setShowPresetEditor(false);
-    setEditingPresetId(null);
-    setPresetName("");
-    setPresetContent("");
-  }
-
-  async function savePreset() {
-    setSavingPreset(true);
-    try {
-      await invoke("save_prompt_preset", { id: editingPresetId, name: presetName, content: presetContent });
-      await load();
-      closePresetEditor();
-      showToast("success", locale === "zh" ? "预设已保存" : "Preset saved");
-    } catch (e: any) {
-      showToast("error", e?.toString() || "Failed to save preset");
-    } finally {
-      setSavingPreset(false);
-    }
-  }
-
-  async function openEditor(file: ClaudeMdFile) {
-    setEditingFile(file);
-    setLoadingContent(true);
-    try {
-      const c = await invoke<string>("read_claude_md_content", { path: file.path });
-      setContent(c);
-      setOriginalContent(c);
-    } catch (e) {
-      console.error(e);
-      setContent("Failed to load file");
-      setOriginalContent("");
-    }
-    finally { setLoadingContent(false); }
-  }
-
-  function closeEditor() {
-    setEditingFile(null);
-    setContent("");
-    setOriginalContent("");
-  }
-
-  async function handleSave() {
-    if (!editingFile) return;
-    setSaving(true);
-    try {
-      await invoke("write_claude_md_content", { path: editingFile.path, content });
-      setOriginalContent(content);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) { console.error(e); showToast("error", "Failed to save"); }
-    finally { setSaving(false); }
-  }
-
-  function handleRevert() {
-    setContent(originalContent);
-  }
-
-  async function handleCreate(template: ClaudeMdTemplate) {
-    if (!newDirPath.trim()) return;
-    try {
-      const dirPath = newDirPath.trim();
-      const path = await invoke<string>("create_instruction_doc_file", {
-        dirPath,
-        fileName: template.file_name,
-        content: template.content,
-      });
-      setShowCreate(false);
-      setNewDirPath("");
-      await load();
-      const newFile: ClaudeMdFile = {
-        path,
-        project_name: dirPath.split(/[/\\]/).pop() || dirPath,
-        size_bytes: template.content.length,
-        modified_at: new Date().toISOString().slice(0, 16).replace("T", " "),
-        content_preview: template.content.slice(0, 200),
-        disabled: false,
-        tool_name: template.tool_name,
-        file_name: template.file_name,
-        scope: "project",
-      };
-      openEditor(newFile);
-    } catch (e: any) {
-      showToast("error", e?.toString() || "Failed to create file");
-    }
-  }
-
-  async function handleDelete(file: ClaudeMdFile) {
-    try {
-      await invoke("delete_claude_md_file", { path: file.path });
-      showToast("success", i.claudeMd.deleteSuccess);
-      if (editingFile?.path === file.path) {
-        closeEditor();
-      }
-      setConfirmDelete(null);
-      await load();
-    } catch (e: any) {
-      showToast("error", e?.toString() || "Failed to delete");
-    }
-  }
-
-  async function handleToggle(file: ClaudeMdFile) {
-    setTogglingPath(file.path);
-    try {
-      if (file.disabled) {
-        await invoke<string>("enable_claude_md_file", { path: file.path });
-        showToast("success", i.claudeMd.enableSuccess);
-      } else {
-        await invoke<string>("disable_claude_md_file", { path: file.path });
-        showToast("success", i.claudeMd.disableSuccess);
-      }
-      await load();
-    } catch (e: any) {
-      showToast("error", e?.toString() || "Failed to toggle");
-    }
-    finally { setTogglingPath(null); }
-  }
+  }, [editingFile, handleSave, hasChanges, saving, showPresetEditor]);
 
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -283,8 +349,6 @@ export default function ClaudeMd() {
       || file.content_preview.toLowerCase().includes(keyword)
     ));
   }, [files, search]);
-
-  const locale = localStorage.getItem("cchub-locale") || "zh";
 
   if (loading) {
     return (
@@ -380,10 +444,10 @@ export default function ClaudeMd() {
           <p className="page-subtitle">{i.claudeMd.subtitle.replace("{count}", String(files.length))}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowCreate(true)}>
+          <button className="btn btn-secondary btn-sm" onClick={handleRequestCreate}>
             <Plus size={14} />{i.claudeMd.newFile}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={load}>
+          <button className="btn btn-secondary btn-sm" onClick={handleRefresh}>
             <RefreshCw size={14} />{i.common.refresh}
           </button>
         </div>
@@ -399,7 +463,7 @@ export default function ClaudeMd() {
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
               {locale === "zh"
                 ? "创建多套通用指令预设，并一键同步写入 Claude / Codex / Gemini / OpenCode / OpenClaw 的全局指令文档。"
-                : "Create reusable instruction presets and sync them into the global docs for Claude, Codex, Gemini, OpenCode, and OpenClaw."}
+              : "Create reusable instruction presets and sync them into the global docs for Claude, Codex, Gemini, OpenCode, and OpenClaw."}
             </p>
           </div>
           <button className="btn btn-secondary btn-sm" onClick={() => openPresetEditor()} style={{ gap: 6 }}>
@@ -422,11 +486,11 @@ export default function ClaudeMd() {
                 className="input"
                 placeholder={locale === "zh" ? "预设名称" : "Preset name"}
                 value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
+                onChange={handlePresetNameChange}
               />
               <CodeEditor
                 value={presetContent}
-                onChange={setPresetContent}
+                onChange={handlePresetContentChange}
                 language="markdown"
                 minHeight={220}
               />
@@ -448,62 +512,24 @@ export default function ClaudeMd() {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
-            {promptPresets.map((preset) => {
-              const isActive = activePresetId === preset.id;
-              return (
-                <div key={preset.id} className="card" style={{ padding: "14px 16px", background: isActive ? "var(--bg-elevated)" : "var(--bg-card)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", marginBottom: 10 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 14, fontWeight: 700 }}>{preset.name}</span>
-                        {isActive && <span className="badge badge-success" style={{ fontSize: 10 }}>{locale === "zh" ? "当前激活" : "Active"}</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                        {preset.updated_at.replace("T", " ").slice(0, 19)}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                      <button className="btn btn-ghost btn-icon-sm" onClick={() => openPresetEditor(preset)} title={locale === "zh" ? "编辑预设" : "Edit preset"}>
-                        <Pencil size={14} />
-                      </button>
-                      <button className="btn btn-ghost btn-icon-sm" onClick={() => setConfirmPresetDelete(preset)} title={locale === "zh" ? "删除预设" : "Delete preset"}>
-                        <Trash2 size={14} style={{ color: "var(--danger)" }} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="code-block" style={{ fontSize: 11, maxHeight: 120, overflow: "auto", marginBottom: 10 }}>
-                    {preset.content}
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {locale === "zh" ? "激活后将写入所有全局指令文档" : "Activation writes all global instruction docs"}
-                    </div>
-                    <button
-                      className={`btn btn-sm ${isActive ? "btn-secondary" : "btn-primary"}`}
-                      disabled={activatingPresetId === preset.id}
-                      onClick={async () => {
-                        setActivatingPresetId(preset.id);
-                        try {
-                          await invoke("activate_prompt_preset", { id: preset.id });
-                          await load();
-                          showToast("success", locale === "zh" ? "预设已激活并同步到全局文档" : "Preset activated and synced to global docs");
-                        } catch (e: any) {
-                          showToast("error", e?.toString() || "Failed to activate preset");
-                        } finally {
-                          setActivatingPresetId((current) => current === preset.id ? null : current);
-                        }
-                      }}
-                    >
-                      {activatingPresetId === preset.id
-                        ? (locale === "zh" ? "同步中..." : "Syncing...")
-                        : isActive
-                          ? (locale === "zh" ? "重新同步" : "Resync")
-                          : (locale === "zh" ? "激活" : "Activate")}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {promptPresets.map((preset) => (
+              <ClaudeMdPresetCard
+                key={preset.id}
+                preset={preset}
+                isActive={activePresetId === preset.id}
+                activating={activatingPresetId === preset.id}
+                activeLabel={locale === "zh" ? "当前激活" : "Active"}
+                activationHint={locale === "zh" ? "激活后将写入所有全局指令文档" : "Activation writes all global instruction docs"}
+                editTitle={locale === "zh" ? "编辑预设" : "Edit preset"}
+                deleteTitle={locale === "zh" ? "删除预设" : "Delete preset"}
+                syncLabel={locale === "zh" ? "激活" : "Activate"}
+                resyncLabel={locale === "zh" ? "重新同步" : "Resync"}
+                syncingLabel={locale === "zh" ? "同步中..." : "Syncing..."}
+                onEdit={openPresetEditor}
+                onDelete={handleRequestPresetDelete}
+                onActivate={handleActivatePreset}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -513,7 +539,7 @@ export default function ClaudeMd() {
           <div className="empty-icon"><FileText size={28} style={{ color: "var(--text-muted)" }} /></div>
           <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>{i.claudeMd.noFiles}</p>
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>{i.claudeMd.noFilesTip}</p>
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 16 }} onClick={() => setShowCreate(true)}>
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 16 }} onClick={handleRequestCreate}>
             <Plus size={14} />{i.claudeMd.newFile}
           </button>
         </div>
@@ -526,13 +552,13 @@ export default function ClaudeMd() {
               style={{ paddingLeft: 36, paddingRight: search ? 36 : undefined }}
               placeholder={locale === "zh" ? "搜索指令文档、路径或预览内容..." : "Search docs, paths, or preview content..."}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={handleSearchChange}
             />
             {search && (
               <button
                 className="btn btn-ghost btn-icon-sm"
                 style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
-                onClick={() => setSearch("")}
+                onClick={handleClearSearch}
               >
                 <X size={14} />
               </button>
@@ -544,7 +570,7 @@ export default function ClaudeMd() {
             <div className="section-card" style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 700 }}>{i.claudeMd.newFile}</h3>
-                <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowCreate(false)}><X size={16} /></button>
+                <button className="btn btn-ghost btn-icon-sm" onClick={handleCloseCreate}><X size={16} /></button>
               </div>
               <div style={{ marginBottom: 16 }}>
                 <span className="field-label">{i.claudeMd.createIn}</span>
@@ -553,22 +579,17 @@ export default function ClaudeMd() {
                   style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
                   placeholder={locale === "zh" ? "输入项目目录路径" : "Enter project directory path"}
                   value={newDirPath}
-                  onChange={(e) => setNewDirPath(e.target.value)}
+                  onChange={handleNewDirPathChange}
                 />
               </div>
               <span className="field-label">{i.claudeMd.selectTemplate}</span>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
                 {templates.map((tmpl) => (
-                  <div
+                  <ClaudeMdTemplateCard
                     key={tmpl.id}
-                    className="card card-interactive"
-                    style={{ padding: "14px 18px" }}
-                    onClick={() => handleCreate(tmpl)}
-                  >
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tmpl.name}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{tmpl.file_name}</div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{tmpl.description}</div>
-                  </div>
+                    template={tmpl}
+                    onCreate={handleCreate}
+                  />
                 ))}
               </div>
             </div>
@@ -586,85 +607,21 @@ export default function ClaudeMd() {
                 </p>
               </div>
             ) : filteredFiles.map((file) => (
-              <div
+              <ClaudeMdFileCard
                 key={file.path}
-                className="card"
-                style={{ padding: "16px 20px", opacity: file.disabled ? 0.55 : 1, transition: "opacity 0.2s" }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div className="icon-box" style={{ background: "var(--bg-elevated)", width: 36, height: 36, borderRadius: 6 }}>
-                    <FileText size={16} style={{ color: file.disabled ? "var(--text-muted)" : "var(--text-secondary)" }} />
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {file.project_name}
-                      </span>
-                      {file.disabled && (
-                        <span className="badge badge-muted" style={{ fontSize: 10, padding: "1px 6px" }}>
-                          {i.claudeMd.disabled}
-                        </span>
-                      )}
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatSize(file.size_bytes)}</span>
-                      {file.modified_at && (
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{file.modified_at}</span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {file.tool_name} · {file.file_name} · {file.scope === "project" ? "Project" : "Global"}
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => openEditor(file)}
-                    >
-                      <Pencil size={13} />{i.common.edit}
-                    </button>
-
-                    {/* Switch toggle */}
-                    <button
-                      onClick={() => handleToggle(file)}
-                      disabled={togglingPath === file.path}
-                      title={file.disabled ? i.claudeMd.enable : i.claudeMd.disable}
-                      style={{
-                        position: "relative",
-                        width: 40,
-                        height: 22,
-                        borderRadius: 11,
-                        border: "none",
-                        cursor: togglingPath === file.path ? "wait" : "pointer",
-                        background: file.disabled ? "var(--border-strong)" : "var(--success)",
-                        transition: "background 0.2s",
-                        padding: 0,
-                        flexShrink: 0,
-                      }}
-                    >
-                      <span style={{
-                        position: "absolute",
-                        top: 2,
-                        left: file.disabled ? 2 : 20,
-                        width: 18,
-                        height: 18,
-                        borderRadius: "50%",
-                        background: "#fff",
-                        transition: "left 0.2s",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                      }} />
-                    </button>
-
-                    <button
-                      className="btn btn-ghost btn-icon-sm"
-                      title={i.claudeMd.delete}
-                      onClick={() => setConfirmDelete(file)}
-                    >
-                      <Trash2 size={14} style={{ color: "var(--danger)" }} />
-                    </button>
-                  </div>
-                </div>
-              </div>
+                file={file}
+                disabledLabel={i.claudeMd.disabled}
+                editLabel={i.common.edit}
+                deleteTitle={i.claudeMd.delete}
+                enableTitle={i.claudeMd.enable}
+                disableTitle={i.claudeMd.disable}
+                metaLabel={`${file.tool_name} · ${file.file_name} · ${file.scope === "project" ? "Project" : "Global"}`}
+                sizeLabel={formatSize(file.size_bytes)}
+                toggling={togglingPath === file.path}
+                onEdit={openEditor}
+                onToggle={handleToggle}
+                onDelete={handleRequestDelete}
+              />
             ))}
           </div>
         </div>

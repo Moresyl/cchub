@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Clock3,
   Copy,
-  FileText,
   FolderOpen,
   History,
   RefreshCw,
@@ -14,6 +12,7 @@ import { getLocale } from "../lib/i18n";
 import { fetchVisibleApps, getAppLabel, type ManagedAppId } from "../lib/appPreferences";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
+import SessionListItem from "../components/SessionListItem";
 
 interface SessionSummary {
   id: string;
@@ -47,6 +46,20 @@ interface SessionDetail {
 }
 
 const TOOL_ORDER: ManagedAppId[] = ["claude", "codex", "gemini", "opencode", "openclaw"];
+
+function countSessionHits(session: SessionSummary, query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return 0;
+
+  return [
+    session.title,
+    session.preview,
+    session.cwd ?? "",
+    session.tool_name,
+    session.source_backend,
+    session.source_path,
+  ].filter((value) => value.toLowerCase().includes(normalized)).length;
+}
 
 function matchesEntry(entry: SessionEntry, query: string) {
   const normalized = query.trim().toLowerCase();
@@ -95,7 +108,7 @@ export default function Sessions() {
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(TOOL_ORDER);
   const [filterTool, setFilterTool] = useState<ManagedAppId | "all">("all");
   const [query, setQuery] = useState("");
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
@@ -106,6 +119,11 @@ export default function Sessions() {
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const sessionsRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
+  const selectedSessionRef = useRef<SessionSummary | null>(null);
+  const detailRef = useRef<SessionDetail | null>(null);
+  const deferredQuery = useDeferredValue(query);
   const uiText = (zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
   );
@@ -116,11 +134,19 @@ export default function Sessions() {
   }, []);
 
   useEffect(() => {
+    selectedSessionRef.current = selectedSession;
+  }, [selectedSession]);
+
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadSessions(false);
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [filterTool, query]);
+  }, [filterTool]);
 
   useEffect(() => {
     const handleSearch = () => {
@@ -150,6 +176,9 @@ export default function Sessions() {
   }, [detailQuery, pendingDelete, selectedSession]);
 
   async function loadSessions(showLoading: boolean) {
+    const requestId = sessionsRequestIdRef.current + 1;
+    sessionsRequestIdRef.current = requestId;
+
     if (showLoading) {
       setLoading(true);
     } else {
@@ -158,30 +187,63 @@ export default function Sessions() {
     try {
       const nextSessions = await invoke<SessionSummary[]>("get_sessions", {
         toolId: filterTool === "all" ? null : filterTool,
-        query,
+        query: null,
         limit: 240,
       });
-      setSessions(nextSessions);
+      if (requestId !== sessionsRequestIdRef.current) {
+        return;
+      }
+      setAllSessions(nextSessions);
 
-      if (selectedSession) {
-        const nextSelected = nextSessions.find((item) => item.id === selectedSession.id && item.tool_id === selectedSession.tool_id) ?? null;
+      const currentSelected = selectedSessionRef.current;
+      if (currentSelected) {
+        const nextSelected = nextSessions.find((item) => item.id === currentSelected.id && item.tool_id === currentSelected.tool_id) ?? null;
         setSelectedSession(nextSelected);
         if (nextSelected) {
-          await openSession(nextSelected, false);
+          const currentDetail = detailRef.current;
+          const isSameDetail =
+            currentDetail?.session.id === nextSelected.id
+            && currentDetail.session.tool_id === nextSelected.tool_id;
+
+          if (isSameDetail) {
+            setDetail((current) => (
+              current
+                ? {
+                    ...current,
+                    session: {
+                      ...current.session,
+                      ...nextSelected,
+                    },
+                  }
+                : current
+            ));
+          } else {
+            void openSession(nextSelected, false);
+          }
         } else {
+          detailRequestIdRef.current += 1;
+          setDetailLoading(false);
           setDetail(null);
         }
       }
     } catch (error) {
+      if (requestId !== sessionsRequestIdRef.current) {
+        return;
+      }
       showToast("error", String(error));
-      setSessions([]);
+      setAllSessions([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === sessionsRequestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
-  async function openSession(session: SessionSummary, updateSelection = true) {
+  const openSession = useCallback(async (session: SessionSummary, updateSelection = true) => {
+    const requestId = detailRequestIdRef.current + 1;
+    detailRequestIdRef.current = requestId;
+
     if (updateSelection) {
       setSelectedSession(session);
     }
@@ -202,17 +264,25 @@ export default function Sessions() {
         canResume: session.can_resume,
         canDelete: session.can_delete,
       });
+      if (requestId !== detailRequestIdRef.current) {
+        return;
+      }
       setDetail(nextDetail);
       setDetailQuery("");
     } catch (error) {
+      if (requestId !== detailRequestIdRef.current) {
+        return;
+      }
       showToast("error", String(error));
       setDetail(null);
     } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestIdRef.current) {
+        setDetailLoading(false);
+      }
     }
-  }
+  }, []);
 
-  async function confirmDeleteSession() {
+  const confirmDeleteSession = useCallback(async () => {
     if (!pendingDelete) return;
     setDeletingId(pendingDelete.id);
     try {
@@ -237,7 +307,21 @@ export default function Sessions() {
     } finally {
       setDeletingId(null);
     }
-  }
+  }, [pendingDelete, selectedSession]);
+
+  const handleOpenSession = useCallback((session: SessionSummary) => {
+    void openSession(session);
+  }, [openSession]);
+
+  const handleCopyResumeCommand = useCallback((command: string) => {
+    void navigator.clipboard.writeText(command).then(() =>
+      showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
+    );
+  }, [uiText]);
+
+  const handleRequestDelete = useCallback((session: SessionSummary) => {
+    setPendingDelete(session);
+  }, []);
 
   const toolFilters = useMemo<Array<{ id: ManagedAppId | "all"; label: string }>>(
     () => [
@@ -254,6 +338,24 @@ export default function Sessions() {
     () => (detail?.entries || []).filter((entry) => matchesEntry(entry, detailQuery)),
     [detail?.entries, detailQuery],
   );
+  const sessions = useMemo(() => {
+    const normalized = deferredQuery.trim().toLowerCase();
+    if (!normalized) {
+      return allSessions;
+    }
+
+    return allSessions
+      .map((session) => {
+        const searchHitCount = countSessionHits(session, normalized);
+        return searchHitCount > 0
+          ? {
+              ...session,
+              search_hit_count: searchHitCount,
+            }
+          : null;
+      })
+      .filter((session): session is SessionSummary => session !== null);
+  }, [allSessions, deferredQuery]);
 
   if (loading) {
     return (
@@ -330,88 +432,26 @@ export default function Sessions() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, color: "var(--text-muted)", fontSize: 13 }}>
                   {uiText("当前没有匹配的会话", "No sessions matched the current filters", "現在の条件に一致する会話はありません")}
                 </div>
-              ) : sessions.map((session) => {
-                const selected = selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id;
-                return (
-                  <button
-                    key={`${session.tool_id}-${session.id}-${session.source_path}`}
-                    className="card card-interactive"
-                    onClick={() => void openSession(session)}
-                    style={{
-                      textAlign: "left",
-                      padding: 14,
-                      borderColor: selected ? "var(--accent)" : "var(--border-default)",
-                      background: selected ? "var(--accent-subtle)" : "var(--bg-card)",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                          <span className="badge badge-accent" style={{ fontSize: 10 }}>{session.tool_name}</span>
-                          <span className="badge badge-muted" style={{ fontSize: 10 }}>{session.source_backend}</span>
-                          {session.search_hit_count > 0 && query.trim() && (
-                            <span className="badge badge-success" style={{ fontSize: 10 }}>
-                              {uiText(`${session.search_hit_count} 处匹配`, `${session.search_hit_count} match(es)`, `${session.search_hit_count} 件一致`)}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.35 }}>
-                          {session.title}
-                        </div>
-                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5 }}>
-                          {session.preview}
-                        </div>
-                        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                            <Clock3 size={12} />
-                            {session.updated_at || session.created_at || uiText("未知时间", "Unknown time", "時刻不明")}
-                          </span>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                            <FileText size={12} />
-                            {uiText(`${session.message_count} 条记录`, `${session.message_count} items`, `${session.message_count} 件`)}
-                          </span>
-                          {session.cwd && (
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0 }}>
-                              <FolderOpen size={12} />
-                              <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {session.cwd}
-                              </span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-                        {buildResumeCommand(session.tool_id, session.id) && (
-                          <button
-                            className="btn btn-secondary btn-xs"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              const cmd = buildResumeCommand(session.tool_id, session.id)!;
-                              void navigator.clipboard.writeText(cmd).then(() =>
-                                showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
-                              );
-                            }}
-                            title={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
-                          >
-                            <Copy size={12} />
-                          </button>
-                        )}
-                        <button
-                          className="btn btn-danger btn-xs"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setPendingDelete(session);
-                          }}
-                          disabled={!session.can_delete || deletingId === session.id}
-                          title={uiText("删除会话", "Delete session", "会話を削除")}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+              ) : sessions.map((session) => (
+                <SessionListItem
+                  key={`${session.tool_id}-${session.id}-${session.source_path}`}
+                  session={session}
+                  selected={selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id}
+                  query={query}
+                  resumeCommand={buildResumeCommand(session.tool_id, session.id)}
+                  deleting={deletingId === session.id}
+                  copyLabel={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
+                  copyTitle={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
+                  deleteTitle={uiText("删除会话", "Delete session", "会話を削除")}
+                  deleteLabel={uiText("删除会话", "Delete session", "会話を削除")}
+                  unknownTimeLabel={uiText("未知时间", "Unknown time", "時刻不明")}
+                  matchLabel={(count) => uiText(`${count} 处匹配`, `${count} match(es)`, `${count} 件一致`)}
+                  itemsLabel={(count) => uiText(`${count} 条记录`, `${count} items`, `${count} 件`)}
+                  onOpen={handleOpenSession}
+                  onCopyResume={handleCopyResumeCommand}
+                  onDelete={handleRequestDelete}
+                />
+              ))}
             </div>
           </div>
 

@@ -1,10 +1,12 @@
 use crate::copilot_auth::{self, CopilotAuthState};
 use crate::db::DbState;
+use crate::utils::configure_background_command;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,14 @@ pub struct ToolEnvironmentReport {
     pub manual_setup_kind: Option<String>,
     pub manual_setup_command: Option<String>,
     pub manual_setup_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplyConfigProfileResult {
+    pub tool_id: String,
+    pub profile_id: String,
+    pub active_profile_ids: Vec<String>,
+    pub applied_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1162,7 +1172,9 @@ fn resolve_cli_path(cmd: &str) -> String {
             }
         }
         // 2) `where` — may return system shims (e.g. C:\Windows\claude.exe)
-        if let Ok(output) = std::process::Command::new("where").arg(cmd).output() {
+        let mut process = std::process::Command::new("where");
+        configure_background_command(&mut process);
+        if let Ok(output) = process.arg(cmd).output() {
             if output.status.success() {
                 let mut fallback = None;
                 for line in String::from_utf8_lossy(&output.stdout).lines() {
@@ -1178,8 +1190,9 @@ fn resolve_cli_path(cmd: &str) -> String {
                     let is_windows_alias = lower.starts_with("c:\\windows\\")
                         && (lower.ends_with(&format!("\\{cmd}.exe"))
                             || lower.ends_with(&format!("\\{cmd}.cmd")));
-                    let is_cmd_wrapper =
-                        lower.ends_with(".cmd") || lower.ends_with(".bat") || lower.ends_with(".ps1");
+                    let is_cmd_wrapper = lower.ends_with(".cmd")
+                        || lower.ends_with(".bat")
+                        || lower.ends_with(".ps1");
 
                     if !is_windows_alias && is_cmd_wrapper {
                         return p.to_string();
@@ -2224,10 +2237,7 @@ fn launch_preferred_terminal_impl(
             match preferences.selected_terminal.as_str() {
                 "windows-terminal" => {
                     std::process::Command::new("wt")
-                        .raw_arg(format!(
-                            "-d \"{}\" cmd.exe /K {}",
-                            target_text, command
-                        ))
+                        .raw_arg(format!("-d \"{}\" cmd.exe /K {}", target_text, command))
                         .spawn()
                         .map_err(|e| e.to_string())?;
                 }
@@ -2244,10 +2254,7 @@ fn launch_preferred_terminal_impl(
                 }
                 "cmd" => {
                     std::process::Command::new("cmd.exe")
-                        .raw_arg(format!(
-                            "/K cd /d \"{}\" && {}",
-                            target_text, command
-                        ))
+                        .raw_arg(format!("/K cd /d \"{}\" && {}", target_text, command))
                         .spawn()
                         .map_err(|e| e.to_string())?;
                 }
@@ -3899,10 +3906,19 @@ pub fn apply_config_profile_from_conn(
 }
 
 #[tauri::command]
-pub fn apply_config_profile(id: String, db: State<'_, DbState>) -> Result<(), String> {
+pub fn apply_config_profile(
+    id: String,
+    db: State<'_, DbState>,
+) -> Result<ApplyConfigProfileResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    apply_config_profile_from_conn(&conn, &id)?;
-    Ok(())
+    let (tool_id, _) = apply_config_profile_from_conn(&conn, &id)?;
+    let active_profile_ids = get_active_config_profile_ids_from_conn(&conn)?;
+    Ok(ApplyConfigProfileResult {
+        tool_id,
+        profile_id: id,
+        active_profile_ids,
+        applied_at: chrono::Utc::now().to_rfc3339(),
+    })
 }
 
 #[tauri::command]
@@ -6845,7 +6861,7 @@ pub fn get_claude_permissions_level() -> Result<u32, String> {
 
 /// Set Claude Code permissions level (0=strict, 1=standard, 2=relaxed, 3=bypass)
 #[tauri::command]
-pub fn set_claude_permissions_level(level: u32) -> Result<(), String> {
+pub fn set_claude_permissions_level(level: u32) -> Result<u32, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".claude").join("settings.json");
 
@@ -6912,7 +6928,7 @@ pub fn set_claude_permissions_level(level: u32) -> Result<(), String> {
     }
     let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(level)
 }
 
 /// Get Claude Code auto-update channel
@@ -6934,7 +6950,7 @@ pub fn get_claude_auto_update() -> Result<String, String> {
 
 /// Set Claude Code auto-update channel
 #[tauri::command]
-pub fn set_claude_auto_update(channel: String) -> Result<(), String> {
+pub fn set_claude_auto_update(channel: String) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".claude").join("settings.json");
     let mut settings: serde_json::Value = if path.exists() {
@@ -6952,7 +6968,7 @@ pub fn set_claude_auto_update(channel: String) -> Result<(), String> {
     }
     let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(channel)
 }
 
 /// Get Codex CLI settings (approval_mode, reasoning_effort, disable_response_storage)
@@ -7070,7 +7086,7 @@ pub fn get_claude_model() -> Result<String, String> {
 
 /// Set Claude Code model
 #[tauri::command]
-pub fn set_claude_model(model: String) -> Result<(), String> {
+pub fn set_claude_model(model: String) -> Result<String, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let path = home.join(".claude").join("settings.json");
     let mut settings: serde_json::Value = if path.exists() {
@@ -7082,7 +7098,7 @@ pub fn set_claude_model(model: String) -> Result<(), String> {
     settings["model"] = serde_json::json!(model);
     let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(settings["model"].as_str().unwrap_or_default().to_string())
 }
 
 /// Get Claude Code Tool Search (ENABLE_TOOL_SEARCH) status from settings.local.json
@@ -7094,10 +7110,10 @@ pub fn get_claude_tool_search(db: State<'_, DbState>) -> Result<bool, String> {
 
 /// Set Claude Code Tool Search (ENABLE_TOOL_SEARCH) in settings.local.json
 #[tauri::command]
-pub fn set_claude_tool_search(enabled: bool, db: State<'_, DbState>) -> Result<(), String> {
+pub fn set_claude_tool_search(enabled: bool, db: State<'_, DbState>) -> Result<bool, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let _ = write_claude_config_toggle_to_conn(&conn, "enableToolSearch", enabled)?;
-    Ok(())
+    Ok(enabled)
 }
 
 // ── StatusLine (claude-hud) ──
@@ -7213,7 +7229,8 @@ await main({
     let ts_path = version_dir.join("env-entry.ts");
     let mjs_path = version_dir.join("env-entry.mjs");
 
-    std::fs::write(&ts_path, ts_content).map_err(|e| format!("Write env-entry.ts failed: {}", e))?;
+    std::fs::write(&ts_path, ts_content)
+        .map_err(|e| format!("Write env-entry.ts failed: {}", e))?;
     std::fs::write(&mjs_path, mjs_content)
         .map_err(|e| format!("Write env-entry.mjs failed: {}", e))?;
 
@@ -7307,7 +7324,18 @@ fn find_bun_path(home: &std::path::Path) -> Option<String> {
     }
 
     // Also check if bun is in PATH via which
-    if let Ok(output) = std::process::Command::new("which").arg("bun").output() {
+    let probe = if cfg!(target_os = "windows") {
+        let mut command = std::process::Command::new("where");
+        command.arg("bun");
+        command
+    } else {
+        let mut command = std::process::Command::new("which");
+        command.arg("bun");
+        command
+    };
+    let mut probe = probe;
+    configure_background_command(&mut probe);
+    if let Ok(output) = probe.output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -7792,14 +7820,625 @@ pub fn set_claude_statusline(enabled: bool) -> Result<(), String> {
 
 /// Update claude-hud config.json
 #[tauri::command]
-pub fn set_claude_hud_config(config: serde_json::Value) -> Result<(), String> {
+pub fn set_claude_hud_config(config: serde_json::Value) -> Result<serde_json::Value, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let config_dir = home.join(".claude").join("plugins").join("claude-hud");
     std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     let config_path = config_dir.join("config.json");
     let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     crate::utils::atomic_write_string(&config_path, &content).map_err(|e| e.to_string())?;
+    get_claude_hud_status()
+}
+
+const HELLO2CC_PLUGIN_ID: &str = "hello2cc@hello2cc";
+const HELLO2CC_MANIFEST_URLS: [&str; 2] = [
+    "https://raw.githubusercontent.com/hellowind777/hello2cc/main/.claude-plugin/plugin.json",
+    "https://ghgo.xyz/raw.githubusercontent.com/hellowind777/hello2cc/main/.claude-plugin/plugin.json",
+];
+const HELLO2CC_TARBALL_URLS: [&str; 2] = [
+    "https://github.com/hellowind777/hello2cc/archive/refs/heads/main.tar.gz",
+    "https://ghgo.xyz/github.com/hellowind777/hello2cc/archive/refs/heads/main.tar.gz",
+];
+const HELLO2CC_ROOT_PREFIXES: [&str; 2] = ["hello2cc-main/", "hello2cc-master/"];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Hello2ccConfig {
+    pub routing_policy: String,
+    pub mirror_session_model: bool,
+    pub default_agent_model: String,
+    pub primary_model: String,
+    pub subagent_model: String,
+    pub guide_model: String,
+    pub explore_model: String,
+    pub plan_model: String,
+    pub general_model: String,
+    pub team_model: String,
+    pub compatibility_mode: String,
+}
+
+impl Default for Hello2ccConfig {
+    fn default() -> Self {
+        Self {
+            routing_policy: "native-inject".to_string(),
+            mirror_session_model: true,
+            default_agent_model: String::new(),
+            primary_model: String::new(),
+            subagent_model: String::new(),
+            guide_model: String::new(),
+            explore_model: String::new(),
+            plan_model: String::new(),
+            general_model: String::new(),
+            team_model: String::new(),
+            compatibility_mode: "full".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hello2ccStatus {
+    pub installed: bool,
+    pub enabled: bool,
+    pub version: String,
+    pub install_path: String,
+    pub settings_path: String,
+    pub config: Hello2ccConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hello2ccUpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+}
+
+fn claude_settings_path(home: &std::path::Path) -> PathBuf {
+    home.join(".claude").join("settings.json")
+}
+
+fn hello2cc_cache_dir(home: &std::path::Path) -> PathBuf {
+    home.join(".claude")
+        .join("plugins")
+        .join("cache")
+        .join("hello2cc")
+        .join("hello2cc")
+}
+
+fn ensure_json_object(
+    value: &mut serde_json::Value,
+) -> &mut serde_json::Map<String, serde_json::Value> {
+    if !value.is_object() {
+        *value = serde_json::json!({});
+    }
+    value.as_object_mut().expect("value should be an object")
+}
+
+fn ensure_child_object<'a>(
+    parent: &'a mut serde_json::Value,
+    key: &str,
+) -> &'a mut serde_json::Map<String, serde_json::Value> {
+    let parent_obj = ensure_json_object(parent);
+    let entry = parent_obj
+        .entry(key.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !entry.is_object() {
+        *entry = serde_json::json!({});
+    }
+    entry.as_object_mut().expect("value should be an object")
+}
+
+fn read_json_value_or_default(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    if content.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+fn write_json_value(path: &std::path::Path, value: &serde_json::Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(path, &content).map_err(|e| e.to_string())
+}
+
+fn normalize_hello2cc_mode(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.eq_ignore_ascii_case("sanitize-only")
+        || trimmed.eq_ignore_ascii_case("sanitize_only")
+        || trimmed.eq_ignore_ascii_case("sanitizeonly")
+    {
+        "sanitize-only".to_string()
+    } else {
+        "full".to_string()
+    }
+}
+
+fn normalize_hello2cc_routing_policy(value: &str) -> String {
+    if value.trim().eq_ignore_ascii_case("prompt-only") {
+        "prompt-only".to_string()
+    } else {
+        "native-inject".to_string()
+    }
+}
+
+fn sanitize_hello2cc_config(config: Hello2ccConfig) -> Hello2ccConfig {
+    Hello2ccConfig {
+        routing_policy: normalize_hello2cc_routing_policy(&config.routing_policy),
+        mirror_session_model: config.mirror_session_model,
+        default_agent_model: config.default_agent_model.trim().to_string(),
+        primary_model: config.primary_model.trim().to_string(),
+        subagent_model: config.subagent_model.trim().to_string(),
+        guide_model: config.guide_model.trim().to_string(),
+        explore_model: config.explore_model.trim().to_string(),
+        plan_model: config.plan_model.trim().to_string(),
+        general_model: config.general_model.trim().to_string(),
+        team_model: config.team_model.trim().to_string(),
+        compatibility_mode: normalize_hello2cc_mode(&config.compatibility_mode),
+    }
+}
+
+fn read_hello2cc_config_from_settings(settings: &serde_json::Value) -> Hello2ccConfig {
+    let options = settings
+        .get("pluginConfigs")
+        .and_then(|value| value.get(HELLO2CC_PLUGIN_ID))
+        .and_then(|value| value.get("options"))
+        .and_then(|value| value.as_object());
+
+    let string_value = |key: &str| {
+        options
+            .and_then(|opts| opts.get(key))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+
+    Hello2ccConfig {
+        routing_policy: normalize_hello2cc_routing_policy(&string_value("routing_policy")),
+        mirror_session_model: options
+            .and_then(|opts| opts.get("mirror_session_model"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true),
+        default_agent_model: string_value("default_agent_model"),
+        primary_model: string_value("primary_model"),
+        subagent_model: string_value("subagent_model"),
+        guide_model: string_value("guide_model"),
+        explore_model: string_value("explore_model"),
+        plan_model: string_value("plan_model"),
+        general_model: string_value("general_model"),
+        team_model: string_value("team_model"),
+        compatibility_mode: normalize_hello2cc_mode(&string_value("compatibility_mode")),
+    }
+}
+
+fn write_hello2cc_config_into_settings(
+    settings: &mut serde_json::Value,
+    config: Hello2ccConfig,
+) -> Hello2ccConfig {
+    let sanitized = sanitize_hello2cc_config(config);
+    let plugin_configs = ensure_child_object(settings, "pluginConfigs");
+    let plugin_config_entry = plugin_configs
+        .entry(HELLO2CC_PLUGIN_ID.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let options = ensure_child_object(plugin_config_entry, "options");
+
+    options.insert(
+        "routing_policy".to_string(),
+        serde_json::Value::String(sanitized.routing_policy.clone()),
+    );
+    options.insert(
+        "mirror_session_model".to_string(),
+        serde_json::Value::Bool(sanitized.mirror_session_model),
+    );
+    options.insert(
+        "default_agent_model".to_string(),
+        serde_json::Value::String(sanitized.default_agent_model.clone()),
+    );
+    options.insert(
+        "primary_model".to_string(),
+        serde_json::Value::String(sanitized.primary_model.clone()),
+    );
+    options.insert(
+        "subagent_model".to_string(),
+        serde_json::Value::String(sanitized.subagent_model.clone()),
+    );
+    options.insert(
+        "guide_model".to_string(),
+        serde_json::Value::String(sanitized.guide_model.clone()),
+    );
+    options.insert(
+        "explore_model".to_string(),
+        serde_json::Value::String(sanitized.explore_model.clone()),
+    );
+    options.insert(
+        "plan_model".to_string(),
+        serde_json::Value::String(sanitized.plan_model.clone()),
+    );
+    options.insert(
+        "general_model".to_string(),
+        serde_json::Value::String(sanitized.general_model.clone()),
+    );
+    options.insert(
+        "team_model".to_string(),
+        serde_json::Value::String(sanitized.team_model.clone()),
+    );
+    options.insert(
+        "compatibility_mode".to_string(),
+        serde_json::Value::String(sanitized.compatibility_mode.clone()),
+    );
+
+    sanitized
+}
+
+fn parse_version_components(version: &str) -> Vec<u64> {
+    version
+        .trim()
+        .trim_start_matches('v')
+        .split(['.', '-', '_'])
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| segment.parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+fn compare_version_like(left: &str, right: &str) -> Ordering {
+    let left_parts = parse_version_components(left);
+    let right_parts = parse_version_components(right);
+    let max_len = left_parts.len().max(right_parts.len());
+
+    for index in 0..max_len {
+        let left_part = *left_parts.get(index).unwrap_or(&0);
+        let right_part = *right_parts.get(index).unwrap_or(&0);
+        match left_part.cmp(&right_part) {
+            Ordering::Equal => continue,
+            non_equal => return non_equal,
+        }
+    }
+
+    left.cmp(right)
+}
+
+fn find_latest_installed_plugin_version(
+    cache_dir: &std::path::Path,
+    required_relative_path: &std::path::Path,
+) -> Option<(String, PathBuf)> {
+    let entries = std::fs::read_dir(cache_dir).ok()?;
+    let mut candidates = Vec::new();
+
+    for entry in entries.flatten() {
+        let version_dir = entry.path();
+        if !version_dir.is_dir() {
+            continue;
+        }
+        if version_dir.join(required_relative_path).exists() {
+            candidates.push((entry.file_name().to_string_lossy().to_string(), version_dir));
+        }
+    }
+
+    candidates.sort_by(|left, right| compare_version_like(&right.0, &left.0));
+    candidates.into_iter().next()
+}
+
+fn build_plugin_http_client(proxy_url: &str) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder().user_agent("CCHub");
+    if !proxy_url.trim().is_empty() {
+        let proxy =
+            reqwest::Proxy::all(proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
+        builder = builder.proxy(proxy);
+    }
+    builder
+        .build()
+        .map_err(|e| format!("Client build failed: {}", e))
+}
+
+async fn fetch_plugin_version_from_manifest(
+    client: &reqwest::Client,
+    urls: &[&str],
+) -> Result<String, String> {
+    for url in urls {
+        let response = match client.get(*url).send().await {
+            Ok(response) if response.status().is_success() => response,
+            _ => continue,
+        };
+        let text = response.text().await.map_err(|e| e.to_string())?;
+        let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        if let Some(version) = manifest.get("version").and_then(|value| value.as_str()) {
+            let trimmed = version.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+    }
+
+    Err("Failed to fetch plugin manifest version".to_string())
+}
+
+async fn download_first_available(
+    client: &reqwest::Client,
+    urls: &[&str],
+) -> Result<bytes::Bytes, String> {
+    let mut last_err = String::new();
+    for url in urls {
+        match client.get(*url).send().await {
+            Ok(response) if response.status().is_success() => match response.bytes().await {
+                Ok(bytes) => return Ok(bytes),
+                Err(error) => last_err = format!("Read failed: {}", error),
+            },
+            Ok(response) => last_err = format!("HTTP {} from {}", response.status(), url),
+            Err(error) => last_err = format!("Download failed: {}", error),
+        }
+    }
+
+    Err(format!("All sources failed: {}", last_err))
+}
+
+fn extract_repo_tarball(
+    bytes: &[u8],
+    version_dir: &std::path::Path,
+    root_prefixes: &[&str],
+) -> Result<(), String> {
+    let gz = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(gz);
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("Tar read failed: {}", e))?;
+
+    for entry in entries {
+        let mut entry = entry.map_err(|e| format!("Tar entry error: {}", e))?;
+        let entry_path = entry
+            .path()
+            .map_err(|e| format!("Path error: {}", e))?
+            .to_path_buf();
+        let entry_str = entry_path.to_string_lossy().replace('\\', "/");
+
+        let relative = root_prefixes
+            .iter()
+            .find_map(|prefix| entry_str.strip_prefix(prefix))
+            .unwrap_or("");
+        if relative.is_empty() || relative.ends_with('/') {
+            continue;
+        }
+
+        let relative_path = PathBuf::from(relative);
+        if relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
+            continue;
+        }
+
+        let target = version_dir.join(relative_path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut file = std::fs::File::create(&target).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+    }
+
     Ok(())
+}
+
+fn get_hello2cc_status_from_home(home: &std::path::Path) -> Result<Hello2ccStatus, String> {
+    let settings_path = claude_settings_path(home);
+    let settings = read_json_value_or_default(&settings_path)?;
+    let cache_dir = hello2cc_cache_dir(home);
+    let installed = find_latest_installed_plugin_version(
+        &cache_dir,
+        &PathBuf::from(".claude-plugin").join("plugin.json"),
+    );
+
+    let (version, install_path, is_installed) = if let Some((version, install_path)) = installed {
+        (version, install_path.to_string_lossy().to_string(), true)
+    } else {
+        (String::new(), String::new(), false)
+    };
+
+    let enabled = settings
+        .get("enabledPlugins")
+        .and_then(|value| value.get(HELLO2CC_PLUGIN_ID))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    Ok(Hello2ccStatus {
+        installed: is_installed,
+        enabled,
+        version,
+        install_path,
+        settings_path: settings_path.to_string_lossy().to_string(),
+        config: read_hello2cc_config_from_settings(&settings),
+    })
+}
+
+#[tauri::command]
+pub fn get_hello2cc_status() -> Result<Hello2ccStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    get_hello2cc_status_from_home(&home)
+}
+
+#[tauri::command]
+pub fn get_hello2cc_config() -> Result<Hello2ccConfig, String> {
+    Ok(get_hello2cc_status()?.config)
+}
+
+#[tauri::command]
+pub fn set_hello2cc_config(config: Hello2ccConfig) -> Result<Hello2ccStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let settings_path = claude_settings_path(&home);
+    let mut settings = read_json_value_or_default(&settings_path)?;
+    write_hello2cc_config_into_settings(&mut settings, config);
+    write_json_value(&settings_path, &settings)?;
+    get_hello2cc_status_from_home(&home)
+}
+
+#[tauri::command]
+pub fn set_hello2cc_enabled(enabled: bool) -> Result<Hello2ccStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let status = get_hello2cc_status_from_home(&home)?;
+    if enabled && !status.installed {
+        return Err("hello2cc not installed".to_string());
+    }
+
+    let settings_path = claude_settings_path(&home);
+    let mut settings = read_json_value_or_default(&settings_path)?;
+    let enabled_plugins = ensure_child_object(&mut settings, "enabledPlugins");
+    if enabled {
+        enabled_plugins.insert(
+            HELLO2CC_PLUGIN_ID.to_string(),
+            serde_json::Value::Bool(true),
+        );
+    } else {
+        enabled_plugins.remove(HELLO2CC_PLUGIN_ID);
+    }
+    write_json_value(&settings_path, &settings)?;
+    get_hello2cc_status_from_home(&home)
+}
+
+#[tauri::command]
+pub fn uninstall_hello2cc() -> Result<Hello2ccStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let cache_dir = hello2cc_cache_dir(&home);
+    if cache_dir.exists() {
+        std::fs::remove_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    }
+
+    let settings_path = claude_settings_path(&home);
+    let mut settings = read_json_value_or_default(&settings_path)?;
+    if let Some(enabled_plugins) = settings
+        .get_mut("enabledPlugins")
+        .and_then(|value| value.as_object_mut())
+    {
+        enabled_plugins.remove(HELLO2CC_PLUGIN_ID);
+    }
+    if let Some(plugin_configs) = settings
+        .get_mut("pluginConfigs")
+        .and_then(|value| value.as_object_mut())
+    {
+        plugin_configs.remove(HELLO2CC_PLUGIN_ID);
+    }
+    write_json_value(&settings_path, &settings)?;
+    get_hello2cc_status_from_home(&home)
+}
+
+#[tauri::command]
+pub async fn install_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello2ccStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let client = build_plugin_http_client(&get_proxy(db))?;
+    let version = fetch_plugin_version_from_manifest(&client, &HELLO2CC_MANIFEST_URLS).await?;
+    let cache_dir = hello2cc_cache_dir(&home);
+    let version_dir = cache_dir.join(&version);
+    let manifest_path = version_dir.join(".claude-plugin").join("plugin.json");
+
+    if manifest_path.exists() {
+        return get_hello2cc_status_from_home(&home);
+    }
+
+    if version_dir.exists() {
+        std::fs::remove_dir_all(&version_dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
+
+    let bytes = download_first_available(&client, &HELLO2CC_TARBALL_URLS).await?;
+    extract_repo_tarball(&bytes, &version_dir, &HELLO2CC_ROOT_PREFIXES)?;
+
+    let required_paths = [
+        version_dir.join(".claude-plugin").join("plugin.json"),
+        version_dir.join(".claude-plugin").join("marketplace.json"),
+        version_dir.join("settings.json"),
+        version_dir.join("agents").join("native.md"),
+        version_dir
+            .join("output-styles")
+            .join("hello2cc-native.md"),
+    ];
+    for required_path in required_paths {
+        if !required_path.exists() {
+            return Err(format!(
+                "Installation failed: missing {}",
+                required_path.display()
+            ));
+        }
+    }
+
+    get_hello2cc_status_from_home(&home)
+}
+
+#[tauri::command]
+pub async fn check_hello2cc_update(
+    db: State<'_, crate::db::DbState>,
+) -> Result<Hello2ccUpdateInfo, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let status = get_hello2cc_status_from_home(&home)?;
+    if !status.installed {
+        return Err("hello2cc not installed".to_string());
+    }
+
+    let client = build_plugin_http_client(&get_proxy(db))?;
+    let latest_version = fetch_plugin_version_from_manifest(&client, &HELLO2CC_MANIFEST_URLS).await?;
+
+    Ok(Hello2ccUpdateInfo {
+        current_version: status.version.clone(),
+        has_update: latest_version != status.version,
+        latest_version,
+    })
+}
+
+#[tauri::command]
+pub async fn update_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello2ccStatus, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let status = get_hello2cc_status_from_home(&home)?;
+    if !status.installed {
+        return Err("hello2cc not installed".to_string());
+    }
+
+    let client = build_plugin_http_client(&get_proxy(db))?;
+    let version = fetch_plugin_version_from_manifest(&client, &HELLO2CC_MANIFEST_URLS).await?;
+    let cache_dir = hello2cc_cache_dir(&home);
+    let version_dir = cache_dir.join(&version);
+    let manifest_path = version_dir.join(".claude-plugin").join("plugin.json");
+
+    if !manifest_path.exists() {
+        if version_dir.exists() {
+            std::fs::remove_dir_all(&version_dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
+        let bytes = download_first_available(&client, &HELLO2CC_TARBALL_URLS).await?;
+        extract_repo_tarball(&bytes, &version_dir, &HELLO2CC_ROOT_PREFIXES)?;
+    }
+
+    let required_paths = [
+        version_dir.join(".claude-plugin").join("plugin.json"),
+        version_dir.join(".claude-plugin").join("marketplace.json"),
+        version_dir.join("settings.json"),
+        version_dir.join("agents").join("native.md"),
+        version_dir
+            .join("output-styles")
+            .join("hello2cc-native.md"),
+    ];
+    for required_path in required_paths {
+        if !required_path.exists() {
+            return Err(format!("Update failed: missing {}", required_path.display()));
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name != version {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+
+    get_hello2cc_status_from_home(&home)
 }
 
 const SQL_BACKUP_MARKER: &str = "-- CCHub Database Backup (.sql)";

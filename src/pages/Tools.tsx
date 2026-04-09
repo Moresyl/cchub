@@ -1,10 +1,28 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Terminal, Code, Download, RefreshCw } from "lucide-react";
+import { Terminal, Code, Download, RefreshCw, Trash2 } from "lucide-react";
+import Hello2ccConfigSection, { type Hello2ccConfigField } from "../components/Hello2ccConfigSection";
+import ToolsChoiceCard from "../components/ToolsChoiceCard";
+import ToolsCheckboxSection from "../components/ToolsCheckboxSection";
+import ToolsCheckboxRow from "../components/ToolsCheckboxRow";
+import ToolsChoiceRow from "../components/ToolsChoiceRow";
+import { type Hello2ccSelectOption } from "../components/Hello2ccSelectField";
 import { getLocale } from "../lib/i18n";
+import ToolsEmptyStateCard from "../components/ToolsEmptyStateCard";
+import ToolsManagedSectionHeader from "../components/ToolsManagedSectionHeader";
+import ToolsPermissionCard from "../components/ToolsPermissionCard";
+import ToolsTabButton from "../components/ToolsTabButton";
+import ToolsToggleCard from "../components/ToolsToggleCard";
 import { showToast } from "../components/Toast";
-import type { DetectedTool } from "../types/skills";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import { useSetClaudeHudConfigMutation, useSetHello2ccConfigMutation } from "../hooks/mutations";
+import {
+  useDetectTools,
+  useHello2ccStatus,
+  useHudStatus,
+  type Hello2ccConfigQueryResult,
+  type Hello2ccStatusQueryResult,
+} from "../hooks/queries";
 
 type ToolTab = "claude" | "codex";
 
@@ -47,6 +65,18 @@ interface HudConfig {
   };
 }
 
+type Hello2ccConfig = Hello2ccConfigQueryResult;
+type Hello2ccStatus = Hello2ccStatusQueryResult;
+type Hello2ccSelectKey = Exclude<keyof Hello2ccConfig, "mirror_session_model">;
+type HudGitStatusKey = keyof NonNullable<HudConfig["gitStatus"]>;
+type HudDisplayBooleanKey = Exclude<keyof NonNullable<HudConfig["display"]>, "contextValue">;
+
+interface Hello2ccUpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+}
+
 const DEFAULT_HUD_CONFIG: HudConfig = {
   lineLayout: "expanded",
   showSeparators: false,
@@ -59,6 +89,20 @@ const DEFAULT_HUD_CONFIG: HudConfig = {
     showTools: false, showAgents: false, showTodos: false,
     showSessionName: false, showClaudeCodeVersion: false, showMemoryUsage: false,
   },
+};
+
+const DEFAULT_HELLO2CC_CONFIG: Hello2ccConfig = {
+  routing_policy: "native-inject",
+  mirror_session_model: true,
+  default_agent_model: "",
+  primary_model: "",
+  subagent_model: "",
+  guide_model: "",
+  explore_model: "",
+  plan_model: "",
+  general_model: "",
+  team_model: "",
+  compatibility_mode: "full",
 };
 
 const PERM_LEVELS = [
@@ -83,29 +127,52 @@ export default function Tools() {
   const [codexContextWindow1M, setCodexContextWindow1M] = useState(false);
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
   const [loading, setLoading] = useState(true);
-  const [tools, setTools] = useState<DetectedTool[]>([]);
-  const [hudStatus, setHudStatus] = useState<HudStatus | null>(null);
   const [hudInstalling, setHudInstalling] = useState(false);
   const [hudUpdateInfo, setHudUpdateInfo] = useState<{ currentVersion: string; latestVersion: string; hasUpdate: boolean } | null>(null);
   const [hudUpdating, setHudUpdating] = useState(false);
   const [hudChecking, setHudChecking] = useState(false);
+  const [hello2ccInstalling, setHello2ccInstalling] = useState(false);
+  const [hello2ccUninstalling, setHello2ccUninstalling] = useState(false);
+  const [hello2ccUpdating, setHello2ccUpdating] = useState(false);
+  const [hello2ccChecking, setHello2ccChecking] = useState(false);
+  const [hello2ccToggling, setHello2ccToggling] = useState(false);
+  const [hello2ccUpdateInfo, setHello2ccUpdateInfo] = useState<Hello2ccUpdateInfo | null>(null);
+  const [hello2ccDraft, setHello2ccDraft] = useState<Hello2ccConfig>(DEFAULT_HELLO2CC_CONFIG);
+  const pendingPermLevelRef = useRef<number | null>(null);
+  const { data: tools = [] } = useDetectTools();
+  const { data: rawHudStatus, refetch: refetchHudStatus } = useHudStatus();
+  const { data: hello2ccStatus, refetch: refetchHello2ccStatus } = useHello2ccStatus();
+  const setHudConfigMutation = useSetClaudeHudConfigMutation();
+  const setHello2ccConfigMutation = useSetHello2ccConfigMutation();
   const locale = getLocale();
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
+  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
+  ), [locale]);
+  const hudStatus = migrateHudConfig((rawHudStatus as HudStatus | null) ?? null);
+
+  const toolById = useMemo(
+    () => new Map(tools.map((tool) => [tool.id, tool])),
+    [tools],
   );
+  const visibleTabs = useMemo(
+    () => (["claude", "codex"] as ToolTab[]).filter((id) => visibleApps.includes(id)),
+    [visibleApps],
+  );
+  const visibleTabItems = useMemo(
+    () => visibleTabs.map((id) => ({
+      id,
+      label: toolById.get(id)?.name || id,
+      installed: toolById.get(id)?.installed ?? false,
+      Icon: id === "claude" ? Terminal : Code,
+    })),
+    [toolById, visibleTabs],
+  );
+  const activeTabInstalled = toolById.get(tab)?.installed ?? false;
 
-  const visibleTabs = (["claude", "codex"] as ToolTab[]).filter((id) => visibleApps.includes(id));
-
-  useEffect(() => { loadData(); }, []);
-  useEffect(() => {
-    if (visibleTabs.length === 0) return;
-    if (!visibleTabs.includes(tab)) setTab(visibleTabs[0]);
-  }, [tab, visibleTabs]);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [level, channel, model, toolSearchEnabled, codexSettings, detectedTools, hud, nextVisibleApps] = await Promise.all([
+      const [level, channel, model, toolSearchEnabled, codexSettings, nextVisibleApps] = await Promise.all([
         invoke<number>("get_claude_permissions_level").catch(() => 0),
         invoke<string>("get_claude_auto_update").catch(() => "latest"),
         invoke<string>("get_claude_model").catch(() => ""),
@@ -113,8 +180,6 @@ export default function Tools() {
         invoke<{ approval_mode: string; reasoning_effort: string; disable_response_storage: boolean; context_window_1m: boolean }>("get_codex_settings").catch(() => ({
           approval_mode: "suggest", reasoning_effort: "medium", disable_response_storage: false, context_window_1m: false,
         })),
-        invoke<DetectedTool[]>("detect_tools").catch(() => []),
-        invoke<HudStatus>("get_claude_hud_status").catch(() => null),
         fetchVisibleApps(),
       ]);
       setPermLevel(level);
@@ -125,43 +190,49 @@ export default function Tools() {
       setCodexReasoning(codexSettings.reasoning_effort);
       setCodexDisableStorage(codexSettings.disable_response_storage);
       setCodexContextWindow1M(codexSettings.context_window_1m);
-      setTools(detectedTools);
-      setHudStatus(migrateHudConfig(hud));
       setVisibleApps(nextVisibleApps);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, []);
 
-  async function setClaudeSetting(fn: string, args: Record<string, unknown>, onSuccess: () => void) {
+  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    if (visibleTabs.length === 0) return;
+    if (!visibleTabs.includes(tab)) setTab(visibleTabs[0]);
+  }, [tab, visibleTabs]);
+  useEffect(() => {
+    setHello2ccDraft(hello2ccStatus?.config ?? DEFAULT_HELLO2CC_CONFIG);
+  }, [hello2ccStatus]);
+
+  const setClaudeSetting = useCallback(async <T,>(fn: string, args: Record<string, unknown>, onSuccess: (value: T) => void) => {
     try {
-      await invoke(fn, args);
-      onSuccess();
+      const value = await invoke<T>(fn, args);
+      onSuccess(value);
       showToast("success", uiText("已更新", "Updated", "更新しました"));
     } catch (e) { showToast("error", `${e}`); }
-  }
+  }, [uiText]);
 
-  async function setCodex(key: string, value: string) {
+  const setCodex = useCallback(async (key: string, value: string) => {
     try {
       await invoke("set_codex_setting", { key, value });
       showToast("success", uiText("已更新", "Updated", "更新しました"));
     } catch (e) { showToast("error", `${e}`); }
-  }
+  }, [uiText]);
 
-  async function handleInstallHud() {
+  const handleInstallHud = useCallback(async () => {
     setHudInstalling(true);
     try {
       await invoke("install_claude_hud");
-      const hud = await invoke<HudStatus>("get_claude_hud_status");
-      setHudStatus(migrateHudConfig(hud));
+      await refetchHudStatus();
       showToast("success", uiText("claude-hud 安装成功", "claude-hud installed", "claude-hud をインストールしました"));
     } catch (e) {
       showToast("error", uiText(`安装失败: ${e}`, `Install failed: ${e}`, `インストールに失敗しました: ${e}`));
     } finally {
       setHudInstalling(false);
     }
-  }
+  }, [refetchHudStatus, uiText]);
 
-  async function checkHudUpdate() {
+  const checkHudUpdate = useCallback(async () => {
     setHudChecking(true);
     try {
       const info = await invoke<{ currentVersion: string; latestVersion: string; hasUpdate: boolean }>("check_claude_hud_update");
@@ -174,14 +245,13 @@ export default function Tools() {
     } finally {
       setHudChecking(false);
     }
-  }
+  }, [uiText]);
 
-  async function handleUpdateHud() {
+  const handleUpdateHud = useCallback(async () => {
     setHudUpdating(true);
     try {
       const result = await invoke<{ version: string; skipped: boolean }>("update_claude_hud");
-      const hud = await invoke<HudStatus>("get_claude_hud_status");
-      setHudStatus(migrateHudConfig(hud));
+      await refetchHudStatus();
       setHudUpdateInfo(null);
       if (result.skipped) {
         showToast("success", uiText("已是最新版本", "Already up to date", "すでに最新です"));
@@ -193,7 +263,91 @@ export default function Tools() {
     } finally {
       setHudUpdating(false);
     }
-  }
+  }, [refetchHudStatus, uiText]);
+
+  const updateHello2ccDraft = useCallback(<K extends keyof Hello2ccConfig,>(key: K, value: Hello2ccConfig[K]) => {
+    setHello2ccDraft(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const handleInstallHello2cc = useCallback(async () => {
+    setHello2ccInstalling(true);
+    try {
+      await invoke("install_hello2cc");
+      setHello2ccUpdateInfo(null);
+      await refetchHello2ccStatus();
+      showToast("success", uiText("hello2cc 安装成功", "hello2cc installed", "hello2cc をインストールしました"));
+    } catch (e) {
+      showToast("error", uiText(`安装失败: ${e}`, `Install failed: ${e}`, `インストールに失敗しました: ${e}`));
+    } finally {
+      setHello2ccInstalling(false);
+    }
+  }, [refetchHello2ccStatus, uiText]);
+
+  const handleUninstallHello2cc = useCallback(async () => {
+    setHello2ccUninstalling(true);
+    try {
+      await invoke("uninstall_hello2cc");
+      setHello2ccUpdateInfo(null);
+      await refetchHello2ccStatus();
+      showToast("success", uiText("hello2cc 已卸载", "hello2cc uninstalled", "hello2cc をアンインストールしました"));
+    } catch (e) {
+      showToast("error", uiText(`卸载失败: ${e}`, `Uninstall failed: ${e}`, `アンインストールに失敗しました: ${e}`));
+    } finally {
+      setHello2ccUninstalling(false);
+    }
+  }, [refetchHello2ccStatus, uiText]);
+
+  const toggleHello2ccEnabled = useCallback(async (enabled: boolean) => {
+    setHello2ccToggling(true);
+    try {
+      await invoke("set_hello2cc_enabled", { enabled });
+      await refetchHello2ccStatus();
+      showToast("success", uiText("已更新", "Updated", "更新しました"));
+    } catch (e) {
+      showToast("error", `${e}`);
+    } finally {
+      setHello2ccToggling(false);
+    }
+  }, [refetchHello2ccStatus, uiText]);
+
+  const checkHello2ccUpdate = useCallback(async () => {
+    setHello2ccChecking(true);
+    try {
+      const info = await invoke<Hello2ccUpdateInfo>("check_hello2cc_update");
+      setHello2ccUpdateInfo(info);
+      if (!info.hasUpdate) {
+        showToast("success", uiText("已是最新版本", "Already up to date", "すでに最新です"));
+      }
+    } catch (e) {
+      showToast("error", uiText(`检查更新失败: ${e}`, `Check failed: ${e}`, `更新確認に失敗しました: ${e}`));
+    } finally {
+      setHello2ccChecking(false);
+    }
+  }, [uiText]);
+
+  const handleUpdateHello2cc = useCallback(async () => {
+    setHello2ccUpdating(true);
+    try {
+      const status = await invoke<Hello2ccStatus>("update_hello2cc");
+      setHello2ccUpdateInfo(null);
+      await refetchHello2ccStatus();
+      showToast("success", uiText(`已更新到 v${status.version}`, `Updated to v${status.version}`, `v${status.version} に更新しました`));
+    } catch (e) {
+      showToast("error", uiText(`更新失败: ${e}`, `Update failed: ${e}`, `更新に失敗しました: ${e}`));
+    } finally {
+      setHello2ccUpdating(false);
+    }
+  }, [refetchHello2ccStatus, uiText]);
+
+  const handleSaveHello2ccConfig = useCallback(async () => {
+    try {
+      const status = await setHello2ccConfigMutation.mutateAsync(hello2ccDraft);
+      setHello2ccDraft(status.config);
+      showToast("success", uiText("hello2cc 配置已保存", "hello2cc config saved", "hello2cc 設定を保存しました"));
+    } catch (e) {
+      showToast("error", `${e}`);
+    }
+  }, [hello2ccDraft, setHello2ccConfigMutation, uiText]);
 
   /** Migrate legacy `layout` field to `lineLayout` + `showSeparators` */
   function migrateHudConfig(status: HudStatus | null): HudStatus | null {
@@ -212,16 +366,15 @@ export default function Tools() {
     return { ...status, hudConfig: cfg };
   }
 
-  async function toggleStatusLine(enabled: boolean) {
+  const toggleStatusLine = useCallback(async (enabled: boolean) => {
     try {
       await invoke("set_claude_statusline", { enabled });
-      const hud = await invoke<HudStatus>("get_claude_hud_status");
-      setHudStatus(migrateHudConfig(hud));
+      await refetchHudStatus();
       showToast("success", uiText("已更新", "Updated", "更新しました"));
     } catch (e) { showToast("error", `${e}`); }
-  }
+  }, [refetchHudStatus, uiText]);
 
-  async function updateHudConfig(patch: Partial<HudConfig>) {
+  const updateHudConfig = useCallback(async (patch: Partial<HudConfig>) => {
     if (!hudStatus) return;
     const current = hudStatus.hudConfig || DEFAULT_HUD_CONFIG;
     const updated: HudConfig = {
@@ -231,19 +384,422 @@ export default function Tools() {
       display: { ...current.display, ...patch.display },
     };
     try {
-      await invoke("set_claude_hud_config", { config: updated });
-      setHudStatus({ ...hudStatus, hudConfig: updated });
+      await setHudConfigMutation.mutateAsync(updated);
       showToast("success", uiText("已更新", "Updated", "更新しました"));
     } catch (e) { showToast("error", `${e}`); }
-  }
+  }, [hudStatus, setHudConfigMutation, uiText]);
 
+  const commitPermLevel = useCallback(async (nextLevel = pendingPermLevelRef.current ?? permLevel) => {
+    pendingPermLevelRef.current = null;
+    await setClaudeSetting<number>("set_claude_permissions_level", { level: nextLevel }, setPermLevel);
+  }, [permLevel, setClaudeSetting]);
+
+  const unavailableLabel = useMemo(() => uiText("未安装", "N/A", "未インストール"), [uiText]);
+  const permLevelLabels = useMemo(
+    () => PERM_LEVELS.map((level) => uiText(level.label_zh, level.label_en, level.label_ja)),
+    [uiText],
+  );
+  const autoUpdateOptions = useMemo(
+    () => [
+      { value: "latest", label: uiText("最新", "Latest", "最新") },
+      { value: "stable", label: uiText("稳定", "Stable", "安定版") },
+      { value: "disabled", label: uiText("关闭", "Off", "オフ") },
+    ],
+    [uiText],
+  );
+  const claudeModelOptions = useMemo(
+    () => [
+      { value: "opus", label: "Opus" },
+      { value: "sonnet", label: "Sonnet" },
+      { value: "haiku", label: "Haiku" },
+    ],
+    [],
+  );
+  const hudLayoutOptions = useMemo(
+    () => [
+      { value: "expanded", label: uiText("多行展开", "Expanded", "展開表示"), style: { fontSize: 11 } },
+      { value: "compact", label: uiText("单行紧凑", "Compact", "コンパクト"), style: { fontSize: 11 } },
+    ],
+    [uiText],
+  );
+  const hudPathLevelOptions = useMemo(
+    () => [1, 2, 3].map((value) => ({ value, label: String(value), style: { fontSize: 11, minWidth: 24 } })),
+    [],
+  );
+  const hudContextValueOptions = useMemo(
+    () => [
+      { value: "percent", label: "45%", style: { fontSize: 11 } },
+      { value: "tokens", label: "45k/200k", style: { fontSize: 11 } },
+      { value: "remaining", label: uiText("剩余", "Remain", "残り"), style: { fontSize: 11 } },
+      { value: "both", label: uiText("全部", "Both", "両方"), style: { fontSize: 11 } },
+    ],
+    [uiText],
+  );
+  const codexApprovalOptions = useMemo(
+    () => [
+      { value: "suggest", label: uiText("建议", "Suggest", "提案") },
+      { value: "auto-edit", label: uiText("自动编辑", "Auto Edit", "自動編集") },
+      { value: "full-auto", label: uiText("全自动", "Full Auto", "フルオート") },
+    ],
+    [uiText],
+  );
+  const codexReasoningOptions = useMemo(
+    () => [
+      { value: "low", label: uiText("低", "Low", "低") },
+      { value: "medium", label: uiText("中", "Medium", "中") },
+      { value: "high", label: uiText("高", "High", "高") },
+      { value: "xhigh", label: uiText("极高", "XHigh", "最高") },
+    ],
+    [uiText],
+  );
+  const permLevelOptions = useMemo(
+    () => PERM_LEVELS.map((level, index) => ({ value: index, label: permLevelLabels[index], color: level.color })),
+    [permLevelLabels],
+  );
+  const hudGitStatusOptions = useMemo(
+    () => [
+      { key: "enabled" as HudGitStatusKey, label: uiText("显示分支", "Branch", "ブランチ表示"), defaultValue: true },
+      { key: "showDirty" as HudGitStatusKey, label: uiText("未提交标记", "Dirty Mark", "変更あり表示"), defaultValue: true },
+      { key: "showAheadBehind" as HudGitStatusKey, label: uiText("领先/落后", "Ahead/Behind", "先行/遅延"), defaultValue: false },
+      { key: "showFileStats" as HudGitStatusKey, label: uiText("文件统计", "File Stats", "ファイル統計"), defaultValue: false },
+    ],
+    [uiText],
+  );
+  const hudDisplayOptions = useMemo(
+    () => [
+      { key: "showModel" as HudDisplayBooleanKey, label: uiText("模型名", "Model", "モデル名"), defaultValue: true },
+      { key: "showProject" as HudDisplayBooleanKey, label: uiText("项目路径", "Project Path", "プロジェクトパス"), defaultValue: true },
+      { key: "showContextBar" as HudDisplayBooleanKey, label: uiText("上下文进度条", "Context Bar", "コンテキストバー"), defaultValue: true },
+      { key: "showConfigCounts" as HudDisplayBooleanKey, label: uiText("配置计数", "Config Counts", "設定数"), defaultValue: false },
+      { key: "showDuration" as HudDisplayBooleanKey, label: uiText("会话时长", "Duration", "継続時間"), defaultValue: false },
+      { key: "showSpeed" as HudDisplayBooleanKey, label: uiText("输出速度", "Output Speed", "出力速度"), defaultValue: false },
+      { key: "showUsage" as HudDisplayBooleanKey, label: uiText("用量限制", "Usage", "使用量"), defaultValue: true },
+      { key: "usageBarEnabled" as HudDisplayBooleanKey, label: uiText("用量进度条", "Usage Bar", "使用量バー"), defaultValue: true },
+      { key: "showTokenBreakdown" as HudDisplayBooleanKey, label: uiText("Token 明细", "Token Detail", "トークン詳細"), defaultValue: true },
+      { key: "showTools" as HudDisplayBooleanKey, label: uiText("工具活动", "Tools", "ツール活動"), defaultValue: false },
+      { key: "showAgents" as HudDisplayBooleanKey, label: uiText("Agent 活动", "Agents", "Agent 活動"), defaultValue: false },
+      { key: "showTodos" as HudDisplayBooleanKey, label: uiText("Todo 进度", "Todos", "Todo 進捗"), defaultValue: false },
+      { key: "showSessionName" as HudDisplayBooleanKey, label: uiText("会话名称", "Session Name", "セッション名"), defaultValue: false },
+      { key: "showClaudeCodeVersion" as HudDisplayBooleanKey, label: uiText("CC 版本号", "CC Version", "CC バージョン"), defaultValue: false },
+      { key: "showMemoryUsage" as HudDisplayBooleanKey, label: uiText("内存占用", "Memory Usage", "メモリ使用量"), defaultValue: false },
+    ],
+    [uiText],
+  );
+  const hello2ccRoutingOptions = useMemo<Hello2ccSelectOption[]>(
+    () => [
+      { value: "native-inject", label: "native-inject" },
+      { value: "prompt-only", label: "prompt-only" },
+    ],
+    [],
+  );
+  const hello2ccCompatibilityOptions = useMemo<Hello2ccSelectOption[]>(
+    () => [
+      { value: "full", label: "full" },
+      { value: "sanitize-only", label: "sanitize-only" },
+    ],
+    [],
+  );
+  const hello2ccModelOptions = useMemo<Hello2ccSelectOption[]>(
+    () => [
+      { value: "", label: uiText("留空", "Blank", "空欄") },
+      { value: "inherit", label: "inherit" },
+      { value: "opus", label: "opus" },
+      { value: "sonnet", label: "sonnet" },
+      { value: "haiku", label: "haiku" },
+    ],
+    [uiText],
+  );
+  const hello2ccModelFields = useMemo(
+    () => [
+      { fieldKey: "default_agent_model" as Hello2ccSelectKey, label: uiText("默认 Agent 槽位", "Default Agent Slot", "既定 Agent スロット"), description: uiText("统一默认值", "Global default", "全体デフォルト") },
+      { fieldKey: "primary_model" as Hello2ccSelectKey, label: uiText("Primary Model", "Primary Model", "Primary Model"), description: uiText("高能力 Agent", "High-capability agents", "高能力 Agent") },
+      { fieldKey: "subagent_model" as Hello2ccSelectKey, label: uiText("Subagent Model", "Subagent Model", "Subagent Model"), description: uiText("未指定模型的 Agent", "Agents without explicit model", "未指定モデルの Agent") },
+      { fieldKey: "guide_model" as Hello2ccSelectKey, label: uiText("Guide Model", "Guide Model", "Guide Model"), description: "Claude Code Guide" },
+      { fieldKey: "explore_model" as Hello2ccSelectKey, label: uiText("Explore Model", "Explore Model", "Explore Model"), description: "Explore" },
+      { fieldKey: "plan_model" as Hello2ccSelectKey, label: uiText("Plan Model", "Plan Model", "Plan Model"), description: "Plan" },
+      { fieldKey: "general_model" as Hello2ccSelectKey, label: uiText("General Model", "General Model", "General Model"), description: "General-Purpose" },
+      { fieldKey: "team_model" as Hello2ccSelectKey, label: uiText("Team Model", "Team Model", "Team Model"), description: uiText("团队 teammate", "Team teammates", "チーム teammate") },
+    ],
+    [uiText],
+  );
+  const noVisibleTabsTitle = useMemo(
+    () => uiText("当前已隐藏所有工具页签", "All tool tabs are currently hidden", "すべてのツールタブは現在非表示です"),
+    [uiText],
+  );
+  const noVisibleTabsDescription = useMemo(
+    () => uiText("可在设置页的 App 可见性中重新开启", "Re-enable them from Settings > App Visibility", "Settings > App Visibility から再表示できます"),
+    [uiText],
+  );
+  const notInstalledTitle = useMemo(
+    () => uiText(
+      `${tab === "claude" ? "Claude Code" : "Codex CLI"} 未安装`,
+      `${tab === "claude" ? "Claude Code" : "Codex CLI"} not installed`,
+      `${tab === "claude" ? "Claude Code" : "Codex CLI"} は未インストールです`,
+    ),
+    [tab, uiText],
+  );
+  const notInstalledDescription = useMemo(
+    () => uiText("安装后即可在此管理工具设置", "Install it to manage settings here", "インストール後にここで设置を管理できます"),
+    [uiText],
+  );
+  const handleSelectTab = useCallback((value: string) => {
+    setTab(value as ToolTab);
+  }, []);
+  const handleSelectPermLevel = useCallback((value: string | number) => {
+    const nextLevel = Number(value);
+    setPermLevel(nextLevel);
+    pendingPermLevelRef.current = nextLevel;
+    void commitPermLevel(nextLevel);
+  }, [commitPermLevel]);
+  const handleSelectAutoUpdate = useCallback((value: string | number) => {
+    const nextValue = String(value);
+    setAutoUpdate(nextValue);
+    void setClaudeSetting<string>("set_claude_auto_update", { channel: nextValue }, setAutoUpdate);
+  }, [setClaudeSetting]);
+  const handleSelectClaudeModel = useCallback((value: string | number) => {
+    const nextValue = String(value);
+    setClaudeModel(nextValue);
+    void setClaudeSetting<string>("set_claude_model", { model: nextValue }, setClaudeModel);
+  }, [setClaudeSetting]);
+  const handleSelectHudLayout = useCallback((value: string | number) => {
+    void updateHudConfig({ lineLayout: value as HudConfig["lineLayout"] });
+  }, [updateHudConfig]);
+  const handleSelectHudPathLevel = useCallback((value: string | number) => {
+    void updateHudConfig({ pathLevels: Number(value) });
+  }, [updateHudConfig]);
+  const handleSelectHudContextValue = useCallback((value: string | number) => {
+    void updateHudConfig({ display: { contextValue: value as NonNullable<HudConfig["display"]>["contextValue"] } });
+  }, [updateHudConfig]);
+  const handleToggleHudGitStatus = useCallback((key: string, checked: boolean) => {
+    void updateHudConfig({ gitStatus: { [key]: checked } as Partial<NonNullable<HudConfig["gitStatus"]>> });
+  }, [updateHudConfig]);
+  const handleToggleHudDisplay = useCallback((key: string, checked: boolean) => {
+    void updateHudConfig({ display: { [key]: checked } as Partial<NonNullable<HudConfig["display"]>> });
+  }, [updateHudConfig]);
+  const handleSelectCodexApproval = useCallback((value: string | number) => {
+    const nextValue = String(value);
+    setCodexApproval(nextValue);
+    void setCodex("approval_mode", nextValue);
+  }, [setCodex]);
+  const handleSelectCodexReasoning = useCallback((value: string | number) => {
+    const nextValue = String(value);
+    setCodexReasoning(nextValue);
+    void setCodex("reasoning_effort", nextValue);
+  }, [setCodex]);
+  const handleToggleBypassPermissions = useCallback((enabled: boolean) => {
+    const nextLevel = enabled ? 3 : 0;
+    setPermLevel(nextLevel);
+    pendingPermLevelRef.current = nextLevel;
+    void commitPermLevel(nextLevel);
+  }, [commitPermLevel]);
+  const handleToggleToolSearch = useCallback((enabled: boolean) => {
+    setToolSearch(enabled);
+    void setClaudeSetting<boolean>("set_claude_tool_search", { enabled }, setToolSearch);
+  }, [setClaudeSetting]);
+  const handleChangePermLevelRange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const nextLevel = Number(event.target.value);
+    pendingPermLevelRef.current = nextLevel;
+    setPermLevel(nextLevel);
+  }, []);
+  const handleCommitPermLevelPointerUp = useCallback(() => {
+    void commitPermLevel();
+  }, [commitPermLevel]);
+  const handleCommitPermLevelBlur = useCallback(() => {
+    void commitPermLevel();
+  }, [commitPermLevel]);
+  const handleCommitPermLevelKeyUp = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End") {
+      void commitPermLevel();
+    }
+  }, [commitPermLevel]);
+  const handleInstallHudClick = useCallback(() => {
+    void handleInstallHud();
+  }, [handleInstallHud]);
+  const handleUpdateHudClick = useCallback(() => {
+    void handleUpdateHud();
+  }, [handleUpdateHud]);
+  const handleCheckHudUpdateClick = useCallback(() => {
+    void checkHudUpdate();
+  }, [checkHudUpdate]);
+  const handleToggleHudSeparators = useCallback((checked: boolean) => {
+    void updateHudConfig({ showSeparators: checked });
+  }, [updateHudConfig]);
+  const handleChangeHello2ccSelect = useCallback((fieldKey: string, value: string) => {
+    updateHello2ccDraft(fieldKey as Hello2ccSelectKey, value as Hello2ccConfig[Hello2ccSelectKey]);
+  }, [updateHello2ccDraft]);
+  const handleToggleHello2ccMirrorSessionModel = useCallback((enabled: boolean) => {
+    updateHello2ccDraft("mirror_session_model", enabled);
+  }, [updateHello2ccDraft]);
+  const handleToggleCodexDisableStorage = useCallback((enabled: boolean) => {
+    setCodexDisableStorage(enabled);
+    void setCodex("disable_response_storage", String(enabled));
+  }, [setCodex]);
+  const handleToggleCodexContextWindow1M = useCallback((enabled: boolean) => {
+    setCodexContextWindow1M(enabled);
+    void setCodex("context_window_1m", String(enabled));
+  }, [setCodex]);
+  const hello2ccConfigSource = hello2ccStatus?.config ?? DEFAULT_HELLO2CC_CONFIG;
+  const handleInstallHello2ccClick = useCallback(() => {
+    void handleInstallHello2cc();
+  }, [handleInstallHello2cc]);
+  const handleUpdateHello2ccClick = useCallback(() => {
+    void handleUpdateHello2cc();
+  }, [handleUpdateHello2cc]);
+  const handleCheckHello2ccUpdateClick = useCallback(() => {
+    void checkHello2ccUpdate();
+  }, [checkHello2ccUpdate]);
+  const handleUninstallHello2ccClick = useCallback(() => {
+    void handleUninstallHello2cc();
+  }, [handleUninstallHello2cc]);
+  const handleResetHello2ccDraft = useCallback(() => {
+    setHello2ccDraft(hello2ccConfigSource);
+  }, [hello2ccConfigSource]);
+  const handleSaveHello2ccConfigClick = useCallback(() => {
+    void handleSaveHello2ccConfig();
+  }, [handleSaveHello2ccConfig]);
+  const perm = PERM_LEVELS[permLevel] || PERM_LEVELS[0];
+  const hc = hudStatus?.hudConfig || DEFAULT_HUD_CONFIG;
+  const hudResolvedGitStatusOptions = useMemo(
+    () => hudGitStatusOptions.map((option) => ({
+      key: option.key,
+      label: option.label,
+      checked: hc.gitStatus?.[option.key] ?? option.defaultValue,
+    })),
+    [hc.gitStatus, hudGitStatusOptions],
+  );
+  const hudResolvedDisplayOptions = useMemo(
+    () => hudDisplayOptions.map((option) => ({
+      key: option.key,
+      label: option.label,
+      checked: hc.display?.[option.key] ?? option.defaultValue,
+    })),
+    [hc.display, hudDisplayOptions],
+  );
+  const hudInstallAction = useMemo(
+    () => ({
+      label: uiText("安装", "Install", "インストール"),
+      icon: Download,
+      pending: hudInstalling,
+      onClick: handleInstallHudClick,
+      disabled: hudInstalling,
+      variant: "primary" as const,
+      gap: 5,
+    }),
+    [handleInstallHudClick, hudInstalling, uiText],
+  );
+  const hudPrimaryAction = useMemo(
+    () => (hudUpdateInfo?.hasUpdate
+      ? {
+        label: uiText(`更新到 v${hudUpdateInfo.latestVersion}`, `Update to v${hudUpdateInfo.latestVersion}`, `v${hudUpdateInfo.latestVersion} に更新`),
+        icon: Download,
+        pending: hudUpdating,
+        onClick: handleUpdateHudClick,
+        disabled: hudUpdating,
+        variant: "primary" as const,
+        gap: 5,
+      }
+      : {
+        label: uiText("检查更新", "Check Update", "更新を確認"),
+        icon: RefreshCw,
+        pending: hudChecking,
+        onClick: handleCheckHudUpdateClick,
+        disabled: hudChecking,
+        title: uiText("检查更新", "Check for updates", "更新を確認"),
+      }),
+    [handleCheckHudUpdateClick, handleUpdateHudClick, hudChecking, hudUpdateInfo, hudUpdating, uiText],
+  );
+  const hudToggle = useMemo(
+    () => ({
+      value: hudStatus?.statuslineEnabled ?? false,
+      onChange: toggleStatusLine,
+      labelOn: uiText("已启用", "Enabled", "有効"),
+      labelOff: uiText("已关闭", "Disabled", "無効"),
+    }),
+    [hudStatus?.statuslineEnabled, toggleStatusLine, uiText],
+  );
+  const hello2ccInstallAction = useMemo(
+    () => ({
+      label: uiText("安装", "Install", "インストール"),
+      icon: Download,
+      pending: hello2ccInstalling,
+      onClick: handleInstallHello2ccClick,
+      disabled: hello2ccInstalling,
+      variant: "primary" as const,
+      gap: 5,
+    }),
+    [handleInstallHello2ccClick, hello2ccInstalling, uiText],
+  );
+  const hello2ccPrimaryAction = useMemo(
+    () => (hello2ccUpdateInfo?.hasUpdate
+      ? {
+        label: uiText(`更新到 v${hello2ccUpdateInfo.latestVersion}`, `Update to v${hello2ccUpdateInfo.latestVersion}`, `v${hello2ccUpdateInfo.latestVersion} に更新`),
+        icon: Download,
+        pending: hello2ccUpdating,
+        onClick: handleUpdateHello2ccClick,
+        disabled: hello2ccUpdating,
+        variant: "primary" as const,
+        gap: 5,
+      }
+      : {
+        label: uiText("检查更新", "Check Update", "更新を確認"),
+        icon: RefreshCw,
+        pending: hello2ccChecking,
+        onClick: handleCheckHello2ccUpdateClick,
+        disabled: hello2ccChecking,
+      }),
+    [handleCheckHello2ccUpdateClick, handleUpdateHello2ccClick, hello2ccChecking, hello2ccUpdateInfo, hello2ccUpdating, uiText],
+  );
+  const hello2ccSecondaryAction = useMemo(
+    () => ({
+      label: uiText("卸载", "Uninstall", "アンインストール"),
+      icon: Trash2,
+      pending: hello2ccUninstalling,
+      onClick: handleUninstallHello2ccClick,
+      disabled: hello2ccUninstalling,
+    }),
+    [handleUninstallHello2ccClick, hello2ccUninstalling, uiText],
+  );
+  const hello2ccToggle = useMemo(
+    () => ({
+      value: hello2ccStatus?.enabled ?? false,
+      onChange: toggleHello2ccEnabled,
+      labelOn: hello2ccToggling ? uiText("处理中", "Updating", "更新中") : uiText("已启用", "Enabled", "有効"),
+      labelOff: hello2ccToggling ? uiText("处理中", "Updating", "更新中") : uiText("已关闭", "Disabled", "無効"),
+    }),
+    [hello2ccStatus?.enabled, hello2ccToggling, toggleHello2ccEnabled, uiText],
+  );
+  const hello2ccHasChanges = JSON.stringify(hello2ccDraft) !== JSON.stringify(hello2ccConfigSource);
+  const permDescription = uiText(PERM_DESC_ZH[permLevel], PERM_DESC_EN[permLevel], PERM_DESC_JA[permLevel]);
+  const hello2ccSelectFields = useMemo<Hello2ccConfigField[]>(
+    () => [
+      {
+        fieldKey: "routing_policy",
+        label: uiText("路由策略", "Routing Policy", "ルーティングポリシー"),
+        description: uiText("决定是否在原生 Agent 调用前注入模型槽位", "Choose whether native agent calls receive silent model injection", "ネイティブ Agent 呼び出し前にモデル注入するかを選びます"),
+        value: hello2ccDraft.routing_policy,
+        options: hello2ccRoutingOptions,
+      },
+      {
+        fieldKey: "compatibility_mode",
+        label: uiText("兼容模式", "Compatibility Mode", "互換モード"),
+        description: uiText("与其他插件共存时可切到仅净化模式", "Use sanitize-only when coexisting with other orchestration plugins", "他プラグインと共存する場合は sanitize-only を使います"),
+        value: hello2ccDraft.compatibility_mode,
+        options: hello2ccCompatibilityOptions,
+      },
+      ...hello2ccModelFields.map((field) => ({
+        fieldKey: field.fieldKey,
+        label: field.label,
+        description: field.description,
+        value: hello2ccDraft[field.fieldKey],
+        options: hello2ccModelOptions,
+      })),
+    ],
+    [hello2ccCompatibilityOptions, hello2ccDraft, hello2ccModelFields, hello2ccModelOptions, hello2ccRoutingOptions, uiText],
+  );
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{uiText("加载中...", "Loading...", "読み込み中...")}</span></div>;
   }
-
-  const perm = PERM_LEVELS[permLevel] || PERM_LEVELS[0];
-  const hc = hudStatus?.hudConfig || DEFAULT_HUD_CONFIG;
 
   return (
     <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -256,422 +812,237 @@ export default function Tools() {
 
         {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {visibleTabs.map(id => {
-          const Icon = id === "claude" ? Terminal : Code;
-          const tool = tools.find(t => t.id === id);
-          const installed = tool?.installed ?? false;
+        {visibleTabItems.map(({ id, label, installed, Icon }) => {
           return (
-            <button key={id} className={`btn btn-sm ${tab === id ? "btn-primary" : "btn-secondary"}`}
-              onClick={() => setTab(id)} style={{ gap: 6, opacity: installed ? 1 : 0.5 }}>
-              <Icon size={14} />{tool?.name || id}
-              {!installed && <span style={{ fontSize: 9, color: "var(--text-muted)" }}>({uiText("未安装", "N/A", "未インストール")})</span>}
-            </button>
+            <ToolsTabButton
+              key={id}
+              tabId={id}
+              label={label}
+              icon={<Icon size={14} />}
+              active={tab === id}
+              installed={installed}
+              unavailableLabel={unavailableLabel}
+              onSelect={handleSelectTab}
+            />
           );
         })}
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {visibleTabs.length === 0 && (
-          <div className="card" style={{ padding: "40px 20px", textAlign: "center", marginBottom: 12 }}>
-            <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
-              {uiText("当前已隐藏所有工具页签", "All tool tabs are currently hidden", "すべてのツールタブは現在非表示です")}
-            </p>
-            <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {uiText("可在设置页的 App 可见性中重新开启", "Re-enable them from Settings > App Visibility", "Settings > App Visibility から再表示できます")}
-            </p>
-          </div>
+          <ToolsEmptyStateCard
+            title={noVisibleTabsTitle}
+            description={noVisibleTabsDescription}
+            marginBottom={12}
+          />
         )}
 
         {/* Not installed hint */}
-        {visibleTabs.length > 0 && !(tools.find(t => t.id === tab)?.installed) && (
-          <div className="card" style={{ padding: "40px 20px", textAlign: "center" }}>
-            <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
-              {uiText(
-                `${tab === "claude" ? "Claude Code" : "Codex CLI"} 未安装`,
-                `${tab === "claude" ? "Claude Code" : "Codex CLI"} not installed`,
-                `${tab === "claude" ? "Claude Code" : "Codex CLI"} は未インストールです`,
-              )}
-            </p>
-            <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {uiText("安装后即可在此管理工具设置", "Install it to manage settings here", "インストール後にここで設定を管理できます")}
-            </p>
-          </div>
+        {visibleTabs.length > 0 && !activeTabInstalled && (
+          <ToolsEmptyStateCard
+            title={notInstalledTitle}
+            description={notInstalledDescription}
+          />
         )}
 
-        {tab === "claude" && tools.find(t => t.id === "claude")?.installed && (
+        {tab === "claude" && toolById.get("claude")?.installed && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {/* Permission Slider */}
-            <div className="card" style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 20 }}>
-              <div style={{ flex: 1 }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{uiText("权限模式", "Permission Mode", "権限モード")}</h4>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: perm.color, boxShadow: `0 0 5px ${perm.color}50` }} />
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText(perm.label_zh, perm.label_en, perm.label_ja)}</span>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>— {uiText(PERM_DESC_ZH[permLevel], PERM_DESC_EN[permLevel], PERM_DESC_JA[permLevel])}</span>
-                </div>
-                <div style={{ position: "relative", height: 5, borderRadius: 3, background: "var(--bg-badge)" }}>
-                  <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${(permLevel / 3) * 100}%`, borderRadius: 3, background: `linear-gradient(90deg, #ef4444, ${perm.color})`, transition: "width 0.2s" }} />
-                  <input type="range" min={0} max={3} step={1} value={permLevel}
-                    onChange={e => { const v = Number(e.target.value); setPermLevel(v); setClaudeSetting("set_claude_permissions_level", { level: v }, () => {}); }}
-                    style={{ position: "absolute", top: -8, left: 0, width: "100%", height: 22, opacity: 0, cursor: "pointer" }} />
-                  <div style={{ position: "absolute", top: -5, left: `calc(${(permLevel / 3) * 100}% - 7px)`, width: 14, height: 14, borderRadius: "50%", background: perm.color, border: "2px solid var(--bg-app)", boxShadow: `0 0 5px ${perm.color}60`, transition: "left 0.2s", pointerEvents: "none" }} />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-                  {PERM_LEVELS.map((pl, i) => (
-                    <span key={i} style={{ fontSize: 10, color: permLevel === i ? pl.color : "var(--text-muted)", fontWeight: permLevel === i ? 700 : 400, cursor: "pointer" }}
-                      onClick={() => { setPermLevel(i); setClaudeSetting("set_claude_permissions_level", { level: i }, () => {}); }}>
-                      {uiText(pl.label_zh, pl.label_en, pl.label_ja)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <ToolsPermissionCard
+              title={uiText("权限模式", "Permission Mode", "権限モード")}
+              currentLabel={uiText(perm.label_zh, perm.label_en, perm.label_ja)}
+              currentDescription={permDescription}
+              currentColor={perm.color}
+              value={permLevel}
+              options={permLevelOptions}
+              onSelect={handleSelectPermLevel}
+              onRangeChange={handleChangePermLevelRange}
+              onRangePointerUp={handleCommitPermLevelPointerUp}
+              onRangeKeyUp={handleCommitPermLevelKeyUp}
+              onRangeBlur={handleCommitPermLevelBlur}
+            />
 
             {/* Bypass Permissions */}
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("绕过权限确认", "Bypass Permissions", "権限確認をバイパス")}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{uiText("跳过所有权限确认，全自动执行", "Skip all permission prompts, fully autonomous", "すべての権限確認をスキップして完全自動で実行します")}</p>
-              </div>
-              <ToggleSwitch
-                value={permLevel === 3}
-                onChange={v => {
-                  const newLevel = v ? 3 : 0;
-                  setPermLevel(newLevel);
-                  setClaudeSetting("set_claude_permissions_level", { level: newLevel }, () => {});
-                }}
-                labelOn="ON"
-                labelOff="OFF"
-              />
-            </div>
+            <ToolsToggleCard
+              title={uiText("绕过权限确认", "Bypass Permissions", "権限確認をバイパス")}
+              description={uiText("跳过所有权限确认，全自动执行", "Skip all permission prompts, fully autonomous", "すべての権限確認をスキップして完全自動で実行します")}
+              value={permLevel === 3}
+              onChange={handleToggleBypassPermissions}
+              labelOn="ON"
+              labelOff="OFF"
+            />
 
             {/* Auto Update */}
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("自动更新", "Auto Update", "自動更新")}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{uiText("Claude Code 更新频道", "Update channel", "Claude Code の更新チャンネル")}</p>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[
-                  { value: "latest", label: uiText("最新", "Latest", "最新") },
-                  { value: "stable", label: uiText("稳定", "Stable", "安定版") },
-                  { value: "disabled", label: uiText("关闭", "Off", "オフ") },
-                ].map(opt => (
-                  <button key={opt.value}
-                    className={`btn btn-xs ${autoUpdate === opt.value ? "btn-primary" : "btn-secondary"}`}
-                    onClick={() => { setAutoUpdate(opt.value); setClaudeSetting("set_claude_auto_update", { channel: opt.value }, () => {}); }}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ToolsChoiceCard
+              title={uiText("自动更新", "Auto Update", "自動更新")}
+              description={uiText("Claude Code 更新频道", "Update channel", "Claude Code の更新チャンネル")}
+              value={autoUpdate}
+              onSelect={handleSelectAutoUpdate}
+              options={autoUpdateOptions}
+            />
 
             {/* Model Selection */}
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("模型选择", "Model", "モデル")}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{uiText("切换默认使用的模型", "Switch default model", "既定モデルを切り替えます")}</p>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[
-                  { value: "opus", label: "Opus" },
-                  { value: "sonnet", label: "Sonnet" },
-                  { value: "haiku", label: "Haiku" },
-                ].map(opt => (
-                  <button key={opt.value}
-                    className={`btn btn-xs ${claudeModel.includes(opt.value) ? "btn-primary" : "btn-secondary"}`}
-                    onClick={() => { setClaudeModel(opt.value); setClaudeSetting("set_claude_model", { model: opt.value }, () => {}); }}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ToolsChoiceCard
+              title={uiText("模型选择", "Model", "モデル")}
+              description={uiText("切换默认使用的模型", "Switch default model", "既定モデルを切り替えます")}
+              value={claudeModelOptions.find((option) => claudeModel.includes(String(option.value)))?.value ?? ""}
+              onSelect={handleSelectClaudeModel}
+              options={claudeModelOptions}
+            />
 
             {/* Tool Search */}
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>Tool Search</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{uiText("启用工具搜索功能（实验性）", "Enable tool search (experimental)", "ツール検索機能を有効化します（実験的）")}</p>
-              </div>
-              <ToggleSwitch
-                value={toolSearch}
-                onChange={v => { setToolSearch(v); setClaudeSetting("set_claude_tool_search", { enabled: v }, () => {}); }}
-                labelOn={uiText("已启用", "Enabled", "有効")}
-                labelOff={uiText("已关闭", "Disabled", "無効")}
-              />
-            </div>
+            <ToolsToggleCard
+              title="Tool Search"
+              description={uiText("启用工具搜索功能（实验性）", "Enable tool search (experimental)", "ツール検索機能を有効化します（実験的）")}
+              value={toolSearch}
+              onChange={handleToggleToolSearch}
+              labelOn={uiText("已启用", "Enabled", "有効")}
+              labelOff={uiText("已关闭", "Disabled", "無効")}
+            />
 
             {/* StatusLine (claude-hud) */}
             <div className="card" style={{ padding: "16px 18px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: hudStatus?.installed ? 12 : 0 }}>
-                <div>
-                  <h4 style={{ fontSize: 13, fontWeight: 700 }}>StatusLine (claude-hud)</h4>
-                  <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                    {uiText("终端底部实时状态栏", "Real-time status bar at terminal bottom", "ターミナル下部のリアルタイムステータスバー")}
-                    {hudStatus?.installed && hudStatus.version && (
-                      <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>v{hudStatus.version}</span>
-                    )}
-                  </p>
-                </div>
-                {!hudStatus?.installed ? (
-                  <button
-                    className="btn btn-primary btn-xs"
-                    onClick={() => void handleInstallHud()}
-                    disabled={hudInstalling}
-                    style={{ gap: 5 }}
-                  >
-                    {hudInstalling ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Download size={12} />}
-                    {uiText("安装", "Install", "インストール")}
-                  </button>
-                ) : (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {hudUpdateInfo?.hasUpdate ? (
-                      <button
-                        className="btn btn-primary btn-xs"
-                        onClick={() => void handleUpdateHud()}
-                        disabled={hudUpdating}
-                        style={{ gap: 5 }}
-                      >
-                        {hudUpdating ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Download size={12} />}
-                        {uiText(`更新到 v${hudUpdateInfo.latestVersion}`, `Update to v${hudUpdateInfo.latestVersion}`, `v${hudUpdateInfo.latestVersion} に更新`)}
-                      </button>
-                    ) : (
-                      <button
-                        className="btn btn-secondary btn-xs"
-                        onClick={() => void checkHudUpdate()}
-                        disabled={hudChecking}
-                        title={uiText("检查更新", "Check for updates", "更新を確認")}
-                        style={{ gap: 4 }}
-                      >
-                        {hudChecking ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={12} />}
-                        {uiText("检查更新", "Check Update", "更新を確認")}
-                      </button>
-                    )}
-                    <ToggleSwitch
-                      value={hudStatus.statuslineEnabled}
-                      onChange={v => void toggleStatusLine(v)}
-                      labelOn={uiText("已启用", "Enabled", "有効")}
-                      labelOff={uiText("已关闭", "Disabled", "無効")}
-                    />
-                  </div>
-                )}
-              </div>
+              <ToolsManagedSectionHeader
+                title="StatusLine (claude-hud)"
+                description={uiText("终端底部实时状态栏", "Real-time status bar at terminal bottom", "ターミナル下部のリアルタイムステータスバー")}
+                version={hudStatus?.version}
+                installed={hudStatus?.installed ?? false}
+                installAction={hudInstallAction}
+                primaryAction={hudPrimaryAction}
+                toggle={hudToggle}
+              />
 
               {hudStatus?.installed && (
                 <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
                   {/* Layout */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("布局模式", "Layout Mode", "レイアウトモード")}</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      {(["expanded", "compact"] as const).map(mode => (
-                        <button key={mode}
-                          className={`btn btn-xs ${(hc.lineLayout || "expanded") === mode ? "btn-primary" : "btn-secondary"}`}
-                          onClick={() => void updateHudConfig({ lineLayout: mode })}
-                          style={{ fontSize: 11 }}
-                        >
-                          {mode === "expanded"
-                            ? uiText("多行展开", "Expanded", "展開表示")
-                            : uiText("单行紧凑", "Compact", "コンパクト")}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <ToolsChoiceRow
+                    title={uiText("布局模式", "Layout Mode", "レイアウトモード")}
+                    value={hc.lineLayout || "expanded"}
+                    onSelect={handleSelectHudLayout}
+                    options={hudLayoutOptions}
+                  />
 
                   {/* Separators */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("分隔线", "Separators", "区切り線")}</span>
-                    </div>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
-                      <input type="checkbox" checked={hc.showSeparators === true}
-                        onChange={e => void updateHudConfig({ showSeparators: e.target.checked })} />
-                      {uiText("活动区域前显示分隔线", "Show separator before activity", "アクティビティの前に区切り線を表示")}
-                    </label>
-                  </div>
+                  <ToolsCheckboxRow
+                    title={uiText("分隔线", "Separators", "区切り線")}
+                    label={uiText("活动区域前显示分隔线", "Show separator before activity", "アクティビティの前に区切り線を表示")}
+                    checked={hc.showSeparators === true}
+                    onChange={handleToggleHudSeparators}
+                  />
 
                   {/* Path Levels */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("路径层级", "Path Levels", "パス階層")}</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      {[1, 2, 3].map(n => (
-                        <button key={n}
-                          className={`btn btn-xs ${(hc.pathLevels || 1) === n ? "btn-primary" : "btn-secondary"}`}
-                          onClick={() => void updateHudConfig({ pathLevels: n })}
-                          style={{ fontSize: 11, minWidth: 24 }}
-                        >
-                          {n}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <ToolsChoiceRow
+                    title={uiText("路径层级", "Path Levels", "パス階層")}
+                    value={hc.pathLevels || 1}
+                    onSelect={handleSelectHudPathLevel}
+                    options={hudPathLevelOptions}
+                  />
 
                   {/* Context Value Format */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{uiText("上下文格式", "Context Format", "コンテキスト形式")}</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      {(["percent", "tokens", "remaining", "both"] as const).map(mode => (
-                        <button key={mode}
-                          className={`btn btn-xs ${(hc.display?.contextValue || "percent") === mode ? "btn-primary" : "btn-secondary"}`}
-                          onClick={() => void updateHudConfig({ display: { ...hc.display, contextValue: mode } })}
-                          style={{ fontSize: 11 }}
-                        >
-                          {mode === "percent" ? "45%" : mode === "tokens" ? "45k/200k" : mode === "remaining" ? uiText("剩余", "Remain", "残り") : uiText("全部", "Both", "両方")}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <ToolsChoiceRow
+                    title={uiText("上下文格式", "Context Format", "コンテキスト形式")}
+                    value={hc.display?.contextValue || "percent"}
+                    onSelect={handleSelectHudContextValue}
+                    options={hudContextValueOptions}
+                  />
 
                   {/* Git Status */}
-                  <div>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Git Status</span>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px 16px", marginTop: 8 }}>
-                      {([
-                        ["enabled", uiText("显示分支", "Branch", "ブランチ表示"), hc.gitStatus?.enabled, true],
-                        ["showDirty", uiText("未提交标记", "Dirty Mark", "変更あり表示"), hc.gitStatus?.showDirty, true],
-                        ["showAheadBehind", uiText("领先/落后", "Ahead/Behind", "先行/遅延"), hc.gitStatus?.showAheadBehind, false],
-                        ["showFileStats", uiText("文件统计", "File Stats", "ファイル統計"), hc.gitStatus?.showFileStats, false],
-                      ] as [string, string, boolean | undefined, boolean][]).map(([key, label, value, defaultVal]) => (
-                        <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
-                          <input type="checkbox" checked={value ?? defaultVal}
-                            onChange={e => void updateHudConfig({ gitStatus: { ...hc.gitStatus, [key]: e.target.checked } })} />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+                  <ToolsCheckboxSection
+                    title="Git Status"
+                    options={hudResolvedGitStatusOptions}
+                    onToggle={handleToggleHudGitStatus}
+                  />
 
                   {/* Display Options */}
-                  <div>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{uiText("显示选项", "Display", "表示項目")}</span>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px 16px", marginTop: 8 }}>
-                      {([
-                        ["showModel", uiText("模型名", "Model", "モデル名"), hc.display?.showModel, true],
-                        ["showProject", uiText("项目路径", "Project Path", "プロジェクトパス"), hc.display?.showProject, true],
-                        ["showContextBar", uiText("上下文进度条", "Context Bar", "コンテキストバー"), hc.display?.showContextBar, true],
-                        ["showConfigCounts", uiText("配置计数", "Config Counts", "設定数"), hc.display?.showConfigCounts, false],
-                        ["showDuration", uiText("会话时长", "Duration", "継続時間"), hc.display?.showDuration, false],
-                        ["showSpeed", uiText("输出速度", "Output Speed", "出力速度"), hc.display?.showSpeed, false],
-                        ["showUsage", uiText("用量限制", "Usage", "使用量"), hc.display?.showUsage, true],
-                        ["usageBarEnabled", uiText("用量进度条", "Usage Bar", "使用量バー"), hc.display?.usageBarEnabled, true],
-                        ["showTokenBreakdown", uiText("Token 明细", "Token Detail", "トークン詳細"), hc.display?.showTokenBreakdown, true],
-                        ["showTools", uiText("工具活动", "Tools", "ツール活動"), hc.display?.showTools, false],
-                        ["showAgents", uiText("Agent 活动", "Agents", "Agent 活動"), hc.display?.showAgents, false],
-                        ["showTodos", uiText("Todo 进度", "Todos", "Todo 進捗"), hc.display?.showTodos, false],
-                        ["showSessionName", uiText("会话名称", "Session Name", "セッション名"), hc.display?.showSessionName, false],
-                        ["showClaudeCodeVersion", uiText("CC 版本号", "CC Version", "CC バージョン"), hc.display?.showClaudeCodeVersion, false],
-                        ["showMemoryUsage", uiText("内存占用", "Memory Usage", "メモリ使用量"), hc.display?.showMemoryUsage, false],
-                      ] as [string, string, boolean | undefined, boolean][]).map(([key, label, value, defaultVal]) => (
-                        <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
-                          <input type="checkbox" checked={value ?? defaultVal}
-                            onChange={e => void updateHudConfig({ display: { ...hc.display, [key]: e.target.checked } })} />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+                  <ToolsCheckboxSection
+                    title={uiText("显示选项", "Display", "表示項目")}
+                    options={hudResolvedDisplayOptions}
+                    onToggle={handleToggleHudDisplay}
+                  />
                 </div>
+              )}
+            </div>
+
+            {/* hello2cc */}
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <ToolsManagedSectionHeader
+                title="hello2cc"
+                description={uiText("让第三方模型更接近 Claude Code 原生工作流", "Make third-party models behave more like native Claude Code", "サードパーティーモデルを Claude Code ネイティブに近づけます")}
+                version={hello2ccStatus?.version}
+                installed={hello2ccStatus?.installed ?? false}
+                installAction={hello2ccInstallAction}
+                primaryAction={hello2ccPrimaryAction}
+                secondaryAction={hello2ccSecondaryAction}
+                toggle={hello2ccToggle}
+                actionsWrap
+              />
+
+              {hello2ccStatus?.installed && (
+                <Hello2ccConfigSection
+                  pathLabel={uiText("插件缓存目录", "Plugin cache path", "プラグインキャッシュパス")}
+                  installPath={hello2ccStatus.installPath}
+                  fields={hello2ccSelectFields}
+                  onSelectChange={handleChangeHello2ccSelect}
+                  mirrorTitle={uiText("镜像当前会话模型", "Mirror Session Model", "現在のセッションモデルをミラー")}
+                  mirrorDescription={uiText("缺少显式模型时优先跟随当前会话模型槽位", "Prefer the current session model when no explicit slot is set", "明示的なモデルがない場合は現在のセッションモデルを優先します")}
+                  mirrorValue={hello2ccDraft.mirror_session_model}
+                  onMirrorChange={handleToggleHello2ccMirrorSessionModel}
+                  mirrorLabelOn={uiText("已启用", "Enabled", "有効")}
+                  mirrorLabelOff={uiText("已关闭", "Disabled", "無効")}
+                  resetLabel={uiText("重置", "Reset", "リセット")}
+                  saveLabel={uiText("保存配置", "Save Config", "設定を保存")}
+                  hasChanges={hello2ccHasChanges}
+                  isSaving={setHello2ccConfigMutation.isPending}
+                  onReset={handleResetHello2ccDraft}
+                  onSave={handleSaveHello2ccConfigClick}
+                />
               )}
             </div>
           </div>
         )}
 
-        {tab === "codex" && tools.find(t => t.id === "codex")?.installed && (
+        {tab === "codex" && toolById.get("codex")?.installed && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {/* Approval Mode */}
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("审批模式", "Approval Mode", "承認モード")}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{uiText("操作确认级别", "Action confirmation level", "操作確認レベル")}</p>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[
-                  { value: "suggest", label: uiText("建议", "Suggest", "提案") },
-                  { value: "auto-edit", label: uiText("自动编辑", "Auto Edit", "自動編集") },
-                  { value: "full-auto", label: uiText("全自动", "Full Auto", "フルオート") },
-                ].map(opt => (
-                  <button key={opt.value}
-                    className={`btn btn-xs ${codexApproval === opt.value ? "btn-primary" : "btn-secondary"}`}
-                    onClick={() => { setCodexApproval(opt.value); setCodex("approval_mode", opt.value); }}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ToolsChoiceCard
+              title={uiText("审批模式", "Approval Mode", "承認モード")}
+              description={uiText("操作确认级别", "Action confirmation level", "操作確認レベル")}
+              value={codexApproval}
+              onSelect={handleSelectCodexApproval}
+              options={codexApprovalOptions}
+            />
 
             {/* Reasoning Effort */}
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("推理强度", "Reasoning Effort", "推論強度")}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{uiText("模型推理计算量", "Model reasoning compute", "モデルの推論計算量")}</p>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[
-                  { value: "low", label: uiText("低", "Low", "低") },
-                  { value: "medium", label: uiText("中", "Medium", "中") },
-                  { value: "high", label: uiText("高", "High", "高") },
-                  { value: "xhigh", label: uiText("极高", "XHigh", "最高") },
-                ].map(opt => (
-                  <button key={opt.value}
-                    className={`btn btn-xs ${codexReasoning === opt.value ? "btn-primary" : "btn-secondary"}`}
-                    onClick={() => { setCodexReasoning(opt.value); setCodex("reasoning_effort", opt.value); }}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ToolsChoiceCard
+              title={uiText("推理强度", "Reasoning Effort", "推論強度")}
+              description={uiText("模型推理计算量", "Model reasoning compute", "モデルの推論計算量")}
+              value={codexReasoning}
+              onSelect={handleSelectCodexReasoning}
+              options={codexReasoningOptions}
+            />
 
             {/* Disable Response Storage */}
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("禁用响应存储", "Disable Response Storage", "応答保存を無効化")}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{uiText("不保存 API 响应到本地", "Don't save API responses locally", "API 応答をローカルに保存しません")}</p>
-              </div>
-              <ToggleSwitch
-                value={codexDisableStorage}
-                onChange={v => { setCodexDisableStorage(v); setCodex("disable_response_storage", String(v)); }}
-                labelOn={uiText("已禁用", "Disabled", "無効")}
-                labelOff={uiText("已启用", "Enabled", "有効")}
-              />
-            </div>
+            <ToolsToggleCard
+              title={uiText("禁用响应存储", "Disable Response Storage", "応答保存を無効化")}
+              description={uiText("不保存 API 响应到本地", "Don't save API responses locally", "API 応答をローカルに保存しません")}
+              value={codexDisableStorage}
+              onChange={handleToggleCodexDisableStorage}
+              labelOn={uiText("已禁用", "Disabled", "無効")}
+              labelOff={uiText("已启用", "Enabled", "有効")}
+            />
 
-            <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("1M 上下文窗口", "1M Context Window", "1M コンテキストウィンドウ")}</h4>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                  {uiText("一键写入 `model_context_window = 1000000`", "Write `model_context_window = 1000000` with one toggle", "`model_context_window = 1000000` をワンタップで書き込みます")}
-                </p>
-              </div>
-              <ToggleSwitch
-                value={codexContextWindow1M}
-                onChange={v => { setCodexContextWindow1M(v); setCodex("context_window_1m", String(v)); }}
-                labelOn={uiText("已开启", "Enabled", "有効")}
-                labelOff={uiText("默认", "Default", "既定")}
-              />
-            </div>
+            <ToolsToggleCard
+              title={uiText("1M 上下文窗口", "1M Context Window", "1M コンテキストウィンドウ")}
+              description={uiText("一键写入 `model_context_window = 1000000`", "Write `model_context_window = 1000000` with one toggle", "`model_context_window = 1000000` をワンタップで書き込みます")}
+              value={codexContextWindow1M}
+              onChange={handleToggleCodexContextWindow1M}
+              labelOn={uiText("已开启", "Enabled", "有効")}
+              labelOff={uiText("默认", "Default", "既定")}
+            />
           </div>
         )}
 
       </div>
-    </div>
-  );
-}
-
-
-function ToggleSwitch({ value, onChange, labelOn, labelOff }: { value: boolean; onChange: (v: boolean) => void; labelOn: string; labelOff: string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <button className={`toggle toggle-sm ${value ? "on" : "off"}`} onClick={() => onChange(!value)}>
-        <span className="toggle-knob" />
-      </button>
-      <span style={{ fontSize: 12, color: value ? "var(--success)" : "var(--text-muted)", fontWeight: 500 }}>
-        {value ? labelOn : labelOff}
-      </span>
     </div>
   );
 }

@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     recorded_at TEXT
 );
 
+CREATE INDEX IF NOT EXISTS idx_activity_logs_recorded_at
+ON activity_logs(recorded_at DESC);
+
 CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

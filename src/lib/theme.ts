@@ -11,7 +11,24 @@ export function setTheme(theme: Theme) {
 }
 
 export function applyTheme(theme: Theme) {
-  document.documentElement.setAttribute("data-theme", theme);
+  const root = document.documentElement;
+  const apply = () => {
+    root.setAttribute("data-theme", theme);
+  };
+
+  const startViewTransition = (
+    document as Document & {
+      startViewTransition?: (callback: () => void) => void;
+    }
+  ).startViewTransition?.bind(document);
+  if (!startViewTransition || root.getAttribute("data-theme") === theme) {
+    apply();
+    return;
+  }
+
+  startViewTransition(() => {
+    apply();
+  });
 }
 
 export function initTheme() {

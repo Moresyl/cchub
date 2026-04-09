@@ -202,7 +202,7 @@ pub fn get_recent_proxy_request_logs(
     db: State<'_, DbState>,
 ) -> Result<Vec<ProxyRequestLogRow>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let limit = limit.unwrap_or(12).clamp(1, 100) as i64;
+    let limit = limit.unwrap_or(12).clamp(1, 240) as i64;
     let mut stmt = conn
         .prepare(
             "SELECT

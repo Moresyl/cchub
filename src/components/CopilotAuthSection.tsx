@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { Copy, ExternalLink, Github, Loader2, RefreshCw, Trash2 } from "lucide-react";
@@ -34,20 +34,99 @@ interface CopilotAuthSectionProps {
   showDescription?: boolean;
 }
 
+interface CopilotAccountRowProps {
+  account: GitHubAccount;
+  isDefault: boolean;
+  isSelected: boolean;
+  defaulting: boolean;
+  removing: boolean;
+  defaultLabel: string;
+  boundLabel: string;
+  savingLabel: string;
+  setDefaultLabel: string;
+  removeLabel: string;
+  onSetDefault: (accountId: string) => void;
+  onRemove: (accountId: string) => void;
+}
+
 function formatExpiry(unixSeconds: number | null) {
   if (!unixSeconds) return "";
   return new Date(unixSeconds * 1000).toLocaleString();
 }
 
-export default function CopilotAuthSection({
+function CopilotAccountRowComponent({
+  account,
+  isDefault,
+  isSelected,
+  defaulting,
+  removing,
+  defaultLabel,
+  boundLabel,
+  savingLabel,
+  setDefaultLabel,
+  removeLabel,
+  onSetDefault,
+  onRemove,
+}: CopilotAccountRowProps) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        alignItems: "center",
+        padding: "12px 14px",
+        borderRadius: 10,
+        background: "var(--bg-input)",
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{account.login}</span>
+          {isDefault ? <span className="badge badge-success">{defaultLabel}</span> : null}
+          {isSelected ? <span className="badge badge-accent">{boundLabel}</span> : null}
+        </div>
+        <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>
+          ID: {account.id}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        {!isDefault ? (
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={() => onSetDefault(account.id)}
+            disabled={defaulting}
+          >
+            {defaulting ? savingLabel : setDefaultLabel}
+          </button>
+        ) : null}
+        <button
+          className="btn btn-danger-ghost btn-sm"
+          type="button"
+          onClick={() => onRemove(account.id)}
+          disabled={removing}
+          style={{ gap: 6 }}
+        >
+          {removing ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+          {removeLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const CopilotAccountRow = memo(CopilotAccountRowComponent);
+
+function CopilotAuthSectionComponent({
   selectedAccountId = null,
   onAccountSelect,
   showDescription = true,
 }: CopilotAuthSectionProps) {
   const locale = getLocale();
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
+  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  ), [locale]);
 
   const [status, setStatus] = useState<CopilotAuthStatus | null>(null);
   const [deviceCode, setDeviceCode] = useState<GitHubDeviceCodeResponse | null>(null);
@@ -57,7 +136,7 @@ export default function CopilotAuthSection({
   const [defaultingAccountId, setDefaultingAccountId] = useState<string | null>(null);
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
 
-  async function loadStatus(showError = false) {
+  const loadStatus = useCallback(async (showError = false) => {
     try {
       const next = await invoke<CopilotAuthStatus>("copilot_get_auth_status");
       setStatus(next);
@@ -76,11 +155,11 @@ export default function CopilotAuthSection({
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [uiText]);
 
   useEffect(() => {
     void loadStatus();
-  }, []);
+  }, [loadStatus]);
 
   useEffect(() => {
     if (!deviceCode) return undefined;
@@ -104,9 +183,7 @@ export default function CopilotAuthSection({
               `GitHub Copilot を認証しました: ${account.login}`,
             ),
           );
-          if (onAccountSelect) {
-            onAccountSelect(account.id);
-          }
+          onAccountSelect?.(account.id);
           return;
         }
       } catch (error) {
@@ -138,9 +215,9 @@ export default function CopilotAuthSection({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [deviceCode, onAccountSelect]);
+  }, [deviceCode, loadStatus, onAccountSelect, uiText]);
 
-  async function startDeviceFlow() {
+  const startDeviceFlow = useCallback(async () => {
     setStarting(true);
     try {
       const flow = await invoke<GitHubDeviceCodeResponse>("copilot_start_device_flow");
@@ -162,9 +239,9 @@ export default function CopilotAuthSection({
     } finally {
       setStarting(false);
     }
-  }
+  }, [uiText]);
 
-  async function handleSetDefault(accountId: string) {
+  const handleSetDefault = useCallback(async (accountId: string) => {
     setDefaultingAccountId(accountId);
     try {
       await invoke("copilot_set_default_account", { accountId });
@@ -173,8 +250,8 @@ export default function CopilotAuthSection({
         "success",
         uiText("默认账号已更新", "Default account updated", "既定アカウントを更新しました"),
       );
-      if (!selectedAccountId && onAccountSelect) {
-        onAccountSelect(null);
+      if (!selectedAccountId) {
+        onAccountSelect?.(null);
       }
     } catch (error) {
       showToast(
@@ -188,9 +265,9 @@ export default function CopilotAuthSection({
     } finally {
       setDefaultingAccountId(null);
     }
-  }
+  }, [loadStatus, onAccountSelect, selectedAccountId, uiText]);
 
-  async function handleRemoveAccount(accountId: string) {
+  const handleRemoveAccount = useCallback(async (accountId: string) => {
     setRemovingAccountId(accountId);
     try {
       await invoke("copilot_remove_account", { accountId });
@@ -199,8 +276,8 @@ export default function CopilotAuthSection({
         "success",
         uiText("账号已移除", "Account removed", "アカウントを削除しました"),
       );
-      if (selectedAccountId === accountId && onAccountSelect) {
-        onAccountSelect(null);
+      if (selectedAccountId === accountId) {
+        onAccountSelect?.(null);
       }
     } catch (error) {
       showToast(
@@ -214,16 +291,50 @@ export default function CopilotAuthSection({
     } finally {
       setRemovingAccountId(null);
     }
-  }
+  }, [loadStatus, onAccountSelect, selectedAccountId, uiText]);
 
-  async function copyUserCode() {
+  const copyUserCode = useCallback(async () => {
     if (!deviceCode?.user_code) return;
     await navigator.clipboard.writeText(deviceCode.user_code);
     showToast(
       "success",
       uiText("授权码已复制", "Code copied", "コードをコピーしました"),
     );
-  }
+  }, [deviceCode?.user_code, uiText]);
+
+  const handleRefreshClick = useCallback(() => {
+    setRefreshing(true);
+    void loadStatus(true);
+  }, [loadStatus]);
+
+  const handleStartDeviceFlowClick = useCallback(() => {
+    void startDeviceFlow();
+  }, [startDeviceFlow]);
+
+  const handleProviderAccountSelect = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    onAccountSelect?.(event.target.value || null);
+  }, [onAccountSelect]);
+
+  const handleCopyUserCodeClick = useCallback(() => {
+    void copyUserCode();
+  }, [copyUserCode]);
+
+  const handleOpenVerificationPage = useCallback(() => {
+    if (!deviceCode?.verification_uri) return;
+    void shellOpen(deviceCode.verification_uri);
+  }, [deviceCode?.verification_uri]);
+
+  const handleCancelDeviceCode = useCallback(() => {
+    setDeviceCode(null);
+  }, []);
+
+  const accounts = useMemo(() => status?.accounts || [], [status?.accounts]);
+  const defaultAccountId = status?.default_account_id || null;
+  const defaultLabel = uiText("默认", "Default", "既定");
+  const boundLabel = uiText("当前绑定", "Bound", "現在の紐付け");
+  const savingLabel = uiText("设置中...", "Saving...", "保存中...");
+  const setDefaultLabel = uiText("设为默认", "Set Default", "既定に設定");
+  const removeLabel = uiText("移除", "Remove", "削除");
 
   if (loading) {
     return (
@@ -235,9 +346,6 @@ export default function CopilotAuthSection({
     );
   }
 
-  const accounts = status?.accounts || [];
-  const defaultAccountId = status?.default_account_id || null;
-
   return (
     <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -246,7 +354,7 @@ export default function CopilotAuthSection({
             <Github size={16} />
             {uiText("GitHub Copilot 认证", "GitHub Copilot Auth", "GitHub Copilot 認証")}
           </div>
-          {showDescription && (
+          {showDescription ? (
             <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
               {uiText(
                 "支持 Device Code 登录、多账号保存、默认账号切换，以及给 Provider 绑定指定 GitHub Copilot 账号。",
@@ -254,16 +362,13 @@ export default function CopilotAuthSection({
                 "Device Code ログイン、複数アカウント保存、既定アカウント切替、Provider ごとの GitHub Copilot 紐付けに対応します。",
               )}
             </div>
-          )}
+          ) : null}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
             className="btn btn-secondary btn-sm"
             type="button"
-            onClick={() => {
-              setRefreshing(true);
-              void loadStatus(true);
-            }}
+            onClick={handleRefreshClick}
             disabled={refreshing}
             style={{ gap: 6 }}
           >
@@ -273,7 +378,7 @@ export default function CopilotAuthSection({
           <button
             className="btn btn-primary btn-sm"
             type="button"
-            onClick={() => void startDeviceFlow()}
+            onClick={handleStartDeviceFlowClick}
             disabled={starting}
             style={{ gap: 6 }}
           >
@@ -298,7 +403,7 @@ export default function CopilotAuthSection({
         ) : null}
       </div>
 
-      {onAccountSelect && (
+      {onAccountSelect ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label className="field-label">
             {uiText("Provider 绑定账号", "Provider Account Binding", "Provider の紐付けアカウント")}
@@ -306,7 +411,7 @@ export default function CopilotAuthSection({
           <select
             className="input"
             value={selectedAccountId || ""}
-            onChange={(event) => onAccountSelect(event.target.value || null)}
+            onChange={handleProviderAccountSelect}
             style={{ fontSize: 13 }}
           >
             <option value="">{uiText("使用默认账号", "Use default account", "既定アカウントを使用")}</option>
@@ -317,9 +422,9 @@ export default function CopilotAuthSection({
             ))}
           </select>
         </div>
-      )}
+      ) : null}
 
-      {deviceCode && (
+      {deviceCode ? (
         <div style={{ padding: 14, borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border-color)" }}>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
             {uiText(
@@ -332,20 +437,20 @@ export default function CopilotAuthSection({
             <code className="badge badge-accent" style={{ fontSize: 18, padding: "10px 14px", fontFamily: "'JetBrains Mono', monospace" }}>
               {deviceCode.user_code}
             </code>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={() => void copyUserCode()} style={{ gap: 6 }}>
+            <button className="btn btn-secondary btn-sm" type="button" onClick={handleCopyUserCodeClick} style={{ gap: 6 }}>
               <Copy size={14} />
               {uiText("复制", "Copy", "コピー")}
             </button>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={() => void shellOpen(deviceCode.verification_uri)} style={{ gap: 6 }}>
+            <button className="btn btn-secondary btn-sm" type="button" onClick={handleOpenVerificationPage} style={{ gap: 6 }}>
               <ExternalLink size={14} />
               {uiText("打开授权页", "Open Browser", "ブラウザで開く")}
             </button>
-            <button className="btn btn-ghost btn-sm" type="button" onClick={() => setDeviceCode(null)}>
+            <button className="btn btn-ghost btn-sm" type="button" onClick={handleCancelDeviceCode}>
               {uiText("取消", "Cancel", "キャンセル")}
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {accounts.length === 0 ? (
         <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.7 }}>
@@ -357,61 +462,27 @@ export default function CopilotAuthSection({
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {accounts.map((account) => {
-            const isDefault = account.id === defaultAccountId;
-            const isSelected = selectedAccountId === account.id;
-            return (
-              <div
-                key={account.id}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "center",
-                  padding: "12px 14px",
-                  borderRadius: 10,
-                  background: "var(--bg-input)",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{account.login}</span>
-                    {isDefault ? <span className="badge badge-success">{uiText("默认", "Default", "既定")}</span> : null}
-                    {isSelected ? <span className="badge badge-accent">{uiText("当前绑定", "Bound", "現在の紐付け")}</span> : null}
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>
-                    ID: {account.id}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {!isDefault ? (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="button"
-                      onClick={() => void handleSetDefault(account.id)}
-                      disabled={defaultingAccountId === account.id}
-                    >
-                      {defaultingAccountId === account.id
-                        ? uiText("设置中...", "Saving...", "保存中...")
-                        : uiText("设为默认", "Set Default", "既定に設定")}
-                    </button>
-                  ) : null}
-                  <button
-                    className="btn btn-danger-ghost btn-sm"
-                    type="button"
-                    onClick={() => void handleRemoveAccount(account.id)}
-                    disabled={removingAccountId === account.id}
-                    style={{ gap: 6 }}
-                  >
-                    {removingAccountId === account.id ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-                    {uiText("移除", "Remove", "削除")}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          {accounts.map((account) => (
+            <CopilotAccountRow
+              key={account.id}
+              account={account}
+              isDefault={account.id === defaultAccountId}
+              isSelected={selectedAccountId === account.id}
+              defaulting={defaultingAccountId === account.id}
+              removing={removingAccountId === account.id}
+              defaultLabel={defaultLabel}
+              boundLabel={boundLabel}
+              savingLabel={savingLabel}
+              setDefaultLabel={setDefaultLabel}
+              removeLabel={removeLabel}
+              onSetDefault={handleSetDefault}
+              onRemove={handleRemoveAccount}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 }
+
+export default memo(CopilotAuthSectionComponent);

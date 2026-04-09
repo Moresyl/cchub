@@ -1,22 +1,14 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Monitor, Plus, Trash2, X, Save, Shield } from "lucide-react";
+import { Monitor, Plus, Save, Shield, X } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import ConfirmDialog from "../components/ConfirmDialog";
+import McpClientCard, { type McpClientCardClient } from "../components/McpClientCard";
+import McpClientAccessRow, { type McpClientAccessRowServer } from "../components/McpClientAccessRow";
 
-interface McpClient {
-  id: string;
-  name: string;
-  config_path: string;
-  server_access: Record<string, boolean>;
-  created_at: string | null;
-}
+type McpClient = McpClientCardClient;
 
-interface McpServer {
-  id: string;
-  name: string;
-  status: string;
-}
+type McpServer = McpClientAccessRowServer;
 
 export default function McpClients() {
   const [clients, setClients] = useState<McpClient[]>([]);
@@ -34,9 +26,7 @@ export default function McpClients() {
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
   );
 
-  useEffect(() => { load(); }, []);
-
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [c, s] = await Promise.all([
@@ -47,9 +37,11 @@ export default function McpClients() {
       setServers(s);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, []);
 
-  async function handleCreate() {
+  useEffect(() => { void load(); }, [load]);
+
+  const handleCreate = useCallback(async () => {
     if (!newName.trim()) return;
     try {
       await invoke("create_mcp_client", { name: newName.trim(), configPath: newConfigPath.trim() || null });
@@ -58,29 +50,30 @@ export default function McpClients() {
       setNewConfigPath("");
       await load();
     } catch (e) { console.error(e); }
-  }
+  }, [load, newConfigPath, newName]);
 
-  async function handleDelete(client: McpClient) {
+  const handleDelete = useCallback((client: McpClient) => {
     setPendingDelete(client);
-  }
-  async function doDelete(client: McpClient) {
+  }, []);
+
+  const doDelete = useCallback(async (client: McpClient) => {
     try {
       await invoke("delete_mcp_client", { id: client.id });
       if (selected?.id === client.id) setSelected(null);
       await load();
     } catch (e) { console.error(e); }
-  }
+  }, [load, selected?.id]);
 
-  function startEdit(client: McpClient) {
+  const startEdit = useCallback((client: McpClient) => {
     setEditing(true);
     const access: Record<string, boolean> = {};
     for (const s of servers) {
       access[s.id] = client.server_access[s.id] ?? true;
     }
     setEditAccess(access);
-  }
+  }, [servers]);
 
-  async function handleSaveAccess() {
+  const handleSaveAccess = useCallback(async () => {
     if (!selected) return;
     try {
       await invoke("update_mcp_client_access", { id: selected.id, serverAccess: editAccess });
@@ -90,21 +83,39 @@ export default function McpClients() {
       const updated = (await invoke<McpClient[]>("get_mcp_clients")).find(c => c.id === selected.id);
       if (updated) setSelected(updated);
     } catch (e) { console.error(e); }
-  }
+  }, [editAccess, load, selected]);
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
     setShowCreate(true);
-  }
+  }, []);
 
-  function closeCreate() {
+  const closeCreate = useCallback(() => {
     setShowCreate(false);
     setNewName("");
     setNewConfigPath("");
-  }
+  }, []);
 
-  function stopEditing() {
+  const stopEditing = useCallback(() => {
     setEditing(false);
-  }
+  }, []);
+
+  const handleSelectClient = useCallback((client: McpClient) => {
+    setSelected(client);
+    setEditing(false);
+  }, []);
+
+  const handleStartEditSelected = useCallback(() => {
+    if (!selected) return;
+    startEdit(selected);
+  }, [selected, startEdit]);
+
+  const handleToggleServerAccess = useCallback((serverId: string) => {
+    setEditAccess((prev) => ({ ...prev, [serverId]: !(prev[serverId] ?? true) }));
+  }, []);
+
+  const clearSelectedClient = useCallback(() => {
+    setSelected(null);
+  }, []);
 
   useEffect(() => {
     const handleSaveShortcut = () => {
@@ -131,7 +142,7 @@ export default function McpClients() {
         return;
       }
       if (selected) {
-        setSelected(null);
+        clearSelectedClient();
       }
     };
 
@@ -143,7 +154,7 @@ export default function McpClients() {
       window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
       window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
     };
-  }, [showCreate, editing, selected, newName, newConfigPath, editAccess, servers]);
+  }, [clearSelectedClient, editing, handleCreate, handleSaveAccess, openCreate, selected, showCreate, stopEditing]);
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{uiText("加载中...", "Loading...", "読み込み中...")}</span></div>;
@@ -195,32 +206,17 @@ export default function McpClients() {
               </div>
             )}
 
-            {clients.map(client => {
+            {clients.map((client) => {
               const accessCount = Object.values(client.server_access).filter(Boolean).length;
               return (
-                <div
+                <McpClientCard
                   key={client.id}
-                  className={`card card-interactive ${selected?.id === client.id ? "selected" : ""}`}
-                  style={{ padding: "16px 20px" }}
-                  onClick={() => { setSelected(client); setEditing(false); }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div className="icon-box" style={{ background: "var(--bg-elevated)", width: 36, height: 36, borderRadius: 6 }}>
-                        <Monitor size={16} style={{ color: "var(--text-secondary)" }} />
-                      </div>
-                      <div>
-                        <span style={{ fontSize: 13, fontWeight: 600 }}>{client.name}</span>
-                        <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                          {uiText(`可访问 ${accessCount}/${servers.length} 个服务器`, `${accessCount}/${servers.length} servers accessible`, `${accessCount}/${servers.length} 個のサーバーにアクセス可能`)}
-                        </p>
-                      </div>
-                    </div>
-                    <button className="btn btn-danger-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); handleDelete(client); }}>
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
+                  client={client}
+                  selected={selected?.id === client.id}
+                  serverCountLabel={uiText(`可访问 ${accessCount}/${servers.length} 个服务器`, `${accessCount}/${servers.length} servers accessible`, `${accessCount}/${servers.length} 個のサーバーにアクセス可能`)}
+                  onSelect={handleSelectClient}
+                  onDelete={handleDelete}
+                />
               );
             })}
           </div>
@@ -240,7 +236,7 @@ export default function McpClients() {
                       <button className="btn btn-primary btn-sm" onClick={handleSaveAccess}><Save size={14} />{uiText("保存", "Save", "保存")}</button>
                     </div>
                   ) : (
-                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(selected)}>
+                    <button className="btn btn-secondary btn-sm" onClick={handleStartEditSelected}>
                       <Shield size={14} />{uiText("管理权限", "Manage Access", "アクセス権を管理")}
                     </button>
                   )}
@@ -256,30 +252,18 @@ export default function McpClients() {
                 <div>
                   <span className="field-label">{uiText("服务器访问权限", "Server Access", "サーバーアクセス権")}</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {servers.map(server => {
+                    {servers.map((server) => {
                       const hasAccess = editing ? (editAccess[server.id] ?? true) : (selected.server_access[server.id] ?? true);
                       return (
-                        <div key={server.id} className="list-row" style={{ padding: "10px 12px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <span className={`dot ${server.status === "active" ? "dot-active" : "dot-disabled"}`} />
-                            <span style={{ fontSize: 13, fontWeight: 500 }}>{server.name}</span>
-                          </div>
-                          {editing ? (
-                            <button
-                              className={`toggle ${hasAccess ? "on" : "off"}`}
-                              onClick={() => setEditAccess(prev => ({ ...prev, [server.id]: !hasAccess }))}
-                              style={{ width: 36, height: 20 }}
-                            >
-                              <div className="toggle-knob" style={{ width: 14, height: 14, top: 3 }} />
-                            </button>
-                          ) : (
-                            <span className={`badge ${hasAccess ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
-                              {hasAccess
-                                ? uiText("允许", "Allowed", "許可")
-                                : uiText("拒绝", "Denied", "拒否")}
-                            </span>
-                          )}
-                        </div>
+                        <McpClientAccessRow
+                          key={server.id}
+                          server={server}
+                          hasAccess={hasAccess}
+                          editing={editing}
+                          allowedLabel={uiText("允许", "Allowed", "許可")}
+                          deniedLabel={uiText("拒绝", "Denied", "拒否")}
+                          onToggle={handleToggleServerAccess}
+                        />
                       );
                     })}
                   </div>

@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, startTransition } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Activity, DollarSign, PencilLine, RefreshCw, Save, Trash2, X } from "lucide-react";
+import { Activity, DollarSign, RefreshCw, Save, X } from "lucide-react";
+import ActivityLogRow from "../components/ActivityLogRow";
+import ModelPricingListItem, { type ModelPricingListItemRow } from "../components/ModelPricingListItem";
+import ProxyRequestRow from "../components/ProxyRequestRow";
 import { showToast } from "../components/Toast";
 import { getLocale } from "../lib/i18n";
 
@@ -89,11 +92,12 @@ const EMPTY_PRICING_DRAFT: ModelPricingDraft = {
 
 const AUTO_REFRESH_INTERVALS = [5, 10, 30, 60] as const;
 const MAX_MERGED_PROXY_LOG_ROWS = 240;
+const RECENT_PROXY_LOG_LIMIT = 240;
 
 export default function Logs() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [proxySummary, setProxySummary] = useState<ProxyUsageSummary | null>(null);
-  const [proxyLogs, setProxyLogs] = useState<ProxyRequestLogRow[]>([]);
+  const [recentProxyLogs, setRecentProxyLogs] = useState<ProxyRequestLogRow[]>([]);
   const [modelPricingRows, setModelPricingRows] = useState<ModelPricingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [proxyFilters, setProxyFilters] = useState(DEFAULT_PROXY_FILTERS);
@@ -106,16 +110,42 @@ export default function Logs() {
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<(typeof AUTO_REFRESH_INTERVALS)[number]>(10);
   const [refreshing, setRefreshing] = useState(false);
   const proxyListRef = useRef<HTMLDivElement | null>(null);
+  const loadRequestIdRef = useRef(0);
+  const deferredProviderQuery = useDeferredValue(proxyFilters.providerQuery);
+  const deferredModelQuery = useDeferredValue(proxyFilters.modelQuery);
   const locale = getLocale();
-  const uiText = (zhText: string, enText: string, jaText?: string) =>
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
+  const uiText = useCallback((zhText: string, enText: string, jaText?: string) =>
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+  [locale]);
+  const effectiveProxyFilters = useMemo(
+    () => ({
+      toolId: proxyFilters.toolId,
+      status: proxyFilters.status,
+      streamMode: proxyFilters.streamMode,
+      providerQuery: deferredProviderQuery,
+      modelQuery: deferredModelQuery,
+    }),
+    [
+      deferredModelQuery,
+      deferredProviderQuery,
+      proxyFilters.status,
+      proxyFilters.streamMode,
+      proxyFilters.toolId,
+    ],
+  );
+  const proxyLogs = useMemo(
+    () => filterProxyLogs(recentProxyLogs, effectiveProxyFilters),
+    [effectiveProxyFilters, recentProxyLogs],
+  );
 
-  async function load(options: { silent?: boolean; mergeProxyRows?: boolean; preserveProxyScroll?: boolean } = {}) {
+  const load = useCallback(async (options: { silent?: boolean; mergeProxyRows?: boolean; preserveProxyScroll?: boolean } = {}) => {
     const {
       silent = false,
       mergeProxyRows = false,
       preserveProxyScroll = false,
     } = options;
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
     const previousScrollTop = preserveProxyScroll ? proxyListRef.current?.scrollTop || 0 : 0;
     const previousScrollHeight = preserveProxyScroll ? proxyListRef.current?.scrollHeight || 0 : 0;
     if (!silent) {
@@ -124,26 +154,22 @@ export default function Logs() {
       setRefreshing(true);
     }
     try {
-      const [acts, summary, filteredProxyLogs, pricing] = await Promise.all([
+      const [acts, summary, latestProxyLogs, pricing] = await Promise.all([
         invoke<ActivityItem[]>("get_activity_logs", { date: selectedDate }),
         invoke<ProxyUsageSummary>("get_proxy_usage_summary"),
-        invoke<ProxyRequestLogRow[]>("search_proxy_request_logs", {
-          filters: {
-            limit: 80,
-            tool_id: proxyFilters.toolId || null,
-            provider_query: proxyFilters.providerQuery,
-            model_query: proxyFilters.modelQuery,
-            status: proxyFilters.status,
-            stream_mode: proxyFilters.streamMode,
-          },
+        invoke<ProxyRequestLogRow[]>("get_recent_proxy_request_logs", {
+          limit: RECENT_PROXY_LOG_LIMIT,
         }),
         invoke<ModelPricingRow[]>("list_model_pricing"),
       ]);
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
       startTransition(() => {
         setActivities(acts);
         setProxySummary(summary);
         setModelPricingRows(pricing);
-        setProxyLogs((current) => (mergeProxyRows ? mergeProxyLogs(current, filteredProxyLogs) : filteredProxyLogs));
+        setRecentProxyLogs((current) => (mergeProxyRows ? mergeProxyLogs(current, latestProxyLogs) : latestProxyLogs));
       });
       if (preserveProxyScroll && previousScrollTop > 0) {
         requestAnimationFrame(() => {
@@ -154,19 +180,24 @@ export default function Logs() {
         });
       }
     } catch (error) {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
       console.error(error);
     } finally {
-      if (!silent) {
-        setLoading(false);
-      } else {
-        setRefreshing(false);
+      if (requestId === loadRequestIdRef.current) {
+        if (!silent) {
+          setLoading(false);
+        } else {
+          setRefreshing(false);
+        }
       }
     }
-  }
+  }, [selectedDate]);
 
   useEffect(() => {
     void load();
-  }, [selectedDate, proxyFilters]);
+  }, [load]);
 
   useEffect(() => {
     if (!autoRefreshEnabled) return undefined;
@@ -174,7 +205,7 @@ export default function Logs() {
       void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true });
     }, autoRefreshInterval * 1000);
     return () => window.clearInterval(timer);
-  }, [autoRefreshEnabled, autoRefreshInterval, selectedDate, proxyFilters]);
+  }, [autoRefreshEnabled, autoRefreshInterval, load]);
 
   const hasActiveProxyFilters =
     proxyFilters.toolId !== "" ||
@@ -183,7 +214,7 @@ export default function Logs() {
     proxyFilters.providerQuery.trim() !== "" ||
     proxyFilters.modelQuery.trim() !== "";
 
-  async function handleSavePricing() {
+  const handleSavePricing = useCallback(async () => {
     if (savingPricing) return;
     setSavingPricing(true);
     try {
@@ -201,9 +232,9 @@ export default function Logs() {
     } finally {
       setSavingPricing(false);
     }
-  }
+  }, [load, pricingDraft, savingPricing, uiText]);
 
-  async function handleDeletePricing(modelId: string) {
+  const handleDeletePricing = useCallback(async (modelId: string) => {
     setDeletingPricingId(modelId);
     try {
       await invoke("delete_model_pricing", { modelId });
@@ -222,9 +253,9 @@ export default function Logs() {
     } finally {
       setDeletingPricingId((current) => (current === modelId ? null : current));
     }
-  }
+  }, [editingModelId, load, uiText]);
 
-  function startEditingPricing(row: ModelPricingRow) {
+  const startEditingPricing = useCallback((row: ModelPricingRow) => {
     setEditingModelId(row.model_id);
     setPricingDraft({
       model_id: row.model_id,
@@ -233,12 +264,20 @@ export default function Logs() {
       cache_read_cost_per_million: row.cache_read_cost_per_million,
       cache_write_cost_per_million: row.cache_write_cost_per_million,
     });
-  }
+  }, []);
 
-  function resetPricingDraft() {
+  const resetPricingDraft = useCallback(() => {
     setPricingDraft(EMPTY_PRICING_DRAFT);
     setEditingModelId(null);
-  }
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true });
+  }, [load]);
+
+  const handleClearProxyFilters = useCallback(() => {
+    setProxyFilters({ ...DEFAULT_PROXY_FILTERS });
+  }, []);
 
   if (loading) {
     return (
@@ -264,7 +303,7 @@ export default function Logs() {
             )}
           </p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={() => void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true })}>
+        <button className="btn btn-secondary btn-sm" onClick={handleRefresh}>
           {refreshing ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
           {uiText("刷新", "Refresh", "更新")}
         </button>
@@ -351,37 +390,15 @@ export default function Logs() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 220, overflowY: "auto" }}>
             {modelPricingRows.map((item) => (
-              <div key={item.model_id} className="list-row" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{item.model_id}</span>
-                    {item.normalized_model_id !== item.model_id && (
-                      <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                        {item.normalized_model_id}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 12, marginTop: 4, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-                    <span>in {item.input_cost_per_million}</span>
-                    <span>out {item.output_cost_per_million}</span>
-                    <span>cache-r {item.cache_read_cost_per_million}</span>
-                    <span>cache-w {item.cache_write_cost_per_million}</span>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <button className="btn btn-secondary btn-icon-sm" onClick={() => startEditingPricing(item)} title={uiText("编辑定价", "Edit pricing", "単価を編集")}>
-                    <PencilLine size={14} />
-                  </button>
-                  <button
-                    className="btn btn-danger-ghost btn-icon-sm"
-                    onClick={() => void handleDeletePricing(item.model_id)}
-                    disabled={deletingPricingId === item.model_id}
-                    title={uiText("删除定价", "Delete pricing", "単価を削除")}
-                  >
-                    {deletingPricingId === item.model_id ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Trash2 size={14} />}
-                  </button>
-                </div>
-              </div>
+              <ModelPricingListItem
+                key={item.model_id}
+                item={item as ModelPricingListItemRow}
+                deleting={deletingPricingId === item.model_id}
+                editTitle={uiText("编辑定价", "Edit pricing", "単価を編集")}
+                deleteTitle={uiText("删除定价", "Delete pricing", "単価を削除")}
+                onEdit={startEditingPricing}
+                onDelete={handleDeletePricing}
+              />
             ))}
           </div>
         )}
@@ -499,7 +516,7 @@ export default function Logs() {
               : uiText(`最近 ${proxyLogs.length} 条`, `${proxyLogs.length} recent rows`, `最近 ${proxyLogs.length} 件`)}
           </span>
           {hasActiveProxyFilters && (
-            <button className="btn btn-ghost btn-xs" onClick={() => setProxyFilters({ ...DEFAULT_PROXY_FILTERS })}>
+            <button className="btn btn-ghost btn-xs" onClick={handleClearProxyFilters}>
               {uiText("清除筛选", "Clear Filters", "フィルター解除")}
             </button>
           )}
@@ -521,77 +538,19 @@ export default function Logs() {
 
             <div ref={proxyListRef} style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 360, overflowY: "auto" }}>
               {proxyLogs.map((item) => {
-                const toolLabel = TOOL_LABELS[item.tool_id] || item.tool_id;
-                const model = item.response_model || item.request_model || "--";
-                const success = item.status_code >= 200 && item.status_code < 300;
+                const totalTokens = item.input_tokens + item.output_tokens;
                 return (
-                  <div
+                  <ProxyRequestRow
                     key={item.request_id}
-                    className="list-row"
-                    style={{ padding: "10px 12px", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 6 }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
-                        <span className={`dot ${success ? "dot-active" : "dot-error"}`} />
-                        <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                          {toolLabel}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 500,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {item.provider_name}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            color: "var(--text-muted)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {model}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-                          {formatUsd(item.total_cost_usd)}
-                        </span>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-                          {item.input_tokens + item.output_tokens > 0
-                            ? `${formatCount(item.input_tokens + item.output_tokens)} tok`
-                            : item.is_streaming
-                              ? uiText("流式", "stream", "ストリーム")
-                              : "--"}
-                        </span>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-                          {item.latency_ms}ms
-                        </span>
-                        <span className={`badge ${success ? "badge-success" : "badge-danger"}`} style={{ fontSize: 10 }}>
-                          {item.status_code}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-                        {item.request_id}
-                      </span>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatDateTime(item.created_at)}</span>
-                    </div>
-
-                    {item.error_message && (
-                      <div style={{ fontSize: 11, color: "var(--danger)", lineHeight: 1.5 }}>
-                        {item.error_message}
-                      </div>
-                    )}
-                  </div>
+                    item={item}
+                    success={item.status_code >= 200 && item.status_code < 300}
+                    toolLabel={TOOL_LABELS[item.tool_id] || item.tool_id}
+                    modelLabel={item.response_model || item.request_model || "--"}
+                    costLabel={formatUsd(item.total_cost_usd)}
+                    tokenLabel={totalTokens > 0 ? `${formatCount(totalTokens)} tok` : item.is_streaming ? uiText("流式", "stream", "ストリーム") : "--"}
+                    latencyLabel={`${item.latency_ms}ms`}
+                    createdAtLabel={formatDateTime(item.created_at)}
+                  />
                 );
               })}
             </div>
@@ -628,25 +587,11 @@ export default function Logs() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {activities.map((item) => (
-                <div key={item.id} className="list-row" style={{ padding: "10px 12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
-                    <span className={`dot ${item.status === "success" ? "dot-active" : item.status === "error" ? "dot-error" : "dot-disabled"}`} />
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{item.server_name}</span>
-                    <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                      {item.request_type}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-                    {item.latency_ms != null && (
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-                        {item.latency_ms}ms
-                      </span>
-                    )}
-                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {item.recorded_at.split("T")[1]?.slice(0, 8) || item.recorded_at}
-                    </span>
-                  </div>
-                </div>
+                <ActivityLogRow
+                  key={item.id}
+                  item={item}
+                  recordedAtLabel={item.recorded_at.split("T")[1]?.slice(0, 8) || item.recorded_at}
+                />
               ))}
             </div>
           )}
@@ -661,6 +606,56 @@ function mergeProxyLogs(previous: ProxyRequestLogRow[], incoming: ProxyRequestLo
   return [...incoming, ...previous.filter((item) => !seen.has(item.request_id))].slice(0, MAX_MERGED_PROXY_LOG_ROWS);
 }
 
+function filterProxyLogs(
+  rows: ProxyRequestLogRow[],
+  filters: {
+    toolId: string;
+    status: string;
+    streamMode: string;
+    providerQuery: string;
+    modelQuery: string;
+  },
+) {
+  const providerQuery = filters.providerQuery.trim().toLowerCase();
+  const modelQuery = filters.modelQuery.trim().toLowerCase();
+
+  return rows.filter((item) => {
+    if (filters.toolId && item.tool_id !== filters.toolId) {
+      return false;
+    }
+
+    if (providerQuery && !item.provider_name.toLowerCase().includes(providerQuery)) {
+      return false;
+    }
+
+    if (
+      modelQuery
+      && !(item.request_model || "").toLowerCase().includes(modelQuery)
+      && !(item.response_model || "").toLowerCase().includes(modelQuery)
+    ) {
+      return false;
+    }
+
+    if (filters.status === "success" && (item.status_code < 200 || item.status_code >= 300)) {
+      return false;
+    }
+
+    if (filters.status === "error" && item.status_code >= 200 && item.status_code < 300) {
+      return false;
+    }
+
+    if (filters.streamMode === "streaming" && !item.is_streaming) {
+      return false;
+    }
+
+    if (filters.streamMode === "non_streaming" && item.is_streaming) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 function todayStr() {
   const date = new Date();
   return dateStr(date);
@@ -670,14 +665,14 @@ function dateStr(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function UsageMetric({ label, value }: { label: string; value: string }) {
+const UsageMetric = memo(function UsageMetric({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-input)" }}>
       <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700 }}>{value}</div>
     </div>
   );
-}
+});
 
 function formatCount(value: number) {
   return Intl.NumberFormat("en-US").format(value);

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { json } from "@codemirror/lang-json";
@@ -84,7 +84,7 @@ function getLangExtension(language: string) {
   }
 }
 
-export default function CodeEditor({
+function CodeEditorComponent({
   value,
   onChange,
   language = "json",
@@ -97,10 +97,8 @@ export default function CodeEditor({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const extensions = [
+  const extensions = useMemo(() => {
+    const nextExtensions = [
       basicSetup,
       ...getLangExtension(language),
       oneDark,
@@ -109,18 +107,22 @@ export default function CodeEditor({
     ];
 
     if (readOnly) {
-      extensions.push(EditorState.readOnly.of(true));
-    }
-
-    if (!readOnly) {
-      extensions.push(
+      nextExtensions.push(EditorState.readOnly.of(true));
+    } else {
+      nextExtensions.push(
         EditorView.updateListener.of((update: ViewUpdate) => {
           if (update.docChanged) {
             onChangeRef.current?.(update.state.doc.toString());
           }
-        })
+        }),
       );
     }
+
+    return nextExtensions;
+  }, [language, readOnly]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
 
     const state = EditorState.create({ doc: value, extensions });
     const view = new EditorView({ state, parent: containerRef.current });
@@ -128,7 +130,7 @@ export default function CodeEditor({
 
     return () => { view.destroy(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language, readOnly]);
+  }, [extensions]);
 
   // Sync external value changes
   useEffect(() => {
@@ -157,3 +159,5 @@ export default function CodeEditor({
     />
   );
 }
+
+export default memo(CodeEditorComponent);

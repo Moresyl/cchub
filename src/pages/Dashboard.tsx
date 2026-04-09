@@ -1,12 +1,15 @@
-import { useState, useEffect } from "react";
+import { memo, startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Plug, Zap, Package, Monitor, Terminal, Code, Wind, Activity, ArrowRight, Shield, Layers } from "lucide-react";
 import { t, getLocale } from "../lib/i18n";
 import { useNavigate } from "react-router-dom";
-import type { DetectedTool } from "../types/skills";
+import { useDetectTools } from "../hooks/queries";
+import DashboardToolChip from "../components/DashboardToolChip";
+import DashboardServerRow, { type DashboardServerRowServer } from "../components/DashboardServerRow";
+import DashboardSkillRow, { type DashboardSkillRowSkill } from "../components/DashboardSkillRow";
 
-interface McpServer { id: string; name: string; command: string | null; args: string; env: string; status: string; transport: string; source: string; }
-interface Skill { id: string; name: string; plugin_id: string | null; trigger_command: string | null; description: string | null; }
+type McpServer = DashboardServerRowServer;
+type Skill = DashboardSkillRowSkill;
 interface Plugin { id: string; name: string; description: string | null; }
 const TOOL_ICONS: Record<string, typeof Monitor> = { claude: Terminal, cursor: Code, windsurf: Wind, codex: Monitor };
 
@@ -14,9 +17,10 @@ export default function Dashboard() {
   const [servers, setServers] = useState<McpServer[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [plugins, setPlugins] = useState<Plugin[]>([]);
-  const [tools, setTools] = useState<DetectedTool[]>([]);
   const [loading, setLoading] = useState(true);
+  const refreshRequestIdRef = useRef(0);
   const navigate = useNavigate();
+  const { data: tools = [], refetch: refetchTools } = useDetectTools();
   const i = t();
   const locale = getLocale();
   const uiText = (zhText: string, enText: string, jaText?: string) => (
@@ -24,19 +28,69 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    const loadInitial = async () => {
       try {
-        const [s, sk, p, dt] = await Promise.all([
+        const [cachedServers, cachedSkills] = await Promise.all([
+          invoke<McpServer[]>("get_mcp_servers").catch(() => []),
+          invoke<Skill[]>("get_skills").catch(() => []),
+          refetchTools().then((result) => result.data ?? []),
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setServers(cachedServers);
+          setSkills(cachedSkills);
+          setLoading(false);
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.error(error);
+          setLoading(false);
+        }
+      }
+    };
+
+    const refreshScannedData = async () => {
+      const requestId = refreshRequestIdRef.current + 1;
+      refreshRequestIdRef.current = requestId;
+
+      try {
+        const [scannedServers, scannedSkills, scannedPlugins] = await Promise.all([
           invoke<McpServer[]>("scan_mcp_servers"),
           invoke<Skill[]>("scan_skills"),
           invoke<Plugin[]>("get_plugins"),
-          invoke<DetectedTool[]>("detect_tools"),
         ]);
-        setServers(s); setSkills(sk); setPlugins(p); setTools(dt);
-      } catch (e) { console.error(e); }
-      finally { setLoading(false); }
-    })();
-  }, []);
+        if (cancelled || requestId !== refreshRequestIdRef.current) {
+          return;
+        }
+
+        startTransition(() => {
+          setServers(scannedServers);
+          setSkills(scannedSkills);
+          setPlugins(scannedPlugins);
+        });
+        void refetchTools();
+      } catch (error) {
+        if (!cancelled && requestId === refreshRequestIdRef.current) {
+          console.error(error);
+        }
+      }
+    };
+
+    void loadInitial();
+    const timer = window.setTimeout(() => {
+      void refreshScannedData();
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [refetchTools]);
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.dashboard.scanning}</span></div>;
@@ -44,6 +98,12 @@ export default function Dashboard() {
 
   const installedTools = tools.filter((t) => t.installed);
   const activeServers = servers.filter((s) => s.status === "active");
+  const openMcpServers = useCallback(() => navigate("/mcp-servers"), [navigate]);
+  const openSkills = useCallback(() => navigate("/skills"), [navigate]);
+  const openMcpClients = useCallback(() => navigate("/mcp-clients"), [navigate]);
+  const openLogs = useCallback(() => navigate("/logs"), [navigate]);
+  const openWorkspaces = useCallback(() => navigate("/workspaces"), [navigate]);
+  const openSecurity = useCallback(() => navigate("/security"), [navigate]);
 
   return (
     <div className="animate-in">
@@ -55,7 +115,7 @@ export default function Dashboard() {
           sub={`${activeServers.length} ${i.dashboard.active}`}
           icon={Plug}
           color="var(--text-primary)"
-          onClick={() => navigate("/mcp-servers")}
+          onClick={openMcpServers}
         />
         <StatCard
           label={i.dashboard.skills}
@@ -63,14 +123,14 @@ export default function Dashboard() {
           sub={`${skills.filter(s => s.plugin_id).length} ${uiText("来自插件", "from plugins", "プラグイン由来")}`}
           icon={Zap}
           color="var(--text-secondary)"
-          onClick={() => navigate("/skills")}
+          onClick={openSkills}
         />
         <StatCard
           label={i.dashboard.plugins}
           value={plugins.length}
           icon={Package}
           color="var(--text-secondary)"
-          onClick={() => navigate("/skills")}
+          onClick={openSkills}
         />
         <StatCard
           label={i.skills.detectedTools}
@@ -78,7 +138,7 @@ export default function Dashboard() {
           sub={`/ ${tools.length} ${uiText("已知", "known", "検出済み")}`}
           icon={Monitor}
           color="var(--text-primary)"
-          onClick={() => navigate("/skills")}
+          onClick={openSkills}
         />
       </div>
 
@@ -94,21 +154,13 @@ export default function Dashboard() {
             {tools.map((tool) => {
               const Icon = TOOL_ICONS[tool.id] || Monitor;
               return (
-                <div
+                <DashboardToolChip
                   key={tool.id}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10, padding: "10px 16px",
-                    borderRadius: 6, border: "1px solid var(--border-default)",
-                    background: tool.installed ? "var(--bg-card)" : "transparent",
-                    opacity: tool.installed ? 1 : 0.4,
-                  }}
-                >
-                  <Icon size={16} style={{ color: tool.installed ? "var(--text-primary)" : "var(--text-muted)" }} />
-                  <span style={{ fontSize: 13, fontWeight: 500, color: tool.installed ? "var(--text-primary)" : "var(--text-muted)" }}>
-                    {tool.name}
-                  </span>
-                  {tool.installed && <span className="dot dot-active" style={{ width: 6, height: 6 }} />}
-                </div>
+                  toolId={tool.id}
+                  toolName={tool.name}
+                  installed={tool.installed}
+                  icon={Icon}
+                />
               );
             })}
           </div>
@@ -124,7 +176,7 @@ export default function Dashboard() {
               <Plug size={16} style={{ color: "var(--text-secondary)" }} />
               {i.dashboard.recentMcp}
             </div>
-            <button className="btn btn-ghost btn-xs" onClick={() => navigate("/mcp-servers")} style={{ gap: 4 }}>
+            <button className="btn btn-ghost btn-xs" onClick={openMcpServers} style={{ gap: 4 }}>
               {uiText("查看全部", "View all", "すべて表示")}<ArrowRight size={12} />
             </button>
           </div>
@@ -133,15 +185,13 @@ export default function Dashboard() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {servers.slice(0, 3).map((s) => (
-                <div key={s.id} className="list-row" style={{ padding: "10px 12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span className={`dot ${s.status === "active" ? "dot-active" : s.status === "error" ? "dot-error" : "dot-disabled"}`} />
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{s.name}</span>
-                  </div>
-                  <span className={`badge ${s.source === "official-plugin" ? "badge-accent" : s.source === "community-plugin" ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
-                    {s.source === "official-plugin" ? i.mcp.officialPlugin : s.source === "community-plugin" ? i.mcp.communityPlugin : s.source === "cursor" ? "Cursor" : i.mcp.local}
-                  </span>
-                </div>
+                <DashboardServerRow
+                  key={s.id}
+                  server={s}
+                  officialLabel={i.mcp.officialPlugin}
+                  communityLabel={i.mcp.communityPlugin}
+                  localLabel={i.mcp.local}
+                />
               ))}
               {servers.length > 3 && (
                 <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "8px 0" }}>
@@ -159,7 +209,7 @@ export default function Dashboard() {
               <Zap size={16} style={{ color: "var(--text-secondary)" }} />
               {i.dashboard.recentSkills}
             </div>
-            <button className="btn btn-ghost btn-xs" onClick={() => navigate("/skills")} style={{ gap: 4 }}>
+            <button className="btn btn-ghost btn-xs" onClick={openSkills} style={{ gap: 4 }}>
               {uiText("查看全部", "View all", "すべて表示")}<ArrowRight size={12} />
             </button>
           </div>
@@ -168,15 +218,10 @@ export default function Dashboard() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {skills.slice(0, 3).map((s) => (
-                <div key={s.id} className="list-row" style={{ padding: "10px 12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
-                    {s.plugin_id && <span className="badge badge-muted" style={{ fontSize: 10, flexShrink: 0 }}>{s.plugin_id}</span>}
-                  </div>
-                  {s.trigger_command && (
-                    <code className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, flexShrink: 0 }}>{s.trigger_command}</code>
-                  )}
-                </div>
+                <DashboardSkillRow
+                  key={s.id}
+                  skill={s}
+                />
               ))}
               {skills.length > 3 && (
                 <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "8px 0" }}>
@@ -194,32 +239,32 @@ export default function Dashboard() {
           icon={Monitor}
           label={uiText("客户端管理", "MCP Clients", "MCP クライアント")}
           desc={uiText("管理 AI 应用访问权限", "Manage AI app access", "AI アプリのアクセス権を管理")}
-          onClick={() => navigate("/mcp-clients")}
+          onClick={openMcpClients}
         />
         <QuickAction
           icon={Activity}
           label={uiText("请求日志", "Request Logs", "リクエストログ")}
           desc={uiText("查看 MCP 活动记录", "View MCP activity", "MCP の活動履歴を表示")}
-          onClick={() => navigate("/logs")}
+          onClick={openLogs}
         />
         <QuickAction
           icon={Layers}
           label={uiText("工作区", "Workspaces", "ワークスペース")}
           desc={uiText("切换与管理工作区", "Switch workspaces", "ワークスペースを切り替えて管理")}
-          onClick={() => navigate("/workspaces")}
+          onClick={openWorkspaces}
         />
         <QuickAction
           icon={Shield}
           label={uiText("安全审计", "Security Audit", "セキュリティ監査")}
           desc={uiText("扫描 MCP 安全风险", "Scan MCP security risks", "MCP のセキュリティリスクをスキャン")}
-          onClick={() => navigate("/security")}
+          onClick={openSecurity}
         />
       </div>
     </div>
   );
 }
 
-function StatCard({ label, value, sub, icon: Icon, color, onClick }: {
+const StatCard = memo(function StatCard({ label, value, sub, icon: Icon, color, onClick }: {
   label: string; value: number; sub?: string; icon: typeof Plug; color: string; onClick?: () => void;
 }) {
   return (
@@ -234,9 +279,9 @@ function StatCard({ label, value, sub, icon: Icon, color, onClick }: {
       {sub && <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, opacity: 0.7 }}>{sub}</p>}
     </div>
   );
-}
+});
 
-function QuickAction({ icon: Icon, label, desc, onClick }: {
+const QuickAction = memo(function QuickAction({ icon: Icon, label, desc, onClick }: {
   icon: typeof Plug; label: string; desc: string; onClick: () => void;
 }) {
   return (
@@ -252,13 +297,13 @@ function QuickAction({ icon: Icon, label, desc, onClick }: {
       </div>
     </div>
   );
-}
+});
 
-function EmptyHint({ text, sub }: { text: string; sub: string }) {
+const EmptyHint = memo(function EmptyHint({ text, sub }: { text: string; sub: string }) {
   return (
     <div style={{ padding: "28px 16px", textAlign: "center" }}>
       <p style={{ fontSize: 13, color: "var(--text-muted)" }}>{text}</p>
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, opacity: 0.7 }}>{sub}</p>
     </div>
   );
-}
+});

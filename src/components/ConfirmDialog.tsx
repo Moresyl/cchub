@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useCallback, useEffect, type MouseEvent } from "react";
 import { AlertTriangle, Info } from "lucide-react";
 
 interface ConfirmDialogProps {
@@ -12,7 +12,7 @@ interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-export default function ConfirmDialog({
+function ConfirmDialogComponent({
   isOpen,
   title,
   message,
@@ -37,10 +37,13 @@ export default function ConfirmDialog({
   const Icon = isDestructive ? AlertTriangle : Info;
   const iconColor = isDestructive ? "var(--danger)" : "var(--accent)";
   const iconBg = isDestructive ? "var(--danger-subtle)" : "var(--accent-subtle)";
+  const handleDialogClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+  }, []);
 
   return (
     <div className="confirm-overlay" onClick={onCancel}>
-      <div className="confirm-dialog animate-in" onClick={(e) => e.stopPropagation()}>
+      <div className="confirm-dialog animate-in" onClick={handleDialogClick}>
         <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
           <div style={{
             width: 40, height: 40, borderRadius: 10,
@@ -71,3 +74,5 @@ export default function ConfirmDialog({
     </div>
   );
 }
+
+export default memo(ConfirmDialogComponent);

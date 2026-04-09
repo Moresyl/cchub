@@ -1073,3 +1073,55 @@ textarea.input {
   border-right: 1px solid var(--border-subtle);
   color: var(--text-muted);
 }
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
+  animation-timing-function: ease;
+}
+
+::view-transition-old(root) {
+  animation-name: cchub-theme-fade-out;
+}
+
+::view-transition-new(root) {
+  animation-name: cchub-theme-fade-in;
+}
+
+@keyframes cchub-theme-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0.92; }
+}
+
+@keyframes cchub-theme-fade-in {
+  from { opacity: 0.92; }
+  to { opacity: 1; }
+}
+
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 10, 18, 0.52);
+  backdrop-filter: blur(10px);
+}
+
+[cmdk-dialog] {
+  position: fixed;
+  top: 14vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
+
+[cmdk-group-heading] {
+  padding: 10px 12px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+[cmdk-item][data-selected="true"] {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}

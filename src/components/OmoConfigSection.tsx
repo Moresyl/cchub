@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Download, RefreshCw } from "lucide-react";
 import { getLocale } from "../lib/i18n";
@@ -38,6 +38,16 @@ interface VariantEditorState {
   agents: Record<string, Record<string, unknown>>;
   categories: Record<string, Record<string, unknown>>;
   otherFieldsText: string;
+}
+
+interface OmoModelFieldProps {
+  label: string;
+  listId: string;
+  value: string;
+  placeholder: string;
+  suggestedLabel: string;
+  recommended?: string;
+  onChange: (value: string) => void;
 }
 
 function createVariantState(): VariantEditorState {
@@ -111,6 +121,40 @@ function normalizeVariantData(data: OmoLocalConfigData): VariantEditorState {
   };
 }
 
+function OmoModelFieldComponent({
+  label,
+  listId,
+  value,
+  placeholder,
+  suggestedLabel,
+  recommended,
+  onChange,
+}: OmoModelFieldProps) {
+  const handleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    onChange(event.target.value);
+  }, [onChange]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label className="field-label">{label}</label>
+      <input
+        className="input"
+        list={listId}
+        value={value}
+        onChange={handleChange}
+        placeholder={placeholder}
+      />
+      {recommended ? (
+        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          {suggestedLabel}: {recommended}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const OmoModelField = memo(OmoModelFieldComponent);
+
 function VariantEditor({
   title,
   description,
@@ -137,9 +181,9 @@ function VariantEditor({
   categoryDefs?: OmoCategoryDef[];
 }) {
   const locale = getLocale();
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
+  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  ), [locale]);
 
   const builtinAgentKeys = useMemo(() => new Set(agentDefs.map((item) => item.key)), [agentDefs]);
   const builtinCategoryKeys = useMemo(
@@ -157,6 +201,8 @@ function VariantEditor({
     variant === "standard",
   );
   const modelListId = `omo-model-list-${variant}`;
+  const suggestedLabel = uiText("建议", "Suggested", "推奨");
+  const otherFieldsPlaceholder = uiText("可选。填写额外 JSON 对象字段，会原样并入 OMO 配置。", "Optional. Add any extra JSON object fields to merge into the OMO config.", "任意。追加の JSON オブジェクト項目を OMO 設定へそのままマージします。");
 
   return (
     <div className="card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -213,21 +259,16 @@ function VariantEditor({
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
             {agentDefs.map((agent) => (
-              <div key={agent.key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label className="field-label">{agent.display}</label>
-                <input
-                  className="input"
-                  list={modelListId}
-                  value={(state.agents[agent.key]?.model as string) || ""}
-                  onChange={(event) => onModelChange("agents", agent.key, event.target.value)}
-                  placeholder={agent.recommended || uiText("输入模型 ID", "Enter model ID", "モデル ID を入力")}
-                />
-                {agent.recommended ? (
-                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    {uiText("建议", "Suggested", "推奨")}: {agent.recommended}
-                  </div>
-                ) : null}
-              </div>
+              <OmoModelField
+                key={agent.key}
+                label={agent.display}
+                listId={modelListId}
+                value={(state.agents[agent.key]?.model as string) || ""}
+                onChange={(value) => onModelChange("agents", agent.key, value)}
+                placeholder={agent.recommended || uiText("输入模型 ID", "Enter model ID", "モデル ID を入力")}
+                suggestedLabel={suggestedLabel}
+                recommended={agent.recommended}
+              />
             ))}
           </div>
         </div>
@@ -235,25 +276,20 @@ function VariantEditor({
         {variant === "standard" && categoryDefs.length > 0 ? (
           <div>
             <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-              {uiText("Category 模型", "Category Models", "Category モデル")}
+            {uiText("Category 模型", "Category Models", "Category モデル")}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
               {categoryDefs.map((category) => (
-                <div key={category.key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <label className="field-label">{category.display}</label>
-                  <input
-                    className="input"
-                    list={modelListId}
-                    value={(state.categories[category.key]?.model as string) || ""}
-                    onChange={(event) => onModelChange("categories", category.key, event.target.value)}
-                    placeholder={category.recommended || uiText("输入模型 ID", "Enter model ID", "モデル ID を入力")}
-                  />
-                  {category.recommended ? (
-                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                      {uiText("建议", "Suggested", "推奨")}: {category.recommended}
-                    </div>
-                  ) : null}
-                </div>
+                <OmoModelField
+                  key={category.key}
+                  label={category.display}
+                  listId={modelListId}
+                  value={(state.categories[category.key]?.model as string) || ""}
+                  onChange={(value) => onModelChange("categories", category.key, value)}
+                  placeholder={category.recommended || uiText("输入模型 ID", "Enter model ID", "モデル ID を入力")}
+                  suggestedLabel={suggestedLabel}
+                  recommended={category.recommended}
+                />
               ))}
             </div>
           </div>
@@ -267,7 +303,7 @@ function VariantEditor({
             className="input"
             value={state.otherFieldsText}
             onChange={(event) => onOtherFieldsTextChange(event.target.value)}
-            placeholder={uiText("可选。填写额外 JSON 对象字段，会原样并入 OMO 配置。", "Optional. Add any extra JSON object fields to merge into the OMO config.", "任意。追加の JSON オブジェクト項目を OMO 設定へそのままマージします。")}
+            placeholder={otherFieldsPlaceholder}
             style={{ minHeight: 120, resize: "vertical", fontFamily: "'JetBrains Mono', monospace" }}
           />
         </div>
@@ -285,17 +321,19 @@ function VariantEditor({
   );
 }
 
-export default function OmoConfigSection() {
+const MemoizedVariantEditor = memo(VariantEditor);
+
+function OmoConfigSectionComponent() {
   const locale = getLocale();
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
+  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  ), [locale]);
 
   const [standardState, setStandardState] = useState<VariantEditorState>(() => createVariantState());
   const [slimState, setSlimState] = useState<VariantEditorState>(() => createVariantState());
   const [modelSuggestions, setModelSuggestions] = useState<string[]>([]);
 
-  async function loadModelSuggestions() {
+  const loadModelSuggestions = useCallback(async () => {
     const suggestions = new Set<string>();
 
     try {
@@ -331,9 +369,9 @@ export default function OmoConfigSection() {
     }
 
     setModelSuggestions([...suggestions].sort((left, right) => left.localeCompare(right)));
-  }
+  }, []);
 
-  async function loadVariant(variant: "standard" | "slim") {
+  const loadVariant = useCallback(async (variant: "standard" | "slim") => {
     if (variant === "standard") {
       setStandardState((current) => ({ ...current, loading: true }));
     } else {
@@ -361,18 +399,18 @@ export default function OmoConfigSection() {
         setSlimState((current) => ({ ...current, loading: false }));
       }
     }
-  }
+  }, [uiText]);
 
   useEffect(() => {
     void Promise.all([loadVariant("standard"), loadVariant("slim"), loadModelSuggestions()]);
-  }, []);
+  }, [loadModelSuggestions, loadVariant]);
 
-  function updateStoreModel(
+  const updateStoreModel = useCallback((
     variant: "standard" | "slim",
     kind: "agents" | "categories",
     key: string,
     value: string,
-  ) {
+  ) => {
     const setState = variant === "standard" ? setStandardState : setSlimState;
     setState((current) => {
       const nextStore = cloneStore(kind === "agents" ? current.agents : current.categories);
@@ -394,14 +432,14 @@ export default function OmoConfigSection() {
         ? { ...current, agents: nextStore }
         : { ...current, categories: nextStore };
     });
-  }
+  }, []);
 
-  function updateOtherFieldsText(variant: "standard" | "slim", value: string) {
+  const updateOtherFieldsText = useCallback((variant: "standard" | "slim", value: string) => {
     const setState = variant === "standard" ? setStandardState : setSlimState;
     setState((current) => ({ ...current, otherFieldsText: value }));
-  }
+  }, []);
 
-  async function saveVariant(variant: "standard" | "slim") {
+  const saveVariant = useCallback(async (variant: "standard" | "slim") => {
     const state = variant === "standard" ? standardState : slimState;
     const setState = variant === "standard" ? setStandardState : setSlimState;
     setState((current) => ({ ...current, saving: true }));
@@ -437,7 +475,39 @@ export default function OmoConfigSection() {
       );
       setState((current) => ({ ...current, saving: false }));
     }
-  }
+  }, [loadModelSuggestions, slimState, standardState, uiText]);
+
+  const handleReloadStandard = useCallback(() => {
+    void loadVariant("standard");
+  }, [loadVariant]);
+
+  const handleReloadSlim = useCallback(() => {
+    void loadVariant("slim");
+  }, [loadVariant]);
+
+  const handleSaveStandard = useCallback(() => {
+    void saveVariant("standard");
+  }, [saveVariant]);
+
+  const handleSaveSlim = useCallback(() => {
+    void saveVariant("slim");
+  }, [saveVariant]);
+
+  const handleStandardModelChange = useCallback((kind: "agents" | "categories", key: string, value: string) => {
+    updateStoreModel("standard", kind, key, value);
+  }, [updateStoreModel]);
+
+  const handleSlimModelChange = useCallback((kind: "agents" | "categories", key: string, value: string) => {
+    updateStoreModel("slim", kind, key, value);
+  }, [updateStoreModel]);
+
+  const handleStandardOtherFieldsChange = useCallback((value: string) => {
+    updateOtherFieldsText("standard", value);
+  }, [updateOtherFieldsText]);
+
+  const handleSlimOtherFieldsChange = useCallback((value: string) => {
+    updateOtherFieldsText("slim", value);
+  }, [updateOtherFieldsText]);
 
   const profilePreviewExample = useMemo(() => {
     return buildStructuredConfig("opencode", {
@@ -476,7 +546,7 @@ export default function OmoConfigSection() {
         </details>
       </div>
 
-      <VariantEditor
+      <MemoizedVariantEditor
         title={uiText("OMO 标准版", "OMO Standard", "OMO 標準版")}
         description={uiText(
           "管理 `oh-my-openagent.jsonc` / `oh-my-opencode.jsonc` 族配置，并提供 Agent + Category 的模型选择。",
@@ -485,16 +555,16 @@ export default function OmoConfigSection() {
         )}
         variant="standard"
         state={standardState}
-        onReload={() => void loadVariant("standard")}
-        onSave={() => void saveVariant("standard")}
-        onModelChange={(kind, key, value) => updateStoreModel("standard", kind, key, value)}
-        onOtherFieldsTextChange={(value) => updateOtherFieldsText("standard", value)}
+        onReload={handleReloadStandard}
+        onSave={handleSaveStandard}
+        onModelChange={handleStandardModelChange}
+        onOtherFieldsTextChange={handleStandardOtherFieldsChange}
         modelSuggestions={modelSuggestions}
         agentDefs={OMO_BUILTIN_AGENTS}
         categoryDefs={OMO_BUILTIN_CATEGORIES}
       />
 
-      <VariantEditor
+      <MemoizedVariantEditor
         title={uiText("OMO Slim", "OMO Slim", "OMO Slim")}
         description={uiText(
           "管理 `oh-my-opencode-slim.jsonc` 轻量变体配置，适合更精简的多 Agent 组合。",
@@ -503,13 +573,15 @@ export default function OmoConfigSection() {
         )}
         variant="slim"
         state={slimState}
-        onReload={() => void loadVariant("slim")}
-        onSave={() => void saveVariant("slim")}
-        onModelChange={(kind, key, value) => updateStoreModel("slim", kind, key, value)}
-        onOtherFieldsTextChange={(value) => updateOtherFieldsText("slim", value)}
+        onReload={handleReloadSlim}
+        onSave={handleSaveSlim}
+        onModelChange={handleSlimModelChange}
+        onOtherFieldsTextChange={handleSlimOtherFieldsChange}
         modelSuggestions={modelSuggestions}
         agentDefs={OMO_SLIM_BUILTIN_AGENTS}
       />
     </div>
   );
 }
+
+export default memo(OmoConfigSectionComponent);

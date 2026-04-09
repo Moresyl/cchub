@@ -1,5 +1,6 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-shell";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 type AppUpdateSource = "tauri" | "github";
@@ -218,7 +219,6 @@ export async function installAppUpdate(handle: AppUpdateHandle): Promise<void> {
   }
 
   if (handle.source === "github" && handle.releaseUrl) {
-    const { open } = await import("@tauri-apps/plugin-shell");
     await open(handle.releaseUrl);
     return;
   }

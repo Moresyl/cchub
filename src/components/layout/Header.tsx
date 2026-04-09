@@ -1,31 +1,35 @@
-import { useState, useEffect } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { Sun, Moon, ArrowUpCircle, Github } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
 import { getTheme, setTheme, type Theme } from "../../lib/theme";
 import { checkAppUpdate } from "../../lib/appUpdater";
 
-export default function Header() {
+function HeaderComponent() {
   const [appUpdateAvailable, setAppUpdateAvailable] = useState(false);
   const [currentTheme, setCurrentTheme] = useState<Theme>(getTheme());
 
   useEffect(() => {
-    checkAppUpdate()
+    void checkAppUpdate()
       .then(({ result }) => setAppUpdateAvailable(result.update_available))
       .catch(() => {});
   }, []);
 
-  function toggleTheme() {
+  const toggleTheme = useCallback(() => {
     const next = currentTheme === "dark" ? "light" : "dark";
     setTheme(next);
     setCurrentTheme(next);
-  }
+  }, [currentTheme]);
+
+  const handleOpenGithub = useCallback(() => {
+    void open("https://github.com/Moresl/cchub");
+  }, []);
 
   return (
     <header className="topbar">
       <button
         className="theme-btn"
         title="GitHub"
-        onClick={() => open("https://github.com/Moresl/cchub")}
+        onClick={handleOpenGithub}
       >
         <Github size={16} />
       </button>
@@ -44,3 +48,5 @@ export default function Header() {
     </header>
   );
 }
+
+export default memo(HeaderComponent);

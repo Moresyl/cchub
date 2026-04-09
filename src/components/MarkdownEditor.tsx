@@ -1,28 +1,4 @@
-import { useRef, useCallback } from "react";
-import {
-  MDXEditor,
-  headingsPlugin,
-  listsPlugin,
-  quotePlugin,
-  thematicBreakPlugin,
-  linkPlugin,
-  linkDialogPlugin,
-  tablePlugin,
-  codeBlockPlugin,
-  codeMirrorPlugin,
-  markdownShortcutPlugin,
-  toolbarPlugin,
-  BoldItalicUnderlineToggles,
-  BlockTypeSelect,
-  ListsToggle,
-  CreateLink,
-  InsertTable,
-  InsertThematicBreak,
-  InsertCodeBlock,
-  type MDXEditorMethods,
-} from "@mdxeditor/editor";
-import "@mdxeditor/editor/style.css";
-import { getTheme } from "../lib/theme";
+import { lazy, memo, Suspense } from "react";
 
 interface MarkdownEditorProps {
   value: string;
@@ -30,17 +6,13 @@ interface MarkdownEditorProps {
   minHeight?: number;
 }
 
-export default function MarkdownEditor({ value, onChange, minHeight = 400 }: MarkdownEditorProps) {
-  const editorRef = useRef<MDXEditorMethods>(null);
-  const isDark = getTheme() === "dark";
+interface MarkdownEditorFallbackProps {
+  minHeight: number;
+}
 
-  const handleChange = useCallback(
-    (md: string) => {
-      onChange(md);
-    },
-    [onChange],
-  );
+const MarkdownEditorImpl = lazy(() => import("./markdown-editor/MarkdownEditorImpl"));
 
+function MarkdownEditorFallbackComponent({ minHeight }: MarkdownEditorFallbackProps) {
   return (
     <div
       className="mdx-editor-wrapper"
@@ -49,40 +21,24 @@ export default function MarkdownEditor({ value, onChange, minHeight = 400 }: Mar
         border: "1px solid var(--border-default)",
         overflow: "hidden",
         minHeight,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
       }}
     >
-      <MDXEditor
-        ref={editorRef}
-        markdown={value}
-        onChange={handleChange}
-        className={isDark ? "dark-theme" : ""}
-        contentEditableClassName="mdx-editor-content"
-        plugins={[
-          headingsPlugin(),
-          listsPlugin(),
-          quotePlugin(),
-          thematicBreakPlugin(),
-          linkPlugin(),
-          linkDialogPlugin(),
-          tablePlugin(),
-          codeBlockPlugin({ defaultCodeBlockLanguage: "" }),
-          codeMirrorPlugin({ codeBlockLanguages: { "": "Plain", js: "JavaScript", ts: "TypeScript", py: "Python", rust: "Rust", bash: "Bash", json: "JSON" } }),
-          markdownShortcutPlugin(),
-          toolbarPlugin({
-            toolbarContents: () => (
-              <>
-                <BoldItalicUnderlineToggles />
-                <BlockTypeSelect />
-                <ListsToggle />
-                <CreateLink />
-                <InsertTable />
-                <InsertCodeBlock />
-                <InsertThematicBreak />
-              </>
-            ),
-          }),
-        ]}
-      />
+      <div className="spinner" />
     </div>
   );
 }
+
+const MarkdownEditorFallback = memo(MarkdownEditorFallbackComponent);
+
+function MarkdownEditorComponent({ value, onChange, minHeight = 400 }: MarkdownEditorProps) {
+  return (
+    <Suspense fallback={<MarkdownEditorFallback minHeight={minHeight} />}>
+      <MarkdownEditorImpl value={value} onChange={onChange} minHeight={minHeight} />
+    </Suspense>
+  );
+}
+
+export default memo(MarkdownEditorComponent);

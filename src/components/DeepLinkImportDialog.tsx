@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, FileText, Globe, Package, Wrench } from "lucide-react";
@@ -36,6 +36,225 @@ interface SkillRegistryEntry {
   content: string;
 }
 
+interface ProviderPreviewSectionProps {
+  current: DeepLinkImportRequest;
+  unnamedLabel: string;
+  primaryEndpointLabel: string;
+  endpointCandidatesLabel: string;
+  homepageLabel: string;
+}
+
+interface PromptPreviewSectionProps {
+  current: DeepLinkImportRequest;
+  unnamedLabel: string;
+  contentPreviewLabel: string;
+  emptyContentLabel: string;
+}
+
+interface McpPreviewSectionProps {
+  current: DeepLinkImportRequest;
+  unavailablePreviewLabel: string;
+}
+
+interface SkillPreviewSectionProps {
+  current: DeepLinkImportRequest;
+  fetchDescription: string;
+}
+
+function ProviderPreviewSectionComponent({
+  current,
+  unnamedLabel,
+  primaryEndpointLabel,
+  endpointCandidatesLabel,
+  homepageLabel,
+}: ProviderPreviewSectionProps) {
+  const endpoints = useMemo(() => splitDeepLinkEndpoints(current.endpoint), [current.endpoint]);
+  const primaryEndpoint = useMemo(() => getPrimaryDeepLinkEndpoint(current), [current]);
+
+  return (
+    <section className="section-card" style={{ padding: 14 }}>
+      <div className="field-label">Provider</div>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <span className="badge badge-accent">{current.app}</span>
+          <span className="badge badge-muted">{current.name || unnamedLabel}</span>
+        </div>
+        {primaryEndpoint && (
+          <div>
+            <div className="field-label">{primaryEndpointLabel}</div>
+            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+              {primaryEndpoint}
+            </div>
+          </div>
+        )}
+        {endpoints.length > 1 && (
+          <div>
+            <div className="field-label">{endpointCandidatesLabel}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {endpoints.map((endpoint) => (
+                <div key={endpoint} style={{ fontSize: 12, color: "var(--text-secondary)", wordBreak: "break-all" }}>
+                  {endpoint}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {(current.model || current.apiFormat) && (
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {current.model && <span className="badge badge-muted">{`Model: ${current.model}`}</span>}
+            {current.apiFormat && <span className="badge badge-muted">{`API: ${current.apiFormat}`}</span>}
+          </div>
+        )}
+        {current.apiKey && (
+          <div>
+            <div className="field-label">API Key</div>
+            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>
+              {maskSecret(current.apiKey)}
+            </div>
+          </div>
+        )}
+        {current.homepage && (
+          <div>
+            <div className="field-label">{homepageLabel}</div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", wordBreak: "break-all" }}>
+              {current.homepage}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const ProviderPreviewSection = memo(ProviderPreviewSectionComponent);
+
+function PromptPreviewSectionComponent({
+  current,
+  unnamedLabel,
+  contentPreviewLabel,
+  emptyContentLabel,
+}: PromptPreviewSectionProps) {
+  const decodedContent = useMemo(() => decodeDeepLinkText(current.content), [current.content]);
+
+  return (
+    <section className="section-card" style={{ padding: 14 }}>
+      <div className="field-label">Prompt</div>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {current.app && <span className="badge badge-accent">{current.app}</span>}
+          <span className="badge badge-muted">{current.name || unnamedLabel}</span>
+        </div>
+        {current.description && (
+          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{current.description}</div>
+        )}
+        <div>
+          <div className="field-label">{contentPreviewLabel}</div>
+          <div
+            style={{
+              padding: "12px 14px",
+              borderRadius: 8,
+              background: "var(--bg-input)",
+              border: "1px solid var(--border-default)",
+              fontSize: 13,
+              lineHeight: 1.6,
+              maxHeight: 240,
+              overflow: "auto",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {decodedContent || emptyContentLabel}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const PromptPreviewSection = memo(PromptPreviewSectionComponent);
+
+function McpPreviewSectionComponent({
+  current,
+  unavailablePreviewLabel,
+}: McpPreviewSectionProps) {
+  const mcpServers = useMemo(() => parseMcpPreviewServers(current), [current]);
+  const appBadges = useMemo(
+    () => (current.apps || "").split(",").map((app) => app.trim()).filter(Boolean),
+    [current.apps],
+  );
+
+  return (
+    <section className="section-card" style={{ padding: 14 }}>
+      <div className="field-label">MCP</div>
+      <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {appBadges.map((app) => (
+            <span key={app} className="badge badge-accent">{app}</span>
+          ))}
+        </div>
+        {mcpServers.length > 0 ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {mcpServers.map((server) => (
+              <div key={server.name} style={{ padding: "12px 14px", borderRadius: 8, background: "var(--bg-input)", border: "1px solid var(--border-default)" }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <strong style={{ fontSize: 13 }}>{server.name}</strong>
+                  <span className="badge badge-muted">{server.transport}</span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+                  {server.command}{server.args.length ? ` ${server.args.join(" ")}` : ""}
+                </div>
+                {server.envKeys.length > 0 && (
+                  <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {server.envKeys.map((key) => (
+                      <span key={key} className="badge badge-muted">{key}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+            {unavailablePreviewLabel}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const McpPreviewSection = memo(McpPreviewSectionComponent);
+
+function SkillPreviewSectionComponent({
+  current,
+  fetchDescription,
+}: SkillPreviewSectionProps) {
+  return (
+    <section className="section-card" style={{ padding: 14 }}>
+      <div className="field-label">Skill</div>
+      <div style={{ display: "grid", gap: 10 }}>
+        {current.name && <span className="badge badge-muted">{current.name}</span>}
+        {current.repo && (
+          <div>
+            <div className="field-label">Repository</div>
+            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{current.repo}</div>
+          </div>
+        )}
+        {(current.branch || current.directory) && (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {current.branch && <span className="badge badge-muted">{`Branch: ${current.branch}`}</span>}
+            {current.directory && <span className="badge badge-muted">{`Dir: ${current.directory}`}</span>}
+          </div>
+        )}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+          {fetchDescription}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const SkillPreviewSection = memo(SkillPreviewSectionComponent);
+
 function requestFingerprint(request: DeepLinkImportRequest) {
   return JSON.stringify(request);
 }
@@ -44,88 +263,88 @@ function normalizeDirectory(value: string | undefined) {
   return (value || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
-export default function DeepLinkImportDialog() {
+function DeepLinkImportDialogComponent() {
   const [queue, setQueue] = useState<DeepLinkImportRequest[]>([]);
   const [importing, setImporting] = useState(false);
   const locale = getLocale();
   const current = queue[0] || null;
 
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
+  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  ), [locale]);
 
-  useEffect(() => {
-    let disposed = false;
+  const enqueueRequest = useCallback(async (request: DeepLinkImportRequest, disposed = false) => {
+    try {
+      const prepared = request.resource === "provider" && (request.config || request.configUrl)
+        ? await deeplinkApi.mergeRequest(request)
+        : request;
+      if (disposed) return;
+      setQueue((currentQueue) => (
+        currentQueue.some((item) => requestFingerprint(item) === requestFingerprint(prepared))
+          ? currentQueue
+          : [...currentQueue, prepared]
+      ));
+    } catch (error) {
+      if (disposed) return;
+      showToast(
+        "error",
+        uiText(
+          `Deep Link 解析失败: ${error}`,
+          `Failed to prepare deep link: ${error}`,
+          `Deep Link の準備に失敗しました: ${error}`,
+        ),
+      );
+    }
+  }, [uiText]);
 
-    async function enqueueRequest(request: DeepLinkImportRequest) {
-      try {
-        const prepared = request.resource === "provider" && (request.config || request.configUrl)
-          ? await deeplinkApi.mergeRequest(request)
-          : request;
-        if (disposed) return;
-        setQueue((currentQueue) => (
-          currentQueue.some((item) => requestFingerprint(item) === requestFingerprint(prepared))
-            ? currentQueue
-            : [...currentQueue, prepared]
-        ));
-      } catch (error) {
-        if (disposed) return;
+  const loadPending = useCallback(async (disposed = false) => {
+    try {
+      const [pendingErrors, pendingImports] = await Promise.all([
+        deeplinkApi.takePendingErrors(),
+        deeplinkApi.takePendingImports(),
+      ]);
+      if (disposed) return;
+      for (const item of pendingErrors) {
+        showToast("error", item.error);
+      }
+      for (const item of pendingImports) {
+        // eslint-disable-next-line no-await-in-loop
+        await enqueueRequest(item, disposed);
+      }
+    } catch (error) {
+      if (!disposed) {
         showToast(
           "error",
           uiText(
-            `Deep Link 解析失败: ${error}`,
-            `Failed to prepare deep link: ${error}`,
-            `Deep Link の準備に失敗しました: ${error}`,
+            `读取待处理 Deep Link 失败: ${error}`,
+            `Failed to load pending deep links: ${error}`,
+            `保留中の Deep Link 読み込みに失敗しました: ${error}`,
           ),
         );
       }
     }
+  }, [enqueueRequest, uiText]);
 
-    async function loadPending() {
-      try {
-        const [pendingErrors, pendingImports] = await Promise.all([
-          deeplinkApi.takePendingErrors(),
-          deeplinkApi.takePendingImports(),
-        ]);
-        if (disposed) return;
-        for (const item of pendingErrors) {
-          showToast("error", item.error);
-        }
-        for (const item of pendingImports) {
-          // eslint-disable-next-line no-await-in-loop
-          await enqueueRequest(item);
-        }
-      } catch (error) {
-        if (!disposed) {
-          showToast(
-            "error",
-            uiText(
-              `读取待处理 Deep Link 失败: ${error}`,
-              `Failed to load pending deep links: ${error}`,
-              `保留中の Deep Link 読み込みに失敗しました: ${error}`,
-            ),
-          );
-        }
-      }
-    }
+  useEffect(() => {
+    let disposed = false;
 
     const importListener = listen<DeepLinkImportRequest>("deeplink-import", (event) => {
-      void enqueueRequest(event.payload);
+      void enqueueRequest(event.payload, disposed);
     });
     const errorListener = listen<DeepLinkErrorPayload>("deeplink-error", (event) => {
       showToast("error", event.payload.error);
     });
 
-    void loadPending();
+    void loadPending(disposed);
 
     return () => {
       disposed = true;
       importListener.then((unlisten) => unlisten());
       errorListener.then((unlisten) => unlisten());
     };
-  }, [locale]);
+  }, [enqueueRequest, loadPending]);
 
-  async function resolveSkill(request: DeepLinkImportRequest): Promise<SkillRegistryEntry> {
+  const resolveSkill = useCallback(async (request: DeepLinkImportRequest): Promise<SkillRegistryEntry> => {
     const repo = request.repo?.trim();
     if (!repo) {
       throw new Error(uiText("技能 Deep Link 缺少 repo 参数", "Skill deep link is missing repo", "Skill Deep Link に repo がありません"));
@@ -163,9 +382,9 @@ export default function DeepLinkImportDialog() {
       "Skill repository contains multiple skills. Add a directory parameter to the deep link.",
       "Skill リポジトリに複数のスキルがあります。Deep Link に directory を指定してください。",
     ));
-  }
+  }, [uiText]);
 
-  async function handleConfirm() {
+  const handleConfirm = useCallback(async () => {
     if (!current || importing) return;
     setImporting(true);
     try {
@@ -260,31 +479,46 @@ export default function DeepLinkImportDialog() {
     } finally {
       setImporting(false);
     }
-  }
+  }, [current, importing, resolveSkill, uiText]);
 
-  function handleCancel() {
+  const handleCancel = useCallback(() => {
     if (importing) return;
     setQueue((currentQueue) => currentQueue.slice(1));
-  }
+  }, [importing]);
 
   if (!current) return null;
 
-  const endpoints = splitDeepLinkEndpoints(current.endpoint);
-  const mcpServers = current.resource === "mcp" ? parseMcpPreviewServers(current) : [];
-  const resourceTitle = current.resource === "provider"
-    ? uiText("导入 Provider", "Import Provider", "Provider をインポート")
-    : current.resource === "prompt"
-      ? uiText("导入提示词", "Import Prompt", "Prompt をインポート")
-      : current.resource === "mcp"
-        ? uiText("导入 MCP", "Import MCP", "MCP をインポート")
-        : uiText("导入技能", "Import Skill", "Skill をインポート");
-  const ResourceIcon = current.resource === "provider"
-    ? Globe
-    : current.resource === "prompt"
-      ? FileText
-      : current.resource === "mcp"
-        ? Wrench
-        : Package;
+  const resourceTitle = useMemo(() => (
+    current.resource === "provider"
+      ? uiText("导入 Provider", "Import Provider", "Provider をインポート")
+      : current.resource === "prompt"
+        ? uiText("导入提示词", "Import Prompt", "Prompt をインポート")
+        : current.resource === "mcp"
+          ? uiText("导入 MCP", "Import MCP", "MCP をインポート")
+          : uiText("导入技能", "Import Skill", "Skill をインポート")
+  ), [current.resource, uiText]);
+  const ResourceIcon = useMemo(() => (
+    current.resource === "provider"
+      ? Globe
+      : current.resource === "prompt"
+        ? FileText
+        : current.resource === "mcp"
+          ? Wrench
+          : Package
+  ), [current.resource]);
+  const providerUnnamedLabel = uiText("未命名 Provider", "Unnamed Provider", "無名の Provider");
+  const promptUnnamedLabel = uiText("未命名提示词", "Unnamed Prompt", "無名の Prompt");
+  const primaryEndpointLabel = uiText("主端点", "Primary Endpoint", "プライマリエンドポイント");
+  const endpointCandidatesLabel = uiText("候选端点", "Endpoint Candidates", "候補エンドポイント");
+  const homepageLabel = uiText("主页", "Homepage", "ホームページ");
+  const contentPreviewLabel = uiText("内容预览", "Content Preview", "内容プレビュー");
+  const emptyContentLabel = uiText("无内容", "No content", "内容なし");
+  const unavailablePreviewLabel = uiText("无法预览 MCP 配置，将在导入时校验。", "MCP config preview is unavailable and will be validated on import.", "MCP 設定はプレビューできません。インポート時に検証します。");
+  const skillFetchDescription = uiText(
+    "确认时将从远程仓库拉取技能内容并安装到当前技能目录。",
+    "The skill content will be fetched from the repository and installed into the current skills directory on confirmation.",
+    "確認時にリポジトリから Skill を取得し、現在の Skill ディレクトリへインストールします。",
+  );
 
   return (
     <div className="confirm-overlay" onClick={handleCancel}>
@@ -335,159 +569,36 @@ export default function DeepLinkImportDialog() {
 
         <div style={{ marginTop: 18, display: "grid", gap: 14 }}>
           {current.resource === "provider" && (
-            <>
-              <section className="section-card" style={{ padding: 14 }}>
-                <div className="field-label">Provider</div>
-                <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <span className="badge badge-accent">{current.app}</span>
-                    <span className="badge badge-muted">{current.name || uiText("未命名 Provider", "Unnamed Provider", "無名の Provider")}</span>
-                  </div>
-                  {getPrimaryDeepLinkEndpoint(current) && (
-                    <div>
-                      <div className="field-label">{uiText("主端点", "Primary Endpoint", "プライマリエンドポイント")}</div>
-                      <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
-                        {getPrimaryDeepLinkEndpoint(current)}
-                      </div>
-                    </div>
-                  )}
-                  {endpoints.length > 1 && (
-                    <div>
-                      <div className="field-label">{uiText("候选端点", "Endpoint Candidates", "候補エンドポイント")}</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {endpoints.map((endpoint) => (
-                          <div key={endpoint} style={{ fontSize: 12, color: "var(--text-secondary)", wordBreak: "break-all" }}>
-                            {endpoint}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {(current.model || current.apiFormat) && (
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {current.model && <span className="badge badge-muted">{`Model: ${current.model}`}</span>}
-                      {current.apiFormat && <span className="badge badge-muted">{`API: ${current.apiFormat}`}</span>}
-                    </div>
-                  )}
-                  {current.apiKey && (
-                    <div>
-                      <div className="field-label">API Key</div>
-                      <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>
-                        {maskSecret(current.apiKey)}
-                      </div>
-                    </div>
-                  )}
-                  {current.homepage && (
-                    <div>
-                      <div className="field-label">{uiText("主页", "Homepage", "ホームページ")}</div>
-                      <div style={{ fontSize: 13, color: "var(--text-secondary)", wordBreak: "break-all" }}>
-                        {current.homepage}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
-            </>
+            <ProviderPreviewSection
+              current={current}
+              unnamedLabel={providerUnnamedLabel}
+              primaryEndpointLabel={primaryEndpointLabel}
+              endpointCandidatesLabel={endpointCandidatesLabel}
+              homepageLabel={homepageLabel}
+            />
           )}
 
           {current.resource === "prompt" && (
-            <section className="section-card" style={{ padding: 14 }}>
-              <div className="field-label">Prompt</div>
-              <div style={{ display: "grid", gap: 10 }}>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {current.app && <span className="badge badge-accent">{current.app}</span>}
-                  <span className="badge badge-muted">{current.name || uiText("未命名提示词", "Unnamed Prompt", "無名の Prompt")}</span>
-                </div>
-                {current.description && (
-                  <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{current.description}</div>
-                )}
-                <div>
-                  <div className="field-label">{uiText("内容预览", "Content Preview", "内容プレビュー")}</div>
-                  <div
-                    style={{
-                      padding: "12px 14px",
-                      borderRadius: 8,
-                      background: "var(--bg-input)",
-                      border: "1px solid var(--border-default)",
-                      fontSize: 13,
-                      lineHeight: 1.6,
-                      maxHeight: 240,
-                      overflow: "auto",
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    {decodeDeepLinkText(current.content) || uiText("无内容", "No content", "内容なし")}
-                  </div>
-                </div>
-              </div>
-            </section>
+            <PromptPreviewSection
+              current={current}
+              unnamedLabel={promptUnnamedLabel}
+              contentPreviewLabel={contentPreviewLabel}
+              emptyContentLabel={emptyContentLabel}
+            />
           )}
 
           {current.resource === "mcp" && (
-            <section className="section-card" style={{ padding: 14 }}>
-              <div className="field-label">MCP</div>
-              <div style={{ display: "grid", gap: 12 }}>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {(current.apps || "").split(",").map((app) => app.trim()).filter(Boolean).map((app) => (
-                    <span key={app} className="badge badge-accent">{app}</span>
-                  ))}
-                </div>
-                {mcpServers.length > 0 ? (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    {mcpServers.map((server) => (
-                      <div key={server.name} style={{ padding: "12px 14px", borderRadius: 8, background: "var(--bg-input)", border: "1px solid var(--border-default)" }}>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <strong style={{ fontSize: 13 }}>{server.name}</strong>
-                          <span className="badge badge-muted">{server.transport}</span>
-                        </div>
-                        <div style={{ marginTop: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
-                          {server.command}{server.args.length ? ` ${server.args.join(" ")}` : ""}
-                        </div>
-                        {server.envKeys.length > 0 && (
-                          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            {server.envKeys.map((key) => (
-                              <span key={key} className="badge badge-muted">{key}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                    {uiText("无法预览 MCP 配置，将在导入时校验。", "MCP config preview is unavailable and will be validated on import.", "MCP 設定はプレビューできません。インポート時に検証します。")}
-                  </div>
-                )}
-              </div>
-            </section>
+            <McpPreviewSection
+              current={current}
+              unavailablePreviewLabel={unavailablePreviewLabel}
+            />
           )}
 
           {current.resource === "skill" && (
-            <section className="section-card" style={{ padding: 14 }}>
-              <div className="field-label">Skill</div>
-              <div style={{ display: "grid", gap: 10 }}>
-                {current.name && <span className="badge badge-muted">{current.name}</span>}
-                {current.repo && (
-                  <div>
-                    <div className="field-label">Repository</div>
-                    <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{current.repo}</div>
-                  </div>
-                )}
-                {(current.branch || current.directory) && (
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {current.branch && <span className="badge badge-muted">{`Branch: ${current.branch}`}</span>}
-                    {current.directory && <span className="badge badge-muted">{`Dir: ${current.directory}`}</span>}
-                  </div>
-                )}
-                <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                  {uiText(
-                    "确认时将从远程仓库拉取技能内容并安装到当前技能目录。",
-                    "The skill content will be fetched from the repository and installed into the current skills directory on confirmation.",
-                    "確認時にリポジトリから Skill を取得し、現在の Skill ディレクトリへインストールします。",
-                  )}
-                </div>
-              </div>
-            </section>
+            <SkillPreviewSection
+              current={current}
+              fetchDescription={skillFetchDescription}
+            />
           )}
 
           <div
@@ -526,3 +637,5 @@ export default function DeepLinkImportDialog() {
     </div>
   );
 }
+
+export default memo(DeepLinkImportDialogComponent);

@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 /// 应用版本号
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 fn cchub_state_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -72,6 +75,16 @@ pub fn append_runtime_log(level: &str, scope: &str, message: &str) {
         trim_text_log(&log_path, 400_000, 180_000);
     }
 }
+
+#[cfg(target_os = "windows")]
+pub fn configure_background_command(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn configure_background_command(_command: &mut std::process::Command) {}
 
 /// Install a panic hook that logs crash details to ~/.cchub/crash.log
 pub fn install_panic_hook() {

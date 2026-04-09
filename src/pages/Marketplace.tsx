@@ -1,31 +1,27 @@
-import { useState, useEffect, lazy, Suspense, useRef } from "react";
+import { memo, useCallback, useEffect, lazy, Suspense, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
-  Store, Search, Download, CheckCircle, X, ExternalLink, Key, Check,
-  Plug, Zap, Plus, Globe, Tag, Edit3, Trash2, Save, ArrowLeft, RotateCcw, Wand2,
+  Store, Search, Download, CheckCircle, X, ExternalLink, Key,
+  Plug, Zap, Plus, Globe, Edit3, Trash2, Save, ArrowLeft, RotateCcw, Wand2,
 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
-import CodeEditor from "../components/CodeEditor";
+import MarketplaceCategoryTab from "../components/MarketplaceCategoryTab";
+import MarketplaceCustomSourceRow from "../components/MarketplaceCustomSourceRow";
+import MarketplaceMcpCard, { type MarketplaceMcpCardEntry } from "../components/MarketplaceMcpCard";
+import MarketplaceRecommendedRepoRow from "../components/MarketplaceRecommendedRepoRow";
+import MarketplaceSkillCard, { type MarketplaceSkillCardEntry } from "../components/MarketplaceSkillCard";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
+const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
-interface RegistryEntry {
-  id: string; name: string; description: string; category: string;
-  install_type: string; package_name: string | null; github_url: string | null;
-  command: string; args: string[]; env_keys: string[]; source: string;
-}
+type RegistryEntry = MarketplaceMcpCardEntry;
 
-interface SkillEntry {
-  id: string; name: string; description: string; description_zh: string | null;
-  category: string; author: string | null; github_url: string | null;
-  cover_url: string | null; tags: string[]; content: string;
-  file_path?: string | null;
-}
+type SkillEntry = MarketplaceSkillCardEntry;
 
 interface InstalledMcpServer {
   id: string; name: string; command: string | null; args: string; env: string;
@@ -86,34 +82,18 @@ export default function Marketplace() {
   const i = t();
   const locale = localStorage.getItem("cchub-locale") || "zh";
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const localeText = (zhText: string, enText: string, jaText?: string) => (
+  const localeText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  ), [locale]);
 
-  useEffect(() => { loadAll(); }, []);
-  useEffect(() => {
-    const handleSearchShortcut = () => {
-      if (editingSkill || editingMcp) return;
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    };
-    window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
-    return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
-  }, [editingSkill, editingMcp]);
-
-  function formatJson(raw: string): string {
-    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
-  }
-
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      // Load installed MCP servers
       try {
         const servers = await invoke<InstalledMcpServer[]>("scan_mcp_servers");
         setInstalledMcpDetails(servers);
-        setInstalledIds(new Set(servers.flatMap(s => [s.id, s.name])));
-        const scannedEntries: RegistryEntry[] = servers.map(s => ({
+        setInstalledIds(new Set(servers.flatMap((s) => [s.id, s.name])));
+        const scannedEntries: RegistryEntry[] = servers.map((s) => ({
           id: s.id,
           name: s.name,
           description: s.command ? `${s.command} ${(() => { try { return JSON.parse(s.args || "[]").join(" "); } catch { return ""; } })()}` : "",
@@ -129,12 +109,11 @@ export default function Marketplace() {
         setEntries(scannedEntries);
       } catch { /* ignore */ }
 
-      // Load installed skills
       let localSkillEntries: SkillEntry[] = [];
       try {
         const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
-        setInstalledSkills(new Set(skills.map(s => s.name.toLowerCase())));
-        localSkillEntries = skills.map(s => ({
+        setInstalledSkills(new Set(skills.map((s) => s.name.toLowerCase())));
+        localSkillEntries = skills.map((s) => ({
           id: `local-${s.name}`,
           name: s.name,
           description: s.description || (s.trigger_command ? `/${s.trigger_command}` : ""),
@@ -149,49 +128,61 @@ export default function Marketplace() {
         }));
       } catch { /* ignore */ }
 
-      // Load skills from SkillHub API (default source)
       try {
         const result = await invoke<{ skills: SkillEntry[]; total: number }>("get_skillhub_catalog", { page: 1, limit: 50, category: "" });
-        // Merge: local skills + market skills (dedup by name)
         const marketSkills = result.skills || [];
-        const localNames = new Set(localSkillEntries.map(s => s.name.toLowerCase()));
-        const merged = [...localSkillEntries, ...marketSkills.filter(s => !localNames.has(s.name.toLowerCase()))];
+        const localNames = new Set(localSkillEntries.map((s) => s.name.toLowerCase()));
+        const merged = [...localSkillEntries, ...marketSkills.filter((s) => !localNames.has(s.name.toLowerCase()))];
         setSkillEntries(merged);
       } catch (e) {
         console.warn("SkillHub API failed, showing local skills only:", e);
         setSkillEntries(localSkillEntries);
       }
 
-      // Load npm MCP entries (page 0)
       try {
         const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", { query: "mcp server", page: 0, pageSize: 50 });
-        setEntries(prev => {
-          const ids = new Set(prev.map(e => e.id));
-          return [...prev, ...result.entries.filter(e => !ids.has(e.id))];
+        setEntries((prev) => {
+          const ids = new Set(prev.map((e) => e.id));
+          return [...prev, ...result.entries.filter((e) => !ids.has(e.id))];
         });
         setMcpTotal(result.total);
         setMcpPage(0);
       } catch { /* ignore */ }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, []);
 
-  async function refreshInstalledMcpDetails() {
+  useEffect(() => { void loadAll(); }, [loadAll]);
+  useEffect(() => {
+    const handleSearchShortcut = () => {
+      if (editingSkill || editingMcp) return;
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    };
+    window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
+    return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
+  }, [editingSkill, editingMcp]);
+
+  const formatJson = useCallback((raw: string): string => {
+    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; }
+  }, []);
+
+  const refreshInstalledMcpDetails = useCallback(async () => {
     const servers = await invoke<InstalledMcpServer[]>("scan_mcp_servers");
     setInstalledMcpDetails(servers);
-    setInstalledIds(new Set(servers.flatMap(s => [s.id, s.name])));
+    setInstalledIds(new Set(servers.flatMap((s) => [s.id, s.name])));
     return servers;
-  }
+  }, []);
 
-  async function findInstalledSkill(skill: SkillEntry) {
+  const findInstalledSkill = useCallback(async (skill: SkillEntry) => {
     const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
     return skills.find((item) => (
       item.name.toLowerCase() === skill.name.toLowerCase() ||
       item.name.toLowerCase() === skill.id.toLowerCase()
     )) || null;
-  }
+  }, []);
 
-  async function openSkillPreview(skill: SkillEntry) {
+  const openSkillPreview = useCallback(async (skill: SkillEntry) => {
     if (!skill.content && skill.file_path) {
       try {
         const content = await invoke<string>("read_skill_content", { filePath: skill.file_path });
@@ -204,9 +195,9 @@ export default function Marketplace() {
       }
     }
     setPreviewSkill(skill);
-  }
+  }, []);
 
-  async function startSkillEdit(skill: SkillEntry) {
+  const startSkillEdit = useCallback(async (skill: SkillEntry) => {
     try {
       const installed = await findInstalledSkill(skill);
       if (!installed?.file_path) {
@@ -228,9 +219,9 @@ export default function Marketplace() {
       console.error(e);
       showToast("error", locale === "zh" ? "打开技能编辑器失败" : "Failed to open skill editor");
     }
-  }
+  }, [findInstalledSkill, locale]);
 
-  async function handleSaveSkillContent() {
+  const handleSaveSkillContent = useCallback(async () => {
     if (!editingSkill?.file_path) return;
     try {
       await invoke("write_skill_content", { filePath: editingSkill.file_path, content: editSkillContent });
@@ -246,14 +237,14 @@ export default function Marketplace() {
       console.error(e);
       showToast("error", locale === "zh" ? "技能保存失败" : "Failed to save skill");
     }
-  }
+  }, [editingSkill, editSkillContent, locale]);
 
-  async function startMcpEdit(entry: RegistryEntry) {
+  const startMcpEdit = useCallback(async (entry: RegistryEntry) => {
     try {
-      let installed = installedMcpDetails.find(server => server.id === entry.id || server.name === entry.name) || null;
+      let installed = installedMcpDetails.find((server) => server.id === entry.id || server.name === entry.name) || null;
       if (!installed) {
         const refreshed = await refreshInstalledMcpDetails();
-        installed = refreshed.find(server => server.id === entry.id || server.name === entry.name) || null;
+        installed = refreshed.find((server) => server.id === entry.id || server.name === entry.name) || null;
       }
       if (!installed) {
         showToast("error", locale === "zh" ? "未找到已安装的 MCP 配置" : "Installed MCP config not found");
@@ -268,9 +259,9 @@ export default function Marketplace() {
       console.error(e);
       showToast("error", locale === "zh" ? "打开 MCP 编辑器失败" : "Failed to open MCP editor");
     }
-  }
+  }, [installedMcpDetails, locale, refreshInstalledMcpDetails]);
 
-  async function handleSaveMcpConfig() {
+  const handleSaveMcpConfig = useCallback(async () => {
     if (!editingMcp) return;
     try {
       const args = JSON.parse(editArgs);
@@ -305,10 +296,10 @@ export default function Marketplace() {
       console.error(e);
       showToast("error", locale === "zh" ? "JSON 格式错误，请检查参数和环境变量" : "Invalid JSON format");
     }
-  }
+  }, [editArgs, editCommand, editEnv, editingMcp, locale, refreshInstalledMcpDetails]);
 
-  async function handleSearch() {
-    if (!search.trim()) { loadAll(); return; }
+  const handleSearch = useCallback(async () => {
+    if (!search.trim()) { await loadAll(); return; }
     setLoading(true);
     try {
       if (tab === "mcp") {
@@ -323,20 +314,9 @@ export default function Marketplace() {
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }
+  }, [loadAll, search, tab]);
 
-  async function handleInstallMcp(entry: RegistryEntry) {
-    if (entry.env_keys.length > 0) {
-      const vals: Record<string, string> = {};
-      entry.env_keys.forEach(k => vals[k] = "");
-      setEnvValues(vals);
-      setShowEnvModal(entry);
-      return;
-    }
-    await doInstallMcp(entry, {});
-  }
-
-  async function doInstallMcp(entry: RegistryEntry, envVals: Record<string, string>) {
+  const doInstallMcp = useCallback(async (entry: RegistryEntry, envVals: Record<string, string>) => {
     setInstalling(entry.id);
     setShowEnvModal(null);
     try {
@@ -349,9 +329,20 @@ export default function Marketplace() {
       showToast("error", locale === "zh" ? "安装失败" : "Installation failed");
     }
     finally { setInstalling(null); }
-  }
+  }, [locale]);
 
-  async function handleInstallSkill(skill: SkillEntry) {
+  const handleInstallMcp = useCallback(async (entry: RegistryEntry) => {
+    if (entry.env_keys.length > 0) {
+      const vals: Record<string, string> = {};
+      entry.env_keys.forEach((k) => { vals[k] = ""; });
+      setEnvValues(vals);
+      setShowEnvModal(entry);
+      return;
+    }
+    await doInstallMcp(entry, {});
+  }, [doInstallMcp]);
+
+  const handleInstallSkill = useCallback(async (skill: SkillEntry) => {
     setInstalling(skill.id);
     try {
       await invoke<string>("install_skill_from_marketplace", {
@@ -363,12 +354,13 @@ export default function Marketplace() {
       showToast("error", locale === "zh" ? "安装失败" : "Installation failed");
     }
     finally { setInstalling(null); }
-  }
+  }, [locale]);
 
-  async function handleUninstallSkill(skill: SkillEntry) {
+  const handleUninstallSkill = useCallback(async (skill: SkillEntry) => {
     setPendingUninstall(skill);
-  }
-  async function doUninstallSkill(skill: SkillEntry) {
+  }, []);
+
+  const doUninstallSkill = useCallback(async (skill: SkillEntry) => {
     try {
       const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
       const installed = skills.find(s => s.name.toLowerCase() === skill.name.toLowerCase() || s.name.toLowerCase() === skill.id.toLowerCase());
@@ -391,9 +383,9 @@ export default function Marketplace() {
         }
       }
     } catch (e) { console.error(e); }
-  }
+  }, [editingSkill]);
 
-  async function handleCustomSource() {
+  const handleCustomSource = useCallback(async () => {
     if (!customUrl.trim()) return;
     setLoadingCustom(true);
     try {
@@ -412,27 +404,87 @@ export default function Marketplace() {
       showToast("error", locale === "zh" ? "加载失败，请检查 URL 格式" : "Failed to load. Check URL format.");
     }
     finally { setLoadingCustom(false); }
-  }
+  }, [customUrl, locale]);
 
-  function removeCustomSource(index: number) {
+  const removeCustomSource = useCallback((index: number) => {
     const source = customSources[index];
     if (!source) return;
     const idsToRemove = new Set(source.skillIds);
     setSkillEntries(prev => prev.filter(s => !idsToRemove.has(s.id)));
     setCustomSources(prev => prev.filter((_, i) => i !== index));
-  }
+  }, [customSources]);
 
-  const mcpCategories: { key: McpCategory; label: string }[] = [
+  const handleSearchChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setSearch(event.target.value);
+  }, []);
+
+  const handleSearchKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      void handleSearch();
+    }
+  }, [handleSearch]);
+
+  const handleClearSearch = useCallback(() => {
+    setSearch("");
+    if (tab === "mcp") {
+      void loadAll();
+    }
+  }, [loadAll, tab]);
+
+  const handleSelectCategory = useCallback((categoryKey: string) => {
+    if (tab === "mcp") {
+      setMcpCategory(categoryKey as McpCategory);
+      return;
+    }
+    setSkillCategory(categoryKey as SkillCategory);
+  }, [tab]);
+
+  const handleCustomUrlChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setCustomUrl(event.target.value);
+  }, []);
+
+  const handleCustomUrlKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      void handleCustomSource();
+    }
+  }, [handleCustomSource]);
+
+  const handleOpenRecommendedRepo = useCallback((repoName: string) => {
+    void shellOpen(`https://github.com/${repoName}`);
+  }, []);
+
+  const handleLoadRecommendedRepo = useCallback(async (repoName: string, branch: string) => {
+    const [owner, repo] = repoName.split("/");
+    setLoadingRepo(repoName);
+    try {
+      const skills = await invoke<SkillEntry[]>("fetch_skills_from_repo", { owner, repo, branch });
+      const newIds: string[] = [];
+      setSkillEntries(prev => {
+        const existingIds = new Set(prev.map(s => s.id));
+        const newEntries = skills.filter(s => !existingIds.has(s.id));
+        newEntries.forEach(s => newIds.push(s.id));
+        return [...prev, ...newEntries];
+      });
+      setCustomSources(prev => [...prev, { url: `github:${repoName}`, count: newIds.length, skillIds: newIds }]);
+    } catch (e) {
+      console.error(e);
+      showToast("error", locale === "zh" ? `加载失败: ${e}` : `Load failed: ${e}`);
+    } finally {
+      setLoadingRepo(null);
+    }
+  }, [locale]);
+
+  const mcpCategories = useMemo<{ key: McpCategory; label: string }[]>(() => [
     { key: "all", label: `${locale === "zh" ? "全部" : "All"} (${entries.length})` },
     { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${entries.filter(e => installedIds.has(e.name) || installedIds.has(e.id)).length})` },
-  ];
+  ], [entries, installedIds, locale]);
 
-  const skillCategories: { key: SkillCategory; label: string }[] = [
+  const skillCategories = useMemo<{ key: SkillCategory; label: string }[]>(() => [
     { key: "all", label: `${locale === "zh" ? "全部" : "All"} (${skillEntries.length})` },
     { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${skillEntries.filter(s => installedSkills.has(s.name.toLowerCase())).length})` },
-  ];
+  ], [installedSkills, locale, skillEntries]);
 
-  const filteredMcp = entries.filter(e => {
+  const filteredMcp = useMemo(() => entries.filter(e => {
     if (mcpCategory === "installed") {
       if (!installedIds.has(e.name) && !installedIds.has(e.id)) return false;
     } else if (mcpCategory !== "all" && e.category !== mcpCategory) return false;
@@ -441,9 +493,9 @@ export default function Marketplace() {
       if (!e.name.toLowerCase().includes(q) && !e.description.toLowerCase().includes(q)) return false;
     }
     return true;
-  });
+  }), [entries, installedIds, mcpCategory, search]);
 
-  const filteredSkills = skillEntries.filter(s => {
+  const filteredSkills = useMemo(() => skillEntries.filter(s => {
     if (skillCategory === "installed") {
       if (!installedSkills.has(s.name.toLowerCase())) return false;
     } else if (skillCategory !== "all" && s.category !== skillCategory) return false;
@@ -452,7 +504,33 @@ export default function Marketplace() {
       if (!s.name.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q) && !(s.description_zh || "").toLowerCase().includes(q)) return false;
     }
     return true;
-  });
+  }), [installedSkills, search, skillCategory, skillEntries]);
+
+  const recommendedRepos = useMemo(() => [
+    {
+      name: "levnikolaevich/claude-code-skills",
+      branch: "master",
+      desc: locale === "zh" ? "125 个技能 — 全流程交付（研发/测试/评审）" : "125 skills — full delivery workflow",
+    },
+    {
+      name: "rohitg00/awesome-claude-code-toolkit",
+      branch: "main",
+      desc: locale === "zh" ? "35 个技能 + 135 个 Agent + 42 个命令" : "35 skills + 135 agents + 42 commands",
+    },
+    {
+      name: "JimLiu/baoyu-skills",
+      branch: "main",
+      desc: locale === "zh" ? "18 个技能 — 宝玉技能合集" : "18 skills — Baoyu skills collection",
+    },
+    {
+      name: "cexll/myclaude",
+      branch: "master",
+      desc: locale === "zh" ? "11 个技能 — 浏览器/代码/开发等" : "11 skills — browser/code/dev",
+    },
+  ], [locale]);
+
+  const activeCategoryKey = tab === "mcp" ? mcpCategory : skillCategory;
+  const currentCategories = tab === "mcp" ? mcpCategories : skillCategories;
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.marketplace.loading}</span></div>;
@@ -467,6 +545,56 @@ export default function Marketplace() {
     editArgs !== originalMcpArgs ||
     editEnv !== originalMcpEnv
   );
+  const handleOpenGithub = useCallback((url: string) => {
+    void shellOpen(url);
+  }, []);
+  const handlePreviewMcp = useCallback((entry: RegistryEntry) => {
+    setPreviewMcp(entry);
+  }, []);
+  const handleOpenSkillPreview = useCallback((skill: SkillEntry) => {
+    void openSkillPreview(skill);
+  }, [openSkillPreview]);
+  const handleEditMcp = useCallback((entry: RegistryEntry) => {
+    void startMcpEdit(entry);
+  }, [startMcpEdit]);
+  const handleInstallMcpCard = useCallback((entry: RegistryEntry) => {
+    void handleInstallMcp(entry);
+  }, [handleInstallMcp]);
+  const handleEditMarketSkill = useCallback((skill: SkillEntry) => {
+    void startSkillEdit(skill);
+  }, [startSkillEdit]);
+  const handleInstallMarketSkill = useCallback((skill: SkillEntry) => {
+    void handleInstallSkill(skill);
+  }, [handleInstallSkill]);
+  const handleUninstallMarketSkill = useCallback((skill: SkillEntry) => {
+    void handleUninstallSkill(skill);
+  }, [handleUninstallSkill]);
+  const handleLoadPrevMcpPage = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const prevPage = mcpPage - 1;
+      const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", {
+        query: search || "mcp server", page: prevPage, pageSize: 50,
+      });
+      setEntries(result.entries);
+      setMcpPage(prevPage);
+      setMcpTotal(result.total);
+    } catch (e) { console.error(e); }
+    finally { setLoadingMore(false); }
+  }, [mcpPage, search]);
+  const handleLoadNextMcpPage = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const nextPage = mcpPage + 1;
+      const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", {
+        query: search || "mcp server", page: nextPage, pageSize: 50,
+      });
+      setEntries(result.entries);
+      setMcpPage(nextPage);
+      setMcpTotal(result.total);
+    } catch (e) { console.error(e); }
+    finally { setLoadingMore(false); }
+  }, [mcpPage, search]);
 
   if (editingSkill) {
     return (
@@ -647,14 +775,14 @@ export default function Marketplace() {
               style={{ paddingLeft: 40, paddingRight: search ? 36 : 12 }}
               placeholder={tab === "mcp" ? i.marketplace.searchPlaceholder : localeText("搜索技能...", "Search skills...", "スキルを検索...")}
               value={search}
-              onChange={e => setSearch(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleSearch()}
+              onChange={handleSearchChange}
+              onKeyDown={handleSearchKeyDown}
             />
             {search && (
               <button
                 className="btn btn-ghost btn-icon-sm"
                 style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
-                onClick={() => { setSearch(""); if (tab === "mcp") loadAll(); }}
+                onClick={handleClearSearch}
               ><X size={14} /></button>
             )}
           </div>
@@ -663,14 +791,14 @@ export default function Marketplace() {
           </button>
         </div>
         <div className="tab-bar" style={{ flexWrap: "wrap" }}>
-          {(tab === "mcp" ? mcpCategories : skillCategories).map(cat => (
-            <button
+          {currentCategories.map((cat) => (
+            <MarketplaceCategoryTab
               key={cat.key}
-              className={`tab-item ${(tab === "mcp" ? mcpCategory : skillCategory) === cat.key ? "active" : ""}`}
-              onClick={() => tab === "mcp" ? setMcpCategory(cat.key as McpCategory) : setSkillCategory(cat.key as SkillCategory)}
-            >
-              {cat.label}
-            </button>
+              categoryKey={cat.key}
+              label={cat.label}
+              active={activeCategoryKey === cat.key}
+              onSelect={handleSelectCategory}
+            />
           ))}
         </div>
       </div>
@@ -688,53 +816,23 @@ export default function Marketplace() {
                 const isInstalled = installedIds.has(entry.name) || installedIds.has(entry.id);
                 const isInstalling = installing === entry.id;
                 return (
-                  <div key={entry.id} className="card card-hover" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12, cursor: "pointer" }}
-                    onClick={() => setPreviewMcp(entry)}>
-                    <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                          <span style={{ fontSize: 14, fontWeight: 600 }}>{entry.name}</span>
-                          <span className="badge badge-muted" style={{ fontSize: 10 }}>{locale === "zh" ? (MCP_CATEGORY_ZH[entry.category] || entry.category) : entry.category}</span>
-                        </div>
-                        <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                          {entry.description}
-                        </p>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        {entry.package_name && <span className="badge badge-muted" style={{ fontSize: 10 }}>{entry.install_type}</span>}
-                        {entry.env_keys.length > 0 && (
-                          <span className="badge badge-warning" style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}>
-                            <Key size={10} />{entry.env_keys.length} {locale === "zh" ? "密钥" : "keys"}
-                          </span>
-                        )}
-                        {entry.github_url && (
-                          <button className="badge badge-accent"
-                            style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3, cursor: "pointer", border: "none", background: "var(--accent-subtle)" }}
-                            onClick={e => { e.stopPropagation(); shellOpen(entry.github_url!); }}>
-                            <ExternalLink size={10} />GitHub
-                          </button>
-                        )}
-                      </div>
-                      {isInstalled ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <button
-                            className="btn btn-ghost btn-icon-sm"
-                            onClick={e => { e.stopPropagation(); void startMcpEdit(entry); }}
-                            title={locale === "zh" ? "编辑" : "Edit"}
-                          >
-                            <Edit3 size={13} style={{ color: "var(--text-muted)" }} />
-                          </button>
-                          <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <CheckCircle size={12} />{i.marketplace.installed}
-                          </span>
-                        </div>
-                      ) : (
-                        <button className="btn btn-primary btn-sm" onClick={e => { e.stopPropagation(); handleInstallMcp(entry); }} disabled={isInstalling}>
-                          <Download size={13} />{isInstalling ? i.marketplace.installing : i.marketplace.install}
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  <MarketplaceMcpCard
+                    key={entry.id}
+                    entry={entry}
+                    categoryLabel={locale === "zh" ? (MCP_CATEGORY_ZH[entry.category] || entry.category) : entry.category}
+                    installed={isInstalled}
+                    installing={isInstalling}
+                    installedLabel={i.marketplace.installed}
+                    installLabel={i.marketplace.install}
+                    installingLabel={i.marketplace.installing}
+                    editTitle={locale === "zh" ? "编辑" : "Edit"}
+                    githubLabel="GitHub"
+                    keysLabel={locale === "zh" ? "密钥" : "keys"}
+                    onPreview={handlePreviewMcp}
+                    onInstall={handleInstallMcpCard}
+                    onEdit={handleEditMcp}
+                    onOpenGithub={handleOpenGithub}
+                  />
                 );
               })}
             </div>
@@ -743,19 +841,7 @@ export default function Marketplace() {
                 <button
                   className="btn btn-secondary btn-sm"
                   disabled={mcpPage === 0 || loadingMore}
-                  onClick={async () => {
-                    setLoadingMore(true);
-                    try {
-                      const prevPage = mcpPage - 1;
-                      const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", {
-                        query: search || "mcp server", page: prevPage, pageSize: 50,
-                      });
-                      setEntries(result.entries);
-                      setMcpPage(prevPage);
-                      setMcpTotal(result.total);
-                    } catch (e) { console.error(e); }
-                    finally { setLoadingMore(false); }
-                  }}
+                  onClick={() => void handleLoadPrevMcpPage()}
                 >
                   {locale === "zh" ? "上一页" : "Prev"}
                 </button>
@@ -767,19 +853,7 @@ export default function Marketplace() {
                 <button
                   className="btn btn-secondary btn-sm"
                   disabled={(mcpPage + 1) * 50 >= mcpTotal || loadingMore}
-                  onClick={async () => {
-                    setLoadingMore(true);
-                    try {
-                      const nextPage = mcpPage + 1;
-                      const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", {
-                        query: search || "mcp server", page: nextPage, pageSize: 50,
-                      });
-                      setEntries(result.entries);
-                      setMcpPage(nextPage);
-                      setMcpTotal(result.total);
-                    } catch (e) { console.error(e); }
-                    finally { setLoadingMore(false); }
-                  }}
+                  onClick={() => void handleLoadNextMcpPage()}
                 >
                   {loadingMore ? <div className="spinner" style={{ width: 12, height: 12 }} /> : null}
                   {locale === "zh" ? "下一页" : "Next"}
@@ -799,59 +873,24 @@ export default function Marketplace() {
                 const isInstalling = installing === skill.id;
                 const desc = showTranslation && locale === "zh" && skill.description_zh ? skill.description_zh : skill.description;
                 return (
-                  <div key={skill.id} className="card card-hover" style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10, cursor: "pointer" }}
-                    onClick={() => { void openSkillPreview(skill); }}>
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                          <span style={{ fontSize: 14, fontWeight: 600 }}>{skill.name}</span>
-                          <span className="badge badge-muted" style={{ fontSize: 10 }}>{skill.category}</span>
-                        </div>
-                        <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                          {desc}
-                        </p>
-                      </div>
-                      {/* Tags */}
-                      {skill.tags.length > 0 && (
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {skill.tags.slice(0, 4).map(tag => (
-                            <span key={tag} className="badge badge-muted" style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}>
-                              <Tag size={9} />{tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          {skill.author && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{skill.author}</span>}
-                          {skill.github_url && (
-                            <button className="badge badge-accent"
-                              style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3, cursor: "pointer", border: "none", background: "var(--accent-subtle)" }}
-                              onClick={e => { e.stopPropagation(); shellOpen(skill.github_url!); }}>
-                              <ExternalLink size={10} />GitHub
-                            </button>
-                          )}
-                        </div>
-                        {isInstalled ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <button className="btn btn-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); void startSkillEdit(skill); }}
-                              title={locale === "zh" ? "编辑" : "Edit"}>
-                              <Edit3 size={13} style={{ color: "var(--text-muted)" }} />
-                            </button>
-                            <button className="btn btn-danger-ghost btn-icon-sm" onClick={e => { e.stopPropagation(); handleUninstallSkill(skill); }}
-                              title={locale === "zh" ? "卸载" : "Uninstall"}>
-                              <Trash2 size={13} />
-                            </button>
-                            <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                              <CheckCircle size={12} />{i.marketplace.installed}
-                            </span>
-                          </div>
-                        ) : (
-                          <button className="btn btn-primary btn-sm" onClick={e => { e.stopPropagation(); handleInstallSkill(skill); }} disabled={isInstalling}>
-                            <Download size={13} />{isInstalling ? i.marketplace.installing : i.marketplace.install}
-                          </button>
-                        )}
-                      </div>
-                  </div>
+                  <MarketplaceSkillCard
+                    key={skill.id}
+                    skill={skill}
+                    description={desc}
+                    installed={isInstalled}
+                    installing={isInstalling}
+                    installedLabel={i.marketplace.installed}
+                    installLabel={i.marketplace.install}
+                    installingLabel={i.marketplace.installing}
+                    editTitle={locale === "zh" ? "编辑" : "Edit"}
+                    uninstallTitle={locale === "zh" ? "卸载" : "Uninstall"}
+                    githubLabel="GitHub"
+                    onPreview={handleOpenSkillPreview}
+                    onInstall={handleInstallMarketSkill}
+                    onEdit={handleEditMarketSkill}
+                    onUninstall={handleUninstallMarketSkill}
+                    onOpenGithub={handleOpenGithub}
+                  />
                 );
               })}
             </div>
@@ -931,53 +970,22 @@ export default function Marketplace() {
             <div style={{ marginBottom: 20 }}>
               <span className="field-label">{locale === "zh" ? "推荐技能仓库" : "Recommended Skill Repos"}</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {[
-                  { name: "levnikolaevich/claude-code-skills", branch: "master", desc: locale === "zh" ? "125 个技能 — 全流程交付（研发/测试/评审）" : "125 skills — full delivery workflow" },
-                  { name: "rohitg00/awesome-claude-code-toolkit", branch: "main", desc: locale === "zh" ? "35 个技能 + 135 个 Agent + 42 个命令" : "35 skills + 135 agents + 42 commands" },
-                  { name: "JimLiu/baoyu-skills", branch: "main", desc: locale === "zh" ? "18 个技能 — 宝玉技能合集" : "18 skills — Baoyu skills collection" },
-                  { name: "cexll/myclaude", branch: "master", desc: locale === "zh" ? "11 个技能 — 浏览器/代码/开发等" : "11 skills — browser/code/dev" },
-                ].map((repo) => {
-                  const [owner, repoName] = repo.name.split("/");
-                  const isLoaded = customSources.some(s => s.url === `github:${repo.name}`);
-                  const isLoading = loadingRepo === repo.name;
-                  return (
-                  <div key={repo.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "var(--bg-input)" }}>
-                    <ExternalLink size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>{repo.name}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo.desc}</div>
-                    </div>
-                    <button className="btn btn-xs btn-ghost" style={{ flexShrink: 0, gap: 4 }}
-                      onClick={() => shellOpen(`https://github.com/${repo.name}`)}>
-                      <ExternalLink size={10} />
-                    </button>
-                    <button className={`btn btn-xs ${isLoaded ? "btn-ghost" : "btn-primary"}`} style={{ flexShrink: 0, gap: 4 }}
-                      disabled={isLoading || isLoaded}
-                      onClick={async () => {
-                        setLoadingRepo(repo.name);
-                        try {
-                          const skills = await invoke<SkillEntry[]>("fetch_skills_from_repo", { owner, repo: repoName, branch: repo.branch });
-                          const newIds: string[] = [];
-                          setSkillEntries(prev => {
-                            const existingIds = new Set(prev.map(s => s.id));
-                            const newEntries = skills.filter(s => !existingIds.has(s.id));
-                            newEntries.forEach(s => newIds.push(s.id));
-                            return [...prev, ...newEntries];
-                          });
-                          setCustomSources(prev => [...prev, { url: `github:${repo.name}`, count: newIds.length, skillIds: newIds }]);
-                        } catch (e) {
-                          console.error(e);
-                          showToast("error", locale === "zh" ? `加载失败: ${e}` : `Load failed: ${e}`);
-                        }
-                        finally { setLoadingRepo(null); }
-                      }}>
-                      {isLoading ? <><div className="spinner" style={{ width: 10, height: 10 }} />{locale === "zh" ? "加载中" : "Loading"}</>
-                        : isLoaded ? <><Check size={10} style={{ color: "var(--success)" }} />{locale === "zh" ? "已加载" : "Loaded"}</>
-                        : <><Download size={10} />{locale === "zh" ? "加载技能" : "Load Skills"}</>}
-                    </button>
-                  </div>
-                  );
-                })}
+                {recommendedRepos.map((repo) => (
+                  <MarketplaceRecommendedRepoRow
+                    key={repo.name}
+                    repoName={repo.name}
+                    branch={repo.branch}
+                    description={repo.desc}
+                    isLoaded={customSources.some((source) => source.url === `github:${repo.name}`)}
+                    isLoading={loadingRepo === repo.name}
+                    openLabel="GitHub"
+                    loadLabel={locale === "zh" ? "加载技能" : "Load Skills"}
+                    loadingLabel={locale === "zh" ? "加载中" : "Loading"}
+                    loadedLabel={locale === "zh" ? "已加载" : "Loaded"}
+                    onOpen={handleOpenRecommendedRepo}
+                    onLoad={handleLoadRecommendedRepo}
+                  />
+                ))}
               </div>
             </div>
 
@@ -987,23 +995,15 @@ export default function Marketplace() {
                 <span className="field-label">{locale === "zh" ? "已添加的源" : "Added Sources"}</span>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {customSources.map((source, idx) => (
-                    <div key={idx} style={{
-                      display: "flex", alignItems: "center", justifyContent: "space-between",
-                      padding: "10px 14px", borderRadius: 8, background: "var(--bg-input)", gap: 12
-                    }}>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {source.url}
-                        </div>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                          {source.count} {locale === "zh" ? "个技能" : "skills"}
-                        </span>
-                      </div>
-                      <button className="btn btn-danger-ghost btn-icon-sm" onClick={() => removeCustomSource(idx)}
-                        title={locale === "zh" ? "移除" : "Remove"}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
+                    <MarketplaceCustomSourceRow
+                      key={source.url}
+                      index={idx}
+                      url={source.url}
+                      count={source.count}
+                      countLabel={locale === "zh" ? "个技能" : "skills"}
+                      removeTitle={locale === "zh" ? "移除" : "Remove"}
+                      onRemove={removeCustomSource}
+                    />
                   ))}
                 </div>
               </div>
@@ -1023,8 +1023,8 @@ export default function Marketplace() {
                   style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, flex: 1 }}
                   placeholder="https://example.com/skills.json"
                   value={customUrl}
-                  onChange={e => setCustomUrl(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleCustomSource()}
+                  onChange={handleCustomUrlChange}
+                  onKeyDown={handleCustomUrlKeyDown}
                 />
                 <button className="btn btn-primary btn-sm" onClick={handleCustomSource} disabled={!customUrl.trim() || loadingCustom} style={{ flexShrink: 0 }}>
                   {loadingCustom ? (
@@ -1183,7 +1183,7 @@ export default function Marketplace() {
   );
 }
 
-function EmptyState({ icon: Icon, text, sub }: { icon: typeof Store; text: string; sub: string }) {
+const EmptyState = memo(function EmptyState({ icon: Icon, text, sub }: { icon: typeof Store; text: string; sub: string }) {
   return (
     <div className="card empty-state">
       <div className="empty-icon"><Icon size={28} style={{ color: "var(--text-muted)" }} /></div>
@@ -1191,4 +1191,4 @@ function EmptyState({ icon: Icon, text, sub }: { icon: typeof Store; text: strin
       <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>{sub}</p>
     </div>
   );
-}
+});

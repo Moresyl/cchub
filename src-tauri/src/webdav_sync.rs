@@ -10,6 +10,7 @@ use crate::commands::extra_commands::{
     generate_sql_backup, get_json_app_setting, import_backup_from_path_impl, set_json_app_setting,
 };
 use crate::db::DbState;
+use crate::utils::configure_background_command;
 
 const WEBDAV_SYNC_SETTINGS_KEY: &str = "webdav_sync_settings";
 const WEBDAV_MANIFEST_FILE: &str = "manifest.json";
@@ -760,7 +761,9 @@ fn device_name() -> String {
         }
     }
 
-    if let Ok(output) = Command::new("hostname").output() {
+    let mut command = Command::new("hostname");
+    configure_background_command(&mut command);
+    if let Ok(output) = command.output() {
         if output.status.success() {
             if let Ok(hostname) = String::from_utf8(output.stdout) {
                 let trimmed = hostname.trim();

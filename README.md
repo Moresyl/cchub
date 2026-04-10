@@ -36,9 +36,11 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 
 ## Screenshots
 
-| Light Theme | Dark Theme |
-|:-:|:-:|
-| ![Light Theme](screenshots/light-theme.png) | ![Dark Theme](screenshots/dark-theme.png) |
+### Light Theme
+![Light Theme](screenshots/light-theme.png)
+
+### Dark Theme
+![Dark Theme](screenshots/dark-theme.png)
 
 ---
 

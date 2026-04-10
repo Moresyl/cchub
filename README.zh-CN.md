@@ -36,9 +36,11 @@ Claude Code 生态正在爆发式增长 — MCP 服务、技能、插件、钩�
 
 ## 截图展示
 
-| 浅色主题 | 深色主题 |
-|:-:|:-:|
-| ![浅色主题](screenshots/light-theme.png) | ![深色主题](screenshots/dark-theme.png) |
+### 浅色主题
+![浅色主题](screenshots/light-theme.png)
+
+### 深色主题
+![深色主题](screenshots/dark-theme.png)
 
 ---
 

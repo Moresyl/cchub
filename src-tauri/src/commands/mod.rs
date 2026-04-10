@@ -1,3 +1,4 @@
+pub mod autopilot_commands;
 pub mod claude_md_commands;
 pub mod config_files_commands;
 pub mod copilot_commands;

@@ -17,6 +17,7 @@ mod webdav_sync;
 mod workflows;
 
 use commands::claude_md_commands;
+use commands::autopilot_commands;
 use commands::config_files_commands;
 use commands::copilot_commands;
 use commands::deeplink_commands;
@@ -234,7 +235,9 @@ pub(crate) fn refresh_tray_menu(app_handle: &AppHandle) -> Result<(), tauri::Err
 pub fn run() {
     utils::install_panic_hook();
 
-    let mut builder = tauri::Builder::default().manage(deeplink::DeepLinkState::default());
+    let mut builder = tauri::Builder::default()
+        .manage(deeplink::DeepLinkState::default())
+        .manage(autopilot_commands::AutopilotRuntime::default());
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
@@ -612,6 +615,13 @@ pub fn run() {
             workflow_commands::delete_workflow,
             workflow_commands::toggle_workflow,
             workflow_commands::import_workflow_file,
+            autopilot_commands::get_autopilot_status,
+            autopilot_commands::pick_autopilot_file,
+            autopilot_commands::start_autopilot,
+            autopilot_commands::stop_autopilot,
+            autopilot_commands::list_autopilot_logs,
+            autopilot_commands::delete_autopilot_log,
+            autopilot_commands::clear_autopilot_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

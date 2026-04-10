@@ -26,6 +26,9 @@ desktop.ini
 # Checkpoints
 .checkpoints/
 
+# Temp
+tmp/
+
 # Generated
 tsconfig.tsbuildinfo
 *.tsbuildinfo

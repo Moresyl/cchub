@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
@@ -24,6 +25,19 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Application crashed inside ErrorBoundary", error, errorInfo);
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    if (!this.state.hasError) {
+      return;
+    }
+
+    if (prevProps.resetKey !== this.props.resetKey || prevProps.children !== this.props.children) {
+      this.setState({
+        hasError: false,
+        message: "",
+      });
+    }
   }
 
   private handleReload = () => {

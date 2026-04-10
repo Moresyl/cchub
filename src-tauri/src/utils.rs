@@ -7,10 +7,18 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn cchub_state_dir() -> PathBuf {
+pub fn cchub_state_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".cchub")
+}
+
+pub fn autopilot_root_dir() -> PathBuf {
+    cchub_state_dir().join("autopilot")
+}
+
+pub fn autopilot_runs_dir() -> PathBuf {
+    autopilot_root_dir().join("runs")
 }
 
 pub fn crash_log_path() -> PathBuf {

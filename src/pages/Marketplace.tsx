@@ -531,20 +531,6 @@ export default function Marketplace() {
 
   const activeCategoryKey = tab === "mcp" ? mcpCategory : skillCategory;
   const currentCategories = tab === "mcp" ? mcpCategories : skillCategories;
-
-  if (loading) {
-    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.marketplace.loading}</span></div>;
-  }
-
-  const hasSkillChanges = editSkillContent !== skillContent;
-  const originalMcpCommand = editingMcp?.command || "";
-  const originalMcpArgs = editingMcp ? formatJson(editingMcp.args || "[]") : "";
-  const originalMcpEnv = editingMcp ? formatJson(editingMcp.env || "{}") : "";
-  const hasMcpChanges = !!editingMcp && (
-    editCommand !== originalMcpCommand ||
-    editArgs !== originalMcpArgs ||
-    editEnv !== originalMcpEnv
-  );
   const handleOpenGithub = useCallback((url: string) => {
     void shellOpen(url);
   }, []);
@@ -595,6 +581,20 @@ export default function Marketplace() {
     } catch (e) { console.error(e); }
     finally { setLoadingMore(false); }
   }, [mcpPage, search]);
+
+  if (loading) {
+    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.marketplace.loading}</span></div>;
+  }
+
+  const hasSkillChanges = editSkillContent !== skillContent;
+  const originalMcpCommand = editingMcp?.command || "";
+  const originalMcpArgs = editingMcp ? formatJson(editingMcp.args || "[]") : "";
+  const originalMcpEnv = editingMcp ? formatJson(editingMcp.env || "{}") : "";
+  const hasMcpChanges = !!editingMcp && (
+    editCommand !== originalMcpCommand ||
+    editArgs !== originalMcpArgs ||
+    editEnv !== originalMcpEnv
+  );
 
   if (editingSkill) {
     return (

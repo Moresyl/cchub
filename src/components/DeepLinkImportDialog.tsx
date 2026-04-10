@@ -486,26 +486,28 @@ function DeepLinkImportDialogComponent() {
     setQueue((currentQueue) => currentQueue.slice(1));
   }, [importing]);
 
-  if (!current) return null;
-
-  const resourceTitle = useMemo(() => (
-    current.resource === "provider"
-      ? uiText("导入 Provider", "Import Provider", "Provider をインポート")
-      : current.resource === "prompt"
-        ? uiText("导入提示词", "Import Prompt", "Prompt をインポート")
-        : current.resource === "mcp"
-          ? uiText("导入 MCP", "Import MCP", "MCP をインポート")
-          : uiText("导入技能", "Import Skill", "Skill をインポート")
-  ), [current.resource, uiText]);
-  const ResourceIcon = useMemo(() => (
-    current.resource === "provider"
-      ? Globe
-      : current.resource === "prompt"
-        ? FileText
-        : current.resource === "mcp"
-          ? Wrench
-          : Package
-  ), [current.resource]);
+  const resourceTitle = current
+    ? (
+      current.resource === "provider"
+        ? uiText("导入 Provider", "Import Provider", "Provider をインポート")
+        : current.resource === "prompt"
+          ? uiText("导入提示词", "Import Prompt", "Prompt をインポート")
+          : current.resource === "mcp"
+            ? uiText("导入 MCP", "Import MCP", "MCP をインポート")
+            : uiText("导入技能", "Import Skill", "Skill をインポート")
+    )
+    : "";
+  const ResourceIcon = current
+    ? (
+      current.resource === "provider"
+        ? Globe
+        : current.resource === "prompt"
+          ? FileText
+          : current.resource === "mcp"
+            ? Wrench
+            : Package
+    )
+    : Package;
   const providerUnnamedLabel = uiText("未命名 Provider", "Unnamed Provider", "無名の Provider");
   const promptUnnamedLabel = uiText("未命名提示词", "Unnamed Prompt", "無名の Prompt");
   const primaryEndpointLabel = uiText("主端点", "Primary Endpoint", "プライマリエンドポイント");
@@ -519,6 +521,8 @@ function DeepLinkImportDialogComponent() {
     "The skill content will be fetched from the repository and installed into the current skills directory on confirmation.",
     "確認時にリポジトリから Skill を取得し、現在の Skill ディレクトリへインストールします。",
   );
+
+  if (!current) return null;
 
   return (
     <div className="confirm-overlay" onClick={handleCancel}>

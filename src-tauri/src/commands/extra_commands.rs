@@ -7906,6 +7906,27 @@ fn hello2cc_cache_dir(home: &std::path::Path) -> PathBuf {
         .join("hello2cc")
 }
 
+fn hello2cc_required_paths(version_dir: &std::path::Path) -> [PathBuf; 4] {
+    [
+        version_dir.join(".claude-plugin").join("plugin.json"),
+        version_dir.join(".claude-plugin").join("marketplace.json"),
+        version_dir.join("agents").join("native.md"),
+        version_dir
+            .join("output-styles")
+            .join("hello2cc-native.md"),
+    ]
+}
+
+fn validate_hello2cc_install(version_dir: &std::path::Path, action: &str) -> Result<(), String> {
+    for required_path in hello2cc_required_paths(version_dir) {
+        if !required_path.exists() {
+            return Err(format!("{} failed: missing {}", action, required_path.display()));
+        }
+    }
+
+    Ok(())
+}
+
 fn ensure_json_object(
     value: &mut serde_json::Value,
 ) -> &mut serde_json::Map<String, serde_json::Value> {
@@ -8339,6 +8360,7 @@ pub async fn install_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello
     let manifest_path = version_dir.join(".claude-plugin").join("plugin.json");
 
     if manifest_path.exists() {
+        validate_hello2cc_install(&version_dir, "Installation")?;
         return get_hello2cc_status_from_home(&home);
     }
 
@@ -8349,24 +8371,7 @@ pub async fn install_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello
 
     let bytes = download_first_available(&client, &HELLO2CC_TARBALL_URLS).await?;
     extract_repo_tarball(&bytes, &version_dir, &HELLO2CC_ROOT_PREFIXES)?;
-
-    let required_paths = [
-        version_dir.join(".claude-plugin").join("plugin.json"),
-        version_dir.join(".claude-plugin").join("marketplace.json"),
-        version_dir.join("settings.json"),
-        version_dir.join("agents").join("native.md"),
-        version_dir
-            .join("output-styles")
-            .join("hello2cc-native.md"),
-    ];
-    for required_path in required_paths {
-        if !required_path.exists() {
-            return Err(format!(
-                "Installation failed: missing {}",
-                required_path.display()
-            ));
-        }
-    }
+    validate_hello2cc_install(&version_dir, "Installation")?;
 
     get_hello2cc_status_from_home(&home)
 }
@@ -8413,21 +8418,7 @@ pub async fn update_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello2
         let bytes = download_first_available(&client, &HELLO2CC_TARBALL_URLS).await?;
         extract_repo_tarball(&bytes, &version_dir, &HELLO2CC_ROOT_PREFIXES)?;
     }
-
-    let required_paths = [
-        version_dir.join(".claude-plugin").join("plugin.json"),
-        version_dir.join(".claude-plugin").join("marketplace.json"),
-        version_dir.join("settings.json"),
-        version_dir.join("agents").join("native.md"),
-        version_dir
-            .join("output-styles")
-            .join("hello2cc-native.md"),
-    ];
-    for required_path in required_paths {
-        if !required_path.exists() {
-            return Err(format!("Update failed: missing {}", required_path.display()));
-        }
-    }
+    validate_hello2cc_install(&version_dir, "Update")?;
 
     if let Ok(entries) = std::fs::read_dir(&cache_dir) {
         for entry in entries.flatten() {

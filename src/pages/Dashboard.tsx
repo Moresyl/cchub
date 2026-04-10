@@ -92,18 +92,19 @@ export default function Dashboard() {
     };
   }, [refetchTools]);
 
-  if (loading) {
-    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.dashboard.scanning}</span></div>;
-  }
-
-  const installedTools = tools.filter((t) => t.installed);
-  const activeServers = servers.filter((s) => s.status === "active");
   const openMcpServers = useCallback(() => navigate("/mcp-servers"), [navigate]);
   const openSkills = useCallback(() => navigate("/skills"), [navigate]);
   const openMcpClients = useCallback(() => navigate("/mcp-clients"), [navigate]);
   const openLogs = useCallback(() => navigate("/logs"), [navigate]);
   const openWorkspaces = useCallback(() => navigate("/workspaces"), [navigate]);
   const openSecurity = useCallback(() => navigate("/security"), [navigate]);
+
+  if (loading) {
+    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.dashboard.scanning}</span></div>;
+  }
+
+  const installedTools = tools.filter((t) => t.installed);
+  const activeServers = servers.filter((s) => s.status === "active");
 
   return (
     <div className="animate-in">

@@ -20,6 +20,7 @@ const McpClients = lazy(() => import("./pages/McpClients"));
 const Logs = lazy(() => import("./pages/Logs"));
 const Skills = lazy(() => import("./pages/Skills"));
 const Workflows = lazy(() => import("./pages/Workflows"));
+const Autopilot = lazy(() => import("./pages/Autopilot"));
 const Hooks = lazy(() => import("./pages/Hooks"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Security = lazy(() => import("./pages/Security"));
@@ -190,7 +191,7 @@ function AppShell() {
             </div>
           )}
           <main className="page-content">
-            <ErrorBoundary>
+            <ErrorBoundary resetKey={location.pathname}>
               <Suspense fallback={<RouteFallback />}>
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.div
@@ -208,6 +209,7 @@ function AppShell() {
                       <Route path="/logs" element={<Logs />} />
                       <Route path="/skills" element={<Skills />} />
                       <Route path="/workflows" element={<Workflows />} />
+                      <Route path="/autopilot" element={<Autopilot />} />
                       <Route path="/marketplace" element={<Marketplace />} />
                       <Route path="/hooks" element={<Hooks />} />
                       <Route path="/workspaces" element={<Workspaces />} />

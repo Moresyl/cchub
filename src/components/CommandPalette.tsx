@@ -3,6 +3,7 @@ import { Command } from "cmdk";
 import {
   Activity,
   ArrowRightLeft,
+  Bot,
   FileText,
   FolderOpen,
   GitBranch,
@@ -55,6 +56,7 @@ const PAGE_ICONS: Record<string, LucideIcon> = {
   "/logs": Activity,
   "/skills": Zap,
   "/workflows": GitBranch,
+  "/autopilot": Bot,
   "/marketplace": Store,
   "/hooks": Webhook,
   "/workspaces": Layers,
@@ -136,6 +138,7 @@ function CommandPaletteComponent({
       { id: "page-logs", label: i.nav.logs, icon: PAGE_ICONS["/logs"], group: pageGroupLabel, keywords: ["logs", "activity"], value: `${i.nav.logs} logs activity`, action: { type: "navigate", path: "/logs" } },
       { id: "page-skills", label: i.nav.skills, icon: PAGE_ICONS["/skills"], group: pageGroupLabel, keywords: ["skills", "plugins"], value: `${i.nav.skills} skills plugins`, action: { type: "navigate", path: "/skills" } },
       { id: "page-workflows", label: i.nav.workflows, icon: PAGE_ICONS["/workflows"], group: pageGroupLabel, keywords: ["workflows", "templates"], value: `${i.nav.workflows} workflows templates`, action: { type: "navigate", path: "/workflows" } },
+      { id: "page-autopilot", label: i.nav.autopilot, icon: PAGE_ICONS["/autopilot"], group: pageGroupLabel, keywords: ["autopilot", "codex", "automation", "task"], value: `${i.nav.autopilot} autopilot codex automation task`, action: { type: "navigate", path: "/autopilot" } },
       { id: "page-marketplace", label: i.nav.marketplace, icon: PAGE_ICONS["/marketplace"], group: pageGroupLabel, keywords: ["market", "plugins"], value: `${i.nav.marketplace} market plugins`, action: { type: "navigate", path: "/marketplace" } },
       { id: "page-hooks", label: i.nav.hooks, icon: PAGE_ICONS["/hooks"], group: pageGroupLabel, keywords: ["hooks"], value: `${i.nav.hooks} hooks`, action: { type: "navigate", path: "/hooks" } },
       { id: "page-workspaces", label: i.nav.workspaces, icon: PAGE_ICONS["/workspaces"], group: pageGroupLabel, keywords: ["workspaces"], value: `${i.nav.workspaces} workspaces`, action: { type: "navigate", path: "/workspaces" } },

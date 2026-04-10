@@ -1,83 +1,134 @@
 <div align="center">
 
-<img src="app-icon.png" alt="CCHub" width="120" />
+<img src="app-icon.png" alt="CCHub" width="128" />
 
 # CCHub
 
-**Claude Code Full Ecosystem Management Platform**
+### Stop editing JSON files. Manage your Claude Code ecosystem from one app.
 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Moresl/cchub?style=social)](https://github.com/Moresl/cchub/stargazers)
 [![Latest Release](https://img.shields.io/github/v/release/Moresl/cchub?color=green)](https://github.com/Moresl/cchub/releases)
 [![Downloads](https://img.shields.io/github/downloads/Moresl/cchub/total?color=blue)](https://github.com/Moresl/cchub/releases)
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-orange.svg)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-Backend-red.svg)](https://rust-lang.org)
-[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Tauri 2.0](https://img.shields.io/badge/Tauri-2.0-orange.svg)](https://tauri.app)
 
-[中文](README.zh-CN.md) · English
+**Windows** · **macOS** · **Linux** &nbsp;|&nbsp; [中文](README.zh-CN.md) · English
 
-**[Download Latest Release](https://github.com/Moresl/cchub/releases/latest)**
+[**Download**](https://github.com/Moresl/cchub/releases/latest) &nbsp;&nbsp;·&nbsp;&nbsp; [Report Bug](https://github.com/Moresl/cchub/issues) &nbsp;&nbsp;·&nbsp;&nbsp; [Request Feature](https://github.com/Moresl/cchub/issues)
 
 </div>
 
 ---
 
-## Introduction
+## The Problem
 
-CCHub is a desktop application for managing the complete Claude Code ecosystem — MCP Servers, Skills, Plugins, Hooks, and Config Profiles — all in one place.
+The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, Workflows — but management is stuck in the stone age:
 
-The Claude Code ecosystem is growing rapidly, but management is fragmented: manual JSON editing, manual file copying, no unified interface. CCHub is here to fix that.
+- Editing `settings.json` by hand, hoping you don't break the syntax
+- Copy-pasting MCP configs between machines
+- No idea which of your 30 MCP servers are actually working
+- Switching between Claude / Codex / Gemini configs = nightmare
+- Zero visibility into security risks from your installed tools
+
+**CCHub puts everything in one GUI.** Install MCP servers in one click. Switch configs instantly. Monitor health. Audit security. Done.
+
+---
 
 ## Screenshots
 
-<!-- Add your screenshots here -->
-<!-- ![MCP Server Management](screenshots/mcp-management.png) -->
-<!-- ![Config Profiles](screenshots/config-profiles.png) -->
-<!-- ![Dark Theme](screenshots/dark-theme.png) -->
+> **Note:** Add your screenshots to the `screenshots/` directory and they will display here.
 
-> Screenshots coming soon. Star the repo to stay updated!
+<!-- Replace these placeholders with actual screenshots -->
+
+| Dashboard | MCP Servers | Config Profiles |
+|:-:|:-:|:-:|
+| ![Dashboard](screenshots/dashboard.png) | ![MCP Servers](screenshots/mcp-servers.png) | ![Profiles](screenshots/profiles.png) |
+
+| MCP Marketplace | Tools & Plugins | Dark Theme |
+|:-:|:-:|:-:|
+| ![Marketplace](screenshots/marketplace.png) | ![Tools](screenshots/tools.png) | ![Dark Theme](screenshots/dark-theme.png) |
+
+---
 
 ## Features
 
-- **MCP Server Management** — Auto-scan installed MCP Servers (Claude Code, Claude Desktop, Cursor). Enable/disable, edit config, delete.
-- **MCP Server Marketplace** — Built-in registry with categorized MCP servers, one-click install with env config, custom source support.
-- **MCP Server Health Monitoring** — Command existence check, process spawn test, latency measurement.
-- **Skills & Plugins** — Browse installed Skills and Plugins with trigger commands, descriptions, and file paths. MDXEditor rich-text editing.
-- **Workflows Management** — 12 built-in workflow templates (Code Review, TDD, Bug Diagnosis, Refactoring, Security Audit, etc.). One-click install to Claude / Codex / Gemini / OpenCode / OpenClaw, Markdown editing, enable/disable toggle.
-- **Hooks Management** — Visualize all Hooks with event types, matchers, and commands.
-- **Config Profiles** — Switch between different configurations for Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw. Structured editing with presets, auto-scan local configs.
-- **CLAUDE.md Manager** — Visual editor for CLAUDE.md project instructions with templates.
-- **Tools Page** — Claude Code permission slider (4 levels), StatusLine (claude-hud) install/config/toggle, Codex settings.
-- **StatusLine (claude-hud)** — One-click install, proxy support, China mirror fallback, display configuration.
-- **Security Audit** — Permission scanning for env secrets, shell execution risks, npx auto-install risks.
-- **Backup & Restore** — Export all configs as SQL, import with legacy JSON support.
-- **Auto Update** — Built-in update checker with Tauri native updater + GitHub Releases fallback.
-- **Dark / Light Theme** — Glassmorphism UI with theme switching.
-- **i18n** — Chinese (default) and English.
-- **System Tray** — Minimize to tray on close.
+### Core Management
+
+| Feature | Description |
+|---------|-------------|
+| **MCP Server Management** | Auto-scan Claude Code, Claude Desktop, Cursor configs. Enable/disable, edit, delete — no JSON editing |
+| **MCP Marketplace** | Built-in registry with categories. One-click install with env config. Custom source support |
+| **MCP Health Monitor** | Command check, process spawn test, latency measurement. Know which servers are broken |
+| **Config Profiles** | One-click switch between Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw configs |
+| **Skills & Plugins** | Browse, edit (MDXEditor rich-text), cross-tool sync |
+| **Workflows** | 12 built-in templates (Code Review, TDD, Bug Diagnosis, Security Audit...). One-click install |
+| **Hooks Visualizer** | See all hooks: event types, matchers, commands — at a glance |
+
+### Developer Experience
+
+| Feature | Description |
+|---------|-------------|
+| **CLAUDE.md Manager** | Visual editor for project instructions with templates |
+| **Autopilot** | Task orchestration for Claude / Codex auto-execution with real-time monitoring |
+| **Command Palette** | `Ctrl+K` to navigate anywhere instantly |
+| **Security Audit** | Env secrets, shell execution risks, npx auto-install risk scanning |
+| **StatusLine (claude-hud)** | One-click install, proxy support, China mirror, display config |
+
+### Platform
+
+| Feature | Description |
+|---------|-------------|
+| **Cross-platform** | Windows 10/11, macOS 10.15+, Linux |
+| **Dark / Light Theme** | Glassmorphism UI with system-aware theme |
+| **Backup & Restore** | Export all configs as SQL, import with legacy format support |
+| **Auto Update** | Built-in updater with GitHub Releases fallback |
+| **i18n** | Chinese, English, Japanese |
+| **System Tray** | Minimize to tray on close |
+
+---
+
+## Quick Comparison
+
+| Task | Without CCHub | With CCHub |
+|------|:---:|:---:|
+| Install an MCP server | Edit JSON, find npm package, configure env vars manually | One click from Marketplace |
+| Switch from Claude to Codex config | Copy files, rename, edit paths | One click in Profiles |
+| Check if MCP servers are healthy | Run commands manually, check logs | Health dashboard with latency |
+| Audit security risks | Read JSON files, grep for secrets | Automated scan with risk report |
+| Manage CLAUDE.md | Open in text editor, remember syntax | Rich visual editor with templates |
+
+---
 
 ## Download
 
-| File | Description |
-|------|-------------|
-| [Setup EXE](https://github.com/Moresl/cchub/releases/latest) | **Recommended** — NSIS installer with shortcuts and auto-update |
-| [MSI](https://github.com/Moresl/cchub/releases/latest) | Windows Installer format for enterprise deployment |
-| [Portable](https://github.com/Moresl/cchub/releases/latest) | No install needed — double-click and run |
-| [macOS DMG](https://github.com/Moresl/cchub/releases/latest) | Apple Silicon & Intel |
-| [Linux](https://github.com/Moresl/cchub/releases/latest) | deb / AppImage / RPM |
+| File | Platform | Description |
+|------|----------|-------------|
+| [`CCHub_x64-setup.exe`](https://github.com/Moresl/cchub/releases/latest) | Windows | **Recommended** — NSIS installer with auto-update |
+| [`CCHub_x64_en-US.msi`](https://github.com/Moresl/cchub/releases/latest) | Windows | MSI format for enterprise deployment |
+| [`CCHub_x64_portable.exe`](https://github.com/Moresl/cchub/releases/latest) | Windows | No install needed — double-click and run |
+| [`CCHub_aarch64.dmg`](https://github.com/Moresl/cchub/releases/latest) | macOS | Apple Silicon (M1/M2/M3/M4) |
+| [`CCHub_x64.dmg`](https://github.com/Moresl/cchub/releases/latest) | macOS | Intel |
+| [`CCHub_amd64.deb`](https://github.com/Moresl/cchub/releases/latest) | Linux | Debian / Ubuntu |
+| [`CCHub_amd64.AppImage`](https://github.com/Moresl/cchub/releases/latest) | Linux | Universal AppImage |
+| [`CCHub_x86_64.rpm`](https://github.com/Moresl/cchub/releases/latest) | Linux | Fedora / RHEL |
 
-**Requirements:** Windows 10/11 (x64), macOS 10.15+, Linux (WebKit2GTK required).
+---
 
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
-| Desktop Framework | **Tauri 2.0** — Rust backend + Web frontend, 10x lighter than Electron |
-| Frontend | **React 19 + TypeScript + Tailwind CSS 4** |
-| Backend | **Rust** — High performance, single binary distribution |
+|-------|-----------|
+| Framework | [**Tauri 2.0**](https://tauri.app) — Rust backend + Web frontend, ~20MB binary |
+| Frontend | **React 19** + **TypeScript** + **Tailwind CSS 4** |
+| Backend | **Rust** — High perf, memory safe, single binary |
 | Database | **SQLite** (rusqlite) — Zero-dependency local storage |
-| Build | **Vite 6 + pnpm** |
+| Build | **Vite 6** + **pnpm** |
+| Data Layer | **TanStack React Query** — Unified caching & state |
+| UI | **shadcn/ui** + **Framer Motion** + **cmdk** |
 
-## Getting Started (Development)
+---
+
+## Development
 
 ### Prerequisites
 
@@ -86,77 +137,94 @@ The Claude Code ecosystem is growing rapidly, but management is fragmented: manu
 - [Rust](https://rustup.rs) >= 1.70
 - [Tauri 2.0 Prerequisites](https://v2.tauri.app/start/prerequisites/)
 
-### Install & Run
+### Quick Start
 
 ```bash
-# Clone
 git clone https://github.com/Moresl/cchub.git
 cd cchub
-
-# Install dependencies
 pnpm install
-
-# Development
 pnpm tauri dev
+```
 
-# Build
+### Build
+
+```bash
 pnpm tauri build
 ```
 
-## Scan Paths
+---
 
-CCHub auto-scans MCP Server configs from:
+## Supported Config Sources
 
-| Path | Description |
-|---|---|
-| `~/.claude/plugins/**/.mcp.json` | Claude Code plugin directory (recursive) |
-| `%APPDATA%/Claude/claude_desktop_config.json` | Claude Desktop config |
-| `~/.cursor/mcp.json` | Cursor editor config |
+CCHub auto-scans MCP server configs from:
+
+| Path | Source |
+|------|--------|
+| `~/.claude/plugins/**/.mcp.json` | Claude Code plugins (recursive) |
+| `%APPDATA%/Claude/claude_desktop_config.json` | Claude Desktop |
+| `~/.cursor/mcp.json` | Cursor |
+| `~/.codex/config.toml` | Codex CLI |
+| `~/.gemini/settings.json` | Gemini CLI |
+
+---
 
 ## Roadmap
 
 - [x] MCP Server management (scan, toggle, edit, delete)
-- [x] MCP Server marketplace (registry, one-click install, custom sources)
-- [x] MCP Server health monitoring (command check, spawn test, latency)
+- [x] MCP Marketplace (registry, one-click install, custom sources)
+- [x] MCP Health monitoring (command check, spawn test, latency)
 - [x] Skills & Plugins browser (MDXEditor, cross-tool sync)
-- [x] Workflows management (12 templates, Markdown editing, enable/disable)
+- [x] Workflows (12 templates, Markdown editing, multi-tool install)
 - [x] Hooks visualization
 - [x] Config Profiles (structured editor, multi-tool switching)
-- [x] CLAUDE.md manager (editor, templates, toggle)
+- [x] CLAUDE.md manager (editor, templates)
 - [x] Tools page (permissions, StatusLine, Codex settings)
-- [x] StatusLine (claude-hud) integration (install, config, proxy, China mirror)
+- [x] StatusLine (claude-hud) integration
 - [x] Security audit (permission scanning, risk detection)
 - [x] Backup & restore (SQL export/import)
 - [x] Auto-update (Tauri Updater + GitHub fallback)
-- [x] Dark / Light theme
-- [x] i18n (Chinese + English)
-- [x] macOS / Linux support (CI multi-platform builds)
-- [x] System tray (minimize on close)
-- [ ] Config change detection (security audit over time)
+- [x] Autopilot (Claude / Codex task orchestration)
+- [x] Command Palette (Ctrl+K)
+- [x] hello2cc plugin management
+- [x] Dark / Light / System theme
+- [x] i18n (Chinese + English + Japanese)
+- [x] Cross-platform (Windows, macOS, Linux)
+- [x] System tray
+- [ ] Config change detection (security timeline)
 - [ ] Hooks editor (create/edit hooks from UI)
+- [ ] WebDAV cloud sync
+- [ ] Plugin ecosystem (community MCP templates)
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions welcome! See [issues](https://github.com/Moresl/cchub/issues) for ideas.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+```
+Fork → Branch → Commit → Push → Pull Request
+```
+
+---
 
 ## Star History
 
+<div align="center">
+
+If CCHub saves you time, consider giving it a star. It helps others discover the project.
+
 [![Star History Chart](https://api.star-history.com/svg?repos=Moresl/cchub&type=Date)](https://star-history.com/#Moresl/cchub&Date)
+
+</div>
+
+---
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [Tauri](https://tauri.app) — Lightweight desktop app framework
+- [Tauri](https://tauri.app) — Lightweight desktop framework
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — AI coding assistant
 - [MCP](https://modelcontextprotocol.io) — Model Context Protocol

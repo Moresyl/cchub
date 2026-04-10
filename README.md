@@ -36,17 +36,9 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 
 ## Screenshots
 
-> **Note:** Add your screenshots to the `screenshots/` directory and they will display here.
-
-<!-- Replace these placeholders with actual screenshots -->
-
-| Dashboard | MCP Servers | Config Profiles |
-|:-:|:-:|:-:|
-| ![Dashboard](screenshots/dashboard.png) | ![MCP Servers](screenshots/mcp-servers.png) | ![Profiles](screenshots/profiles.png) |
-
-| MCP Marketplace | Tools & Plugins | Dark Theme |
-|:-:|:-:|:-:|
-| ![Marketplace](screenshots/marketplace.png) | ![Tools](screenshots/tools.png) | ![Dark Theme](screenshots/dark-theme.png) |
+| Light Theme | Dark Theme |
+|:-:|:-:|
+| ![Light Theme](screenshots/light-theme.png) | ![Dark Theme](screenshots/dark-theme.png) |
 
 ---
 

@@ -36,17 +36,9 @@ Claude Code 生态正在爆发式增长 — MCP 服务、技能、插件、钩�
 
 ## 截图展示
 
-> **提示：** 将截图放入 `screenshots/` 目录即可展示。
-
-<!-- 替换为实际截图 -->
-
-| 仪表盘 | MCP 服务管理 | 配置切换 |
-|:-:|:-:|:-:|
-| ![Dashboard](screenshots/dashboard.png) | ![MCP Servers](screenshots/mcp-servers.png) | ![Profiles](screenshots/profiles.png) |
-
-| MCP 市场 | 工具与插件 | 暗色主题 |
-|:-:|:-:|:-:|
-| ![Marketplace](screenshots/marketplace.png) | ![Tools](screenshots/tools.png) | ![Dark Theme](screenshots/dark-theme.png) |
+| 浅色主题 | 深色主题 |
+|:-:|:-:|
+| ![浅色主题](screenshots/light-theme.png) | ![深色主题](screenshots/dark-theme.png) |
 
 ---
 

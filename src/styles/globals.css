@@ -114,14 +114,16 @@ body {
 
 /* ═══ Scrollbar ═══ */
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: var(--text-muted);
-  border-radius: 3px;
-  opacity: 0.4;
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-::-webkit-scrollbar-thumb:hover { opacity: 0.7; }
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
 
 /* ═══ Layout ═══ */
 

@@ -126,6 +126,7 @@ pub struct AutopilotClearResult {
 struct AutopilotShared {
     status: Mutex<AutopilotStatus>,
     child: Mutex<Option<Child>>,
+    child_pid: Mutex<Option<u32>>,
 }
 
 #[derive(Clone, Default)]
@@ -185,14 +186,19 @@ impl AutopilotRuntime {
     }
 
     fn set_child(&self, child: Child) -> Result<(), String> {
+        let pid = child.id();
         let mut slot = self.0.child.lock().map_err(|e| e.to_string())?;
         *slot = Some(child);
+        let mut pid_slot = self.0.child_pid.lock().map_err(|e| e.to_string())?;
+        *pid_slot = Some(pid);
         Ok(())
     }
 
     fn clear_child(&self) -> Result<(), String> {
         let mut slot = self.0.child.lock().map_err(|e| e.to_string())?;
         *slot = None;
+        let mut pid_slot = self.0.child_pid.lock().map_err(|e| e.to_string())?;
+        *pid_slot = None;
         Ok(())
     }
 
@@ -209,11 +215,15 @@ impl AutopilotRuntime {
             .map(|status| status.stop_requested)
             .unwrap_or(false)
     }
+
+    fn child_pid(&self) -> Result<Option<u32>, String> {
+        Ok(*self.0.child_pid.lock().map_err(|e| e.to_string())?)
+    }
 }
 
 #[tauri::command]
 pub fn get_autopilot_status(runtime: State<'_, AutopilotRuntime>) -> Result<AutopilotStatus, String> {
-    runtime.inner().clone().snapshot()
+    refresh_runtime_status(runtime.inner().clone())
 }
 
 #[tauri::command]
@@ -337,15 +347,25 @@ pub fn stop_autopilot(runtime: State<'_, AutopilotRuntime>) -> Result<AutopilotS
     runtime.update_status(|status| {
         status.stop_requested = true;
         status.status = AUTOPILOT_STATUS_STOPPING.to_string();
-        push_stage(status, "stopping", "正在停止任务".to_string(), None);
+        push_stage(status, "stopping", "正在发送停止请求".to_string(), None);
     })?;
 
-    runtime.with_child(|slot| {
-        if let Some(child) = slot.as_mut() {
-            kill_process_tree(child)?;
-        }
-        Ok(())
-    })?;
+    if let Some(pid) = runtime.child_pid()? {
+        let runtime_for_stop = runtime.clone();
+        thread::spawn(move || {
+            if let Err(error) = kill_process_tree_by_pid(pid) {
+                let _ = runtime_for_stop.update_status(|status| {
+                    status.last_error = error.clone();
+                    push_stage(
+                        status,
+                        "stop_warning",
+                        format!("停止进程失败: {error}"),
+                        Some(status.attempt),
+                    );
+                });
+            }
+        });
+    }
 
     runtime.snapshot()
 }
@@ -353,7 +373,7 @@ pub fn stop_autopilot(runtime: State<'_, AutopilotRuntime>) -> Result<AutopilotS
 #[tauri::command]
 pub fn list_autopilot_logs(runtime: State<'_, AutopilotRuntime>) -> Result<Vec<AutopilotStatus>, String> {
     let runtime = runtime.inner().clone();
-    let current_snapshot = runtime.snapshot()?;
+    let current_snapshot = refresh_runtime_status(runtime.clone())?;
     let current_run_id = current_snapshot.current_run_id.clone();
     let root = utils::autopilot_runs_dir();
     fs::create_dir_all(&root).map_err(|e| format!("创建日志根目录失败: {e}"))?;
@@ -769,7 +789,7 @@ fn build_codex_command(
     let resume_prompt = fs::read_to_string(&context.paths.resume_prompt_file)
         .map_err(|e| format!("读取续跑提示词失败: {e}"))?;
 
-    let mut command = Command::new(&context.codex_bin);
+    let mut command = build_codex_process(&context.codex_bin);
     command.arg("exec");
 
     let actual_mode = match requested_mode {
@@ -814,6 +834,41 @@ fn build_codex_command(
     }
 }
 
+fn build_codex_process(codex_bin: &str) -> Command {
+    #[cfg(target_os = "windows")]
+    {
+        let codex_path = Path::new(codex_bin);
+        if let Some((node_bin, script_path)) = try_resolve_windows_node_wrapper(codex_path) {
+            let mut command = Command::new(node_bin);
+            command.arg(script_path);
+            return command;
+        }
+    }
+
+    Command::new(codex_bin)
+}
+
+#[cfg(target_os = "windows")]
+fn try_resolve_windows_node_wrapper(codex_path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let parent = codex_path.parent()?;
+    let script_path = parent
+        .join("node_modules")
+        .join("@openai")
+        .join("codex")
+        .join("bin")
+        .join("codex.js");
+    if !script_path.is_file() {
+        return None;
+    }
+
+    let node_bin = parent.join("node.exe");
+    if node_bin.is_file() {
+        return Some((node_bin, script_path));
+    }
+
+    Some((PathBuf::from("node"), script_path))
+}
+
 fn build_initial_prompt(context: &NativeAutopilotContext, task_content: &str) -> String {
     format!(
         "You are continuing implementation work inside the repository at `{}`.\n\nPrimary objective:\n- Read the task document below carefully. It describes features, improvements, or fixes to implement.\n- The document may use any format: checkboxes ([ ] / [x]), numbered lists, headings, bullet points, etc.\n- Implement every item that has NOT yet been completed in the codebase.\n- If the document uses checkboxes, treat [x] as done and [ ] as remaining. Otherwise, judge completion by whether the described feature/fix already exists in the code.\n- Update `{}` in place as you make progress (e.g., mark items as done, add notes).\n- Do not stop after a summary, one feature, or one phase. Keep going until every feasible item is implemented and verified.\n- Run relevant verification commands after meaningful batches of changes.\n- Do not claim completion merely because the document contains historical progress entries.\n- Respect any explicit exclusions noted in the document.\n- Do not revert unrelated existing changes.\n\nTask document follows (the file itself remains the source of truth):\n\n{}\n\n{}",
@@ -852,6 +907,59 @@ fn completion_detected(last_message_path: &Path, done_token: &str) -> Result<boo
             && lines.first().copied().unwrap_or_default() == done_token
             && lines.get(1).copied().unwrap_or_default() == DEFAULT_CONFIRM_TEXT,
     )
+}
+
+fn refresh_runtime_status(runtime: AutopilotRuntime) -> Result<AutopilotStatus, String> {
+    let snapshot = runtime.snapshot()?;
+    let Some(paths) = derive_paths_from_status(&snapshot) else {
+        return Ok(snapshot);
+    };
+
+    let latest_session_id = maybe_record_session_id(&paths)?;
+    let latest_preview = read_last_message_preview(&paths.last_message);
+    let session_changed = latest_session_id
+        .as_deref()
+        .map(|value| value != snapshot.session_id)
+        .unwrap_or(false);
+    let preview_changed = !latest_preview.is_empty() && latest_preview != snapshot.last_message_preview;
+
+    if !session_changed && !preview_changed {
+        return Ok(snapshot);
+    }
+
+    runtime.update_status(|status| {
+        if let Some(session_id) = latest_session_id.clone() {
+            if status.session_id != session_id {
+                status.session_id = session_id;
+            }
+        }
+        if !latest_preview.is_empty() && status.last_message_preview != latest_preview {
+            status.last_message_preview = latest_preview.clone();
+        }
+    })
+}
+
+fn derive_paths_from_status(status: &AutopilotStatus) -> Option<AutopilotPaths> {
+    if status.state_dir.trim().is_empty() {
+        return None;
+    }
+
+    let state_dir = PathBuf::from(&status.state_dir);
+    let log_dir = PathBuf::from(&status.log_dir);
+    Some(AutopilotPaths {
+        log_dir: log_dir.clone(),
+        state_dir: state_dir.clone(),
+        main_log: PathBuf::from(&status.main_log_path),
+        event_log: state_dir.join("events.jsonl"),
+        runner_log: state_dir.join("runner.log"),
+        last_message: state_dir.join("last-message.txt"),
+        session_id_file: state_dir.join("session-id.txt"),
+        meta_file: state_dir.join("meta.json"),
+        initial_prompt_file: state_dir.join("initial-prompt.txt"),
+        resume_prompt_file: state_dir.join("resume-prompt.txt"),
+        current_prompt_file: state_dir.join("_current_prompt.txt"),
+        task_file_abs: PathBuf::from(&status.task_file),
+    })
 }
 
 fn maybe_record_session_id(paths: &AutopilotPaths) -> Result<Option<String>, String> {
@@ -896,18 +1004,22 @@ fn find_session_id_in_value(value: &Value) -> Option<String> {
     }
 }
 
-fn update_last_message_preview(
-    runtime: &AutopilotRuntime,
-    last_message_path: &Path,
-    attempt: u32,
-) -> Result<String, String> {
-    let preview = fs::read_to_string(last_message_path)
+fn read_last_message_preview(last_message_path: &Path) -> String {
+    fs::read_to_string(last_message_path)
         .unwrap_or_default()
         .trim()
         .chars()
         .take(300)
         .collect::<String>()
-        .replace('\n', " ↵ ");
+        .replace('\n', " ↵ ")
+}
+
+fn update_last_message_preview(
+    runtime: &AutopilotRuntime,
+    last_message_path: &Path,
+    attempt: u32,
+) -> Result<String, String> {
+    let preview = read_last_message_preview(last_message_path);
     if preview.is_empty() {
         return Ok(String::new());
     }
@@ -1185,12 +1297,14 @@ fn clear_state_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn kill_process_tree(child: &mut Child) -> Result<(), String> {
+fn kill_process_tree_by_pid(pid: u32) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let pid = child.id().to_string();
         let mut command = Command::new("taskkill");
+        let pid = pid.to_string();
         command.args(["/PID", pid.as_str(), "/T", "/F"]);
+        command.stdout(Stdio::null());
+        command.stderr(Stdio::null());
         utils::configure_background_command(&mut command);
         command.status().map_err(|e| format!("停止任务失败: {e}"))?;
         return Ok(());
@@ -1198,7 +1312,12 @@ fn kill_process_tree(child: &mut Child) -> Result<(), String> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        child.kill().map_err(|e| format!("停止任务失败: {e}"))?;
+        let pid_arg = pid.to_string();
+        let mut command = Command::new("kill");
+        command.args(["-TERM", pid_arg.as_str()]);
+        command.stdout(Stdio::null());
+        command.stderr(Stdio::null());
+        command.status().map_err(|e| format!("停止任务失败: {e}"))?;
         Ok(())
     }
 }
@@ -1245,9 +1364,10 @@ fn now_string() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        completion_detected, generate_nonce, maybe_record_session_id, now_string,
-        run_native_autopilot_inner, sanitize_task_name, AutopilotPaths, AutopilotRuntime,
-        AutopilotStartRequest, NativeAutopilotContext, DEFAULT_CONFIRM_TEXT, looks_like_uuid,
+        build_codex_process, completion_detected, generate_nonce, maybe_record_session_id,
+        now_string, run_native_autopilot_inner, sanitize_task_name, AutopilotPaths,
+        AutopilotRuntime, AutopilotStartRequest, NativeAutopilotContext, DEFAULT_CONFIRM_TEXT,
+        looks_like_uuid,
     };
     use std::env;
     use std::fs;
@@ -1412,5 +1532,37 @@ mod tests {
         assert!(!summary.running);
         assert_eq!(summary.status, "completed");
         assert_eq!(summary.phase, "completed");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn build_codex_process_uses_node_for_npm_wrapper() {
+        let temp = tempdir().unwrap();
+        let bin_dir = temp.path().join("bin");
+        let codex_cmd = bin_dir.join("codex.cmd");
+        let node_exe = bin_dir.join("node.exe");
+        let script_path = bin_dir
+            .join("node_modules")
+            .join("@openai")
+            .join("codex")
+            .join("bin")
+            .join("codex.js");
+
+        fs::create_dir_all(script_path.parent().unwrap()).unwrap();
+        fs::write(&codex_cmd, "@echo off\r\n").unwrap();
+        fs::write(&node_exe, "").unwrap();
+        fs::write(&script_path, "console.log('ok')\n").unwrap();
+
+        let command = build_codex_process(&codex_cmd.to_string_lossy());
+        let args = command
+            .get_args()
+            .map(|value| value.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            command.get_program().to_string_lossy().to_ascii_lowercase(),
+            node_exe.to_string_lossy().to_ascii_lowercase()
+        );
+        assert_eq!(args.first().map(String::as_str), Some(script_path.to_string_lossy().as_ref()));
     }
 }

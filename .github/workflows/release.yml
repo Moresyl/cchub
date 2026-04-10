@@ -43,11 +43,15 @@ jobs:
           releaseBody: |
             ## 更新内容 / Highlights
 
-            - 新增工作流管理页面，内置 12 个热门工作流模板，支持一键安装、编辑和启用/禁用
-            - StatusLine (claude-hud) 管理移至工具页，支持安装、配置和代理下载
-            - Claude 配置新增 StatusLine 开关和跳过权限确认开关
-            - 修复配置切换时 StatusLine 和权限设置丢失的问题
-            - 优化配置切换体验
+            - 新增 Autopilot 自动驾驶页面，支持 Claude/Codex 任务编排与自动执行
+            - 大型页面拆分重构（Settings/Tools/Profiles/Marketplace → 60+ 子组件）
+            - 引入 TanStack React Query 数据管理层
+            - 新增 hello2cc 第三方兼容客户端插件管理
+            - 新增 CommandPalette (Ctrl+K) 全局命令面板
+            - 新增 ErrorBoundary 全局错误边界
+            - Autopilot 停止逻辑异步化，Windows codex 兼容优化
+            - 修复 Windows 下 claude-hud 多行 StatusLine 显示问题
+            - Vite manualChunks 分包优化
 
             ## 下载 / Download
 

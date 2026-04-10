@@ -135,6 +135,26 @@ function formatDateTime(value: string | null) {
   return date.toLocaleString();
 }
 
+function formatRuntime(startedAt: string | null, finishedAt: string | null, nowTs: number) {
+  if (!startedAt) return "--";
+  const start = new Date(startedAt).getTime();
+  if (Number.isNaN(start)) return "--";
+
+  const end = finishedAt ? new Date(finishedAt).getTime() : nowTs;
+  if (Number.isNaN(end)) return "--";
+
+  const totalSeconds = Math.max(0, Math.floor((end - start) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+  }
+
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
 function shortenPath(value: string, keep = 42) {
   const trimmed = value.trim();
   if (!trimmed) return "--";
@@ -205,6 +225,8 @@ function getPhaseLabel(
       return uiText("空转停止", "Idle Stopped", "空転停止");
     case "stopping":
       return uiText("正在停止", "Stopping", "停止中");
+    case "stop_warning":
+      return uiText("停止异常", "Stop Warning", "停止警告");
     case "stopped":
       return uiText("已停止", "Stopped", "停止済み");
     case "completed":
@@ -246,6 +268,7 @@ export default function Autopilot() {
   const [stopping, setStopping] = useState(false);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [busyRunId, setBusyRunId] = useState<string | null>(null);
+  const [nowTs, setNowTs] = useState(() => Date.now());
   const locale = getLocale();
   const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
@@ -300,6 +323,14 @@ export default function Autopilot() {
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadAll, status.running]);
+
+  useEffect(() => {
+    if (!status.running) return undefined;
+    const timer = window.setInterval(() => {
+      setNowTs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [status.running]);
 
   const updateField = useCallback(<K extends keyof AutopilotFormState>(key: K, value: AutopilotFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -445,6 +476,8 @@ export default function Autopilot() {
   const statusLabel = getStatusLabel(status.status, uiText);
   const phaseLabel = getPhaseLabel(status.phase, uiText);
   const statusTone = getStatusTone(status.status);
+  const runtimeLabel = formatRuntime(status.startedAt, status.finishedAt, nowTs);
+  const runtimeTone = status.running ? "#2563eb" : "var(--text-primary)";
 
   if (loading) {
     return (
@@ -478,12 +511,12 @@ export default function Autopilot() {
           {status.running ? (
             <button className="btn btn-danger btn-sm" onClick={() => void handleStop()} style={{ gap: 6 }} disabled={stopping}>
               <Square size={14} />
-              {uiText("停止任务", "Stop Run", "停止")}
+              {stopping ? uiText("停止中...", "Stopping...", "停止中...") : uiText("停止任务", "Stop Run", "停止")}
             </button>
           ) : (
             <button className="btn btn-primary btn-sm" onClick={() => void handleStart()} style={{ gap: 6 }} disabled={!canStart}>
               <Play size={14} />
-              {uiText("启动任务", "Start Run", "開始")}
+              {starting ? uiText("启动中...", "Starting...", "開始中...") : uiText("启动任务", "Start Run", "開始")}
             </button>
           )}
         </div>
@@ -539,22 +572,17 @@ export default function Autopilot() {
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
               {uiText("所有运行日志将统一保存到 `~/.cchub/autopilot/runs`。", "All runs are stored under `~/.cchub/autopilot/runs`.", "すべての実行ログは `~/.cchub/autopilot/runs` に保存されます。")}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn btn-secondary btn-sm" onClick={handleResetForm} style={{ gap: 6 }}>
-                <RotateCcw size={14} />
-                {uiText("重置表单", "Reset Form", "フォームをリセット")}
-              </button>
-              <button className="btn btn-primary btn-sm" onClick={() => void handleStart()} style={{ gap: 6 }} disabled={!canStart}>
-                <Play size={14} />
-                {starting ? uiText("启动中...", "Starting...", "開始中...") : uiText("启动任务", "Start Run", "開始")}
-              </button>
-            </div>
+            <button className="btn btn-secondary btn-sm" onClick={handleResetForm} style={{ gap: 6 }}>
+              <RotateCcw size={14} />
+              {uiText("重置表单", "Reset Form", "フォームをリセット")}
+            </button>
           </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <MetricCard title={uiText("当前状态", "Current Status", "現在の状態")} value={statusLabel} tone={statusTone} icon={<ShieldCheck size={16} />} />
           <MetricCard title={uiText("当前阶段", "Current Phase", "現在の段階")} value={phaseLabel} tone="var(--accent)" icon={<Bot size={16} />} />
+          <MetricCard title={uiText("运行时长", "Runtime", "実行時間")} value={runtimeLabel} tone={runtimeTone} icon={<Play size={16} />} />
           <MetricCard title={uiText("执行轮次", "Attempt", "実行回数")} value={status.attempt > 0 ? String(status.attempt) : "--"} tone="var(--text-primary)" icon={<RefreshCw size={16} />} />
           <MetricCard title={uiText("最近一次运行", "Latest Run", "最新の実行")} value={latestRun ? leafName(latestRun.taskFile || latestRun.taskName) : "--"} tone="var(--text-primary)" icon={<FileSearch size={16} />} />
         </div>
@@ -566,11 +594,13 @@ export default function Autopilot() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
             <SummaryItem label={uiText("摘要", "Summary", "要約")} value={currentSummary} strong />
+            <SummaryItem label={uiText("运行 ID", "Run ID", "実行 ID")} value={status.currentRunId || "--"} />
+            <SummaryItem label={uiText("会话 ID", "Session ID", "セッション ID")} value={status.sessionId || uiText("等待 Codex 创建会话", "Waiting for Codex session", "Codex セッション待機中")} />
             <SummaryItem label={uiText("任务文档", "Task File", "タスクファイル")} value={status.taskFile ? shortenPath(status.taskFile) : uiText("尚未选择", "Not selected", "未選択")} />
             <SummaryItem label={uiText("工作目录", "Working Directory", "作業ディレクトリ")} value={status.workdir ? shortenPath(status.workdir) : uiText("按启动时自动解析", "Resolved on start", "開始時に自動解決")} />
+            <SummaryItem label={uiText("主日志", "Main Log", "メインログ")} value={status.mainLogPath ? shortenPath(status.mainLogPath, 52) : "--"} />
             <SummaryItem label={uiText("开始时间", "Started At", "開始時刻")} value={formatDateTime(status.startedAt)} />
             <SummaryItem label={uiText("结束时间", "Finished At", "終了時刻")} value={formatDateTime(status.finishedAt)} />
-            <SummaryItem label={uiText("会话 ID", "Session ID", "セッション ID")} value={status.sessionId ? `${status.sessionId.slice(0, 18)}...` : "--"} />
           </div>
           {status.lastMessagePreview && (
             <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border-default)" }}>
@@ -779,12 +809,39 @@ function MetricCard(props: {
   icon: ReactNode;
 }) {
   return (
-    <div className="card" style={{ padding: 16 }}>
+    <div className="card" style={{ padding: 16, minWidth: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{props.title}</div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+            minWidth: 0,
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={props.title}
+        >
+          {props.title}
+        </div>
         <div style={{ color: props.tone }}>{props.icon}</div>
       </div>
-      <div style={{ marginTop: 10, fontSize: 18, fontWeight: 700, color: props.tone }}>{props.value}</div>
+      <div
+        style={{
+          marginTop: 10,
+          fontSize: 18,
+          fontWeight: 700,
+          color: props.tone,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={props.value}
+      >
+        {props.value}
+      </div>
     </div>
   );
 }

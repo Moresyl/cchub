@@ -27,7 +27,7 @@ Claude Code 生态正在爆发式增长 — MCP 服务、技能、插件、钩�
 - 手动编辑 `settings.json`，一个逗号打错全炸
 - MCP 配置在不同机器之间手动拷贝
 - 装了 30 个 MCP 服务，不知道哪些还能用
-- Claude / Codex / Gemini 配置互切 = 噩梦
+- Claude / Codex / Gemini / Hermes 配置互切 = 噩梦
 - 对已安装工具的安全风险毫无感知
 
 **CCHub 把这一切搬进一个图形界面。** 一键安装 MCP 服务、一键切换配置、实时健康监控、安全审计。
@@ -53,7 +53,7 @@ Claude Code 生态正在爆发式增长 — MCP 服务、技能、插件、钩�
 | **MCP 服务管理** | 自动扫描 Claude Code / Claude Desktop / Cursor 配置，启用/禁用/编辑/删除 — 无需手动编辑 JSON |
 | **MCP 市场** | 内置分类注册表，一键安装 + 环境变量配置，支持自定义源 |
 | **MCP 健康监控** | 命令检测、进程启动测试、延迟测量，一眼看出哪些服务挂了 |
-| **配置切换** | Claude Code / Codex / Gemini CLI / OpenCode / OpenClaw 配置一键切换 |
+| **配置切换** | Claude Code / Codex / Gemini CLI / OpenCode / OpenClaw / Hermes 配置一键切换 |
 | **技能与插件** | 浏览、编辑（MDXEditor 富文本）、跨工具同步 |
 | **工作流管理** | 内置 12 个模板（代码审查、TDD、Bug 诊断、安全审计…），一键安装 |
 | **钩子可视化** | 事件类型、匹配器、命令 — 一目了然 |
@@ -159,6 +159,7 @@ CCHub 自动扫描以下配置源：
 | `~/.cursor/mcp.json` | Cursor |
 | `~/.codex/config.toml` | Codex CLI |
 | `~/.gemini/settings.json` | Gemini CLI |
+| `~/.hermes/cli-config.yaml` + `~/.hermes/.env` | Hermes Agent (NousResearch)，YAML + dotenv 双文件 |
 
 ---
 

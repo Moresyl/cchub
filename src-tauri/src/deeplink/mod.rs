@@ -178,6 +178,7 @@ pub async fn merge_deeplink_request(
         "codex" => merge_codex_config(&mut request, &config_text)?,
         "gemini" => merge_gemini_config(&mut request, &config_text)?,
         "openclaw" => merge_openclaw_config(&mut request, &config_text)?,
+        "hermes" => merge_hermes_config(&mut request, &config_text)?,
         "opencode" => merge_opencode_config(&mut request, &config_text)?,
         other => {
             return Err(AppError::Custom(format!(
@@ -532,6 +533,71 @@ fn merge_opencode_config(
             .get("models")
             .and_then(Value::as_object)
             .and_then(|models| models.keys().next().cloned());
+    }
+
+    Ok(())
+}
+
+fn merge_hermes_config(
+    request: &mut DeepLinkImportRequest,
+    config_text: &str,
+) -> Result<(), AppError> {
+    let config = parse_json_value(config_text)?;
+    let config_obj = config
+        .get("config")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let model = config_obj
+        .get("model")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let env = config
+        .get("env")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+
+    if request
+        .endpoint
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        if let Some(endpoint) = model.get("base_url").and_then(Value::as_str) {
+            request.endpoint = Some(endpoint.to_string());
+        }
+    }
+
+    if request.model.is_none() {
+        request.model = model
+            .get("default")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+    }
+
+    if request.notes.is_none() {
+        request.notes = model
+            .get("provider")
+            .and_then(Value::as_str)
+            .map(|provider| format!("provider={provider}"));
+    }
+
+    if request
+        .api_key
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        if let Some(env_key) = config
+            .get("metadata")
+            .and_then(|value| value.get("hermesApiKeyEnv"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            if let Some(api_key) = env.get(env_key).and_then(Value::as_str) {
+                request.api_key = Some(api_key.to_string());
+            }
+        }
     }
 
     Ok(())

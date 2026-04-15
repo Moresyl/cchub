@@ -136,7 +136,7 @@ fn parse_target_apps(raw: &str) -> Result<Vec<String>, String> {
         .filter(|value| !value.is_empty())
     {
         match value {
-            "claude" | "codex" | "gemini" | "opencode" => {
+            "claude" | "codex" | "gemini" | "opencode" | "hermes" => {
                 if !apps.iter().any(|current| current == value) {
                     apps.push(value.to_string());
                 }

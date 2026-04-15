@@ -74,6 +74,7 @@ const TOOL_LABELS: Record<string, string> = {
   gemini: "Gemini",
   opencode: "OpenCode",
   openclaw: "OpenClaw",
+  hermes: "Hermes",
 };
 
 const DEFAULT_PROXY_FILTERS = {

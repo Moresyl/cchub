@@ -1,4 +1,6 @@
+use rusqlite::Connection;
 use serde::Serialize;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DetectedTool {
@@ -74,23 +76,12 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         install_command: "npm install -g openclaw",
         install_url: "https://github.com/openclaw-ai/openclaw",
     },
-    // Hermes Agent (Nous Research) — detection-only support.
-    //
-    // See GitHub issue #3. The submitter selected the "MCP server management"
-    // category, but NousResearch/hermes-agent is verifiably an agent CLI peer to
-    // Claude Code / Codex (85k+ stars, ~/.hermes data directory, cli-config.yaml).
-    // Detection here mirrors the precedent set by `openclaw`: the tool surfaces
-    // on the Dashboard Detected Tools strip, while Provider switching, MCP sync,
-    // workflow installation and skill sync all keep their own tool_id allow-lists
-    // and will not act on "hermes" until each system is widened with verified
-    // schema support. (See mcp/config.rs, where openclaw still returns
-    // "OpenClaw MCP sync is not yet supported" — same staged-rollout pattern.)
     ToolCandidate {
         id: "hermes",
         name: "Hermes Agent",
         dir: ".hermes",
-        config_file: "cli-config.yaml",
-        mcp_config_file: "cli-config.yaml",
+        config_file: "config.yaml",
+        mcp_config_file: "config.yaml",
         skills_subdir: "skills",
         install_command:
             "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
@@ -100,6 +91,30 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
 
 /// Detect AI coding tools installed on the system
 pub fn detect_tools() -> Vec<DetectedTool> {
+    detect_tools_with_conn(None)
+}
+
+pub fn detect_tools_for_conn(conn: &Connection) -> Vec<DetectedTool> {
+    detect_tools_with_conn(Some(conn))
+}
+
+fn base_dir_for_candidate(
+    candidate: &ToolCandidate,
+    home: &std::path::Path,
+    conn: Option<&Connection>,
+) -> PathBuf {
+    if candidate.id == "hermes" {
+        if let Some(conn) = conn {
+            if let Ok(path) = crate::hermes::hermes_root(conn) {
+                return path;
+            }
+        }
+    }
+
+    home.join(candidate.dir)
+}
+
+fn detect_tools_with_conn(conn: Option<&Connection>) -> Vec<DetectedTool> {
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => return Vec::new(),
@@ -108,7 +123,7 @@ pub fn detect_tools() -> Vec<DetectedTool> {
     TOOL_CANDIDATES
         .iter()
         .map(|t| {
-            let base = home.join(t.dir);
+            let base = base_dir_for_candidate(t, &home, conn);
             let config_path = base.join(t.config_file);
             let mcp_config_path = if t.id == "claude" {
                 home.join(".claude.json")

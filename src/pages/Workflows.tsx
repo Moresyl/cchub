@@ -8,6 +8,8 @@ import WorkflowCard from "../components/WorkflowCard";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
+type WorkflowAppId = Exclude<ManagedAppId, "hermes">;
+
 interface WorkflowFile {
   path: string;
   tool_id: string;
@@ -37,6 +39,7 @@ const TOOL_TABS = [
   { id: "gemini", label_zh: "Gemini", label_en: "Gemini" },
   { id: "opencode", label_zh: "OpenCode", label_en: "OpenCode" },
   { id: "openclaw", label_zh: "OpenClaw", label_en: "OpenClaw" },
+  { id: "hermes", label_zh: "Hermes", label_en: "Hermes" },
 ];
 
 const TOOL_COLORS: Record<string, string> = {
@@ -45,6 +48,7 @@ const TOOL_COLORS: Record<string, string> = {
   gemini: "#059669",
   opencode: "#7c3aed",
   openclaw: "#dc2626",
+  hermes: "#0f766e",
 };
 
 export default function Workflows() {
@@ -63,7 +67,7 @@ export default function Workflows() {
   const [installing, setInstalling] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WorkflowFile | null>(null);
   const [togglingPath, setTogglingPath] = useState<string | null>(null);
-  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw", "hermes"]);
   const i = t();
   const zh = (localStorage.getItem("cchub-locale") || "zh") === "zh";
   const hasChanges = content !== originalContent;
@@ -198,12 +202,14 @@ export default function Workflows() {
   }, []);
 
   const visibleToolTabs = TOOL_TABS.filter((tab) => tab.id === "all" || visibleApps.includes(tab.id as ManagedAppId));
-  const visibleFiles = files.filter((file) => visibleApps.includes(file.tool_id as ManagedAppId));
+  const workflowCapableApps = visibleApps.filter((appId): appId is WorkflowAppId => appId !== "hermes");
+  const visibleFiles = files.filter((file) => visibleApps.includes(file.tool_id as ManagedAppId) && file.tool_id !== "hermes");
   const filteredFiles = activeTab === "all" ? visibleFiles : visibleFiles.filter(f => f.tool_id === activeTab);
+  const hermesWorkflowUnsupported = activeTab === "hermes";
 
   async function handleImport() {
     try {
-      const fallbackTool = visibleApps[0] || "claude";
+      const fallbackTool = workflowCapableApps[0] || "claude";
       await invoke<string>("import_workflow_file", { toolId: activeTab === "all" ? fallbackTool : activeTab });
       showToast("success", i.workflows.importSuccess);
       await load();
@@ -218,14 +224,14 @@ export default function Workflows() {
   );
 
   useEffect(() => {
-    const firstVisibleTool = visibleApps[0] || "claude";
+    const firstVisibleTool = workflowCapableApps[0] || "claude";
     if (activeTab !== "all" && !visibleApps.includes(activeTab as ManagedAppId)) {
       setActiveTab("all");
     }
-    if (!visibleApps.includes(installTool as ManagedAppId)) {
+    if (!workflowCapableApps.includes(installTool as WorkflowAppId)) {
       setInstallTool(firstVisibleTool);
     }
-  }, [activeTab, installTool, visibleApps]);
+  }, [activeTab, installTool, visibleApps, workflowCapableApps]);
 
   if (loading) {
     return (
@@ -290,10 +296,10 @@ export default function Workflows() {
           <p className="page-subtitle">{zh ? `共 ${visibleFiles.length} 个工作流` : `${visibleFiles.length} workflows`}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={handleImport}>
+          <button className="btn btn-secondary btn-sm" onClick={handleImport} disabled={hermesWorkflowUnsupported || workflowCapableApps.length === 0}>
             <Upload size={14} />{i.workflows.importWorkflow}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowInstall(!showInstall)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowInstall(!showInstall)} disabled={hermesWorkflowUnsupported || workflowCapableApps.length === 0}>
             <Plus size={14} />{i.workflows.installTemplate}
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => void load()}>
@@ -303,8 +309,21 @@ export default function Workflows() {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto" }}>
+        {hermesWorkflowUnsupported && (
+          <div className="section-card" style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
+              {zh ? "Hermes Workflow 暂不支持" : "Hermes workflows are not supported yet"}
+            </h3>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0, lineHeight: 1.7 }}>
+              {zh
+                ? "Hermes 当前没有与本页完全对等的 workflow 机制，因此这里只保留显式禁用态，不提供安装、导入或编辑入口。"
+                : "Hermes does not expose a workflow mechanism that matches this page yet, so this tab stays visible only as an explicit unsupported state."}
+            </p>
+          </div>
+        )}
+
         {/* Install Template Panel (inline, top of page) */}
-        {showInstall && (
+        {showInstall && !hermesWorkflowUnsupported && (
           <div className="section-card" style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700 }}>{i.workflows.templateTitle}</h3>
@@ -315,7 +334,7 @@ export default function Workflows() {
             {/* Tool Selector */}
             <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
               <span style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: "28px" }}>{i.workflows.selectTool}:</span>
-              {visibleToolTabs.filter(tab => tab.id !== "all").map(tab => (
+              {visibleToolTabs.filter(tab => tab.id !== "all" && tab.id !== "hermes").map(tab => (
                 <button
                   key={tab.id}
                   className={`btn btn-xs ${installTool === tab.id ? "btn-primary" : "btn-ghost"}`}
@@ -379,7 +398,17 @@ export default function Workflows() {
         </div>
 
         {/* Workflow Cards */}
-        {filteredFiles.length === 0 ? (
+        {hermesWorkflowUnsupported ? (
+          <div className="card empty-state" style={{ flex: 1 }}>
+            <div className="empty-icon"><GitBranch size={28} style={{ color: "var(--text-muted)" }} /></div>
+            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>
+              {zh ? "Hermes 暂无可管理 Workflow" : "Hermes workflows are unavailable"}
+            </p>
+            <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 360 }}>
+              {zh ? "当前版本只支持 Hermes 的 Provider、MCP、Skills 和 ConfigFiles 管理。" : "This release only supports Hermes provider, MCP, skills, and config-file management."}
+            </p>
+          </div>
+        ) : filteredFiles.length === 0 ? (
           <div className="card empty-state" style={{ flex: 1 }}>
             <div className="empty-icon"><GitBranch size={28} style={{ color: "var(--text-muted)" }} /></div>
             <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>{i.workflows.noWorkflows}</p>

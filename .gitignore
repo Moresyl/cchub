@@ -13,8 +13,10 @@ src-tauri/target/
 .idea/
 *.swp
 *.swo
-
+docs
 # OS
+*docs
+*/docs
 .DS_Store
 Thumbs.db
 desktop.ini

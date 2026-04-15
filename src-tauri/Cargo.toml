@@ -47,6 +47,7 @@ flate2 = "1"
 tar = "0.4"
 base64 = "0.22.1"
 url = "2"
+serde_yaml = "0.9"
 
 [profile.dev]
 # Windows/MSVC has hit intermittent linker failures with optimized dev builds

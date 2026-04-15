@@ -42,7 +42,7 @@ function SettingsLocalProviderProxySectionComponent({
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 14 }}>
         {uiText(
           locale,
-          "把 Claude / Codex / Gemini / OpenCode / OpenClaw 的活动 Provider 改写到本机回环地址，由 CCHub 在请求时动态转发到当前选中的 Provider。切换 Provider 时无需重启代理服务。",
+          "把 Claude / Codex / Gemini / OpenCode / OpenClaw / Hermes 的活动 Provider 改写到本机回环地址，由 CCHub 在请求时动态转发到当前选中的 Provider。切换 Provider 时无需重启代理服务。",
           "Rewrite supported app endpoints to a local loopback address so CCHub can forward requests to the currently active provider at request time. Provider switches do not require restarting the proxy service.",
           "対応 App のエンドポイントをローカルループバックへ書き換え、CCHub がリクエスト時点のアクティブ Provider へ動的転送します。Provider 切替でプロキシ再起動は不要です。",
         )}

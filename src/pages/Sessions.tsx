@@ -47,7 +47,7 @@ interface SessionDetail {
   entries: SessionEntry[];
 }
 
-const TOOL_ORDER: ManagedAppId[] = ["claude", "codex", "gemini", "opencode", "openclaw"];
+const TOOL_ORDER: ManagedAppId[] = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
 
 function countSessionHits(session: SessionSummary, query: string) {
   const normalized = query.trim().toLowerCase();

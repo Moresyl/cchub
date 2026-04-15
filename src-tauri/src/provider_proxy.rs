@@ -31,7 +31,8 @@ const LOCAL_PROVIDER_PROXY_HOST: &str = "127.0.0.1";
 const LOCAL_PROVIDER_PROXY_TOKEN: &str = "cchub-local-proxy";
 const DEFAULT_LOCAL_PROVIDER_PROXY_PORT: u16 = 34567;
 const MAX_PROXY_BODY_BYTES: usize = 64 * 1024 * 1024;
-const MANAGED_PROXY_TOOLS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "openclaw"];
+const MANAGED_PROXY_TOOLS: [&str; 6] =
+    ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
 const ENDPOINT_CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
 const ENDPOINT_CIRCUIT_BREAKER_COOLDOWN: Duration = Duration::from_secs(30);
 
@@ -225,6 +226,7 @@ pub(crate) fn materialize_tool_snapshot_for_runtime(
         "codex" => rewrite_codex_snapshot(snapshot, settings.port),
         "gemini" => rewrite_gemini_snapshot(snapshot, settings.port),
         "openclaw" => rewrite_openclaw_snapshot(snapshot, settings.port),
+        "hermes" => rewrite_hermes_snapshot(snapshot, settings.port),
         "opencode" => rewrite_opencode_snapshot(snapshot, settings.port),
         _ => Ok(snapshot.to_string()),
     }
@@ -351,6 +353,47 @@ fn rewrite_openclaw_snapshot(snapshot: &str, port: u16) -> Result<String, String
         "apiKey".to_string(),
         Value::String(LOCAL_PROVIDER_PROXY_TOKEN.to_string()),
     );
+    serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
+}
+
+fn rewrite_hermes_snapshot(snapshot: &str, port: u16) -> Result<String, String> {
+    let mut parsed: Value = serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
+    let obj = parsed
+        .as_object_mut()
+        .ok_or_else(|| "Invalid Hermes snapshot".to_string())?;
+    let config = obj
+        .entry("config")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Hermes config must be an object".to_string())?;
+    let model = config
+        .entry("model")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Hermes model must be an object".to_string())?;
+    model.insert(
+        "base_url".to_string(),
+        Value::String(local_provider_proxy_tool_base_url(port, "hermes")),
+    );
+
+    let env_key = obj
+        .get("metadata")
+        .and_then(|value| value.get("hermesApiKeyEnv"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "OPENROUTER_API_KEY".to_string());
+    let env = obj
+        .entry("env")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Hermes env must be an object".to_string())?;
+    env.insert(
+        env_key,
+        Value::String(LOCAL_PROVIDER_PROXY_TOKEN.to_string()),
+    );
+
     serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
 }
 
@@ -1126,6 +1169,79 @@ async fn extract_upstream_target(
                 ],
                 "google-generative-ai" => vec![("x-goog-api-key".to_string(), token.to_string())],
                 _ => vec![("authorization".to_string(), format!("Bearer {token}"))],
+            };
+
+            Ok(UpstreamTarget {
+                profile_id,
+                profile_name,
+                candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
+                base_url,
+                headers,
+                claude_api_format: None,
+                is_github_copilot: false,
+                cost_multiplier,
+            })
+        }
+        "hermes" => {
+            let config = parsed
+                .get("config")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let model = config
+                .get("model")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let env = parsed
+                .get("env")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let provider = model
+                .get("provider")
+                .and_then(|value| value.as_str())
+                .unwrap_or("custom");
+            let base_url = model
+                .get("base_url")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    format!("Provider {profile_name} does not define a Hermes base_url")
+                })?
+                .to_string();
+            let env_key = parsed
+                .get("metadata")
+                .and_then(|value| value.get("hermesApiKeyEnv"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    crate::hermes::providers::default_env_key_for_provider(provider)
+                        .map(str::to_string)
+                })
+                .ok_or_else(|| {
+                    format!("Provider {profile_name} does not define a Hermes API key env")
+                })?;
+            let token = env
+                .get(&env_key)
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    format!("Provider {profile_name} does not define Hermes API key {env_key}")
+                })?;
+            let headers = if provider == "gemini" {
+                vec![("x-goog-api-key".to_string(), token.to_string())]
+            } else if provider == "anthropic" {
+                vec![
+                    ("x-api-key".to_string(), token.to_string()),
+                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                ]
+            } else {
+                vec![("authorization".to_string(), format!("Bearer {token}"))]
             };
 
             Ok(UpstreamTarget {

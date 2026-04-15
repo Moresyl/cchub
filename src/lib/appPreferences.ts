@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export const MANAGED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw"] as const;
+export const MANAGED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"] as const;
 
 export type ManagedAppId = (typeof MANAGED_APPS)[number];
 
@@ -76,6 +76,8 @@ export function getAppLabel(appId: ManagedAppId): string {
       return "OpenCode";
     case "openclaw":
       return "OpenClaw";
+    case "hermes":
+      return "Hermes";
   }
 }
 
@@ -86,6 +88,7 @@ export function toolNameToAppId(toolName: string): ManagedAppId | null {
   if (normalized === "gemini") return "gemini";
   if (normalized === "opencode") return "opencode";
   if (normalized === "openclaw") return "openclaw";
+  if (normalized === "hermes") return "hermes";
   return null;
 }
 

@@ -1,5 +1,6 @@
-use super::tools::detect_tools;
+use super::tools::{detect_tools, detect_tools_for_conn};
 use crate::db::models::{Plugin, Skill};
+use rusqlite::Connection;
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -173,8 +174,11 @@ pub fn scan_local_plugins() -> Vec<Plugin> {
     plugins
 }
 
-/// Scan skills from plugins and standalone skills directory
-pub fn scan_local_skills() -> Vec<Skill> {
+pub fn scan_local_skills_for_conn(conn: &Connection) -> Vec<Skill> {
+    scan_local_skills_with_conn(Some(conn))
+}
+
+fn scan_local_skills_with_conn(conn: Option<&Connection>) -> Vec<Skill> {
     let mut skills = Vec::new();
 
     // Scan skills within plugins
@@ -185,7 +189,8 @@ pub fn scan_local_skills() -> Vec<Skill> {
     }
 
     // Scan standalone skills for every detected tool
-    for tool in detect_tools().into_iter().filter(|tool| tool.installed) {
+    let detected_tools = conn.map(detect_tools_for_conn).unwrap_or_else(detect_tools);
+    for tool in detected_tools.into_iter().filter(|tool| tool.installed) {
         let skills_dir = PathBuf::from(&tool.skills_dir);
         if skills_dir.exists() {
             scan_skills_in_dir(&skills_dir, &mut skills, false, Some(tool.id.as_str()));

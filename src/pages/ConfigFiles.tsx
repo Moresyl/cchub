@@ -15,6 +15,7 @@ import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import OmoConfigSection from "../components/OmoConfigSection";
 import OpenClawConfigSection from "../components/OpenClawConfigSection";
+import HermesConfigSection from "../components/HermesConfigSection";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 import { useConfigFiles } from "../hooks/queries";
 import {
@@ -88,7 +89,7 @@ export default function ConfigFiles() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw", "hermes"]);
   const [codexApiKey, setCodexApiKey] = useState("");
   const [showCodexApiKey, setShowCodexApiKey] = useState(false);
   const [claudeToggles, setClaudeToggles] = useState<ClaudeConfigToggles | null>(null);
@@ -357,6 +358,7 @@ export default function ConfigFiles() {
 
       {activeRoot === "opencode" && <OmoConfigSection />}
       {activeRoot === "openclaw" && <OpenClawConfigSection />}
+      {activeRoot === "hermes" && <HermesConfigSection />}
 
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "320px minmax(0, 1fr)", gap: 16 }}>
         <ConfigFilesTreePanel

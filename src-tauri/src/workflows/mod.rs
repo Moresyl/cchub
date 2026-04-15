@@ -32,6 +32,7 @@ const WORKFLOW_TOOLS: &[(&str, &str, &str)] = &[
     ("gemini", ".gemini", "Gemini"),
     ("opencode", ".opencode", "OpenCode"),
     ("openclaw", ".openclaw", "OpenClaw"),
+    ("hermes", ".hermes", "Hermes"),
 ];
 
 // ── Scan ──
@@ -158,6 +159,10 @@ pub fn toggle_workflow(path: &str, enabled: bool) -> Result<String, String> {
 // ── Install template ──
 
 pub fn install_workflow(tool_id: &str, template_id: &str) -> Result<String, String> {
+    if tool_id == "hermes" {
+        return Err("Hermes workflows are not yet supported".to_string());
+    }
+
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
 
     let hidden_dir = WORKFLOW_TOOLS

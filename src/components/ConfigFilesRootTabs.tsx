@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Code2, FolderOpen, Globe, Monitor, Sparkles, Terminal, type LucideIcon } from "lucide-react";
+import { Bot, Code2, FolderOpen, Globe, Monitor, Sparkles, Terminal, type LucideIcon } from "lucide-react";
 
 interface ConfigRootTabItem {
   id: string;
@@ -20,6 +20,7 @@ const ROOT_ICONS: Record<string, LucideIcon> = {
   gemini: Sparkles,
   opencode: Globe,
   openclaw: Monitor,
+  hermes: Bot,
 };
 
 function ConfigFilesRootTabsComponent({

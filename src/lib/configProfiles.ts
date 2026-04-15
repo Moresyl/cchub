@@ -1,4 +1,4 @@
-export type StructuredConfigTool = "claude" | "codex" | "gemini" | "openclaw" | "opencode";
+export type StructuredConfigTool = "claude" | "codex" | "gemini" | "openclaw" | "opencode" | "hermes";
 export type ClaudeAuthField = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 export type ApiFormat = "anthropic" | "openai_chat" | "openai_responses";
 export type OpenClawApiProtocol = "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai" | "bedrock-converse-stream";
@@ -67,6 +67,8 @@ export interface ConfigPreset {
   openCodeThinkingLevel?: OpenCodeThinkingLevel | "";
   openCodeReasoningEffort?: OpenCodeReasoningEffort | "";
   openCodeEffort?: OpenCodeReasoningEffort | "";
+  hermesProvider?: string;
+  hermesApiKeyEnv?: string;
 }
 
 export interface StructuredDraftFields {
@@ -113,6 +115,8 @@ export interface StructuredDraftFields {
   openCodeThinkingLevel: OpenCodeThinkingLevel | "";
   openCodeReasoningEffort: OpenCodeReasoningEffort | "";
   openCodeEffort: OpenCodeReasoningEffort | "";
+  hermesProvider: string;
+  hermesApiKeyEnv: string;
 }
 
 const PRESETS: Record<StructuredConfigTool, ConfigPreset[]> = {
@@ -176,6 +180,15 @@ const PRESETS: Record<StructuredConfigTool, ConfigPreset[]> = {
     { id: "openclaw-openrouter", toolId: "openclaw", name: "OpenRouter", websiteUrl: "https://openrouter.ai", apiKeyUrl: "https://openrouter.ai/keys", category: "aggregator", badge: "聚合", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-sonnet-4", apiProtocol: "openai-responses", modelCatalogAlias: "Claude Sonnet", endpointCandidates: ["https://openrouter.ai/api/v1"] },
     { id: "openclaw-custom", toolId: "openclaw", name: "自定义", category: "custom", baseUrl: "", model: "", apiProtocol: "openai-completions" },
   ],
+  hermes: [
+    { id: "hermes-nous", toolId: "hermes", name: "Nous Portal", websiteUrl: "https://portal.nousresearch.com", category: "official", badge: "官方", featured: true, baseUrl: "https://portal.nousresearch.com/v1", model: "anthropic/claude-sonnet-4.6", hermesProvider: "nous", hermesApiKeyEnv: "" },
+    { id: "hermes-openrouter", toolId: "hermes", name: "OpenRouter", websiteUrl: "https://openrouter.ai", apiKeyUrl: "https://openrouter.ai/keys", category: "aggregator", badge: "聚合", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-sonnet-4.6", hermesProvider: "openrouter", hermesApiKeyEnv: "OPENROUTER_API_KEY" },
+    { id: "hermes-anthropic-openrouter", toolId: "hermes", name: "Anthropic via OpenRouter", websiteUrl: "https://openrouter.ai", apiKeyUrl: "https://openrouter.ai/keys", category: "aggregator", badge: "Anthropic", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-sonnet-4.6", hermesProvider: "openrouter", hermesApiKeyEnv: "OPENROUTER_API_KEY" },
+    { id: "hermes-gemini", toolId: "hermes", name: "Gemini", websiteUrl: "https://ai.google.dev/", apiKeyUrl: "https://aistudio.google.com/apikey", category: "official", badge: "官方", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-pro", hermesProvider: "gemini", hermesApiKeyEnv: "GEMINI_API_KEY" },
+    { id: "hermes-zai", toolId: "hermes", name: "Z.AI / GLM", websiteUrl: "https://z.ai", apiKeyUrl: "https://z.ai/subscribe", category: "cn_official", badge: "国产", baseUrl: "https://api.z.ai/v1", model: "glm-5", hermesProvider: "zai", hermesApiKeyEnv: "GLM_API_KEY" },
+    { id: "hermes-kimi", toolId: "hermes", name: "Kimi", websiteUrl: "https://platform.moonshot.ai", apiKeyUrl: "https://platform.moonshot.ai/console/api-keys", category: "cn_official", badge: "国产", baseUrl: "https://api.moonshot.ai/v1", model: "kimi-k2.5", hermesProvider: "kimi-coding", hermesApiKeyEnv: "KIMI_API_KEY" },
+    { id: "hermes-custom", toolId: "hermes", name: "自定义", category: "custom", baseUrl: "", model: "", hermesProvider: "custom", hermesApiKeyEnv: "OPENROUTER_API_KEY" },
+  ],
   opencode: [
     { id: "opencode-openai", toolId: "opencode", name: "OpenAI Responses", websiteUrl: "https://platform.openai.com/", apiKeyUrl: "https://platform.openai.com/api-keys", category: "official", badge: "官方", featured: true, baseUrl: "https://api.openai.com/v1", model: "gpt-5.4", npm: "@ai-sdk/openai", openCodeContextLimit: "400000", openCodeOutputLimit: "128000", openCodeInputModalities: "text,image", openCodeOutputModalities: "text", openCodeVariantName: "high", openCodeReasoningEffort: "high" },
     { id: "opencode-gemini", toolId: "opencode", name: "Google (Gemini)", websiteUrl: "https://ai.google.dev/", apiKeyUrl: "https://aistudio.google.com/apikey", category: "official", badge: "官方", featured: true, baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3-flash-preview", npm: "@ai-sdk/google", openCodeContextLimit: "1048576", openCodeOutputLimit: "65536", openCodeInputModalities: "text,image,pdf,video,audio", openCodeOutputModalities: "text", openCodeVariantName: "high", openCodeIncludeThoughts: true, openCodeThinkingLevel: "high" },
@@ -227,7 +240,7 @@ function parseTemplateValues(value: string): Record<string, TemplateValueConfig>
 }
 
 export function supportsStructuredConfig(toolId: string): toolId is StructuredConfigTool {
-  return toolId === "claude" || toolId === "codex" || toolId === "gemini" || toolId === "openclaw" || toolId === "opencode";
+  return toolId === "claude" || toolId === "codex" || toolId === "gemini" || toolId === "openclaw" || toolId === "opencode" || toolId === "hermes";
 }
 
 export function getConfigPresets(toolId: string): ConfigPreset[] {
@@ -300,6 +313,8 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
     openCodeThinkingLevel: preset?.openCodeThinkingLevel || "",
     openCodeReasoningEffort: preset?.openCodeReasoningEffort || "",
     openCodeEffort: preset?.openCodeEffort || "",
+    hermesProvider: preset?.hermesProvider || "custom",
+    hermesApiKeyEnv: preset?.hermesApiKeyEnv || "",
   };
 }
 
@@ -355,6 +370,8 @@ export function applyPresetToFields(
       openCodeThinkingLevel: current?.openCodeThinkingLevel || "",
       openCodeReasoningEffort: current?.openCodeReasoningEffort || "",
       openCodeEffort: current?.openCodeEffort || "",
+      hermesProvider: current?.hermesProvider || "custom",
+      hermesApiKeyEnv: current?.hermesApiKeyEnv || "",
     };
   }
 
@@ -402,6 +419,8 @@ export function applyPresetToFields(
     openCodeThinkingLevel: preset.openCodeThinkingLevel || current?.openCodeThinkingLevel || "",
     openCodeReasoningEffort: preset.openCodeReasoningEffort || current?.openCodeReasoningEffort || "",
     openCodeEffort: preset.openCodeEffort || current?.openCodeEffort || "",
+    hermesProvider: preset.hermesProvider || current?.hermesProvider || "custom",
+    hermesApiKeyEnv: preset.hermesApiKeyEnv || current?.hermesApiKeyEnv || "",
   };
 }
 
@@ -542,6 +561,39 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           apiKeyUrl: fields.apiKeyUrl,
           endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
           costMultiplier: fields.costMultiplier.trim() || undefined,
+        },
+      },
+      null,
+      2,
+    );
+  }
+
+  if (toolId === "hermes") {
+    const provider = fields.hermesProvider.trim() || "custom";
+    const envKey = fields.hermesApiKeyEnv.trim();
+    const env: Record<string, string> = {};
+    if (envKey && fields.apiKey.trim()) {
+      env[envKey] = fields.apiKey.trim();
+    }
+
+    return JSON.stringify(
+      {
+        config: {
+          model: {
+            provider,
+            default: fields.model.trim(),
+            base_url: fields.baseUrl.trim(),
+          },
+        },
+        env,
+        metadata: {
+          category: fields.category,
+          websiteUrl: fields.websiteUrl,
+          apiKeyUrl: fields.apiKeyUrl,
+          endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+          costMultiplier: fields.costMultiplier.trim() || undefined,
+          hermesProvider: provider,
+          hermesApiKeyEnv: envKey || undefined,
         },
       },
       null,
@@ -720,6 +772,26 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         suggestedPrimaryModel: suggestedDefaults.primary || "",
         suggestedFallbackModels: Array.isArray(suggestedDefaults.fallbacks) ? suggestedDefaults.fallbacks.join(", ") : "",
         modelCatalogAlias: (firstModel?.id && modelCatalog[firstModel.id]?.alias) || "",
+      };
+    }
+
+    if (toolId === "hermes") {
+      const config = (parsed.config || {}) as Record<string, any>;
+      const modelConfig = (config.model || {}) as Record<string, string>;
+      const env = (parsed.env || {}) as Record<string, string>;
+      const hermesApiKeyEnv = (parsed.metadata?.hermesApiKeyEnv as string) || Object.keys(env)[0] || "";
+      return {
+        ...defaults,
+        baseUrl: modelConfig.base_url || defaults.baseUrl,
+        apiKey: hermesApiKeyEnv ? (env[hermesApiKeyEnv] || "") : "",
+        model: modelConfig.default || defaults.model,
+        websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
+        apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
+        category: metadata.category || defaults.category,
+        endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
+        costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        hermesProvider: modelConfig.provider || metadata.hermesProvider || defaults.hermesProvider,
+        hermesApiKeyEnv,
       };
     }
 

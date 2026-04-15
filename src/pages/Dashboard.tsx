@@ -5,6 +5,7 @@ import { t, getLocale } from "../lib/i18n";
 import { useNavigate } from "react-router-dom";
 import { useDetectTools } from "../hooks/queries";
 import DashboardToolChip from "../components/DashboardToolChip";
+import DashboardHermesRootOverride from "../components/DashboardHermesRootOverride";
 import DashboardServerRow, { type DashboardServerRowServer } from "../components/DashboardServerRow";
 import DashboardSkillRow, { type DashboardSkillRowSkill } from "../components/DashboardSkillRow";
 
@@ -161,6 +162,7 @@ export default function Dashboard() {
                   toolName={tool.name}
                   installed={tool.installed}
                   icon={Icon}
+                  action={tool.id === "hermes" ? <DashboardHermesRootOverride /> : undefined}
                 />
               );
             })}

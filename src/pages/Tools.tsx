@@ -133,7 +133,7 @@ export default function Tools() {
   const [codexDisableStorage, setCodexDisableStorage] = useState(cachedToolsPageData?.codexSettings.disable_response_storage ?? false);
   const [codexContextWindow1M, setCodexContextWindow1M] = useState(cachedToolsPageData?.codexSettings.context_window_1m ?? false);
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
-    cachedToolsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw"],
+    cachedToolsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
   );
   const [loading, setLoading] = useState(!cachedToolsPageData);
   const [hudInstalling, setHudInstalling] = useState(false);

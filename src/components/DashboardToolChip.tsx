@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { memo } from "react";
 import { Monitor } from "lucide-react";
 
@@ -6,6 +7,7 @@ interface DashboardToolChipProps {
   toolName: string;
   installed: boolean;
   icon: typeof Monitor;
+  action?: ReactNode;
 }
 
 function DashboardToolChipComponent({
@@ -13,6 +15,7 @@ function DashboardToolChipComponent({
   toolName,
   installed,
   icon: Icon,
+  action,
 }: DashboardToolChipProps) {
   return (
     <div
@@ -33,6 +36,7 @@ function DashboardToolChipComponent({
         {toolName}
       </span>
       {installed && <span className="dot dot-active" style={{ width: 6, height: 6 }} />}
+      {installed && action}
     </div>
   );
 }

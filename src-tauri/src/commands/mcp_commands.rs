@@ -383,7 +383,7 @@ pub fn unsync_mcp_server_from_tool(server_name: String, target_tool: String) -> 
 
 #[tauri::command]
 pub fn check_mcp_server_in_tools(server_name: String) -> std::collections::HashMap<String, bool> {
-    let tools = ["claude", "codex", "gemini", "opencode", "openclaw"];
+    let tools = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
     let mut result = std::collections::HashMap::new();
     for tool in tools {
         result.insert(

@@ -1,6 +1,8 @@
 use crate::skills::scanner::FolderNode;
+use crate::{db::DbState, hermes};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::State;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigRoot {
@@ -42,35 +44,52 @@ const CONFIG_ROOTS: &[ConfigRootCandidate] = &[
         name: "OpenClaw",
         dir: ".openclaw",
     },
+    ConfigRootCandidate {
+        id: "hermes",
+        name: "Hermes",
+        dir: ".hermes",
+    },
 ];
 
-fn config_root_paths() -> Result<Vec<(String, String, PathBuf)>, String> {
+fn config_root_paths(conn: &rusqlite::Connection) -> Result<Vec<(String, String, PathBuf)>, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     Ok(CONFIG_ROOTS
         .iter()
         .map(|root| {
+            let path = if root.id == "hermes" {
+                hermes::hermes_root(conn).unwrap_or_else(|_| home.join(root.dir))
+            } else {
+                home.join(root.dir)
+            };
             (
                 root.id.to_string(),
                 root.name.to_string(),
-                home.join(root.dir),
+                path,
             )
         })
         .collect())
 }
 
-fn resolve_root_path(root_id: &str) -> Result<PathBuf, String> {
-    let (_, _, path) = config_root_paths()?
+pub(crate) fn count_existing_config_roots(conn: &rusqlite::Connection) -> Result<usize, String> {
+    Ok(config_root_paths(conn)?
+        .into_iter()
+        .filter(|(_, _, path)| path.exists())
+        .count())
+}
+
+fn resolve_root_path(conn: &rusqlite::Connection, root_id: &str) -> Result<PathBuf, String> {
+    let (_, _, path) = config_root_paths(conn)?
         .into_iter()
         .find(|(id, _, _)| id == root_id)
         .ok_or_else(|| format!("Unknown config root: {}", root_id))?;
     Ok(path)
 }
 
-fn is_allowed_path(path: &Path) -> Result<bool, String> {
+fn is_allowed_path(conn: &rusqlite::Connection, path: &Path) -> Result<bool, String> {
     let canonical = path
         .canonicalize()
         .map_err(|e| format!("Failed to resolve path {}: {}", path.display(), e))?;
-    let roots = config_root_paths()?;
+    let roots = config_root_paths(conn)?;
     for (_, _, root) in roots {
         if !root.exists() {
             continue;
@@ -84,7 +103,7 @@ fn is_allowed_path(path: &Path) -> Result<bool, String> {
     Ok(false)
 }
 
-fn ensure_allowed_file(path: &str) -> Result<PathBuf, String> {
+fn ensure_allowed_file(conn: &rusqlite::Connection, path: &str) -> Result<PathBuf, String> {
     let file_path = PathBuf::from(path);
     if !file_path.exists() {
         return Err(format!("File does not exist: {}", path));
@@ -92,7 +111,7 @@ fn ensure_allowed_file(path: &str) -> Result<PathBuf, String> {
     if !file_path.is_file() {
         return Err(format!("Path is not a file: {}", path));
     }
-    if !is_allowed_path(&file_path)? {
+    if !is_allowed_path(conn, &file_path)? {
         return Err(format!("Access denied: {}", path));
     }
     Ok(file_path)
@@ -143,8 +162,9 @@ fn build_tree(path: &Path, max_depth: usize, depth: usize) -> FolderNode {
 }
 
 #[tauri::command]
-pub fn get_config_roots() -> Result<Vec<ConfigRoot>, String> {
-    Ok(config_root_paths()?
+pub fn get_config_roots(db: State<'_, DbState>) -> Result<Vec<ConfigRoot>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(config_root_paths(&conn)?
         .into_iter()
         .map(|(id, name, path)| ConfigRoot {
             id,
@@ -156,8 +176,9 @@ pub fn get_config_roots() -> Result<Vec<ConfigRoot>, String> {
 }
 
 #[tauri::command]
-pub fn get_config_file_tree(root_id: String) -> Result<FolderNode, String> {
-    let root = resolve_root_path(&root_id)?;
+pub fn get_config_file_tree(root_id: String, db: State<'_, DbState>) -> Result<FolderNode, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let root = resolve_root_path(&conn, &root_id)?;
     if !root.exists() {
         return Err(format!("Directory does not exist: {}", root.display()));
     }
@@ -165,15 +186,21 @@ pub fn get_config_file_tree(root_id: String) -> Result<FolderNode, String> {
 }
 
 #[tauri::command]
-pub fn read_config_file_content(path: String) -> Result<String, String> {
-    let file_path = ensure_allowed_file(&path)?;
+pub fn read_config_file_content(path: String, db: State<'_, DbState>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let file_path = ensure_allowed_file(&conn, &path)?;
     std::fs::read_to_string(&file_path)
         .map_err(|e| format!("Failed to read {}: {}", file_path.display(), e))
 }
 
 #[tauri::command]
-pub fn write_config_file_content(path: String, content: String) -> Result<(), String> {
-    let file_path = ensure_allowed_file(&path)?;
+pub fn write_config_file_content(
+    path: String,
+    content: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let file_path = ensure_allowed_file(&conn, &path)?;
     crate::utils::atomic_write_string(&file_path, &content)
         .map_err(|e| format!("Failed to write {}: {}", file_path.display(), e))
 }

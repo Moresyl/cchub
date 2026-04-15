@@ -40,6 +40,7 @@ const TOOL_ICONS: Record<string, typeof Monitor> = {
   codex: Monitor,
   gemini: Sparkles,
   opencode: Globe,
+  hermes: Monitor,
 };
 
 const PROMPT_PATTERN = /prompt|提示|template|模板|指令|instruction/i;
@@ -88,7 +89,7 @@ export default function Skills() {
     cachedSkillsPageData?.skillSyncMethod ?? "copy",
   );
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
-    cachedSkillsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw"],
+    cachedSkillsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
   );
   const i = t();
   const locale = getLocale();

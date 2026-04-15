@@ -4,6 +4,7 @@ mod copilot_auth;
 mod db;
 mod deeplink;
 mod error;
+mod hermes;
 mod hooks;
 mod mcp;
 mod omo;
@@ -158,6 +159,7 @@ fn tool_label_for_tray(tool_id: &str) -> &'static str {
         "gemini" => "Gemini",
         "opencode" => "OpenCode",
         "openclaw" => "OpenClaw",
+        "hermes" => "Hermes",
         _ => "Provider",
     }
 }
@@ -548,6 +550,8 @@ pub fn run() {
             extra_commands::get_proxy,
             extra_commands::get_visible_apps,
             extra_commands::set_visible_apps,
+            extra_commands::get_hermes_root_override,
+            extra_commands::set_hermes_root_override,
             extra_commands::get_window_preferences,
             extra_commands::get_log_preferences,
             extra_commands::set_log_preferences,

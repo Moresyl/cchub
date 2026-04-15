@@ -11,9 +11,12 @@ fn log_command_timing(command: &str, started_at: std::time::Instant) {
 }
 
 #[tauri::command]
-pub fn scan_skills(_db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
+pub fn scan_skills(db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
     let started_at = std::time::Instant::now();
-    let result = Ok(scanner::scan_local_skills());
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        Ok(scanner::scan_local_skills_for_conn(&conn))
+    })();
     log_command_timing("scan_skills", started_at);
     result
 }
@@ -109,8 +112,9 @@ pub fn uninstall_plugin(plugin_id: String, db: State<'_, DbState>) -> Result<(),
 // ── New commands for enhanced skill management ──
 
 #[tauri::command]
-pub fn detect_tools() -> Vec<tools::DetectedTool> {
-    tools::detect_tools()
+pub fn detect_tools(db: State<'_, DbState>) -> Result<Vec<tools::DetectedTool>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(tools::detect_tools_for_conn(&conn))
 }
 
 #[tauri::command]
@@ -124,8 +128,9 @@ pub fn check_path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
-pub fn get_skill_categories(_db: State<'_, DbState>) -> Result<scanner::CategoryCounts, String> {
-    let skills = scanner::scan_local_skills();
+pub fn get_skill_categories(db: State<'_, DbState>) -> Result<scanner::CategoryCounts, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let skills = scanner::scan_local_skills_for_conn(&conn);
     Ok(scanner::get_category_counts(&skills))
 }
 

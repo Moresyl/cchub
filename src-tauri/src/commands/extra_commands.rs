@@ -1,5 +1,6 @@
 use crate::copilot_auth::{self, CopilotAuthState};
 use crate::db::DbState;
+use crate::hermes;
 use crate::utils::configure_background_command;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -705,6 +706,7 @@ fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
         "gemini" => Ok("settings.json"),
         "opencode" => Ok("opencode.json"),
         "openclaw" => Ok("openclaw.json"),
+        "hermes" => Ok("config.yaml"),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -716,12 +718,17 @@ fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<Path
         "gemini" => ".gemini",
         "opencode" => ".opencode",
         "openclaw" => ".openclaw",
+        "hermes" => ".hermes",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     };
     Ok(home.join(dir))
 }
 
 fn resolve_tool_config_dir(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
+    if tool_id == "hermes" {
+        return hermes::hermes_root(conn);
+    }
+
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
 
     let custom_dir: Option<String> = conn
@@ -757,6 +764,9 @@ fn resolve_tool_config_dir(conn: &rusqlite::Connection, tool_id: &str) -> Result
 }
 
 fn resolve_tool_config_path(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
+    if tool_id == "hermes" {
+        return hermes::config_path(conn);
+    }
     Ok(resolve_tool_config_dir(conn, tool_id)?.join(tool_config_file_name(tool_id)?))
 }
 
@@ -797,6 +807,10 @@ fn resolve_claude_paths(conn: &rusqlite::Connection) -> Result<(PathBuf, PathBuf
 }
 
 fn resolve_tool_skills_dir(conn: &rusqlite::Connection, tool_id: &str) -> Result<PathBuf, String> {
+    if tool_id == "hermes" {
+        return hermes::skills_dir(conn);
+    }
+
     let custom_skills_dir: Option<String> = conn
         .query_row(
             "SELECT skills_dir FROM custom_paths WHERE tool_id = ?1",
@@ -820,6 +834,7 @@ fn tool_cli_command(tool_id: &str) -> &'static str {
         "gemini" => "gemini",
         "opencode" => "opencode",
         "openclaw" => "openclaw",
+        "hermes" => "hermes",
         _ => "",
     }
 }
@@ -895,6 +910,7 @@ fn tool_label(tool_id: &str) -> &'static str {
         "gemini" => "Gemini",
         "opencode" => "OpenCode",
         "openclaw" => "OpenClaw",
+        "hermes" => "Hermes",
         _ => "Session",
     }
 }
@@ -906,6 +922,7 @@ fn tool_hidden_dir(tool_id: &str) -> Option<&'static str> {
         "gemini" => Some(".gemini"),
         "opencode" => Some(".opencode"),
         "openclaw" => Some(".openclaw"),
+        "hermes" => Some(".hermes"),
         _ => None,
     }
 }
@@ -1425,6 +1442,19 @@ fn bootstrap_tool_environment_from_conn(
                 &mut created_files,
             )?;
         }
+        "hermes" => {
+            write_default_file_if_missing(
+                &config_dir.join("config.yaml"),
+                "model:\n  provider: openrouter\n  default: anthropic/claude-sonnet-4.6\n  base_url: https://openrouter.ai/api/v1\n",
+                &mut created_files,
+            )?;
+            write_default_file_if_missing(
+                &config_dir.join(".env"),
+                "# Add OPENROUTER_API_KEY=...\n",
+                &mut created_files,
+            )?;
+            notes.push("Hermes 仅支持 Linux / macOS / WSL2；Windows 请把根目录覆盖指向 WSL2 内的 ~/.hermes".to_string());
+        }
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     }
 
@@ -1631,7 +1661,7 @@ fn get_text_app_setting(conn: &rusqlite::Connection, key: &str) -> Result<Option
         .ok())
 }
 
-const MANAGED_APP_IDS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "openclaw"];
+const MANAGED_APP_IDS: [&str; 6] = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
 const VISIBLE_APPS_SETTING_KEY: &str = "visible_apps";
 const WINDOW_PREFERENCES_SETTING_KEY: &str = "window_preferences";
 const COMMON_CONFIG_SNIPPETS_SETTING_KEY: &str = "common_config_snippets";
@@ -3207,7 +3237,7 @@ fn sync_live_profiles(
     imported_counts: &HashMap<String, usize>,
     now: &str,
 ) -> Result<(), String> {
-    for tool_id in ["claude", "codex", "gemini", "opencode", "openclaw"] {
+    for tool_id in ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"] {
         let id = format!("live-{}", tool_id);
 
         if imported_counts.get(tool_id).copied().unwrap_or(0) > 0 {
@@ -3321,6 +3351,7 @@ fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<Stri
             }))
             .map_err(|e| e.to_string())
         }
+        "hermes" => hermes::snapshot::read_snapshot(conn),
         "claude" => {
             let (claude_json, settings_json) = resolve_claude_paths(conn)?;
 
@@ -3387,11 +3418,10 @@ fn apply_tool_snapshot(
     tool_id: &str,
     snapshot: &str,
 ) -> Result<(), String> {
-    let common_overlay_snapshot = apply_common_config_snippet_to_snapshot(conn, tool_id, snapshot)?;
     let effective_snapshot = crate::provider_proxy::materialize_tool_snapshot_for_runtime(
         conn,
         tool_id,
-        &common_overlay_snapshot,
+        snapshot,
     )?;
 
     match tool_id {
@@ -3579,6 +3609,7 @@ fn apply_tool_snapshot(
 
             Ok(())
         }
+        "hermes" => hermes::snapshot::apply_snapshot(conn, &effective_snapshot).map(|_| ()),
         _ => {
             let config_path = resolve_tool_config_path(conn, tool_id)?;
             if let Some(parent) = config_path.parent() {
@@ -4327,6 +4358,7 @@ fn apply_common_config_to_gemini_snapshot(
     serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
 }
 
+#[allow(dead_code)]
 fn apply_common_config_snippet_to_snapshot(
     conn: &rusqlite::Connection,
     tool_id: &str,
@@ -4487,10 +4519,13 @@ async fn extract_probe_target(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string);
+            // 官方 Anthropic 模式没有 ANTHROPIC_BASE_URL,回退到默认端点,保持和
+            // extract_stream_check_request 的 fallback 一致。Copilot 模式必须依赖
+            // profile 里的显式 base_url,否则 join "models" 无意义,继续交由下游报错。
             let base_url = if provider_type.as_deref() == Some("github_copilot") {
                 base_url.map(|value| join_api_endpoint(&value, "models"))
             } else {
-                base_url
+                base_url.or_else(|| Some("https://api.anthropic.com".to_string()))
             };
             let headers = if provider_type.as_deref() == Some("github_copilot") {
                 resolve_copilot_headers(app_handle, &parsed).await?
@@ -4523,7 +4558,10 @@ async fn extract_probe_target(
                 .get("config")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
-            let base_url = parse_toml_assignment(config, "base_url");
+            // 官方 OpenAI / Codex OAuth 模式的 config.toml 里没有 base_url,回退到
+            // 默认端点,保持和 extract_stream_check_request(L4820)一致。
+            let base_url = parse_toml_assignment(config, "base_url")
+                .or_else(|| Some("https://api.openai.com/v1".to_string()));
             let mut headers = Vec::new();
             if let Some(token) = parsed
                 .get("auth")
@@ -4542,12 +4580,15 @@ async fn extract_probe_target(
                 .and_then(|value| value.as_object())
                 .cloned()
                 .unwrap_or_default();
+            // 官方 Gemini(Google OAuth)模式没有 GOOGLE_GEMINI_BASE_URL,回退到
+            // 默认端点,保持和 extract_stream_check_request(L4873)一致。
             let base_url = env
                 .get("GOOGLE_GEMINI_BASE_URL")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string);
+                .map(str::to_string)
+                .or_else(|| Some("https://generativelanguage.googleapis.com/v1beta".to_string()));
             let mut headers = Vec::new();
             if let Some(token) = env
                 .get("GEMINI_API_KEY")
@@ -4561,12 +4602,15 @@ async fn extract_probe_target(
             Ok((base_url, headers))
         }
         "openclaw" => {
+            // OpenClaw 的"官方 Anthropic 代理"模式 profile 通常不写 baseUrl(直连
+            // api.anthropic.com),ping 时回退到默认端点避免误报。
             let base_url = parsed
                 .get("baseUrl")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string);
+                .map(str::to_string)
+                .or_else(|| Some("https://api.anthropic.com".to_string()));
             let mut headers = Vec::new();
             if let Some(token) = parsed
                 .get("apiKey")
@@ -4578,14 +4622,76 @@ async fn extract_probe_target(
             }
             Ok((base_url, headers))
         }
+        "hermes" => {
+            let config = parsed
+                .get("config")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let model = config
+                .get("model")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let env = parsed
+                .get("env")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let provider = model
+                .get("provider")
+                .and_then(|value| value.as_str())
+                .unwrap_or("custom");
+            let base_url = model
+                .get("base_url")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    // 官方 Hermes 配置里经常不写 model.base_url,而是依赖 provider 自带的
+                    // 默认端点。回退到已知 provider 的默认 URL,避免 ping 误报 No base_url。
+                    hermes::providers::default_base_url_for_provider(provider).map(str::to_string)
+                });
+            let env_key = parsed
+                .get("metadata")
+                .and_then(|value| value.get("hermesApiKeyEnv"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| hermes::providers::default_env_key_for_provider(provider).map(str::to_string));
+            let mut headers = Vec::new();
+            if let Some(token) = env_key
+                .as_deref()
+                .and_then(|key| env.get(key))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                if provider == "gemini" {
+                    headers.push(("x-goog-api-key".to_string(), token.to_string()));
+                } else if provider == "anthropic" {
+                    headers.push(("x-api-key".to_string(), token.to_string()));
+                    headers.push(("anthropic-version".to_string(), "2023-06-01".to_string()));
+                } else {
+                    headers.push(("authorization".to_string(), format!("Bearer {token}")));
+                }
+            }
+            Ok((base_url, headers))
+        }
         "opencode" => {
+            // OpenCode 的 provider 可以是 anthropic / openai / google 等,默认模式下不写
+            // options.baseURL。这里用 Anthropic 默认端点作为兜底(占绝大多数场景);
+            // 如果用户确实用的是 OpenAI/Gemini 官方账号,自己填 baseURL 后这条兜底就被跳过。
             let base_url = parsed
                 .get("options")
                 .and_then(|value| value.get("baseURL"))
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string);
+                .map(str::to_string)
+                .or_else(|| Some("https://api.anthropic.com".to_string()));
             let mut headers = Vec::new();
             if let Some(token) = parsed
                 .get("options")
@@ -4903,6 +5009,92 @@ async fn extract_stream_check_request(
                     })
                 }
             }
+        }
+        "hermes" => {
+            let config = parsed
+                .get("config")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let model = config
+                .get("model")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let env = parsed
+                .get("env")
+                .and_then(|value| value.as_object())
+                .cloned()
+                .unwrap_or_default();
+            let provider = model
+                .get("provider")
+                .and_then(|value| value.as_str())
+                .unwrap_or("custom");
+            let base_url = model
+                .get("base_url")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "No Hermes base_url configured".to_string())?;
+            let model_id = model
+                .get("default")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("gpt-5.4");
+            let env_key = parsed
+                .get("metadata")
+                .and_then(|value| value.get("hermesApiKeyEnv"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| hermes::providers::default_env_key_for_provider(provider).map(str::to_string))
+                .ok_or_else(|| "No Hermes API key env configured".to_string())?;
+            let token = env
+                .get(&env_key)
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| format!("No Hermes API key configured in {env_key}"))?;
+
+            if provider == "gemini" {
+                return Ok(StreamCheckRequestSpec {
+                    endpoint: build_gemini_stream_endpoint(base_url, model_id),
+                    headers: vec![("x-goog-api-key".to_string(), token.to_string())],
+                    body: serde_json::json!({
+                        "contents": [{ "role": "user", "parts": [{ "text": "Reply with OK." }] }],
+                        "generationConfig": { "maxOutputTokens": 16 },
+                    }),
+                });
+            }
+
+            if provider == "anthropic" {
+                return Ok(StreamCheckRequestSpec {
+                    endpoint: build_claude_messages_endpoint(base_url),
+                    headers: vec![
+                        ("x-api-key".to_string(), token.to_string()),
+                        ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                    ],
+                    body: serde_json::json!({
+                        "model": model_id,
+                        "max_tokens": 16,
+                        "stream": true,
+                        "messages": [{ "role": "user", "content": "Reply with OK." }],
+                    }),
+                });
+            }
+
+            Ok(StreamCheckRequestSpec {
+                endpoint: join_api_endpoint(base_url, "chat/completions"),
+                headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                body: serde_json::json!({
+                    "model": model_id,
+                    "stream": true,
+                    "max_tokens": 16,
+                    "messages": [{ "role": "user", "content": "Reply with OK." }],
+                }),
+            })
         }
         "opencode" => {
             let npm = parsed
@@ -5470,6 +5662,21 @@ pub fn set_visible_apps(
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     set_json_app_setting(&conn, VISIBLE_APPS_SETTING_KEY, &normalized)?;
     Ok(normalized)
+}
+
+#[tauri::command]
+pub fn get_hermes_root_override(db: State<'_, DbState>) -> Result<Option<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    hermes::read_root_override(&conn)
+}
+
+#[tauri::command]
+pub fn set_hermes_root_override(
+    value: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<Option<String>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    hermes::write_root_override(&conn, value.as_deref())
 }
 
 #[tauri::command]
@@ -6236,7 +6443,8 @@ fn scan_sessions_from_conn(
         Some("gemini") => vec!["gemini"],
         Some("opencode") => vec!["opencode"],
         Some("openclaw") => vec!["openclaw"],
-        _ => vec!["claude", "codex", "gemini", "opencode", "openclaw"],
+        Some("hermes") => vec!["hermes"],
+        _ => vec!["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
     };
 
     let mut sessions = Vec::new();
@@ -9066,7 +9274,7 @@ fn best_project_root_candidate<'a>(
 fn build_tool_environment_report_from_conn(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<ToolEnvironmentReport>, String> {
-    let tools = crate::skills::tools::detect_tools();
+    let tools = crate::skills::tools::detect_tools_for_conn(conn);
     let mut reports = Vec::new();
 
     for tool in tools {
@@ -9186,15 +9394,11 @@ fn refresh_mcp_servers_from_scan(conn: &rusqlite::Connection) -> Result<usize, S
 
 fn run_full_rescan_from_conn(conn: &rusqlite::Connection) -> Result<FullRescanResult, String> {
     let mcp_servers = refresh_mcp_servers_from_scan(conn)?;
-    let skills = crate::skills::scanner::scan_local_skills().len();
+    let skills = crate::skills::scanner::scan_local_skills_for_conn(conn).len();
     let hooks = crate::hooks::manager::read_hooks_from_settings(conn).len();
     let instruction_files = crate::claude_md::manager::scan_claude_md_files(conn).len();
     let workflows = crate::workflows::scan_workflow_files().len();
-    let config_roots = crate::commands::config_files_commands::get_config_roots()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter(|root| root.exists)
-        .count();
+    let config_roots = crate::commands::config_files_commands::count_existing_config_roots(conn)?;
     let pending_project_roots = get_pending_imported_project_roots_from_conn(conn)?.len();
     let tool_reports = build_tool_environment_report_from_conn(conn)?;
     let tool_health_issues = tool_reports
@@ -9506,7 +9710,7 @@ fn restore_imported_artifacts(
                                 .is_ok()
                         }
                     }
-                    "codex" | "gemini" | "opencode" | "openclaw" => {
+                    "codex" | "gemini" | "opencode" | "openclaw" | "hermes" => {
                         apply_tool_snapshot(conn, &tool_id, &config_content).is_ok()
                     }
                     _ => false,
@@ -9721,7 +9925,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
 
     // Tool config files
     sql.push_str("-- ── Tool Configs ──\n\n");
-    let tool_ids = ["claude", "codex", "gemini", "opencode", "openclaw"];
+    let tool_ids = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
     for tool_id in tool_ids {
         if let Ok(content) = read_tool_snapshot(conn, tool_id) {
             let config_path = match tool_id {
@@ -9829,7 +10033,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
         "GEMINI.md.bak",
         ".claude.json",
     ];
-    let project_relative_dirs = [".claude", ".codex", ".gemini", ".opencode", ".openclaw"];
+    let project_relative_dirs = [".claude", ".codex", ".gemini", ".opencode", ".openclaw", ".hermes"];
 
     for project_root in discover_project_roots(conn) {
         let root_key = format!("project:{}", project_root.to_string_lossy());

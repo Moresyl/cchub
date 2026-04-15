@@ -236,6 +236,11 @@ export function buildProviderProfileFromDeepLink(request: DeepLinkImportRequest)
     }
   }
 
+  if (toolId === "hermes") {
+    const providerMatch = request.notes?.match(/provider=([a-z0-9-]+)/i);
+    fields.hermesProvider = providerMatch?.[1] || "custom";
+  }
+
   if (toolId === "opencode") {
     if (request.npm && OPENCODE_NPMS.includes(request.npm as OpenCodeNpmPackage)) {
       fields.npm = request.npm as OpenCodeNpmPackage;

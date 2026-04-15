@@ -107,7 +107,7 @@ export default function Dashboard() {
   const activeServers = servers.filter((s) => s.status === "active");
 
   return (
-    <div className="animate-in">
+    <div>
       {/* Stats Row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
         <StatCard

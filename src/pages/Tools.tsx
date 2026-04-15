@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal, Code, Download, RefreshCw, Trash2 } from "lucide-react";
@@ -14,10 +15,12 @@ import ToolsPermissionCard from "../components/ToolsPermissionCard";
 import ToolsTabButton from "../components/ToolsTabButton";
 import ToolsToggleCard from "../components/ToolsToggleCard";
 import { showToast } from "../components/Toast";
-import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import { type ManagedAppId } from "../lib/appPreferences";
 import { useSetClaudeHudConfigMutation, useSetHello2ccConfigMutation } from "../hooks/mutations";
 import {
   useDetectTools,
+  fetchToolsPageData,
+  queryKeys,
   useHello2ccStatus,
   useHudStatus,
   type Hello2ccConfigQueryResult,
@@ -116,17 +119,23 @@ const PERM_DESC_ZH = ["每次操作都确认", "允许读取，写操作确认",
 const PERM_DESC_EN = ["Confirm every action", "Allow read, confirm write", "Allow read/write, confirm Bash", "Skip all prompts"];
 const PERM_DESC_JA = ["毎回すべて確認", "読み取りを許可し、書き込みは確認", "読み書きを許可し、Bash のみ確認", "すべての確認をスキップ"];
 export default function Tools() {
+  const queryClient = useQueryClient();
+  const cachedToolsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchToolsPageData>>>(
+    queryKeys.toolsPage,
+  );
   const [tab, setTab] = useState<ToolTab>("claude");
-  const [permLevel, setPermLevel] = useState(0);
-  const [autoUpdate, setAutoUpdate] = useState("latest");
-  const [claudeModel, setClaudeModel] = useState("");
-  const [toolSearch, setToolSearch] = useState(false);
-  const [codexApproval, setCodexApproval] = useState("suggest");
-  const [codexReasoning, setCodexReasoning] = useState("medium");
-  const [codexDisableStorage, setCodexDisableStorage] = useState(false);
-  const [codexContextWindow1M, setCodexContextWindow1M] = useState(false);
-  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
-  const [loading, setLoading] = useState(true);
+  const [permLevel, setPermLevel] = useState(cachedToolsPageData?.permissionsLevel ?? 0);
+  const [autoUpdate, setAutoUpdate] = useState(cachedToolsPageData?.autoUpdateChannel ?? "latest");
+  const [claudeModel, setClaudeModel] = useState(cachedToolsPageData?.claudeModel ?? "");
+  const [toolSearch, setToolSearch] = useState(cachedToolsPageData?.toolSearchEnabled ?? false);
+  const [codexApproval, setCodexApproval] = useState(cachedToolsPageData?.codexSettings.approval_mode ?? "suggest");
+  const [codexReasoning, setCodexReasoning] = useState(cachedToolsPageData?.codexSettings.reasoning_effort ?? "medium");
+  const [codexDisableStorage, setCodexDisableStorage] = useState(cachedToolsPageData?.codexSettings.disable_response_storage ?? false);
+  const [codexContextWindow1M, setCodexContextWindow1M] = useState(cachedToolsPageData?.codexSettings.context_window_1m ?? false);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
+    cachedToolsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw"],
+  );
+  const [loading, setLoading] = useState(!cachedToolsPageData);
   const [hudInstalling, setHudInstalling] = useState(false);
   const [hudUpdateInfo, setHudUpdateInfo] = useState<{ currentVersion: string; latestVersion: string; hasUpdate: boolean } | null>(null);
   const [hudUpdating, setHudUpdating] = useState(false);
@@ -169,31 +178,29 @@ export default function Tools() {
   );
   const activeTabInstalled = toolById.get(tab)?.installed ?? false;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (options: { force?: boolean } = {}) => {
+    const { force = false } = options;
+    if (!queryClient.getQueryData(queryKeys.toolsPage)) {
+      setLoading(true);
+    }
     try {
-      const [level, channel, model, toolSearchEnabled, codexSettings, nextVisibleApps] = await Promise.all([
-        invoke<number>("get_claude_permissions_level").catch(() => 0),
-        invoke<string>("get_claude_auto_update").catch(() => "latest"),
-        invoke<string>("get_claude_model").catch(() => ""),
-        invoke<boolean>("get_claude_tool_search").catch(() => false),
-        invoke<{ approval_mode: string; reasoning_effort: string; disable_response_storage: boolean; context_window_1m: boolean }>("get_codex_settings").catch(() => ({
-          approval_mode: "suggest", reasoning_effort: "medium", disable_response_storage: false, context_window_1m: false,
-        })),
-        fetchVisibleApps(),
-      ]);
-      setPermLevel(level);
-      setAutoUpdate(channel);
-      setClaudeModel(model);
-      setToolSearch(toolSearchEnabled);
-      setCodexApproval(codexSettings.approval_mode);
-      setCodexReasoning(codexSettings.reasoning_effort);
-      setCodexDisableStorage(codexSettings.disable_response_storage);
-      setCodexContextWindow1M(codexSettings.context_window_1m);
-      setVisibleApps(nextVisibleApps);
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.toolsPage,
+        queryFn: fetchToolsPageData,
+        staleTime: force ? 0 : 30_000,
+      });
+      setPermLevel(data.permissionsLevel);
+      setAutoUpdate(data.autoUpdateChannel);
+      setClaudeModel(data.claudeModel);
+      setToolSearch(data.toolSearchEnabled);
+      setCodexApproval(data.codexSettings.approval_mode);
+      setCodexReasoning(data.codexSettings.reasoning_effort);
+      setCodexDisableStorage(data.codexSettings.disable_response_storage);
+      setCodexContextWindow1M(data.codexSettings.context_window_1m);
+      setVisibleApps(data.visibleApps);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => {
@@ -802,7 +809,7 @@ export default function Tools() {
   }
 
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
           <h2 className="page-title">{uiText("工具", "Tools", "ツール")}</h2>

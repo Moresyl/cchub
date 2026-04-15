@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { lazy, useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, Edit3, X, Save, Plug, Copy, Check, Activity, FileText, Share2, Wand2, MonitorCheck, Upload, PackagePlus, ArrowLeft, ArrowRight } from "lucide-react";
@@ -7,6 +8,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import McpServerCard, { type McpServerCardServer } from "../components/McpServerCard";
 import type { DetectedTool } from "../types/skills";
 import { useMcpValidation, type McpWizardDraft } from "../hooks/useMcpValidation";
+import { fetchMcpServersPageData, queryKeys } from "../hooks/queries";
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
 type McpServer = McpServerCardServer;
@@ -41,8 +43,12 @@ function formatJson(raw: string): string {
 }
 
 export default function McpServers() {
-  const [servers, setServers] = useState<McpServer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const cachedMcpServersPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMcpServersPageData>>>(
+    queryKeys.mcpServersPage,
+  );
+  const [servers, setServers] = useState<McpServer[]>(cachedMcpServersPageData?.servers ?? []);
+  const [loading, setLoading] = useState(!cachedMcpServersPageData);
   const [selected, setSelected] = useState<McpServer | null>(null);
   const [editing, setEditing] = useState(false);
   const [editCommand, setEditCommand] = useState("");
@@ -53,7 +59,9 @@ export default function McpServers() {
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [syncingTo, setSyncingTo] = useState<string | null>(null);
-  const [installedTools, setInstalledTools] = useState<DetectedTool[]>([]);
+  const [installedTools, setInstalledTools] = useState<DetectedTool[]>(
+    cachedMcpServersPageData?.tools.filter((tool) => tool.installed && tool.id !== "openclaw") ?? [],
+  );
   const [toolSyncStatus, setToolSyncStatus] = useState<Record<string, boolean>>({});
   const [pendingDelete, setPendingDelete] = useState<McpServer | null>(null);
   const [runtimeDeps, setRuntimeDeps] = useState<RuntimeDepStatus[]>([]);
@@ -74,19 +82,30 @@ export default function McpServers() {
   const wizardValidation = useMcpValidation(wizardDraft);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
 
-  const loadServers = useCallback(async () => {
-    setLoading(true);
-    try { setServers(await invoke<McpServer[]>("scan_mcp_servers")); }
-    catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  }, []);
-
-  const loadTools = useCallback(async () => {
+  const loadPageData = useCallback(async (options: { force?: boolean } = {}) => {
+    const { force = false } = options;
+    if (!queryClient.getQueryData(queryKeys.mcpServersPage)) {
+      setLoading(true);
+    }
     try {
-      const dt = await invoke<DetectedTool[]>("detect_tools");
-      setInstalledTools(dt.filter((t) => t.installed && t.id !== "openclaw"));
-    } catch (e) { console.error(e); }
-  }, []);
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.mcpServersPage,
+        queryFn: fetchMcpServersPageData,
+        staleTime: force ? 0 : 30_000,
+      });
+      setServers(data.servers);
+      setInstalledTools(data.tools.filter((tool) => tool.installed && tool.id !== "openclaw"));
+      setSelected((current) => (
+        current
+          ? data.servers.find((server) => server.id === current.id) ?? current
+          : current
+      ));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [queryClient]);
 
   const checkDeps = useCallback(async () => {
     setCheckingDeps(true);
@@ -147,12 +166,12 @@ export default function McpServers() {
       setEditing(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
-      await loadServers();
+      await loadPageData({ force: true });
     } catch (e) {
       console.error(e);
       showToast("error", zh ? "JSON 格式错误，请检查参数和环境变量" : "Invalid JSON format");
     }
-  }, [editArgs, editCommand, editEnv, loadServers, selected, zh]);
+  }, [editArgs, editCommand, editEnv, loadPageData, selected, zh]);
 
   const openWizard = useCallback(() => {
     setWizardDraft({
@@ -200,7 +219,7 @@ export default function McpServers() {
 
       const health = await invoke<HealthCheckResult>("check_mcp_server_health", { name: created.name });
       setHealthResults((current) => ({ ...current, [health.server_id]: health }));
-      await loadServers();
+      await loadPageData({ force: true });
       setSelected(created);
       closeWizard();
       showToast(
@@ -215,7 +234,7 @@ export default function McpServers() {
     } finally {
       setWizardInstalling(false);
     }
-  }, [closeWizard, loadServers, wizardDraft, wizardInstalling, wizardSyncTargets, wizardValidation, zh]);
+  }, [closeWizard, loadPageData, wizardDraft, wizardInstalling, wizardSyncTargets, wizardValidation, zh]);
 
   const toggleToolSync = useCallback(async (toolId: string) => {
     if (!selected) return;
@@ -266,17 +285,16 @@ export default function McpServers() {
     try {
       const count = await invoke<number>("import_mcp_servers_from_file");
       showToast("success", `${i.mcp.importSuccess} (${count})`);
-      await loadServers();
+      await loadPageData({ force: true });
     } catch (e) {
       const msg = String(e);
       if (msg !== "Cancelled") showToast("error", msg);
     }
-  }, [i.mcp.importSuccess, loadServers]);
+  }, [i.mcp.importSuccess, loadPageData]);
 
   useEffect(() => {
-    void loadServers();
-    void loadTools();
-  }, [loadServers, loadTools]);
+    void loadPageData();
+  }, [loadPageData]);
 
   useEffect(() => {
     const handleSaveShortcut = () => {
@@ -406,7 +424,7 @@ export default function McpServers() {
 
   // --- 列表视图 ---
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
           <h2 className="page-title">{i.mcp.title}</h2>
@@ -425,7 +443,7 @@ export default function McpServers() {
           <button className="btn btn-secondary btn-sm" onClick={() => void checkHealth()} disabled={checkingHealth}>
             <Activity size={14} />{checkingHealth ? i.mcp.checking : i.mcp.checkHealth}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => void loadServers()}>
+          <button className="btn btn-secondary btn-sm" onClick={() => void loadPageData({ force: true })}>
             <RefreshCw size={14} />{i.mcp.refresh}
           </button>
         </div>

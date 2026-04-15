@@ -1,9 +1,8 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Profiler, lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, Settings2, X } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -34,11 +33,66 @@ const ConfigFiles = lazy(() => import("./pages/ConfigFiles"));
 
 function RouteFallback() {
   return (
-    <div className="loading-center" style={{ height: "100%" }}>
-      <div className="spinner" />
-      <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-        Loading...
-      </span>
+    <div
+      style={{
+        height: "100%",
+        borderRadius: 8,
+        background: "var(--bg-card)",
+        border: "1px solid var(--border-subtle)",
+      }}
+    />
+  );
+}
+
+function RouteProfiler({
+  children,
+  pathname,
+}: {
+  children: ReactNode;
+  pathname: string;
+}) {
+  const handleRender = useCallback(
+    (_id: string, phase: string, actualDuration: number) => {
+      if (!import.meta.env.DEV || phase !== "update") {
+        return;
+      }
+
+      console.debug(
+        `[route-profiler] ${pathname} commit ${actualDuration.toFixed(2)}ms`,
+      );
+    },
+    [pathname],
+  );
+
+  return (
+    <Profiler id={`route:${pathname}`} onRender={handleRender}>
+      {children}
+    </Profiler>
+  );
+}
+
+function RouteContent({ location }: { location: ReturnType<typeof useLocation> }) {
+  return (
+    <div key={location.pathname} className="page-enter" style={{ height: "100%" }}>
+      <Routes location={location}>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/mcp-servers" element={<McpServers />} />
+        <Route path="/mcp-clients" element={<McpClients />} />
+        <Route path="/logs" element={<Logs />} />
+        <Route path="/skills" element={<Skills />} />
+        <Route path="/workflows" element={<Workflows />} />
+        <Route path="/autopilot" element={<Autopilot />} />
+        <Route path="/marketplace" element={<Marketplace />} />
+        <Route path="/hooks" element={<Hooks />} />
+        <Route path="/workspaces" element={<Workspaces />} />
+        <Route path="/profiles" element={<Profiles />} />
+        <Route path="/sessions" element={<Sessions />} />
+        <Route path="/claude-md" element={<ClaudeMd />} />
+        <Route path="/config-files" element={<ConfigFiles />} />
+        <Route path="/tools" element={<Tools />} />
+        <Route path="/security" element={<Security />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
     </div>
   );
 }
@@ -192,38 +246,11 @@ function AppShell() {
           )}
           <main className="page-content">
             <ErrorBoundary resetKey={location.pathname}>
-              <Suspense fallback={<RouteFallback />}>
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={location.pathname}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.18, ease: "easeOut" }}
-                    style={{ height: "100%" }}
-                  >
-                    <Routes location={location}>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/mcp-servers" element={<McpServers />} />
-                      <Route path="/mcp-clients" element={<McpClients />} />
-                      <Route path="/logs" element={<Logs />} />
-                      <Route path="/skills" element={<Skills />} />
-                      <Route path="/workflows" element={<Workflows />} />
-                      <Route path="/autopilot" element={<Autopilot />} />
-                      <Route path="/marketplace" element={<Marketplace />} />
-                      <Route path="/hooks" element={<Hooks />} />
-                      <Route path="/workspaces" element={<Workspaces />} />
-                      <Route path="/profiles" element={<Profiles />} />
-                      <Route path="/sessions" element={<Sessions />} />
-                      <Route path="/claude-md" element={<ClaudeMd />} />
-                      <Route path="/config-files" element={<ConfigFiles />} />
-                      <Route path="/tools" element={<Tools />} />
-                      <Route path="/security" element={<Security />} />
-                      <Route path="/settings" element={<Settings />} />
-                    </Routes>
-                  </motion.div>
-                </AnimatePresence>
-              </Suspense>
+              <RouteProfiler pathname={location.pathname}>
+                <Suspense fallback={<RouteFallback />}>
+                  <RouteContent location={location} />
+                </Suspense>
+              </RouteProfiler>
             </ErrorBoundary>
           </main>
         </div>

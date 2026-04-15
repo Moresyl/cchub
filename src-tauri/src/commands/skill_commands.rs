@@ -3,9 +3,19 @@ use crate::db::{record_activity, DbState};
 use crate::skills::{installer, scanner, tools};
 use tauri::State;
 
+fn log_command_timing(command: &str, started_at: std::time::Instant) {
+    eprintln!(
+        "[cchub][invoke] {command} completed in {}ms",
+        started_at.elapsed().as_millis()
+    );
+}
+
 #[tauri::command]
 pub fn scan_skills(_db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
-    Ok(scanner::scan_local_skills())
+    let started_at = std::time::Instant::now();
+    let result = Ok(scanner::scan_local_skills());
+    log_command_timing("scan_skills", started_at);
+    result
 }
 
 #[tauri::command]
@@ -144,7 +154,10 @@ pub fn uninstall_skill_file(path: String, db: State<'_, DbState>) -> Result<(), 
 
 #[tauri::command]
 pub fn get_skill_backups() -> Result<Vec<installer::SkillBackup>, String> {
-    installer::list_skill_backups()
+    let started_at = std::time::Instant::now();
+    let result = installer::list_skill_backups();
+    log_command_timing("get_skill_backups", started_at);
+    result
 }
 
 #[tauri::command]

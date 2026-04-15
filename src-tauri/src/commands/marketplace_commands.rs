@@ -5,6 +5,13 @@ use crate::skills::scanner;
 use std::collections::HashMap;
 use tauri::State;
 
+fn log_command_timing(command: &str, started_at: std::time::Instant) {
+    eprintln!(
+        "[cchub][invoke] {command} completed in {}ms",
+        started_at.elapsed().as_millis()
+    );
+}
+
 #[tauri::command]
 pub fn get_marketplace_entries() -> Result<Vec<registry::RegistryEntry>, String> {
     // No local data - MCP entries come from npm search
@@ -17,13 +24,17 @@ pub async fn search_marketplace(
     page: Option<u32>,
     page_size: Option<u32>,
 ) -> Result<serde_json::Value, String> {
+    let started_at = std::time::Instant::now();
     if query.trim().is_empty() {
         return Ok(serde_json::json!({ "entries": [], "total": 0 }));
     }
     let p = page.unwrap_or(0);
     let ps = page_size.unwrap_or(50);
-    let (entries, total) = registry::search_npm_registry(&query, p, ps).await?;
-    Ok(serde_json::json!({ "entries": entries, "total": total }))
+    let result = registry::search_npm_registry(&query, p, ps)
+        .await
+        .map(|(entries, total)| serde_json::json!({ "entries": entries, "total": total }));
+    log_command_timing("search_marketplace", started_at);
+    result
 }
 
 #[tauri::command]
@@ -105,11 +116,17 @@ pub async fn get_skillhub_catalog(
     limit: u32,
     category: String,
 ) -> Result<serde_json::Value, String> {
-    let (entries, total) = registry::fetch_skillhub_catalog(page, limit, &category).await?;
-    Ok(serde_json::json!({
-        "skills": entries,
-        "total": total,
-    }))
+    let started_at = std::time::Instant::now();
+    let result = registry::fetch_skillhub_catalog(page, limit, &category)
+        .await
+        .map(|(entries, total)| {
+            serde_json::json!({
+                "skills": entries,
+                "total": total,
+            })
+        });
+    log_command_timing("get_skillhub_catalog", started_at);
+    result
 }
 
 #[tauri::command]

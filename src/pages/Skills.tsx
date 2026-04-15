@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, lazy, Suspense, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -13,7 +14,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import SkillCard, { type SkillCardSkill } from "../components/SkillCard";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import { type ManagedAppId } from "../lib/appPreferences";
+import { fetchSkillsPageData, queryKeys } from "../hooks/queries";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
@@ -55,10 +57,14 @@ function isStandaloneSkill(skill: Skill) {
 }
 
 export default function Skills() {
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [plugins, setPlugins] = useState<Plugin[]>([]);
-  const [tools, setTools] = useState<DetectedTool[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const cachedSkillsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchSkillsPageData>>>(
+    queryKeys.skillsPage,
+  );
+  const [skills, setSkills] = useState<Skill[]>(cachedSkillsPageData?.skills ?? []);
+  const [plugins, setPlugins] = useState<Plugin[]>(cachedSkillsPageData?.plugins ?? []);
+  const [tools, setTools] = useState<DetectedTool[]>(cachedSkillsPageData?.tools ?? []);
+  const [loading, setLoading] = useState(!cachedSkillsPageData);
   const [activeTool, setActiveTool] = useState<string>("claude");
   const [category, setCategory] = useState<SkillCategory>("all");
   const [search, setSearch] = useState("");
@@ -73,37 +79,43 @@ export default function Skills() {
   const [editContent, setEditContent] = useState("");
   const [syncedSkills, setSyncedSkills] = useState<Record<string, Set<string>>>({});
   const [pendingDelete, setPendingDelete] = useState<{ type: "skill"; item: Skill } | { type: "plugin"; item: Plugin } | null>(null);
-  const [skillBackups, setSkillBackups] = useState<SkillBackup[]>([]);
+  const [skillBackups, setSkillBackups] = useState<SkillBackup[]>(
+    cachedSkillsPageData?.skillBackups ?? [],
+  );
   const [backupBusyId, setBackupBusyId] = useState<string | null>(null);
   const [pendingBackupDelete, setPendingBackupDelete] = useState<SkillBackup | null>(null);
-  const [skillSyncMethod, setSkillSyncMethod] = useState<string>("copy");
-  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw"]);
+  const [skillSyncMethod, setSkillSyncMethod] = useState<string>(
+    cachedSkillsPageData?.skillSyncMethod ?? "copy",
+  );
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
+    cachedSkillsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw"],
+  );
   const i = t();
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (options: { force?: boolean } = {}) => {
+    const { force = false } = options;
+    if (!queryClient.getQueryData(queryKeys.skillsPage)) {
+      setLoading(true);
+    }
     try {
-      const [sk, pl, dt, syncMethod, nextVisibleApps, backups] = await Promise.all([
-        invoke<Skill[]>("scan_skills"),
-        invoke<Plugin[]>("get_plugins"),
-        invoke<DetectedTool[]>("detect_tools"),
-        invoke<string>("get_skill_sync_method").catch(() => "copy"),
-        fetchVisibleApps(),
-        invoke<SkillBackup[]>("get_skill_backups").catch(() => []),
-      ]);
-      setSkills(sk);
-      setPlugins(pl);
-      setTools(dt);
-      setSkillSyncMethod(syncMethod);
-      setVisibleApps(nextVisibleApps);
-      setSkillBackups(backups);
-      const firstInstalled = dt.find((t) => t.installed && nextVisibleApps.includes(t.id as ManagedAppId));
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.skillsPage,
+        queryFn: fetchSkillsPageData,
+        staleTime: force ? 0 : 30_000,
+      });
+      setSkills(data.skills);
+      setPlugins(data.plugins);
+      setTools(data.tools);
+      setSkillSyncMethod(data.skillSyncMethod);
+      setVisibleApps(data.visibleApps);
+      setSkillBackups(data.skillBackups);
+      const firstInstalled = data.tools.find((t) => t.installed && data.visibleApps.includes(t.id as ManagedAppId));
       if (firstInstalled) setActiveTool(firstInstalled.id);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, []);
+  }, [queryClient]);
 
   const handleImportSkill = useCallback(async () => {
     const tool = tools.find((t) => t.id === activeTool);
@@ -111,7 +123,7 @@ export default function Skills() {
     try {
       await invoke<string>("import_skill_file", { targetSkillsDir: tool.skills_dir, method: skillSyncMethod });
       showToast("success", i.skills.importSuccess);
-      await load();
+      await load({ force: true });
     } catch (e) {
       const msg = String(e);
       if (msg !== "Cancelled") showToast("error", msg);
@@ -196,7 +208,7 @@ export default function Skills() {
         setSkillContent(null);
         setEditingSkill(false);
       }
-      await load();
+      await load({ force: true });
       showToast("success", locale === "zh" ? "技能已删除，并已自动备份" : "Skill deleted and backed up");
     } catch (e) { console.error(e); }
   }, [load, locale, selectedSkill]);
@@ -206,7 +218,7 @@ export default function Skills() {
     const isDisabled = skill.file_path.endsWith(".disabled");
     try {
       await invoke<string>("toggle_skill_file", { filePath: skill.file_path, enabled: isDisabled });
-      await load();
+      await load({ force: true });
     } catch (e) { console.error(e); }
   }, [load]);
 
@@ -218,7 +230,7 @@ export default function Skills() {
     try {
       await invoke("delete_plugin_dir", { pluginName: plugin.id });
       await invoke("uninstall_plugin", { pluginId: plugin.id });
-      await load();
+      await load({ force: true });
     } catch (e) { console.error(e); }
   }, [load]);
 
@@ -418,7 +430,7 @@ export default function Skills() {
   ];
 
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Page Header */}
       <div className="page-header">
         <div>
@@ -435,7 +447,7 @@ export default function Skills() {
           <button className="btn btn-secondary btn-sm" onClick={openExplorer} style={{ gap: 6 }}>
             <FolderOpen size={14} />{i.skills.explore}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={load}><RefreshCw size={14} />{i.common.refresh}</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => void load({ force: true })}><RefreshCw size={14} />{i.common.refresh}</button>
         </div>
       </div>
 
@@ -480,7 +492,7 @@ export default function Skills() {
                       setBackupBusyId(backup.id);
                       try {
                         const restoredTo = await invoke<string>("restore_skill_backup", { id: backup.id });
-                        await load();
+                        await load({ force: true });
                         showToast("success", locale === "zh" ? `已恢复到 ${restoredTo}` : `Restored to ${restoredTo}`);
                       } catch (e) {
                         showToast("error", String(e));
@@ -888,7 +900,7 @@ export default function Skills() {
           setPendingBackupDelete(null);
           setBackupBusyId(backup.id);
           void invoke("delete_skill_backup", { id: backup.id })
-            .then(() => load())
+            .then(() => load({ force: true }))
             .then(() => showToast("success", locale === "zh" ? "备份已删除" : "Backup deleted"))
             .catch((error) => showToast("error", String(error)))
             .finally(() => setBackupBusyId((current) => current === backup.id ? null : current));

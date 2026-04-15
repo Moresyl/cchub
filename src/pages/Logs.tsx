@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Activity, DollarSign, RefreshCw, Save, X } from "lucide-react";
@@ -6,6 +7,7 @@ import ModelPricingListItem, { type ModelPricingListItemRow } from "../component
 import ProxyRequestRow from "../components/ProxyRequestRow";
 import { showToast } from "../components/Toast";
 import { getLocale } from "../lib/i18n";
+import { fetchLogsPageData, queryKeys } from "../hooks/queries";
 
 interface ActivityItem {
   id: number;
@@ -92,20 +94,30 @@ const EMPTY_PRICING_DRAFT: ModelPricingDraft = {
 
 const AUTO_REFRESH_INTERVALS = [5, 10, 30, 60] as const;
 const MAX_MERGED_PROXY_LOG_ROWS = 240;
-const RECENT_PROXY_LOG_LIMIT = 240;
 
 export default function Logs() {
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
-  const [proxySummary, setProxySummary] = useState<ProxyUsageSummary | null>(null);
-  const [recentProxyLogs, setRecentProxyLogs] = useState<ProxyRequestLogRow[]>([]);
-  const [modelPricingRows, setModelPricingRows] = useState<ModelPricingRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const initialDate = todayStr();
+  const cachedLogsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchLogsPageData>>>(
+    queryKeys.logsPage(initialDate),
+  );
+  const [activities, setActivities] = useState<ActivityItem[]>(cachedLogsPageData?.activities ?? []);
+  const [proxySummary, setProxySummary] = useState<ProxyUsageSummary | null>(
+    cachedLogsPageData?.proxySummary ?? null,
+  );
+  const [recentProxyLogs, setRecentProxyLogs] = useState<ProxyRequestLogRow[]>(
+    cachedLogsPageData?.recentProxyLogs ?? [],
+  );
+  const [modelPricingRows, setModelPricingRows] = useState<ModelPricingRow[]>(
+    cachedLogsPageData?.modelPricingRows ?? [],
+  );
+  const [loading, setLoading] = useState(!cachedLogsPageData);
   const [proxyFilters, setProxyFilters] = useState(DEFAULT_PROXY_FILTERS);
   const [pricingDraft, setPricingDraft] = useState<ModelPricingDraft>(EMPTY_PRICING_DRAFT);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [savingPricing, setSavingPricing] = useState(false);
   const [deletingPricingId, setDeletingPricingId] = useState<string | null>(null);
-  const [selectedDate] = useState<string>(todayStr());
+  const [selectedDate] = useState<string>(initialDate);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<(typeof AUTO_REFRESH_INTERVALS)[number]>(10);
   const [refreshing, setRefreshing] = useState(false);
@@ -138,38 +150,40 @@ export default function Logs() {
     [effectiveProxyFilters, recentProxyLogs],
   );
 
-  const load = useCallback(async (options: { silent?: boolean; mergeProxyRows?: boolean; preserveProxyScroll?: boolean } = {}) => {
+  const load = useCallback(async (options: { silent?: boolean; mergeProxyRows?: boolean; preserveProxyScroll?: boolean; force?: boolean } = {}) => {
     const {
       silent = false,
       mergeProxyRows = false,
       preserveProxyScroll = false,
+      force = false,
     } = options;
     const requestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = requestId;
     const previousScrollTop = preserveProxyScroll ? proxyListRef.current?.scrollTop || 0 : 0;
     const previousScrollHeight = preserveProxyScroll ? proxyListRef.current?.scrollHeight || 0 : 0;
     if (!silent) {
-      setLoading(true);
+      if (!queryClient.getQueryData(queryKeys.logsPage(selectedDate))) {
+        setLoading(true);
+      }
     } else {
       setRefreshing(true);
     }
     try {
-      const [acts, summary, latestProxyLogs, pricing] = await Promise.all([
-        invoke<ActivityItem[]>("get_activity_logs", { date: selectedDate }),
-        invoke<ProxyUsageSummary>("get_proxy_usage_summary"),
-        invoke<ProxyRequestLogRow[]>("get_recent_proxy_request_logs", {
-          limit: RECENT_PROXY_LOG_LIMIT,
-        }),
-        invoke<ModelPricingRow[]>("list_model_pricing"),
-      ]);
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.logsPage(selectedDate),
+        queryFn: () => fetchLogsPageData(selectedDate),
+        staleTime: force || silent ? 0 : 30_000,
+      });
       if (requestId !== loadRequestIdRef.current) {
         return;
       }
       startTransition(() => {
-        setActivities(acts);
-        setProxySummary(summary);
-        setModelPricingRows(pricing);
-        setRecentProxyLogs((current) => (mergeProxyRows ? mergeProxyLogs(current, latestProxyLogs) : latestProxyLogs));
+        setActivities(data.activities);
+        setProxySummary(data.proxySummary);
+        setModelPricingRows(data.modelPricingRows);
+        setRecentProxyLogs((current) => (
+          mergeProxyRows ? mergeProxyLogs(current, data.recentProxyLogs) : data.recentProxyLogs
+        ));
       });
       if (preserveProxyScroll && previousScrollTop > 0) {
         requestAnimationFrame(() => {
@@ -201,10 +215,41 @@ export default function Logs() {
 
   useEffect(() => {
     if (!autoRefreshEnabled) return undefined;
-    const timer = window.setInterval(() => {
-      void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true });
-    }, autoRefreshInterval * 1000);
-    return () => window.clearInterval(timer);
+    let timer: number | null = null;
+
+    const start = () => {
+      if (timer !== null || document.hidden) {
+        return;
+      }
+
+      timer = window.setInterval(() => {
+        void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true });
+      }, autoRefreshInterval * 1000);
+    };
+
+    const stop = () => {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stop();
+        return;
+      }
+
+      start();
+    };
+
+    start();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [autoRefreshEnabled, autoRefreshInterval, load]);
 
   const hasActiveProxyFilters =
@@ -222,7 +267,7 @@ export default function Logs() {
       showToast("success", uiText("模型定价已保存", "Model pricing saved", "モデル単価を保存しました"));
       setPricingDraft(EMPTY_PRICING_DRAFT);
       setEditingModelId(null);
-      await load();
+      await load({ force: true });
     } catch (error) {
       console.error(error);
       showToast(
@@ -243,7 +288,7 @@ export default function Logs() {
         setEditingModelId(null);
       }
       showToast("success", uiText("模型定价已删除", "Model pricing deleted", "モデル単価を削除しました"));
-      await load();
+      await load({ force: true });
     } catch (error) {
       console.error(error);
       showToast(
@@ -272,7 +317,7 @@ export default function Logs() {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true });
+    void load({ silent: true, mergeProxyRows: true, preserveProxyScroll: true, force: true });
   }, [load]);
 
   const handleClearProxyFilters = useCallback(() => {
@@ -291,7 +336,7 @@ export default function Logs() {
   }
 
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
           <h2 className="page-title">{uiText("操作日志", "Activity Logs", "アクティビティログ")}</h2>

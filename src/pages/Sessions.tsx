@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -9,10 +10,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
-import { fetchVisibleApps, getAppLabel, type ManagedAppId } from "../lib/appPreferences";
+import { getAppLabel, type ManagedAppId } from "../lib/appPreferences";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import SessionListItem from "../components/SessionListItem";
+import { fetchSessionsPageData, fetchVisibleAppsQuery, queryKeys } from "../hooks/queries";
 
 interface SessionSummary {
   id: string;
@@ -105,11 +107,17 @@ function entryBadgeColor(kind: string) {
 }
 
 export default function Sessions() {
-  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(TOOL_ORDER);
+  const queryClient = useQueryClient();
+  const cachedVisibleApps = queryClient.getQueryData<ManagedAppId[]>(queryKeys.visibleApps);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(cachedVisibleApps ?? TOOL_ORDER);
   const [filterTool, setFilterTool] = useState<ManagedAppId | "all">("all");
   const [query, setQuery] = useState("");
-  const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [allSessions, setAllSessions] = useState<SessionSummary[]>(
+    queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions(null)) ?? [],
+  );
+  const [loading, setLoading] = useState(
+    !queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions(null)),
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -129,9 +137,12 @@ export default function Sessions() {
   );
 
   useEffect(() => {
-    void fetchVisibleApps().then(setVisibleApps).catch(() => setVisibleApps(TOOL_ORDER));
+    void queryClient.fetchQuery({
+      queryKey: queryKeys.visibleApps,
+      queryFn: fetchVisibleAppsQuery,
+    }).then(setVisibleApps).catch(() => setVisibleApps(TOOL_ORDER));
     void loadSessions(true);
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     selectedSessionRef.current = selectedSession;
@@ -178,6 +189,7 @@ export default function Sessions() {
   async function loadSessions(showLoading: boolean) {
     const requestId = sessionsRequestIdRef.current + 1;
     sessionsRequestIdRef.current = requestId;
+    const toolId = filterTool === "all" ? null : filterTool;
 
     if (showLoading) {
       setLoading(true);
@@ -185,10 +197,10 @@ export default function Sessions() {
       setRefreshing(true);
     }
     try {
-      const nextSessions = await invoke<SessionSummary[]>("get_sessions", {
-        toolId: filterTool === "all" ? null : filterTool,
-        query: null,
-        limit: 240,
+      const nextSessions = await queryClient.fetchQuery({
+        queryKey: queryKeys.sessions(toolId),
+        queryFn: () => fetchSessionsPageData(toolId),
+        staleTime: showLoading ? 30_000 : 0,
       });
       if (requestId !== sessionsRequestIdRef.current) {
         return;
@@ -370,7 +382,7 @@ export default function Sessions() {
 
   return (
     <>
-      <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="page-header">
           <div>
             <h2 className="page-title">{uiText("会话管理器", "Sessions", "セッション")}</h2>

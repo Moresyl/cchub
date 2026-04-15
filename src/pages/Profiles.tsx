@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { lazy, memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -33,6 +34,7 @@ import ProfileFragmentCard from "../components/ProfileFragmentCard";
 import ProfilePresetButton from "../components/ProfilePresetButton";
 import ProfileTargetToolToggle from "../components/ProfileTargetToolToggle";
 import ProfileToolFilterTab from "../components/ProfileToolFilterTab";
+import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
 interface ConfigProfile {
@@ -987,11 +989,19 @@ type DraftFieldsStateUpdate =
   | ((current: StructuredDraftFields) => StructuredDraftFields);
 
 export default function Profiles() {
-  const [profiles, setProfiles] = useState<ConfigProfile[]>([]);
-  const [tools, setTools] = useState<DetectedTool[]>([]);
-  const [activeIds, setActiveIds] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [newTool, setNewTool] = useState("claude");
+  const queryClient = useQueryClient();
+  const cachedProfilesPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchProfilesPageData>>>(
+    queryKeys.profilesPage,
+  );
+  const [profiles, setProfiles] = useState<ConfigProfile[]>(cachedProfilesPageData?.profiles ?? []);
+  const [tools, setTools] = useState<DetectedTool[]>(cachedProfilesPageData?.tools ?? []);
+  const [activeIds, setActiveIds] = useState<string[]>(cachedProfilesPageData?.activeIds ?? []);
+  const [loading, setLoading] = useState(!cachedProfilesPageData);
+  const [newTool, setNewTool] = useState(
+    cachedProfilesPageData?.tools.find((tool) => tool.installed)?.id
+      ?? cachedProfilesPageData?.tools[0]?.id
+      ?? "claude",
+  );
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -1002,7 +1012,9 @@ export default function Profiles() {
   const [draftContent, setDraftContent] = useState("");
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftFields, setDraftFieldsState] = useState<StructuredDraftFields>(() => createDefaultStructuredFields("claude"));
-  const [providerFragments, setProviderFragments] = useState<ProviderConfigFragment[]>([]);
+  const [providerFragments, setProviderFragments] = useState<ProviderConfigFragment[]>(
+    cachedProfilesPageData?.providerFragments ?? [],
+  );
   const [draftFragmentName, setDraftFragmentName] = useState("");
   const [savingFragment, setSavingFragment] = useState(false);
   const [deletingFragmentId, setDeletingFragmentId] = useState<string | null>(null);
@@ -1072,25 +1084,25 @@ export default function Profiles() {
     draftFieldsRef.current = draftFields;
   }, [draftFields]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (options: { force?: boolean } = {}) => {
+    const { force = false } = options;
+    if (!queryClient.getQueryData(queryKeys.profilesPage)) {
+      setLoading(true);
+    }
     try {
-      await invoke("sync_config_profiles");
-      const [nextProfiles, nextTools, nextActiveIds, nextFragments] = await Promise.all([
-        invoke<ConfigProfile[]>("get_config_profiles"),
-        invoke<DetectedTool[]>("detect_tools"),
-        invoke<string[]>("get_active_config_profile_ids"),
-        invoke<ProviderConfigFragment[]>("get_provider_config_fragments").catch(() => [] as ProviderConfigFragment[]),
-      ]);
-      setProfiles(nextProfiles);
-      setTools(nextTools);
-      setActiveIds(nextActiveIds);
-      setProviderFragments(nextFragments);
-      await invoke("refresh_tray_provider_menu").catch(() => undefined);
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.profilesPage,
+        queryFn: fetchProfilesPageData,
+        staleTime: force ? 0 : 30_000,
+      });
+      setProfiles(data.profiles);
+      setTools(data.tools);
+      setActiveIds(data.activeIds);
+      setProviderFragments(data.providerFragments);
       setNewTool((prev) => {
-        const installed = nextTools.filter((tool) => tool.installed);
+        const installed = data.tools.filter((tool) => tool.installed);
         if (installed.some((tool) => tool.id === prev)) return prev;
-        return installed[0]?.id || nextTools[0]?.id || "claude";
+        return installed[0]?.id || data.tools[0]?.id || "claude";
       });
     } catch (e) {
       console.error(e);
@@ -1098,7 +1110,7 @@ export default function Profiles() {
     } finally {
       setLoading(false);
     }
-  }, [locale]);
+  }, [locale, queryClient]);
 
   const updateDraftFieldsState = useCallback((next: DraftFieldsStateUpdate) => {
     setDraftFieldsState((current) => {
@@ -1280,7 +1292,7 @@ export default function Profiles() {
         showToast("success", locale === "zh" ? "配置已保存" : "Configuration saved");
       }
       closeModal();
-      await load();
+      await load({ force: true });
     } catch (e) {
       console.error(e);
       showToast("error", locale === "zh" ? `保存失败: ${e}` : `Save failed: ${e}`);
@@ -1373,7 +1385,7 @@ export default function Profiles() {
         const removedCount = await invoke<number>("delete_config_profile_group", {
           sourceKey: profile.source_key,
         });
-        await load();
+        await load({ force: true });
         showToast(
           "success",
           localeText(
@@ -1389,7 +1401,7 @@ export default function Profiles() {
         return;
       }
       await invoke("delete_config_profile", { id: profile.id });
-      await load();
+      await load({ force: true });
       showToast("success", locale === "zh" ? "配置已删除" : "Configuration deleted");
     } catch (e) {
       console.error(e);
@@ -1405,7 +1417,7 @@ export default function Profiles() {
         toolId: profile.tool_id,
         configSnapshot: profile.config_snapshot,
       });
-      await load();
+      await load({ force: true });
       showToast("success", locale === "zh" ? "配置已复制" : "Configuration duplicated");
     } catch (e) {
       console.error(e);
@@ -1504,7 +1516,7 @@ export default function Profiles() {
     } catch (e) {
       console.error(e);
       showToast("error", locale === "zh" ? `排序失败: ${e}` : `Reorder failed: ${e}`);
-      await load();
+      await load({ force: true });
     } finally {
       setDraggingProfileId(null);
       setDragOverProfileId(null);
@@ -1615,7 +1627,7 @@ export default function Profiles() {
     setConfirmFragmentDelete(fragment);
   }, [providerFragments]);
   const handleRefreshProfiles = useCallback(() => {
-    void load();
+    void load({ force: true });
   }, [load]);
   const handleOpenCreateProfile = useCallback(() => {
     void openCreateModal();
@@ -1883,7 +1895,7 @@ export default function Profiles() {
   }
 
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
           <h2 className="page-title">{locale === "zh" ? "配置切换" : "Config Profiles"}</h2>

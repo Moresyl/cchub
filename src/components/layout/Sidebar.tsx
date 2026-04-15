@@ -1,8 +1,20 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch, History, Bot } from "lucide-react";
 import { t } from "../../lib/i18n";
-import { getVersion } from "@tauri-apps/api/app";
+import {
+  fetchClaudeMdPageData,
+  fetchMarketplaceCatalogPage,
+  fetchMarketplaceLocalData,
+  fetchMarketplaceSearchPage,
+  fetchMcpServersPageData,
+  fetchProfilesPageData,
+  fetchSessionsPageData,
+  fetchSkillsPageData,
+  fetchToolsPageData,
+  queryKeys,
+} from "../../hooks/queries";
 import type { LucideIcon } from "lucide-react";
 
 const navItems = [
@@ -29,17 +41,26 @@ interface SidebarNavItemProps {
   path: string;
   label: string;
   icon: LucideIcon;
+  onPrefetch: (path: string) => void;
 }
 
 function SidebarNavItemComponent({
   path,
   label,
   icon: Icon,
+  onPrefetch,
 }: SidebarNavItemProps) {
   return (
     <NavLink
       to={path}
       end={path === "/"}
+      onClick={(event) => {
+        if (event.currentTarget.classList.contains("active")) {
+          event.preventDefault();
+        }
+      }}
+      onPointerEnter={() => onPrefetch(path)}
+      onFocus={() => onPrefetch(path)}
       className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
     >
       <Icon size={15} />
@@ -52,10 +73,88 @@ const SidebarNavItem = memo(SidebarNavItemComponent);
 
 function SidebarComponent() {
   const i = t();
-  const [version, setVersion] = useState("");
-  useEffect(() => {
-    getVersion().then(setVersion).catch(() => {});
-  }, []);
+  const queryClient = useQueryClient();
+  const prefetchRoute = useCallback((path: string) => {
+    switch (path) {
+      case "/mcp-servers":
+        void Promise.all([
+          import("../../pages/McpServers"),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.mcpServersPage,
+            queryFn: fetchMcpServersPageData,
+          }),
+        ]);
+        return;
+      case "/skills":
+        void Promise.all([
+          import("../../pages/Skills"),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.skillsPage,
+            queryFn: fetchSkillsPageData,
+          }),
+        ]);
+        return;
+      case "/marketplace":
+        void Promise.all([
+          import("../../pages/Marketplace"),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.marketplaceLocal,
+            queryFn: fetchMarketplaceLocalData,
+          }),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.marketplaceCatalog(),
+            queryFn: () => fetchMarketplaceCatalogPage(),
+          }),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.marketplaceSearch("mcp server"),
+            queryFn: () => fetchMarketplaceSearchPage("mcp server"),
+          }),
+        ]);
+        return;
+      case "/profiles":
+        void Promise.all([
+          import("../../pages/Profiles"),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.profilesPage,
+            queryFn: fetchProfilesPageData,
+          }),
+        ]);
+        return;
+      case "/tools":
+        void Promise.all([
+          import("../../pages/Tools"),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.toolsPage,
+            queryFn: fetchToolsPageData,
+          }),
+        ]);
+        return;
+      case "/claude-md":
+        void Promise.all([
+          import("../../pages/ClaudeMd"),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.claudeMdPage,
+            queryFn: fetchClaudeMdPageData,
+          }),
+        ]);
+        return;
+      case "/sessions":
+        void Promise.all([
+          import("../../pages/Sessions"),
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.sessions(null),
+            queryFn: () => fetchSessionsPageData(null),
+          }),
+        ]);
+        return;
+      case "/":
+        void import("../../pages/Dashboard");
+        return;
+      default:
+        return;
+    }
+  }, [queryClient]);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -79,6 +178,7 @@ function SidebarComponent() {
             path={item.path}
             label={i.nav[item.key]}
             icon={item.icon}
+            onPrefetch={prefetchRoute}
           />
         ))}
       </nav>
@@ -101,7 +201,7 @@ function SidebarComponent() {
             color: "var(--text-secondary)",
             letterSpacing: "0.03em",
           }}>
-            v{version}
+            v{__APP_VERSION__}
           </span>
         </div>
       </div>

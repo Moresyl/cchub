@@ -388,10 +388,16 @@ fn spawn_local_provider_proxy_server(
     app_handle: AppHandle,
     port: u16,
 ) -> Result<oneshot::Sender<()>, String> {
-    let listener = std::net::TcpListener::bind((LOCAL_PROVIDER_PROXY_HOST, port))
+    // Bind synchronously so "port in use" errors surface immediately from the
+    // caller. The std listener is handed off to the async task below, where
+    // we convert it into a tokio listener inside a runtime context (required
+    // by tokio::net::TcpListener::from_std, which panics with "there is no
+    // reactor running" if called from the synchronous Tauri setup hook).
+    let std_listener = std::net::TcpListener::bind((LOCAL_PROVIDER_PROXY_HOST, port))
         .map_err(|e| format!("Failed to bind local provider proxy on port {port}: {e}"))?;
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let listener = tokio::net::TcpListener::from_std(listener).map_err(|e| e.to_string())?;
+    std_listener
+        .set_nonblocking(true)
+        .map_err(|e| e.to_string())?;
 
     let router = Router::new()
         .route("/proxy/:tool_id", any(handle_proxy_root))
@@ -411,6 +417,17 @@ fn spawn_local_provider_proxy_server(
     );
 
     tauri::async_runtime::spawn(async move {
+        let listener = match tokio::net::TcpListener::from_std(std_listener) {
+            Ok(listener) => listener,
+            Err(error) => {
+                crate::utils::append_runtime_log(
+                    "error",
+                    "provider_proxy",
+                    &format!("Failed to convert listener to tokio: {error}"),
+                );
+                return;
+            }
+        };
         let server = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         });

@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "CCHub",
+        "visible": false,
         "width": 1300,
         "height": 722,
         "minWidth": 975,

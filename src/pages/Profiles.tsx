@@ -88,6 +88,32 @@ interface DetectedTool {
   installed: boolean;
 }
 
+interface CommonConfigSnippet {
+  hideAttribution: boolean;
+  enableTeammates: boolean;
+  effortLevelHigh: boolean;
+  enableToolSearch: boolean;
+  customValues: Record<string, string>;
+}
+
+const EMPTY_COMMON_SNIPPET: CommonConfigSnippet = {
+  hideAttribution: false,
+  enableTeammates: false,
+  effortLevelHigh: false,
+  enableToolSearch: false,
+  customValues: {},
+};
+
+type CommonSnippetToggleKey = "hideAttribution" | "enableTeammates" | "effortLevelHigh" | "enableToolSearch";
+
+// Backend-supported tools for Common Config Snippet overlay. Keep in sync with
+// apply_common_config_snippet_to_snapshot in src-tauri/src/commands/extra_commands.rs.
+const COMMON_SNIPPET_TOGGLES_BY_TOOL: Record<string, CommonSnippetToggleKey[]> = {
+  claude: ["hideAttribution", "enableTeammates", "effortLevelHigh", "enableToolSearch"],
+  codex: ["effortLevelHigh"],
+  gemini: [],
+};
+
 const TOOL_ICONS: Record<string, typeof Monitor> = {
   claude: Terminal,
   codex: Code,
@@ -904,6 +930,138 @@ const ProfilePlainConfigSection = memo(function ProfilePlainConfigSection({
   );
 });
 
+interface CommonConfigSnippetPanelProps {
+  toolId: string;
+  snippet: CommonConfigSnippet;
+  loading: boolean;
+  savingKey: string | null;
+  onToggle: (toolId: string, key: CommonSnippetToggleKey, nextValue: boolean) => void | Promise<void>;
+  locale: string;
+}
+
+const COMMON_SNIPPET_TOGGLE_LABELS: Record<
+  CommonSnippetToggleKey,
+  { zh: string; en: string; ja: string; hint: { zh: string; en: string; ja: string } }
+> = {
+  hideAttribution: {
+    zh: "隐藏 AI 署名",
+    en: "Hide AI Attribution",
+    ja: "AI 署名を隠す",
+    hint: {
+      zh: "切换 Provider 时自动置空 attribution 字段",
+      en: "Clear the attribution field when applying a profile",
+      ja: "Profile 適用時に attribution を空にします",
+    },
+  },
+  enableTeammates: {
+    zh: "启用 Teammates",
+    en: "Enable Teammates",
+    ja: "Teammates を有効化",
+    hint: {
+      zh: "自动写入 CLAUDE_CODE_ENABLE_TEAMMATES 和实验 Agent 团队标志",
+      en: "Sets CLAUDE_CODE_ENABLE_TEAMMATES and experimental agent teams",
+      ja: "CLAUDE_CODE_ENABLE_TEAMMATES と実験 agent teams を設定",
+    },
+  },
+  effortLevelHigh: {
+    zh: "高强度思考",
+    en: "High Effort Thinking",
+    ja: "高負荷思考",
+    hint: {
+      zh: "Claude: effortLevel=high；Codex: reasoning_effort=high",
+      en: "Claude: effortLevel=high; Codex: reasoning_effort=high",
+      ja: "Claude: effortLevel=high / Codex: reasoning_effort=high",
+    },
+  },
+  enableToolSearch: {
+    zh: "启用 Tool Search",
+    en: "Enable Tool Search",
+    ja: "Tool Search を有効化",
+    hint: {
+      zh: "自动写入 env.ENABLE_TOOL_SEARCH=true",
+      en: "Sets env.ENABLE_TOOL_SEARCH=true",
+      ja: "env.ENABLE_TOOL_SEARCH=true を設定",
+    },
+  },
+};
+
+const CommonConfigSnippetPanel = memo(function CommonConfigSnippetPanel({
+  toolId,
+  snippet,
+  loading,
+  savingKey,
+  onToggle,
+  locale,
+}: CommonConfigSnippetPanelProps) {
+  const applicable = COMMON_SNIPPET_TOGGLES_BY_TOOL[toolId];
+  if (!applicable || applicable.length === 0) return null;
+  const title = locale === "zh"
+    ? "公共配置 (Common Config)"
+    : locale === "ja"
+      ? "共通設定 (Common Config)"
+      : "Common Config Snippet";
+  const subtitle = locale === "zh"
+    ? "切换 Provider 时会叠加到所有 Profile，不会写入 Profile 本身。"
+    : locale === "ja"
+      ? "Profile 適用時にすべての Profile に重ねられます。Profile 本体には書き込みません。"
+      : "Overlaid onto every profile when applied; not written into the profile itself.";
+  return (
+    <div
+      className="section-card"
+      style={{ marginBottom: 16, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {title}
+          </span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{subtitle}</span>
+        </div>
+        {loading && <div className="spinner" style={{ width: 12, height: 12 }} />}
+      </div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+        {applicable.map((key) => {
+          const labels = COMMON_SNIPPET_TOGGLE_LABELS[key];
+          const label = locale === "zh" ? labels.zh : locale === "ja" ? labels.ja : labels.en;
+          const hint = locale === "zh" ? labels.hint.zh : locale === "ja" ? labels.hint.ja : labels.hint.en;
+          const isSaving = savingKey === `${toolId}.${key}`;
+          return (
+            <label
+              key={key}
+              title={hint}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                cursor: isSaving ? "wait" : "pointer",
+                opacity: isSaving ? 0.7 : 1,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={snippet[key]}
+                disabled={isSaving || loading}
+                onChange={(event) => { void onToggle(toolId, key, event.target.checked); }}
+              />
+              <span>{label}</span>
+              {isSaving && <div className="spinner" style={{ width: 10, height: 10 }} />}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 function mergeSharedDraftFields(
   current: StructuredDraftFields,
   toolId: string,
@@ -1029,6 +1187,9 @@ export default function Profiles() {
   const [streamCheckingId, setStreamCheckingId] = useState<string | null>(null);
   const [streamCheckResults, setStreamCheckResults] = useState<Record<string, ProviderStreamCheckResult>>({});
   const [streamCheckConfirmProfile, setStreamCheckConfirmProfile] = useState<ConfigProfile | null>(null);
+  const [commonSnippets, setCommonSnippets] = useState<Record<string, CommonConfigSnippet>>({});
+  const [commonSnippetLoadingTool, setCommonSnippetLoadingTool] = useState<string | null>(null);
+  const [commonSnippetSavingKey, setCommonSnippetSavingKey] = useState<string | null>(null);
 
   const {
     presetId: draftPresetId,
@@ -1111,6 +1272,48 @@ export default function Profiles() {
       setLoading(false);
     }
   }, [locale, queryClient]);
+
+  const loadCommonSnippet = useCallback(async (toolId: string) => {
+    const applicable = COMMON_SNIPPET_TOGGLES_BY_TOOL[toolId];
+    if (!applicable || applicable.length === 0) return;
+    setCommonSnippetLoadingTool(toolId);
+    try {
+      const snippet = await invoke<CommonConfigSnippet>("get_common_config_snippet", { toolId });
+      setCommonSnippets((current) => ({ ...current, [toolId]: { ...EMPTY_COMMON_SNIPPET, ...snippet } }));
+    } catch (e) {
+      console.error(e);
+      showToast(
+        "error",
+        locale === "zh" ? `加载公共配置失败: ${e}` : `Load common config failed: ${e}`,
+      );
+    } finally {
+      setCommonSnippetLoadingTool((current) => (current === toolId ? null : current));
+    }
+  }, [locale]);
+
+  const handleCommonSnippetToggle = useCallback(async (toolId: string, key: CommonSnippetToggleKey, nextValue: boolean) => {
+    const savingKey = `${toolId}.${key}`;
+    setCommonSnippetSavingKey(savingKey);
+    const previous = commonSnippets[toolId] ?? EMPTY_COMMON_SNIPPET;
+    const optimistic: CommonConfigSnippet = { ...previous, [key]: nextValue };
+    setCommonSnippets((current) => ({ ...current, [toolId]: optimistic }));
+    try {
+      const saved = await invoke<CommonConfigSnippet>("set_common_config_snippet", {
+        toolId,
+        snippet: optimistic,
+      });
+      setCommonSnippets((current) => ({ ...current, [toolId]: { ...EMPTY_COMMON_SNIPPET, ...saved } }));
+    } catch (e) {
+      console.error(e);
+      setCommonSnippets((current) => ({ ...current, [toolId]: previous }));
+      showToast(
+        "error",
+        locale === "zh" ? `保存公共配置失败: ${e}` : `Save common config failed: ${e}`,
+      );
+    } finally {
+      setCommonSnippetSavingKey((current) => (current === savingKey ? null : current));
+    }
+  }, [commonSnippets, locale]);
 
   const updateDraftFieldsState = useCallback((next: DraftFieldsStateUpdate) => {
     setDraftFieldsState((current) => {
@@ -1524,6 +1727,11 @@ export default function Profiles() {
   }, [filterTool, load, locale, profiles, search]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!filterTool) return;
+    void loadCommonSnippet(filterTool);
+  }, [filterTool, loadCommonSnippet]);
 
   const activeIdSet = useMemo(() => new Set(activeIds), [activeIds]);
   const presetCategories = useMemo(() => getPresetCategories(draftTool), [draftTool]);
@@ -1939,6 +2147,15 @@ export default function Profiles() {
           ))}
         </div>
       </div>
+
+      <CommonConfigSnippetPanel
+        toolId={filterTool}
+        snippet={commonSnippets[filterTool] ?? EMPTY_COMMON_SNIPPET}
+        loading={commonSnippetLoadingTool === filterTool}
+        savingKey={commonSnippetSavingKey}
+        onToggle={handleCommonSnippetToggle}
+        locale={locale}
+      />
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
         {filteredProfiles.length === 0 ? (

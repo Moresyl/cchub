@@ -74,6 +74,22 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         install_command: "npm install -g openclaw",
         install_url: "https://github.com/openclaw-ai/openclaw",
     },
+    // Hermes Agent (Nous Research) — detection-only support.
+    // See GitHub issue #3. CCHub currently surfaces Hermes on the Dashboard
+    // Detected Tools strip only; Provider switching, MCP sync, workflow
+    // installation and skill sync all gate on their own tool_id allow-lists
+    // and will not act on "hermes" until those systems are widened.
+    ToolCandidate {
+        id: "hermes",
+        name: "Hermes Agent",
+        dir: ".hermes",
+        config_file: "config.json",
+        mcp_config_file: "config.json",
+        skills_subdir: "skills",
+        install_command:
+            "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+        install_url: "https://github.com/NousResearch/hermes-agent",
+    },
 ];
 
 /// Detect AI coding tools installed on the system

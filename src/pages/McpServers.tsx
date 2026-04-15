@@ -9,6 +9,7 @@ import McpServerCard, { type McpServerCardServer } from "../components/McpServer
 import type { DetectedTool } from "../types/skills";
 import { useMcpValidation, type McpWizardDraft } from "../hooks/useMcpValidation";
 import { fetchMcpServersPageData, queryKeys } from "../hooks/queries";
+import { MANAGED_APPS, type ManagedAppId } from "../lib/appPreferences";
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
 type McpServer = McpServerCardServer;
@@ -60,7 +61,9 @@ export default function McpServers() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [syncingTo, setSyncingTo] = useState<string | null>(null);
   const [installedTools, setInstalledTools] = useState<DetectedTool[]>(
-    cachedMcpServersPageData?.tools.filter((tool) => tool.installed && tool.id !== "openclaw") ?? [],
+    cachedMcpServersPageData?.tools.filter(
+      (tool) => tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && tool.id !== "openclaw",
+    ) ?? [],
   );
   const [toolSyncStatus, setToolSyncStatus] = useState<Record<string, boolean>>({});
   const [pendingDelete, setPendingDelete] = useState<McpServer | null>(null);
@@ -94,7 +97,9 @@ export default function McpServers() {
         staleTime: force ? 0 : 30_000,
       });
       setServers(data.servers);
-      setInstalledTools(data.tools.filter((tool) => tool.installed && tool.id !== "openclaw"));
+      setInstalledTools(data.tools.filter(
+        (tool) => tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && tool.id !== "openclaw",
+      ));
       setSelected((current) => (
         current
           ? data.servers.find((server) => server.id === current.id) ?? current

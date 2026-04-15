@@ -365,8 +365,10 @@ pub fn run() {
             let handle3 = app_handle.clone();
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(WINDOW_ICON.clone());
-                if initial_window_preferences.launch_hidden {
-                    let _ = window.hide();
+                // 窗口在 tauri.conf.json 中默认 visible=false,等 setup() 完成后再显示,
+                // 避免用户看到 WebView2 冷启动阶段的白屏。launch_hidden 用户保持隐藏。
+                if !initial_window_preferences.launch_hidden {
+                    let _ = window.show();
                 }
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {

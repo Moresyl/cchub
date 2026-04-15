@@ -9,6 +9,13 @@ use std::io::{BufRead, BufReader};
 use std::path::{Component, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
+fn log_command_timing(command: &str, started_at: std::time::Instant) {
+    eprintln!(
+        "[cchub][invoke] {command} completed in {}ms",
+        started_at.elapsed().as_millis()
+    );
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpClient {
     pub id: String,
@@ -397,33 +404,38 @@ pub fn get_activity_logs(
     date: String,
     db: State<'_, DbState>,
 ) -> Result<Vec<ActivityItem>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT a.id, a.server_id, COALESCE(s.name, a.server_id), a.request_type, a.status, a.latency_ms, a.recorded_at
-             FROM activity_logs a LEFT JOIN mcp_servers s ON a.server_id = s.id
-             WHERE a.recorded_at LIKE ?1
-             ORDER BY a.recorded_at DESC LIMIT 200",
-        )
-        .map_err(|e| e.to_string())?;
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT a.id, a.server_id, COALESCE(s.name, a.server_id), a.request_type, a.status, a.latency_ms, a.recorded_at
+                 FROM activity_logs a LEFT JOIN mcp_servers s ON a.server_id = s.id
+                 WHERE a.recorded_at LIKE ?1
+                 ORDER BY a.recorded_at DESC LIMIT 200",
+            )
+            .map_err(|e| e.to_string())?;
 
-    let items = stmt
-        .query_map([format!("{}%", date)], |row| {
-            Ok(ActivityItem {
-                id: row.get(0)?,
-                server_id: row.get(1)?,
-                server_name: row.get(2)?,
-                request_type: row.get(3)?,
-                status: row.get(4)?,
-                latency_ms: row.get(5)?,
-                recorded_at: row.get(6)?,
+        let items = stmt
+            .query_map([format!("{}%", date)], |row| {
+                Ok(ActivityItem {
+                    id: row.get(0)?,
+                    server_id: row.get(1)?,
+                    server_name: row.get(2)?,
+                    request_type: row.get(3)?,
+                    status: row.get(4)?,
+                    latency_ms: row.get(5)?,
+                    recorded_at: row.get(6)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
 
-    Ok(items)
+        Ok(items)
+    })();
+    log_command_timing("get_activity_logs", started_at);
+    result
 }
 
 #[tauri::command]
@@ -3580,25 +3592,40 @@ fn apply_tool_snapshot(
 
 #[tauri::command]
 pub fn sync_config_profiles(db: State<'_, DbState>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let imported_counts = sync_profiles_from_compatible_databases(&conn, &now)?;
-    sync_live_profiles(&conn, &imported_counts, &now)?;
-    Ok(())
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let imported_counts = sync_profiles_from_compatible_databases(&conn, &now)?;
+        sync_live_profiles(&conn, &imported_counts, &now)?;
+        Ok(())
+    })();
+    log_command_timing("sync_config_profiles", started_at);
+    result
 }
 
 #[tauri::command]
 pub fn get_config_profiles(db: State<'_, DbState>) -> Result<Vec<ConfigProfile>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    read_all_config_profiles_from_conn(&conn)
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        read_all_config_profiles_from_conn(&conn)
+    })();
+    log_command_timing("get_config_profiles", started_at);
+    result
 }
 
 #[tauri::command]
 pub fn get_provider_config_fragments(
     db: State<'_, DbState>,
 ) -> Result<Vec<ProviderConfigFragment>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    read_provider_config_fragments_from_conn(&conn)
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        read_provider_config_fragments_from_conn(&conn)
+    })();
+    log_command_timing("get_provider_config_fragments", started_at);
+    result
 }
 
 #[tauri::command]
@@ -4011,8 +4038,13 @@ pub fn reorder_config_profiles(
 
 #[tauri::command]
 pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<String>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    get_active_config_profile_ids_from_conn(&conn)
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        get_active_config_profile_ids_from_conn(&conn)
+    })();
+    log_command_timing("get_active_config_profile_ids", started_at);
+    result
 }
 
 #[tauri::command]
@@ -6643,8 +6675,13 @@ pub fn get_sessions(
     limit: Option<usize>,
     db: State<'_, DbState>,
 ) -> Result<Vec<SessionSummary>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    scan_sessions_from_conn(&conn, tool_id, query, limit)
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        scan_sessions_from_conn(&conn, tool_id, query, limit)
+    })();
+    log_command_timing("get_sessions", started_at);
+    result
 }
 
 #[tauri::command]
@@ -6664,29 +6701,34 @@ pub fn get_session_detail(
     can_delete: bool,
     db: State<'_, DbState>,
 ) -> Result<SessionDetail, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    if !is_valid_session_source_path(&conn, &tool_id, &source_path) {
-        return Err("Invalid session source path".to_string());
-    }
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        if !is_valid_session_source_path(&conn, &tool_id, &source_path) {
+            return Err("Invalid session source path".to_string());
+        }
 
-    let summary = SessionSummary {
-        id: session_id,
-        tool_id: tool_id.clone(),
-        tool_name: tool_label(&tool_id).to_string(),
-        title,
-        cwd,
-        source_kind,
-        source_backend,
-        source_path,
-        created_at,
-        updated_at,
-        preview,
-        message_count,
-        search_hit_count: 0,
-        can_resume,
-        can_delete,
-    };
-    load_session_detail(&summary)
+        let summary = SessionSummary {
+            id: session_id,
+            tool_id: tool_id.clone(),
+            tool_name: tool_label(&tool_id).to_string(),
+            title,
+            cwd,
+            source_kind,
+            source_backend,
+            source_path,
+            created_at,
+            updated_at,
+            preview,
+            message_count,
+            search_hit_count: 0,
+            can_resume,
+            can_delete,
+        };
+        load_session_detail(&summary)
+    })();
+    log_command_timing("get_session_detail", started_at);
+    result
 }
 
 #[tauri::command]

@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
 
+fn log_command_timing(command: &str, started_at: std::time::Instant) {
+    eprintln!(
+        "[cchub][invoke] {command} completed in {}ms",
+        started_at.elapsed().as_millis()
+    );
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyUsageSummary {
     pub total_requests: u64,
@@ -153,47 +160,52 @@ fn normalize_cost_text(value: &str) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_proxy_usage_summary(db: State<'_, DbState>) -> Result<ProxyUsageSummary, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
 
-    conn.query_row(
-        "SELECT
-            COUNT(*) AS total_requests,
-            COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0) AS success_requests,
-            COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
-            COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
-            COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
-            COALESCE(SUM(cache_creation_tokens), 0) AS total_cache_creation_tokens,
-            COALESCE(SUM(CAST(total_cost_usd AS REAL)), 0) AS total_cost_usd
-         FROM proxy_request_logs",
-        [],
-        |row| {
-            let total_requests: i64 = row.get(0)?;
-            let success_requests: i64 = row.get(1)?;
-            let total_input_tokens: i64 = row.get(2)?;
-            let total_output_tokens: i64 = row.get(3)?;
-            let total_cache_read_tokens: i64 = row.get(4)?;
-            let total_cache_creation_tokens: i64 = row.get(5)?;
-            let total_cost_usd: f64 = row.get(6)?;
+        conn.query_row(
+            "SELECT
+                COUNT(*) AS total_requests,
+                COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0) AS success_requests,
+                COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+                COALESCE(SUM(cache_read_tokens), 0) AS total_cache_read_tokens,
+                COALESCE(SUM(cache_creation_tokens), 0) AS total_cache_creation_tokens,
+                COALESCE(SUM(CAST(total_cost_usd AS REAL)), 0) AS total_cost_usd
+             FROM proxy_request_logs",
+            [],
+            |row| {
+                let total_requests: i64 = row.get(0)?;
+                let success_requests: i64 = row.get(1)?;
+                let total_input_tokens: i64 = row.get(2)?;
+                let total_output_tokens: i64 = row.get(3)?;
+                let total_cache_read_tokens: i64 = row.get(4)?;
+                let total_cache_creation_tokens: i64 = row.get(5)?;
+                let total_cost_usd: f64 = row.get(6)?;
 
-            let success_rate = if total_requests > 0 {
-                success_requests as f64 * 100.0 / total_requests as f64
-            } else {
-                0.0
-            };
+                let success_rate = if total_requests > 0 {
+                    success_requests as f64 * 100.0 / total_requests as f64
+                } else {
+                    0.0
+                };
 
-            Ok(ProxyUsageSummary {
-                total_requests: total_requests.max(0) as u64,
-                success_requests: success_requests.max(0) as u64,
-                success_rate,
-                total_input_tokens: total_input_tokens.max(0) as u64,
-                total_output_tokens: total_output_tokens.max(0) as u64,
-                total_cache_read_tokens: total_cache_read_tokens.max(0) as u64,
-                total_cache_creation_tokens: total_cache_creation_tokens.max(0) as u64,
-                total_cost_usd: format!("{total_cost_usd:.6}"),
-            })
-        },
-    )
-    .map_err(|e| e.to_string())
+                Ok(ProxyUsageSummary {
+                    total_requests: total_requests.max(0) as u64,
+                    success_requests: success_requests.max(0) as u64,
+                    success_rate,
+                    total_input_tokens: total_input_tokens.max(0) as u64,
+                    total_output_tokens: total_output_tokens.max(0) as u64,
+                    total_cache_read_tokens: total_cache_read_tokens.max(0) as u64,
+                    total_cache_creation_tokens: total_cache_creation_tokens.max(0) as u64,
+                    total_cost_usd: format!("{total_cost_usd:.6}"),
+                })
+            },
+        )
+        .map_err(|e| e.to_string())
+    })();
+    log_command_timing("get_proxy_usage_summary", started_at);
+    result
 }
 
 #[tauri::command]
@@ -201,39 +213,44 @@ pub fn get_recent_proxy_request_logs(
     limit: Option<u32>,
     db: State<'_, DbState>,
 ) -> Result<Vec<ProxyRequestLogRow>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let limit = limit.unwrap_or(12).clamp(1, 240) as i64;
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                request_id,
-                tool_id,
-                profile_id,
-                provider_name,
-                request_model,
-                response_model,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                cache_creation_tokens,
-                total_cost_usd,
-                latency_ms,
-                status_code,
-                is_streaming,
-                error_message,
-                created_at
-             FROM proxy_request_logs
-             ORDER BY created_at DESC
-             LIMIT ?1",
-        )
-        .map_err(|e| e.to_string())?;
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let limit = limit.unwrap_or(12).clamp(1, 240) as i64;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    request_id,
+                    tool_id,
+                    profile_id,
+                    provider_name,
+                    request_model,
+                    response_model,
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens,
+                    cache_creation_tokens,
+                    total_cost_usd,
+                    latency_ms,
+                    status_code,
+                    is_streaming,
+                    error_message,
+                    created_at
+                 FROM proxy_request_logs
+                 ORDER BY created_at DESC
+                 LIMIT ?1",
+            )
+            .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map(rusqlite::params![limit], map_proxy_request_log_row)
-        .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![limit], map_proxy_request_log_row)
+            .map_err(|e| e.to_string())?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    })();
+    log_command_timing("get_recent_proxy_request_logs", started_at);
+    result
 }
 
 #[tauri::command]
@@ -402,29 +419,34 @@ pub fn get_proxy_usage_trend(
 
 #[tauri::command]
 pub fn list_model_pricing(db: State<'_, DbState>) -> Result<Vec<ModelPricingRow>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT
-                model_id,
-                normalized_model_id,
-                input_cost_per_million,
-                output_cost_per_million,
-                cache_read_cost_per_million,
-                cache_write_cost_per_million,
-                created_at,
-                updated_at
-             FROM model_pricing
-             ORDER BY updated_at DESC, model_id ASC",
-        )
-        .map_err(|e| e.to_string())?;
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    model_id,
+                    normalized_model_id,
+                    input_cost_per_million,
+                    output_cost_per_million,
+                    cache_read_cost_per_million,
+                    cache_write_cost_per_million,
+                    created_at,
+                    updated_at
+                 FROM model_pricing
+                 ORDER BY updated_at DESC, model_id ASC",
+            )
+            .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map([], map_model_pricing_row)
-        .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], map_model_pricing_row)
+            .map_err(|e| e.to_string())?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    })();
+    log_command_timing("list_model_pricing", started_at);
+    result
 }
 
 #[tauri::command]

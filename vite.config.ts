@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const host = process.env.TAURI_DEV_HOST;
+const appVersion = process.env.npm_package_version ?? "0.0.0";
 
 function includesAny(value: string, patterns: string[]) {
   return patterns.some((pattern) => value.includes(pattern));
@@ -64,6 +65,9 @@ function manualChunks(id: string) {
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   build: {
     rollupOptions: {
       output: {

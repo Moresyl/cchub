@@ -3,10 +3,22 @@ use crate::db::DbState;
 use tauri::command;
 use tauri::State;
 
+fn log_command_timing(command: &str, started_at: std::time::Instant) {
+    eprintln!(
+        "[cchub][invoke] {command} completed in {}ms",
+        started_at.elapsed().as_millis()
+    );
+}
+
 #[command]
 pub fn scan_claude_md(db: State<'_, DbState>) -> Result<Vec<manager::ClaudeMdFile>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    Ok(manager::scan_claude_md_files(&conn))
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        Ok(manager::scan_claude_md_files(&conn))
+    })();
+    log_command_timing("scan_claude_md", started_at);
+    result
 }
 
 #[command]
@@ -26,8 +38,13 @@ pub fn get_claude_md_templates() -> Result<Vec<manager::ClaudeMdTemplate>, Strin
 
 #[command]
 pub fn get_prompt_presets(db: State<'_, DbState>) -> Result<manager::PromptPresetState, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    manager::get_prompt_preset_state(&conn)
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        manager::get_prompt_preset_state(&conn)
+    })();
+    log_command_timing("get_prompt_presets", started_at);
+    result
 }
 
 #[command]

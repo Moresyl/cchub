@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, lazy, Suspense, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
@@ -15,6 +16,12 @@ import MarketplaceRecommendedRepoRow from "../components/MarketplaceRecommendedR
 import MarketplaceSkillCard, { type MarketplaceSkillCardEntry } from "../components/MarketplaceSkillCard";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  fetchMarketplaceCatalogPage,
+  fetchMarketplaceLocalData,
+  fetchMarketplaceSearchPage,
+  queryKeys,
+} from "../hooks/queries";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
@@ -47,15 +54,68 @@ const MCP_CATEGORY_ZH: Record<string, string> = {
 };
 
 export default function Marketplace() {
+  const queryClient = useQueryClient();
+  const cachedLocalData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMarketplaceLocalData>>>(
+    queryKeys.marketplaceLocal,
+  );
+  const cachedCatalogData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMarketplaceCatalogPage>>>(
+    queryKeys.marketplaceCatalog(),
+  );
+  const cachedSearchData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMarketplaceSearchPage>>>(
+    queryKeys.marketplaceSearch("mcp server"),
+  );
+  const initialLocalEntries: RegistryEntry[] = (cachedLocalData?.servers ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    description: s.command ? `${s.command} ${(() => { try { return JSON.parse(s.args || "[]").join(" "); } catch { return ""; } })()}` : "",
+    category: s.source || "local",
+    install_type: "local",
+    package_name: s.package_name,
+    github_url: null,
+    command: s.command || "",
+    args: (() => { try { return JSON.parse(s.args || "[]"); } catch { return []; } })(),
+    env_keys: (() => { try { return Object.keys(JSON.parse(s.env || "{}")); } catch { return []; } })(),
+    source: "local",
+  }));
+  const initialLocalSkills: SkillEntry[] = (cachedLocalData?.installedSkills ?? []).map((s) => ({
+    id: `local-${s.name}`,
+    name: s.name,
+    description: s.description || (s.trigger_command ? `/${s.trigger_command}` : ""),
+    description_zh: null,
+    category: s.plugin_id ? "plugin" : "local",
+    author: s.plugin_id || null,
+    github_url: null,
+    cover_url: null,
+    tags: s.trigger_command ? [s.trigger_command] : [],
+    content: "",
+    file_path: s.file_path,
+  }));
+  const initialSkillEntries: SkillEntry[] = (() => {
+    const localNames = new Set(initialLocalSkills.map((skill) => skill.name.toLowerCase()));
+    const marketSkills = cachedCatalogData?.skills ?? [];
+    return [
+      ...initialLocalSkills,
+      ...marketSkills.filter((skill) => !localNames.has(skill.name.toLowerCase())),
+    ];
+  })();
   const [tab, setTab] = useState<MarketTab>("mcp");
-  const [entries, setEntries] = useState<RegistryEntry[]>([]);
-  const [skillEntries, setSkillEntries] = useState<SkillEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [entries, setEntries] = useState<RegistryEntry[]>([
+    ...initialLocalEntries,
+    ...(cachedSearchData?.entries.filter((entry) => !initialLocalEntries.some((item) => item.id === entry.id)) ?? []),
+  ]);
+  const [skillEntries, setSkillEntries] = useState<SkillEntry[]>(initialSkillEntries);
+  const [loading, setLoading] = useState(
+    !(cachedLocalData || cachedCatalogData || cachedSearchData),
+  );
   const [search, setSearch] = useState("");
   const [mcpCategory, setMcpCategory] = useState<McpCategory>("all");
   const [skillCategory, setSkillCategory] = useState<SkillCategory>("all");
-  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
-  const [installedSkills, setInstalledSkills] = useState<Set<string>>(new Set());
+  const [installedIds, setInstalledIds] = useState<Set<string>>(
+    new Set(cachedLocalData?.servers.flatMap((server) => [server.id, server.name]) ?? []),
+  );
+  const [installedSkills, setInstalledSkills] = useState<Set<string>>(
+    new Set(cachedLocalData?.installedSkills.map((skill) => skill.name.toLowerCase()) ?? []),
+  );
   const [installing, setInstalling] = useState<string | null>(null);
   const [showEnvModal, setShowEnvModal] = useState<RegistryEntry | null>(null);
   const [envValues, setEnvValues] = useState<Record<string, string>>({});
@@ -66,9 +126,11 @@ export default function Marketplace() {
   const [customSources, setCustomSources] = useState<{ url: string; count: number; skillIds: string[] }[]>([]);
   const [loadingRepo, setLoadingRepo] = useState<string | null>(null);
   const [mcpPage, setMcpPage] = useState(0);
-  const [mcpTotal, setMcpTotal] = useState(0);
+  const [mcpTotal, setMcpTotal] = useState(cachedSearchData?.total ?? 0);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [installedMcpDetails, setInstalledMcpDetails] = useState<InstalledMcpServer[]>([]);
+  const [installedMcpDetails, setInstalledMcpDetails] = useState<InstalledMcpServer[]>(
+    cachedLocalData?.servers ?? [],
+  );
   const [previewMcp, setPreviewMcp] = useState<RegistryEntry | null>(null);
   const [previewSkill, setPreviewSkill] = useState<SkillEntry | null>(null);
   const [editingSkill, setEditingSkill] = useState<SkillEntry | null>(null);
@@ -86,71 +148,85 @@ export default function Marketplace() {
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
   ), [locale]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (options: { force?: boolean } = {}) => {
+    const { force = false } = options;
+    if (!queryClient.getQueryData(queryKeys.marketplaceLocal)) {
+      setLoading(true);
+    }
     try {
-      try {
-        const servers = await invoke<InstalledMcpServer[]>("scan_mcp_servers");
-        setInstalledMcpDetails(servers);
-        setInstalledIds(new Set(servers.flatMap((s) => [s.id, s.name])));
-        const scannedEntries: RegistryEntry[] = servers.map((s) => ({
-          id: s.id,
-          name: s.name,
-          description: s.command ? `${s.command} ${(() => { try { return JSON.parse(s.args || "[]").join(" "); } catch { return ""; } })()}` : "",
-          category: s.source || "local",
-          install_type: "local",
-          package_name: s.package_name,
-          github_url: null,
-          command: s.command || "",
-          args: (() => { try { return JSON.parse(s.args || "[]"); } catch { return []; } })(),
-          env_keys: (() => { try { return Object.keys(JSON.parse(s.env || "{}")); } catch { return []; } })(),
-          source: "local",
-        }));
-        setEntries(scannedEntries);
-      } catch { /* ignore */ }
+      const localData = await queryClient.fetchQuery({
+        queryKey: queryKeys.marketplaceLocal,
+        queryFn: fetchMarketplaceLocalData,
+        staleTime: force ? 0 : 30_000,
+      });
+      const localSkillEntries: SkillEntry[] = localData.installedSkills.map((s) => ({
+        id: `local-${s.name}`,
+        name: s.name,
+        description: s.description || (s.trigger_command ? `/${s.trigger_command}` : ""),
+        description_zh: null,
+        category: s.plugin_id ? "plugin" : "local",
+        author: s.plugin_id || null,
+        github_url: null,
+        cover_url: null,
+        tags: s.trigger_command ? [s.trigger_command] : [],
+        content: "",
+        file_path: s.file_path,
+      }));
+      const scannedEntries: RegistryEntry[] = localData.servers.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.command ? `${s.command} ${(() => { try { return JSON.parse(s.args || "[]").join(" "); } catch { return ""; } })()}` : "",
+        category: s.source || "local",
+        install_type: "local",
+        package_name: s.package_name,
+        github_url: null,
+        command: s.command || "",
+        args: (() => { try { return JSON.parse(s.args || "[]"); } catch { return []; } })(),
+        env_keys: (() => { try { return Object.keys(JSON.parse(s.env || "{}")); } catch { return []; } })(),
+        source: "local",
+      }));
+      setInstalledMcpDetails(localData.servers);
+      setInstalledIds(new Set(localData.servers.flatMap((s) => [s.id, s.name])));
+      setInstalledSkills(new Set(localData.installedSkills.map((s) => s.name.toLowerCase())));
+      setEntries(scannedEntries);
 
-      let localSkillEntries: SkillEntry[] = [];
-      try {
-        const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
-        setInstalledSkills(new Set(skills.map((s) => s.name.toLowerCase())));
-        localSkillEntries = skills.map((s) => ({
-          id: `local-${s.name}`,
-          name: s.name,
-          description: s.description || (s.trigger_command ? `/${s.trigger_command}` : ""),
-          description_zh: null,
-          category: s.plugin_id ? "plugin" : "local",
-          author: s.plugin_id || null,
-          github_url: null,
-          cover_url: null,
-          tags: s.trigger_command ? [s.trigger_command] : [],
-          content: "",
-          file_path: s.file_path,
-        }));
-      } catch { /* ignore */ }
+      const catalogPromise = queryClient.fetchQuery({
+        queryKey: queryKeys.marketplaceCatalog(),
+        queryFn: () => fetchMarketplaceCatalogPage(),
+        staleTime: force ? 0 : 30_000,
+      });
+      const searchPromise = queryClient.fetchQuery({
+        queryKey: queryKeys.marketplaceSearch("mcp server"),
+        queryFn: () => fetchMarketplaceSearchPage("mcp server"),
+        staleTime: force ? 0 : 30_000,
+      });
 
-      try {
-        const result = await invoke<{ skills: SkillEntry[]; total: number }>("get_skillhub_catalog", { page: 1, limit: 50, category: "" });
-        const marketSkills = result.skills || [];
+      const [catalogResult, searchResult] = await Promise.allSettled([
+        catalogPromise,
+        searchPromise,
+      ]);
+
+      if (catalogResult.status === "fulfilled") {
+        const marketSkills = catalogResult.value.skills || [];
         const localNames = new Set(localSkillEntries.map((s) => s.name.toLowerCase()));
         const merged = [...localSkillEntries, ...marketSkills.filter((s) => !localNames.has(s.name.toLowerCase()))];
         setSkillEntries(merged);
-      } catch (e) {
-        console.warn("SkillHub API failed, showing local skills only:", e);
+      } else {
+        console.warn("SkillHub API failed, showing local skills only:", catalogResult.reason);
         setSkillEntries(localSkillEntries);
       }
 
-      try {
-        const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", { query: "mcp server", page: 0, pageSize: 50 });
+      if (searchResult.status === "fulfilled") {
         setEntries((prev) => {
-          const ids = new Set(prev.map((e) => e.id));
-          return [...prev, ...result.entries.filter((e) => !ids.has(e.id))];
+          const ids = new Set(prev.map((entry) => entry.id));
+          return [...prev, ...searchResult.value.entries.filter((entry) => !ids.has(entry.id))];
         });
-        setMcpTotal(result.total);
+        setMcpTotal(searchResult.value.total);
         setMcpPage(0);
-      } catch { /* ignore */ }
+      }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
   useEffect(() => {
@@ -168,11 +244,15 @@ export default function Marketplace() {
   }, []);
 
   const refreshInstalledMcpDetails = useCallback(async () => {
-    const servers = await invoke<InstalledMcpServer[]>("scan_mcp_servers");
+    const { servers } = await queryClient.fetchQuery({
+      queryKey: queryKeys.marketplaceLocal,
+      queryFn: fetchMarketplaceLocalData,
+      staleTime: 0,
+    });
     setInstalledMcpDetails(servers);
     setInstalledIds(new Set(servers.flatMap((s) => [s.id, s.name])));
     return servers;
-  }, []);
+  }, [queryClient]);
 
   const findInstalledSkill = useCallback(async (skill: SkillEntry) => {
     const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
@@ -299,11 +379,15 @@ export default function Marketplace() {
   }, [editArgs, editCommand, editEnv, editingMcp, locale, refreshInstalledMcpDetails]);
 
   const handleSearch = useCallback(async () => {
-    if (!search.trim()) { await loadAll(); return; }
+    if (!search.trim()) { await loadAll({ force: true }); return; }
     setLoading(true);
     try {
       if (tab === "mcp") {
-        const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", { query: search, page: 0, pageSize: 50 });
+        const result = await queryClient.fetchQuery({
+          queryKey: queryKeys.marketplaceSearch(search, 0, 50),
+          queryFn: () => fetchMarketplaceSearchPage(search, 0, 50),
+          staleTime: 0,
+        });
         setEntries(result.entries);
         setMcpTotal(result.total);
         setMcpPage(0);
@@ -314,7 +398,7 @@ export default function Marketplace() {
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [loadAll, search, tab]);
+  }, [loadAll, queryClient, search, tab]);
 
   const doInstallMcp = useCallback(async (entry: RegistryEntry, envVals: Record<string, string>) => {
     setInstalling(entry.id);
@@ -427,7 +511,7 @@ export default function Marketplace() {
   const handleClearSearch = useCallback(() => {
     setSearch("");
     if (tab === "mcp") {
-      void loadAll();
+      void loadAll({ force: true });
     }
   }, [loadAll, tab]);
 
@@ -559,28 +643,32 @@ export default function Marketplace() {
     setLoadingMore(true);
     try {
       const prevPage = mcpPage - 1;
-      const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", {
-        query: search || "mcp server", page: prevPage, pageSize: 50,
+      const result = await queryClient.fetchQuery({
+        queryKey: queryKeys.marketplaceSearch(search || "mcp server", prevPage, 50),
+        queryFn: () => fetchMarketplaceSearchPage(search || "mcp server", prevPage, 50),
+        staleTime: 0,
       });
       setEntries(result.entries);
       setMcpPage(prevPage);
       setMcpTotal(result.total);
     } catch (e) { console.error(e); }
     finally { setLoadingMore(false); }
-  }, [mcpPage, search]);
+  }, [mcpPage, queryClient, search]);
   const handleLoadNextMcpPage = useCallback(async () => {
     setLoadingMore(true);
     try {
       const nextPage = mcpPage + 1;
-      const result = await invoke<{ entries: RegistryEntry[]; total: number }>("search_marketplace", {
-        query: search || "mcp server", page: nextPage, pageSize: 50,
+      const result = await queryClient.fetchQuery({
+        queryKey: queryKeys.marketplaceSearch(search || "mcp server", nextPage, 50),
+        queryFn: () => fetchMarketplaceSearchPage(search || "mcp server", nextPage, 50),
+        staleTime: 0,
       });
       setEntries(result.entries);
       setMcpPage(nextPage);
       setMcpTotal(result.total);
     } catch (e) { console.error(e); }
     finally { setLoadingMore(false); }
-  }, [mcpPage, search]);
+  }, [mcpPage, queryClient, search]);
 
   if (loading) {
     return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.marketplace.loading}</span></div>;
@@ -728,7 +816,7 @@ export default function Marketplace() {
   }
 
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Header */}
       <div className="page-header">
         <div>

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, lazy, Suspense, useMemo, useCallback, type ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, FileText, Save, RotateCcw, Plus, X, Check, Trash2, Pencil, ArrowLeft, Search } from "lucide-react";
@@ -6,7 +7,8 @@ import ClaudeMdFileCard from "../components/ClaudeMdFileCard";
 import ClaudeMdPresetCard from "../components/ClaudeMdPresetCard";
 import ClaudeMdTemplateCard from "../components/ClaudeMdTemplateCard";
 import { showToast } from "../components/Toast";
-import { fetchVisibleApps, toolNameToAppId } from "../lib/appPreferences";
+import { toolNameToAppId } from "../lib/appPreferences";
+import { fetchClaudeMdPageData, queryKeys } from "../hooks/queries";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
@@ -40,27 +42,48 @@ interface PromptPreset {
   updated_at: string;
 }
 
-interface PromptPresetState {
-  presets: PromptPreset[];
-  active_preset_id: string | null;
-}
-
 export default function ClaudeMd() {
-  const [files, setFiles] = useState<ClaudeMdFile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const cachedClaudeMdPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchClaudeMdPageData>>>(
+    queryKeys.claudeMdPage,
+  );
+  const [files, setFiles] = useState<ClaudeMdFile[]>(() => {
+    if (!cachedClaudeMdPageData) {
+      return [];
+    }
+
+    return cachedClaudeMdPageData.files.filter((file) => {
+      const appId = toolNameToAppId(file.tool_name);
+      return appId ? cachedClaudeMdPageData.visibleApps.includes(appId) : true;
+    });
+  });
+  const [loading, setLoading] = useState(!cachedClaudeMdPageData);
   const [editingFile, setEditingFile] = useState<ClaudeMdFile | null>(null);
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [loadingContent, setLoadingContent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [templates, setTemplates] = useState<ClaudeMdTemplate[]>([]);
+  const [templates, setTemplates] = useState<ClaudeMdTemplate[]>(() => {
+    if (!cachedClaudeMdPageData) {
+      return [];
+    }
+
+    return cachedClaudeMdPageData.templates.filter((template) => {
+      const appId = toolNameToAppId(template.tool_name);
+      return appId ? cachedClaudeMdPageData.visibleApps.includes(appId) : true;
+    });
+  });
   const [showCreate, setShowCreate] = useState(false);
   const [newDirPath, setNewDirPath] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<ClaudeMdFile | null>(null);
   const [togglingPath, setTogglingPath] = useState<string | null>(null);
-  const [promptPresets, setPromptPresets] = useState<PromptPreset[]>([]);
-  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  const [promptPresets, setPromptPresets] = useState<PromptPreset[]>(
+    cachedClaudeMdPageData?.presetState.presets ?? [],
+  );
+  const [activePresetId, setActivePresetId] = useState<string | null>(
+    cachedClaudeMdPageData?.presetState.active_preset_id ?? null,
+  );
   const [showPresetEditor, setShowPresetEditor] = useState(false);
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
   const [presetName, setPresetName] = useState("");
@@ -73,31 +96,33 @@ export default function ClaudeMd() {
   const locale = localStorage.getItem("cchub-locale") || "zh";
   const hasChanges = content !== originalContent;
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (options: { force?: boolean } = {}) => {
+    const { force = false } = options;
+    if (!queryClient.getQueryData(queryKeys.claudeMdPage)) {
+      setLoading(true);
+    }
     try {
-      const [f, tmpl, nextVisibleApps, presetState] = await Promise.all([
-        invoke<ClaudeMdFile[]>("scan_claude_md"),
-        invoke<ClaudeMdTemplate[]>("get_claude_md_templates"),
-        fetchVisibleApps(),
-        invoke<PromptPresetState>("get_prompt_presets").catch(() => ({ presets: [], active_preset_id: null })),
-      ]);
-      setFiles(f.filter((file) => {
+      const data = await queryClient.fetchQuery({
+        queryKey: queryKeys.claudeMdPage,
+        queryFn: fetchClaudeMdPageData,
+        staleTime: force ? 0 : 30_000,
+      });
+      setFiles(data.files.filter((file) => {
         const appId = toolNameToAppId(file.tool_name);
-        return appId ? nextVisibleApps.includes(appId) : true;
+        return appId ? data.visibleApps.includes(appId) : true;
       }));
-      setTemplates(tmpl.filter((template) => {
+      setTemplates(data.templates.filter((template) => {
         const appId = toolNameToAppId(template.tool_name);
-        return appId ? nextVisibleApps.includes(appId) : true;
+        return appId ? data.visibleApps.includes(appId) : true;
       }));
-      setPromptPresets(presetState.presets);
-      setActivePresetId(presetState.active_preset_id);
+      setPromptPresets(data.presetState.presets);
+      setActivePresetId(data.presetState.active_preset_id);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [queryClient]);
 
   const openPresetEditor = useCallback((preset?: PromptPreset) => {
     setShowPresetEditor(true);
@@ -176,7 +201,7 @@ export default function ClaudeMd() {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    void load();
+    void load({ force: true });
   }, [load]);
 
   const handlePresetNameChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
@@ -199,7 +224,7 @@ export default function ClaudeMd() {
     setSavingPreset(true);
     try {
       await invoke("save_prompt_preset", { id: editingPresetId, name: presetName, content: presetContent });
-      await load();
+      await load({ force: true });
       closePresetEditor();
       showToast("success", locale === "zh" ? "预设已保存" : "Preset saved");
     } catch (e: any) {
@@ -220,7 +245,7 @@ export default function ClaudeMd() {
       });
       setShowCreate(false);
       setNewDirPath("");
-      await load();
+      await load({ force: true });
       const newFile: ClaudeMdFile = {
         path,
         project_name: dirPath.split(/[/\\]/).pop() || dirPath,
@@ -246,7 +271,7 @@ export default function ClaudeMd() {
         closeEditor();
       }
       setConfirmDelete(null);
-      await load();
+      await load({ force: true });
     } catch (e: any) {
       showToast("error", e?.toString() || "Failed to delete");
     }
@@ -262,7 +287,7 @@ export default function ClaudeMd() {
         await invoke<string>("disable_claude_md_file", { path: file.path });
         showToast("success", i.claudeMd.disableSuccess);
       }
-      await load();
+      await load({ force: true });
     } catch (e: any) {
       showToast("error", e?.toString() || "Failed to toggle");
     } finally {
@@ -274,7 +299,7 @@ export default function ClaudeMd() {
     setActivatingPresetId(presetId);
     try {
       await invoke("activate_prompt_preset", { id: presetId });
-      await load();
+      await load({ force: true });
       showToast("success", locale === "zh" ? "预设已激活并同步到全局文档" : "Preset activated and synced to global docs");
     } catch (e: any) {
       showToast("error", e?.toString() || "Failed to activate preset");
@@ -437,7 +462,7 @@ export default function ClaudeMd() {
 
   // ── File List View ──
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
           <h2 className="page-title">{i.claudeMd.title}</h2>
@@ -694,7 +719,7 @@ export default function ClaudeMd() {
                   try {
                     await invoke("delete_prompt_preset", { id: preset.id });
                     setConfirmPresetDelete(null);
-                    await load();
+                    await load({ force: true });
                     showToast("success", locale === "zh" ? "预设已删除" : "Preset deleted");
                   } catch (e: any) {
                     showToast("error", e?.toString() || "Failed to delete preset");

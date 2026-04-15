@@ -5,54 +5,65 @@ use crate::mcp::health;
 use std::collections::HashMap;
 use tauri::State;
 
+fn log_command_timing(command: &str, started_at: std::time::Instant) {
+    eprintln!(
+        "[cchub][invoke] {command} completed in {}ms",
+        started_at.elapsed().as_millis()
+    );
+}
+
 #[tauri::command]
 pub fn scan_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String> {
-    let scanned = config::scan_all_mcp_servers();
+    let started_at = std::time::Instant::now();
+    let result = (|| {
+        let scanned = config::scan_all_mcp_servers();
 
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let now = chrono::Utc::now().to_rfc3339();
 
-    let mut all_servers = Vec::new();
+        let mut all_servers = Vec::new();
 
-    for s in scanned {
-        let args_json = serde_json::to_string(&s.args).unwrap_or_else(|_| "[]".to_string());
-        let env_json = serde_json::to_string(&s.env).unwrap_or_else(|_| "{}".to_string());
+        for s in scanned {
+            let args_json = serde_json::to_string(&s.args).unwrap_or_else(|_| "[]".to_string());
+            let env_json = serde_json::to_string(&s.env).unwrap_or_else(|_| "{}".to_string());
 
-        // Check if disabled in our DB
-        let existing_status: Option<String> = conn
-            .query_row(
-                "SELECT status FROM mcp_servers WHERE id = ?1",
-                rusqlite::params![s.name],
-                |row| row.get(0),
-            )
-            .ok();
+            let existing_status: Option<String> = conn
+                .query_row(
+                    "SELECT status FROM mcp_servers WHERE id = ?1",
+                    rusqlite::params![s.name],
+                    |row| row.get(0),
+                )
+                .ok();
 
-        let status = existing_status.unwrap_or_else(|| "active".to_string());
+            let status = existing_status.unwrap_or_else(|| "active".to_string());
 
-        conn.execute(
-            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE((SELECT installed_at FROM mcp_servers WHERE id = ?1), ?10), ?10)",
-            rusqlite::params![s.name, s.name, s.command, args_json, env_json, s.transport, s.source, s.config_path, status, now],
-        ).map_err(|e| e.to_string())?;
+            conn.execute(
+                "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE((SELECT installed_at FROM mcp_servers WHERE id = ?1), ?10), ?10)",
+                rusqlite::params![s.name, s.name, s.command, args_json, env_json, s.transport, s.source, s.config_path, status, now],
+            ).map_err(|e| e.to_string())?;
 
-        all_servers.push(McpServer {
-            id: s.name.clone(),
-            name: s.name,
-            package_name: None,
-            version: None,
-            transport: s.transport,
-            command: Some(s.command),
-            args: args_json,
-            env: env_json,
-            status,
-            source: s.source,
-            config_path: Some(s.config_path),
-            installed_at: Some(now.clone()),
-            updated_at: Some(now.clone()),
-        });
-    }
+            all_servers.push(McpServer {
+                id: s.name.clone(),
+                name: s.name,
+                package_name: None,
+                version: None,
+                transport: s.transport,
+                command: Some(s.command),
+                args: args_json,
+                env: env_json,
+                status,
+                source: s.source,
+                config_path: Some(s.config_path),
+                installed_at: Some(now.clone()),
+                updated_at: Some(now.clone()),
+            });
+        }
 
-    Ok(all_servers)
+        Ok(all_servers)
+    })();
+    log_command_timing("scan_mcp_servers", started_at);
+    result
 }
 
 #[tauri::command]

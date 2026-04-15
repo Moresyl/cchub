@@ -26,3 +26,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <App />
   </React.StrictMode>,
 );
+
+// React 首次提交后淡出并移除启动动画
+function hideSplash() {
+  const splash = document.getElementById("cchub-splash");
+  if (!splash) return;
+  splash.classList.add("splash-hidden");
+  setTimeout(() => splash.remove(), 300);
+}
+requestAnimationFrame(() => {
+  requestAnimationFrame(hideSplash);
+});

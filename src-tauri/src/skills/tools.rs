@@ -75,16 +75,22 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         install_url: "https://github.com/openclaw-ai/openclaw",
     },
     // Hermes Agent (Nous Research) — detection-only support.
-    // See GitHub issue #3. CCHub currently surfaces Hermes on the Dashboard
-    // Detected Tools strip only; Provider switching, MCP sync, workflow
-    // installation and skill sync all gate on their own tool_id allow-lists
-    // and will not act on "hermes" until those systems are widened.
+    //
+    // See GitHub issue #3. The submitter selected the "MCP server management"
+    // category, but NousResearch/hermes-agent is verifiably an agent CLI peer to
+    // Claude Code / Codex (85k+ stars, ~/.hermes data directory, cli-config.yaml).
+    // Detection here mirrors the precedent set by `openclaw`: the tool surfaces
+    // on the Dashboard Detected Tools strip, while Provider switching, MCP sync,
+    // workflow installation and skill sync all keep their own tool_id allow-lists
+    // and will not act on "hermes" until each system is widened with verified
+    // schema support. (See mcp/config.rs, where openclaw still returns
+    // "OpenClaw MCP sync is not yet supported" — same staged-rollout pattern.)
     ToolCandidate {
         id: "hermes",
         name: "Hermes Agent",
         dir: ".hermes",
-        config_file: "config.json",
-        mcp_config_file: "config.json",
+        config_file: "cli-config.yaml",
+        mcp_config_file: "cli-config.yaml",
         skills_subdir: "skills",
         install_command:
             "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",

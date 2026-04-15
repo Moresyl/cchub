@@ -27,7 +27,7 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 - Editing `settings.json` by hand, hoping you don't break the syntax
 - Copy-pasting MCP configs between machines
 - No idea which of your 30 MCP servers are actually working
-- Switching between Claude / Codex / Gemini configs = nightmare
+- Switching between Claude / Codex / Gemini / Hermes configs = nightmare
 - Zero visibility into security risks from your installed tools
 
 **CCHub puts everything in one GUI.** Install MCP servers in one click. Switch configs instantly. Monitor health. Audit security. Done.
@@ -53,7 +53,7 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 | **MCP Server Management** | Auto-scan Claude Code, Claude Desktop, Cursor configs. Enable/disable, edit, delete — no JSON editing |
 | **MCP Marketplace** | Built-in registry with categories. One-click install with env config. Custom source support |
 | **MCP Health Monitor** | Command check, process spawn test, latency measurement. Know which servers are broken |
-| **Config Profiles** | One-click switch between Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw configs |
+| **Config Profiles** | One-click switch between Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw, and Hermes configs |
 | **Skills & Plugins** | Browse, edit (MDXEditor rich-text), cross-tool sync |
 | **Workflows** | 12 built-in templates (Code Review, TDD, Bug Diagnosis, Security Audit...). One-click install |
 | **Hooks Visualizer** | See all hooks: event types, matchers, commands — at a glance |
@@ -159,6 +159,7 @@ CCHub auto-scans MCP server configs from:
 | `~/.cursor/mcp.json` | Cursor |
 | `~/.codex/config.toml` | Codex CLI |
 | `~/.gemini/settings.json` | Gemini CLI |
+| `~/.hermes/cli-config.yaml` + `~/.hermes/.env` | Hermes Agent (NousResearch) — YAML + dotenv |
 
 ---
 

@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Bot,
@@ -11,6 +10,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { showToast } from "../components/Toast";
 import { getLocale } from "../lib/i18n";
@@ -529,7 +529,7 @@ export default function Autopilot() {
             {uiText("任务入口", "Run Setup", "実行設定")}
           </div>
           <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-            {uiText("界面只显示阶段和摘要，不直接展示原始 Codex 日志。完整日志会统一保存到专用目录，可单独打开和清理。后端直接调用 Codex，不再依赖外部 Python 脚本。", "The UI shows stages and summaries only. Full logs are stored in a dedicated folder. The backend now invokes Codex directly instead of relying on an external Python script.", "画面には段階と要約のみを表示し、生ログは専用フォルダに保存します。バックエンドは Python スクリプトではなく Codex を直接呼び出します。")}
+            {uiText("界面只显示阶段和摘要，不直接展示原始 Codex 日志。完整日志会统一保存到专用目录，可单独打开和清理。后端直接调用 Codex。", "The UI shows stages and summaries only. Full logs are stored in a dedicated folder. The backend now invokes Codex directly instead of relying on an external Python script.", "画面には段階と要約のみを表示し、生ログは専用フォルダに保存します。バックエンドは Python スクリプトではなく Codex を直接呼び出します。")}
           </p>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>

@@ -1,4 +1,4 @@
-import { Profiler, lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { Profiler, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -14,6 +14,17 @@ import { getLocale, setLocale, type Locale } from "./lib/i18n";
 import { getTheme, setTheme, type Theme } from "./lib/theme";
 import type { EnvironmentConflict } from "./lib/appPreferences";
 import { queryClient } from "./lib/queryClient";
+import {
+  fetchClaudeMdPageData,
+  fetchLogsPageData,
+  fetchMarketplaceLocalData,
+  fetchMcpServersPageData,
+  fetchProfilesPageData,
+  fetchSessionsPageData,
+  fetchSkillsPageData,
+  fetchToolsPageData,
+  queryKeys,
+} from "./hooks/queries";
 
 const pageImports = {
   "/": () => import("./pages/Dashboard"),
@@ -45,15 +56,42 @@ const routeComponents: ReadonlyArray<{
   Component: lazy(pageImports[path]),
 }));
 
-// App 启动后空闲时预加载所有页面 chunk，消除首次点击延迟
+// App 启动后空闲时预加载所有页面 chunk 和关键数据，消除首次点击延迟
 {
-  const preloadAll = () => {
+  const preloadChunks = () => {
     Object.values(pageImports).forEach((loader) => void loader());
   };
+  const preloadData = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const prefetchers: Array<{ key: readonly unknown[]; fn: () => Promise<unknown> }> = [
+      { key: queryKeys.mcpServersPage, fn: fetchMcpServersPageData },
+      { key: queryKeys.skillsPage, fn: fetchSkillsPageData },
+      { key: queryKeys.profilesPage, fn: fetchProfilesPageData },
+      { key: queryKeys.marketplaceLocal, fn: fetchMarketplaceLocalData },
+      { key: queryKeys.sessions(null), fn: () => fetchSessionsPageData(null) },
+      { key: queryKeys.toolsPage, fn: fetchToolsPageData },
+      { key: queryKeys.claudeMdPage, fn: fetchClaudeMdPageData },
+      { key: queryKeys.logsPage(today), fn: () => fetchLogsPageData(today) },
+    ];
+    // 串行而非并行，避免一次性打爆后端
+    prefetchers.reduce<Promise<unknown>>(
+      (acc, { key, fn }) => acc.then(() => queryClient.prefetchQuery({ queryKey: key, queryFn: fn }).catch(() => {})),
+      Promise.resolve(),
+    );
+  };
+  const warmup = () => {
+    preloadChunks();
+    // 再空闲一次再预热数据，避免与首屏数据加载抢后端
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(preloadData, { timeout: 5000 });
+    } else {
+      setTimeout(preloadData, 2500);
+    }
+  };
   if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(preloadAll, { timeout: 3000 });
+    window.requestIdleCallback(warmup, { timeout: 3000 });
   } else {
-    setTimeout(preloadAll, 1500);
+    setTimeout(warmup, 1500);
   }
 }
 
@@ -98,11 +136,35 @@ function RouteProfiler({
 }
 
 
+const RouteSlot = memo(function RouteSlot({
+  isActive,
+  Component,
+}: {
+  isActive: boolean;
+  Component: React.LazyExoticComponent<ComponentType>;
+}) {
+  return (
+    <div
+      style={{
+        display: isActive ? "block" : "none",
+        height: "100%",
+      }}
+    >
+      <Suspense fallback={<RouteFallback />}>
+        <Component />
+      </Suspense>
+    </div>
+  );
+});
+
 function KeepAliveRoutes({ pathname }: { pathname: string }) {
+  // useDeferredValue: 新页面 render 作为低优先级 transition，
+  // 主线程被重页面占用时，当前页面能保持可见、不阻塞输入
+  const deferredPathname = useDeferredValue(pathname);
   const [mountedPaths, setMountedPaths] = useState<Set<string>>(() => new Set([pathname]));
 
-  // 同步更新：在 render 阶段立即加入新路径，避免空白帧
-  // React 允许在 render 中调用 setState 作为 derived state 模式
+  // 同步更新：用 urgent pathname（立即挂载新页面，数据请求可提前触发）
+  // 用 deferredPathname 控制 display（旧页面留屏直到新页面就绪）
   if (!mountedPaths.has(pathname)) {
     const next = new Set(mountedPaths);
     next.add(pathname);
@@ -113,20 +175,9 @@ function KeepAliveRoutes({ pathname }: { pathname: string }) {
     <>
       {routeComponents.map(({ path, Component }) => {
         if (!mountedPaths.has(path)) return null;
-        const isActive = path === pathname;
-        return (
-          <div
-            key={path}
-            style={{
-              display: isActive ? "block" : "none",
-              height: "100%",
-            }}
-          >
-            <Suspense fallback={<RouteFallback />}>
-              <Component />
-            </Suspense>
-          </div>
-        );
+        // 用 deferred 值决定可见性 —— 非活动页面的 isActive 不变，memo 跳过重渲染
+        const isActive = path === deferredPathname;
+        return <RouteSlot key={path} isActive={isActive} Component={Component} />;
       })}
     </>
   );

@@ -1,5 +1,6 @@
 import { memo, type MouseEvent } from "react";
 import { Activity, ArrowRightLeft, Check, Copy, Edit3, GripVertical, Trash2, Wifi, type LucideIcon } from "lucide-react";
+import ProviderIcon from "./ProviderIcon";
 
 interface ConfigProfileCard {
   id: string;
@@ -45,6 +46,7 @@ interface ProfileCardProps {
   icon: LucideIcon;
   isActive: boolean;
   toolTag: string;
+  iconUrl?: string;
   sharedTag: string;
   baseUrl?: string;
   model?: string;
@@ -82,6 +84,7 @@ function ProfileCardComponent({
   icon: Icon,
   isActive,
   toolTag,
+  iconUrl,
   sharedTag,
   baseUrl,
   model,
@@ -145,7 +148,7 @@ function ProfileCardComponent({
             <GripVertical size={14} />
           </button>
           <div className="icon-box" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }}>
-            <Icon size={16} />
+            <ProviderIcon iconUrl={iconUrl} fallbackIcon={Icon} size={16} />
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

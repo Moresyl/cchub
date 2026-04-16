@@ -8,6 +8,7 @@ pub mod hook_commands;
 pub mod marketplace_commands;
 pub mod mcp_commands;
 pub mod omo_commands;
+pub mod provider_models;
 pub mod security_commands;
 pub mod skill_commands;
 pub mod update_commands;

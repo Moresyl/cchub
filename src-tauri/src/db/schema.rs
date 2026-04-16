@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS skills (
     file_path TEXT,
     version TEXT,
     installed_at TEXT,
+    source_url TEXT,
+    baseline_sha256 TEXT,
+    latest_sha256 TEXT,
+    last_checked_at INTEGER,
     FOREIGN KEY (plugin_id) REFERENCES plugins(id)
 );
 
@@ -201,6 +205,10 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     let _ = conn
         .execute_batch("ALTER TABLE config_profiles ADD COLUMN source_type TEXT DEFAULT 'manual';");
     let _ = conn.execute_batch("ALTER TABLE config_profiles ADD COLUMN source_key TEXT;");
+    let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN source_url TEXT;");
+    let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN baseline_sha256 TEXT;");
+    let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN latest_sha256 TEXT;");
+    let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN last_checked_at INTEGER;");
 
     Ok(())
 }

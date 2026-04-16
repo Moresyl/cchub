@@ -96,6 +96,11 @@ export interface SkillQueryResult {
   plugin_id: string | null;
   trigger_command: string | null;
   file_path: string | null;
+  source_url: string | null;
+  baseline_sha256: string | null;
+  latest_sha256: string | null;
+  last_checked_at: number | null;
+  current_sha256: string | null;
 }
 
 export interface SkillBackupQueryResult {
@@ -206,6 +211,9 @@ export interface SessionSummaryQueryResult {
   updated_at: string | null;
   preview: string;
   message_count: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  tokens_used: number | null;
   search_hit_count: number;
   can_resume: boolean;
   can_delete: boolean;

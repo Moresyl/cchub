@@ -8,6 +8,7 @@ mod hermes;
 mod hooks;
 mod mcp;
 mod omo;
+mod lightweight;
 mod provider_proxy;
 mod provider_proxy_transform;
 mod security;
@@ -27,6 +28,7 @@ use commands::hook_commands;
 use commands::marketplace_commands;
 use commands::mcp_commands;
 use commands::omo_commands;
+use commands::provider_models;
 use commands::security_commands;
 use commands::skill_commands;
 use commands::update_commands;
@@ -36,7 +38,7 @@ use commands::workflow_commands;
 
 use tauri::{
     image::Image,
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     tray::TrayIconEvent,
     AppHandle, Emitter, Manager,
 };
@@ -75,11 +77,7 @@ fn redact_url_for_log(url_str: &str) -> String {
 }
 
 fn focus_main_window(app_handle: &AppHandle) {
-    if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+    show_or_create_main_window(app_handle, true);
 }
 
 fn handle_deeplink_url(
@@ -173,6 +171,73 @@ fn load_window_preferences(app_handle: &tauri::AppHandle) -> extra_commands::Win
     preferences
 }
 
+fn configure_main_window(
+    app_handle: &AppHandle,
+    window: &tauri::WebviewWindow,
+) -> Result<(), tauri::Error> {
+    window.set_icon(WINDOW_ICON.clone())?;
+    let handle = app_handle.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            let preferences = load_window_preferences(&handle);
+            if preferences.lightweight_mode {
+                api.prevent_close();
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.destroy();
+                }
+                return;
+            }
+
+            if preferences.close_to_tray {
+                api.prevent_close();
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            } else {
+                handle.exit(0);
+            }
+        }
+    });
+    Ok(())
+}
+
+fn show_or_create_main_window(
+    app_handle: &AppHandle,
+    force_visible: bool,
+) -> Option<tauri::WebviewWindow> {
+    let window = match app_handle.get_webview_window("main") {
+        Some(window) => window,
+        None => match lightweight::create_main_window(app_handle, force_visible) {
+            Ok(window) => {
+                if let Err(error) = configure_main_window(app_handle, &window) {
+                    utils::append_runtime_log(
+                        "error",
+                        "window",
+                        &format!("Failed to configure main window: {error}"),
+                    );
+                }
+                window
+            }
+            Err(error) => {
+                utils::append_runtime_log(
+                    "error",
+                    "window",
+                    &format!("Failed to recreate main window: {error}"),
+                );
+                return None;
+            }
+        },
+    };
+
+    if force_visible {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+
+    Some(window)
+}
+
 pub(crate) fn refresh_tray_menu(app_handle: &AppHandle) -> Result<(), tauri::Error> {
     let show = MenuItemBuilder::with_id("show", "显示 CCHub").build(app_handle)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app_handle)?;
@@ -196,29 +261,45 @@ pub(crate) fn refresh_tray_menu(app_handle: &AppHandle) -> Result<(), tauri::Err
 
     if !profiles.is_empty() {
         menu_builder = menu_builder.separator();
-        let mut previous_tool_id: Option<String> = None;
 
-        for profile in profiles {
-            if previous_tool_id.as_deref() != Some(profile.tool_id.as_str()) {
-                previous_tool_id = Some(profile.tool_id.clone());
+        let tool_order = [
+            "claude",
+            "codex",
+            "gemini",
+            "opencode",
+            "openclaw",
+            "hermes",
+        ];
+
+        for tool_id in tool_order {
+            let tool_profiles = profiles
+                .iter()
+                .filter(|profile| profile.tool_id == tool_id)
+                .collect::<Vec<_>>();
+            if tool_profiles.is_empty() {
+                continue;
             }
 
-            let label = if active_ids.contains(&profile.id) {
-                format!(
-                    "• {}: {}",
-                    tool_label_for_tray(&profile.tool_id),
-                    profile.name
-                )
-            } else {
-                format!(
-                    "{}: {}",
-                    tool_label_for_tray(&profile.tool_id),
-                    profile.name
-                )
-            };
-            let menu_item = MenuItemBuilder::with_id(format!("profile:{}", profile.id), label)
-                .build(app_handle)?;
-            menu_builder = menu_builder.item(&menu_item);
+            let mut submenu = SubmenuBuilder::with_id(
+                app_handle,
+                format!("tool-group:{tool_id}"),
+                tool_label_for_tray(tool_id),
+            );
+
+            for profile in tool_profiles {
+                let label = if active_ids.contains(&profile.id) {
+                    format!("• {}", profile.name)
+                } else {
+                    profile.name.clone()
+                };
+                let menu_item =
+                    MenuItemBuilder::with_id(format!("profile:{}", profile.id), label)
+                        .build(app_handle)?;
+                submenu = submenu.item(&menu_item);
+            }
+
+            let submenu = submenu.build()?;
+            menu_builder = menu_builder.item(&submenu);
         }
 
         menu_builder = menu_builder.separator();
@@ -266,6 +347,10 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
             db::init_db(&app_handle)?;
+            if let Ok(conn) = app_handle.state::<db::DbState>().0.lock() {
+                extra_commands::ensure_official_config_profiles_seeded(&conn)
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+            }
             copilot_auth::init_copilot_auth_state(&app_handle);
             provider_proxy::init_local_provider_proxy_runtime(&app_handle);
             if let Ok(conn) = app_handle.state::<db::DbState>().0.lock() {
@@ -328,11 +413,7 @@ pub fn run() {
                 let handle = app_handle.clone();
                 tray.on_menu_event(move |_app, event| match event.id().as_ref() {
                     "show" => {
-                        if let Some(w) = handle.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.unminimize();
-                            let _ = w.set_focus();
-                        }
+                        let _ = show_or_create_main_window(&handle, true);
                     }
                     "quit" => {
                         std::process::exit(0);
@@ -354,37 +435,18 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        if let Some(w) = handle2.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.unminimize();
-                            let _ = w.set_focus();
-                        }
+                        let _ = show_or_create_main_window(&handle2, true);
                     }
                 });
             }
 
-            // Handle window close → hide to tray instead of quit
-            let handle3 = app_handle.clone();
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_icon(WINDOW_ICON.clone());
+                let _ = configure_main_window(&app_handle, &window);
                 // 窗口在 tauri.conf.json 中默认 visible=false,等 setup() 完成后再显示,
                 // 避免用户看到 WebView2 冷启动阶段的白屏。launch_hidden 用户保持隐藏。
                 if !initial_window_preferences.launch_hidden {
                     let _ = window.show();
                 }
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let preferences = load_window_preferences(&handle3);
-                        api.prevent_close();
-                        if preferences.close_to_tray {
-                            if let Some(w) = handle3.get_webview_window("main") {
-                                let _ = w.hide();
-                            }
-                        } else {
-                            handle3.exit(0);
-                        }
-                    }
-                });
             }
 
             Ok(())
@@ -423,6 +485,8 @@ pub fn run() {
             skill_commands::copy_skill_between_tools,
             skill_commands::remove_synced_skill,
             skill_commands::write_skill_content,
+            skill_commands::check_skill_updates,
+            skill_commands::batch_update_skills,
             skill_commands::toggle_skill_file,
             skill_commands::delete_plugin_dir,
             skill_commands::get_skill_sync_method,
@@ -516,6 +580,7 @@ pub fn run() {
             extra_commands::get_sessions,
             extra_commands::get_session_detail,
             extra_commands::delete_session,
+            extra_commands::delete_sessions,
             extra_commands::search_openclaw_daily_memory,
             extra_commands::read_openclaw_daily_memory_content,
             extra_commands::get_claude_permissions_level,
@@ -550,6 +615,8 @@ pub fn run() {
             extra_commands::get_proxy,
             extra_commands::get_visible_apps,
             extra_commands::set_visible_apps,
+            extra_commands::get_welcome_completed,
+            extra_commands::set_welcome_completed,
             extra_commands::get_hermes_root_override,
             extra_commands::set_hermes_root_override,
             extra_commands::get_window_preferences,
@@ -563,6 +630,7 @@ pub fn run() {
             extra_commands::open_in_preferred_terminal,
             extra_commands::resume_session_in_preferred_terminal,
             extra_commands::get_environment_conflicts,
+            provider_models::fetch_provider_models,
             provider_proxy::get_local_provider_proxy_settings,
             provider_proxy::get_local_provider_proxy_status,
             provider_proxy::set_local_provider_proxy_settings,

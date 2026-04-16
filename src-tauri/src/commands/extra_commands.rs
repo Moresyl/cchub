@@ -290,6 +290,9 @@ pub struct SessionSummary {
     pub updated_at: Option<String>,
     pub preview: String,
     pub message_count: usize,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub tokens_used: Option<u64>,
     pub search_hit_count: usize,
     pub can_resume: bool,
     pub can_delete: bool,
@@ -315,6 +318,15 @@ pub struct SessionResumeResult {
     pub launched: bool,
     pub command: String,
     pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDeleteTarget {
+    pub tool_id: String,
+    pub session_id: String,
+    pub source_path: String,
+    pub source_backend: String,
 }
 
 // ── MCP Clients ──
@@ -992,6 +1004,106 @@ fn count_query_hits(query: &str, values: &[String]) -> usize {
         .count()
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct SessionTokenTotals {
+    input_tokens: u64,
+    output_tokens: u64,
+    total_tokens: u64,
+    has_usage: bool,
+}
+
+impl SessionTokenTotals {
+    fn record(&mut self, input_tokens: Option<u64>, output_tokens: Option<u64>, total_tokens: Option<u64>) {
+        let resolved_input = input_tokens.unwrap_or(0);
+        let resolved_output = output_tokens.unwrap_or(0);
+        let resolved_total = total_tokens.unwrap_or_else(|| resolved_input.saturating_add(resolved_output));
+
+        if resolved_input == 0 && resolved_output == 0 && resolved_total == 0 {
+            return;
+        }
+
+        self.input_tokens = self.input_tokens.saturating_add(resolved_input);
+        self.output_tokens = self.output_tokens.saturating_add(resolved_output);
+        self.total_tokens = self.total_tokens.saturating_add(resolved_total);
+        self.has_usage = true;
+    }
+
+    fn input_option(self) -> Option<u64> {
+        self.has_usage.then_some(self.input_tokens)
+    }
+
+    fn output_option(self) -> Option<u64> {
+        self.has_usage.then_some(self.output_tokens)
+    }
+
+    fn total_option(self) -> Option<u64> {
+        self.has_usage.then_some(self.total_tokens)
+    }
+}
+
+fn read_token_u64(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64(),
+        serde_json::Value::String(text) => text.trim().parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
+fn object_usage_totals(map: &serde_json::Map<String, serde_json::Value>) -> Option<(Option<u64>, Option<u64>, Option<u64>)> {
+    let input_tokens = [
+        "input_tokens",
+        "prompt_tokens",
+        "inputTokenCount",
+        "inputTokens",
+    ]
+    .iter()
+    .find_map(|key| map.get(*key).and_then(read_token_u64));
+    let output_tokens = [
+        "output_tokens",
+        "completion_tokens",
+        "candidatesTokenCount",
+        "outputTokenCount",
+        "outputTokens",
+    ]
+    .iter()
+    .find_map(|key| map.get(*key).and_then(read_token_u64));
+    let total_tokens = [
+        "total_tokens",
+        "totalTokenCount",
+        "totalTokens",
+    ]
+    .iter()
+    .find_map(|key| map.get(*key).and_then(read_token_u64));
+
+    (input_tokens.is_some() || output_tokens.is_some() || total_tokens.is_some())
+        .then_some((input_tokens, output_tokens, total_tokens))
+}
+
+fn accumulate_token_usage_from_value(value: &serde_json::Value, totals: &mut SessionTokenTotals, depth: usize) {
+    if depth > 8 {
+        return;
+    }
+
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some((input_tokens, output_tokens, total_tokens)) = object_usage_totals(map) {
+                totals.record(input_tokens, output_tokens, total_tokens);
+                return;
+            }
+
+            for child in map.values() {
+                accumulate_token_usage_from_value(child, totals, depth + 1);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                accumulate_token_usage_from_value(item, totals, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn normalize_session_query(query: Option<String>) -> String {
     query.unwrap_or_default().trim().to_lowercase()
 }
@@ -1183,6 +1295,23 @@ fn preferred_texts_from_value(value: &serde_json::Value, texts: &mut Vec<String>
         }
         _ => {}
     }
+}
+
+fn read_session_token_totals_from_jsonl(path: &std::path::Path) -> SessionTokenTotals {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return SessionTokenTotals::default(),
+    };
+
+    let mut totals = SessionTokenTotals::default();
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        accumulate_token_usage_from_value(&value, &mut totals, 0);
+    }
+
+    totals
 }
 
 /// Resolve the full path to a CLI tool executable (returned WITHOUT quotes).
@@ -1665,6 +1794,7 @@ const MANAGED_APP_IDS: [&str; 6] = ["claude", "codex", "gemini", "opencode", "op
 const VISIBLE_APPS_SETTING_KEY: &str = "visible_apps";
 const WINDOW_PREFERENCES_SETTING_KEY: &str = "window_preferences";
 const COMMON_CONFIG_SNIPPETS_SETTING_KEY: &str = "common_config_snippets";
+const WELCOME_COMPLETED_SETTING_KEY: &str = "welcome_completed";
 
 fn is_common_config_tool(tool_id: &str) -> bool {
     matches!(tool_id, "claude" | "codex" | "gemini")
@@ -1923,6 +2053,7 @@ pub struct WindowPreferences {
     pub launch_at_login: bool,
     pub launch_hidden: bool,
     pub close_to_tray: bool,
+    pub lightweight_mode: bool,
 }
 
 impl Default for WindowPreferences {
@@ -1931,6 +2062,7 @@ impl Default for WindowPreferences {
             launch_at_login: false,
             launch_hidden: false,
             close_to_tray: true,
+            lightweight_mode: false,
         }
     }
 }
@@ -2154,6 +2286,12 @@ fn terminal_options_for_current_platform() -> Vec<TerminalOption> {
                 label: "Ghostty".to_string(),
                 command: "open -a Ghostty".to_string(),
                 installed: macos_app_exists("Ghostty"),
+            },
+            TerminalOption {
+                id: "kaku".to_string(),
+                label: "Kaku".to_string(),
+                command: "open -a Kaku".to_string(),
+                installed: macos_app_exists("Kaku"),
             },
             TerminalOption {
                 id: "kitty".to_string(),
@@ -2401,6 +2539,13 @@ fn launch_preferred_terminal_impl(
                         .map_err(|e| e.to_string())?;
                     return Ok(false);
                 }
+                "kaku" => {
+                    std::process::Command::new("open")
+                        .args(["-a", "Kaku", &target_text])
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    return Ok(false);
+                }
                 _ => {
                     return Err(format!(
                         "Unsupported terminal: {}",
@@ -2432,6 +2577,12 @@ fn launch_preferred_terminal_impl(
             "ghostty" => {
                 std::process::Command::new("open")
                     .args(["-a", "Ghostty", &target_text])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            "kaku" => {
+                std::process::Command::new("open")
+                    .args(["-a", "Kaku", &target_text])
                     .spawn()
                     .map_err(|e| e.to_string())?;
             }
@@ -2832,6 +2983,142 @@ fn next_profile_sort_order(conn: &rusqlite::Connection, tool_id: &str) -> i64 {
         |row| row.get(0),
     )
     .unwrap_or(0)
+}
+
+pub(crate) fn ensure_official_config_profiles_seeded(
+    conn: &rusqlite::Connection,
+) -> Result<(), String> {
+    let seeded_at = chrono::Utc::now().to_rfc3339();
+    let codex_config = [
+        r#"model_provider = "custom""#,
+        r#"model = "gpt-5.4""#,
+        r#"model_reasoning_effort = "high""#,
+        "disable_response_storage = true",
+        "",
+        "[model_providers.custom]",
+        r#"name = "custom""#,
+        r#"base_url = "https://api.openai.com/v1""#,
+        r#"wire_api = "responses""#,
+        "requires_openai_auth = true",
+    ]
+    .join("\n");
+
+    let seeds = vec![
+        (
+            "claude",
+            "Claude Official",
+            serde_json::json!({
+                "env": {
+                    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+                },
+                "includeCoAuthoredBy": false,
+                "metadata": {
+                    "category": "official",
+                    "websiteUrl": "https://www.anthropic.com/api",
+                    "seededAt": seeded_at,
+                },
+            })
+            .to_string(),
+        ),
+        (
+            "codex",
+            "OpenAI Official",
+            serde_json::json!({
+                "auth": {},
+                "config": codex_config,
+                "metadata": {
+                    "category": "official",
+                    "websiteUrl": "https://platform.openai.com/",
+                    "seededAt": seeded_at,
+                },
+            })
+            .to_string(),
+        ),
+        (
+            "gemini",
+            "Google Official",
+            serde_json::json!({
+                "env": {
+                    "GOOGLE_GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+                    "GEMINI_MODEL": "gemini-2.5-pro",
+                },
+                "metadata": {
+                    "category": "official",
+                    "websiteUrl": "https://ai.google.dev/",
+                    "seededAt": seeded_at,
+                },
+                "config": {},
+            })
+            .to_string(),
+        ),
+        (
+            "openclaw",
+            "Anthropic Direct",
+            serde_json::json!({
+                "baseUrl": "https://api.anthropic.com",
+                "apiKey": "",
+                "api": "anthropic-messages",
+                "models": [{
+                    "id": "claude-sonnet-4-5",
+                    "name": "claude-sonnet-4-5",
+                }],
+                "metadata": {
+                    "category": "official",
+                    "websiteUrl": "https://www.anthropic.com/api",
+                    "seededAt": seeded_at,
+                },
+            })
+            .to_string(),
+        ),
+        (
+            "opencode",
+            "OpenAI Responses",
+            serde_json::json!({
+                "npm": "@ai-sdk/openai",
+                "name": "custom",
+                "metadata": {
+                    "category": "official",
+                    "websiteUrl": "https://platform.openai.com/",
+                    "seededAt": seeded_at,
+                },
+                "options": {
+                    "baseURL": "https://api.openai.com/v1",
+                    "apiKey": "",
+                },
+                "models": {
+                    "gpt-5.4": {
+                        "name": "gpt-5.4",
+                    },
+                },
+            })
+            .to_string(),
+        ),
+    ];
+
+    for (tool_id, name, config_snapshot) in seeds {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(1) FROM config_profiles WHERE tool_id = ?1 AND name = ?2",
+                rusqlite::params![tool_id, name],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if exists > 0 {
+            continue;
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let next_sort_order = next_profile_sort_order(conn, tool_id);
+        conn.execute(
+            "INSERT INTO config_profiles (id, name, tool_id, config_snapshot, sort_order, source_type, source_key, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'manual', NULL, ?6, ?6)",
+            rusqlite::params![id, name, tool_id, config_snapshot, next_sort_order, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 fn clear_active_profile_if_selected(
@@ -4377,7 +4664,10 @@ fn apply_common_config_snippet_to_snapshot(
     }
 }
 
-fn join_api_endpoint(base_url: &str, suffix: &str) -> String {
+fn join_api_endpoint(base_url: &str, suffix: &str, use_full_url: bool) -> String {
+    if use_full_url {
+        return base_url.trim().to_string();
+    }
     let trimmed_base = base_url.trim().trim_end_matches('/');
     let trimmed_suffix = suffix.trim_start_matches('/');
     if trimmed_base.ends_with(trimmed_suffix) {
@@ -4387,7 +4677,10 @@ fn join_api_endpoint(base_url: &str, suffix: &str) -> String {
     }
 }
 
-fn build_claude_messages_endpoint(base_url: &str) -> String {
+fn build_claude_messages_endpoint(base_url: &str, use_full_url: bool) -> String {
+    if use_full_url {
+        return base_url.trim().to_string();
+    }
     let trimmed = base_url.trim().trim_end_matches('/');
     if trimmed.ends_with("/messages") {
         trimmed.to_string()
@@ -4398,7 +4691,10 @@ fn build_claude_messages_endpoint(base_url: &str) -> String {
     }
 }
 
-fn build_gemini_stream_endpoint(base_url: &str, model: &str) -> String {
+fn build_gemini_stream_endpoint(base_url: &str, model: &str, use_full_url: bool) -> String {
+    if use_full_url {
+        return base_url.trim().to_string();
+    }
     let trimmed = base_url.trim().trim_end_matches('/');
     if trimmed.contains(":streamGenerateContent") {
         trimmed.to_string()
@@ -4447,6 +4743,13 @@ fn extract_provider_type_from_snapshot(parsed: &serde_json::Value) -> Option<Str
         .filter(|value| !value.is_empty())
 }
 
+fn extract_use_full_url_from_snapshot(parsed: &serde_json::Value) -> bool {
+    extract_profile_metadata(parsed)
+        .get("useFullUrl")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
 fn extract_copilot_account_id_from_snapshot(parsed: &serde_json::Value) -> Option<String> {
     let metadata = extract_profile_metadata(parsed);
     metadata
@@ -4477,11 +4780,15 @@ fn extract_copilot_account_id_from_snapshot(parsed: &serde_json::Value) -> Optio
         })
 }
 
-fn build_openai_chat_endpoint(base_url: &str, provider_type: Option<&str>) -> String {
+fn build_openai_chat_endpoint(
+    base_url: &str,
+    provider_type: Option<&str>,
+    use_full_url: bool,
+) -> String {
     if provider_type == Some("github_copilot") {
-        join_api_endpoint(base_url, "chat/completions")
+        join_api_endpoint(base_url, "chat/completions", use_full_url)
     } else {
-        join_api_endpoint(base_url, "v1/chat/completions")
+        join_api_endpoint(base_url, "v1/chat/completions", use_full_url)
     }
 }
 
@@ -4505,6 +4812,7 @@ async fn extract_probe_target(
     let parsed: serde_json::Value =
         serde_json::from_str(&profile.config_snapshot).map_err(|e| e.to_string())?;
     let provider_type = extract_provider_type_from_snapshot(&parsed);
+    let use_full_url = extract_use_full_url_from_snapshot(&parsed);
 
     match profile.tool_id.as_str() {
         "claude" => {
@@ -4519,11 +4827,10 @@ async fn extract_probe_target(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string);
-            // 官方 Anthropic 模式没有 ANTHROPIC_BASE_URL,回退到默认端点,保持和
-            // extract_stream_check_request 的 fallback 一致。Copilot 模式必须依赖
-            // profile 里的显式 base_url,否则 join "models" 无意义,继续交由下游报错。
-            let base_url = if provider_type.as_deref() == Some("github_copilot") {
-                base_url.map(|value| join_api_endpoint(&value, "models"))
+            let base_url = if use_full_url {
+                base_url
+            } else if provider_type.as_deref() == Some("github_copilot") {
+                base_url.map(|value| join_api_endpoint(&value, "models", false))
             } else {
                 base_url.or_else(|| Some("https://api.anthropic.com".to_string()))
             };
@@ -4558,10 +4865,12 @@ async fn extract_probe_target(
                 .get("config")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
-            // 官方 OpenAI / Codex OAuth 模式的 config.toml 里没有 base_url,回退到
-            // 默认端点,保持和 extract_stream_check_request(L4820)一致。
-            let base_url = parse_toml_assignment(config, "base_url")
-                .or_else(|| Some("https://api.openai.com/v1".to_string()));
+            let explicit_base_url = parse_toml_assignment(config, "base_url");
+            let base_url = if use_full_url {
+                explicit_base_url
+            } else {
+                explicit_base_url.or_else(|| Some("https://api.openai.com/v1".to_string()))
+            };
             let mut headers = Vec::new();
             if let Some(token) = parsed
                 .get("auth")
@@ -4580,15 +4889,18 @@ async fn extract_probe_target(
                 .and_then(|value| value.as_object())
                 .cloned()
                 .unwrap_or_default();
-            // 官方 Gemini(Google OAuth)模式没有 GOOGLE_GEMINI_BASE_URL,回退到
-            // 默认端点,保持和 extract_stream_check_request(L4873)一致。
-            let base_url = env
+            let explicit_base_url = env
                 .get("GOOGLE_GEMINI_BASE_URL")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .or_else(|| Some("https://generativelanguage.googleapis.com/v1beta".to_string()));
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url
+            } else {
+                explicit_base_url
+                    .or_else(|| Some("https://generativelanguage.googleapis.com/v1beta".to_string()))
+            };
             let mut headers = Vec::new();
             if let Some(token) = env
                 .get("GEMINI_API_KEY")
@@ -4602,15 +4914,17 @@ async fn extract_probe_target(
             Ok((base_url, headers))
         }
         "openclaw" => {
-            // OpenClaw 的"官方 Anthropic 代理"模式 profile 通常不写 baseUrl(直连
-            // api.anthropic.com),ping 时回退到默认端点避免误报。
-            let base_url = parsed
+            let explicit_base_url = parsed
                 .get("baseUrl")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .or_else(|| Some("https://api.anthropic.com".to_string()));
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url
+            } else {
+                explicit_base_url.or_else(|| Some("https://api.anthropic.com".to_string()))
+            };
             let mut headers = Vec::new();
             if let Some(token) = parsed
                 .get("apiKey")
@@ -4642,17 +4956,18 @@ async fn extract_probe_target(
                 .get("provider")
                 .and_then(|value| value.as_str())
                 .unwrap_or("custom");
-            let base_url = model
+            let explicit_base_url = model
                 .get("base_url")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .or_else(|| {
-                    // 官方 Hermes 配置里经常不写 model.base_url,而是依赖 provider 自带的
-                    // 默认端点。回退到已知 provider 的默认 URL,避免 ping 误报 No base_url。
-                    hermes::providers::default_base_url_for_provider(provider).map(str::to_string)
-                });
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url
+            } else {
+                explicit_base_url
+                    .or_else(|| hermes::providers::default_base_url_for_provider(provider).map(str::to_string))
+            };
             let env_key = parsed
                 .get("metadata")
                 .and_then(|value| value.get("hermesApiKeyEnv"))
@@ -4681,17 +4996,18 @@ async fn extract_probe_target(
             Ok((base_url, headers))
         }
         "opencode" => {
-            // OpenCode 的 provider 可以是 anthropic / openai / google 等,默认模式下不写
-            // options.baseURL。这里用 Anthropic 默认端点作为兜底(占绝大多数场景);
-            // 如果用户确实用的是 OpenAI/Gemini 官方账号,自己填 baseURL 后这条兜底就被跳过。
-            let base_url = parsed
+            let explicit_base_url = parsed
                 .get("options")
                 .and_then(|value| value.get("baseURL"))
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .or_else(|| Some("https://api.anthropic.com".to_string()));
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url
+            } else {
+                explicit_base_url.or_else(|| Some("https://api.anthropic.com".to_string()))
+            };
             let mut headers = Vec::new();
             if let Some(token) = parsed
                 .get("options")
@@ -4725,6 +5041,7 @@ async fn extract_stream_check_request(
     let parsed: serde_json::Value =
         serde_json::from_str(&profile.config_snapshot).map_err(|e| e.to_string())?;
     let provider_type = extract_provider_type_from_snapshot(&parsed);
+    let use_full_url = extract_use_full_url_from_snapshot(&parsed);
 
     match profile.tool_id.as_str() {
         "claude" => {
@@ -4733,12 +5050,17 @@ async fn extract_stream_check_request(
                 .and_then(|value| value.as_object())
                 .cloned()
                 .unwrap_or_default();
-            let base_url = env
+            let explicit_base_url = env
                 .get("ANTHROPIC_BASE_URL")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .unwrap_or("https://api.anthropic.com");
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url.ok_or_else(|| "No Claude base URL configured".to_string())?
+            } else {
+                explicit_base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string())
+            };
             let model = env
                 .get("ANTHROPIC_MODEL")
                 .or_else(|| env.get("ANTHROPIC_DEFAULT_SONNET_MODEL"))
@@ -4768,7 +5090,11 @@ async fn extract_stream_check_request(
                     vec![("authorization".to_string(), format!("Bearer {token}"))]
                 };
                 return Ok(StreamCheckRequestSpec {
-                    endpoint: build_openai_chat_endpoint(base_url, provider_type.as_deref()),
+                    endpoint: build_openai_chat_endpoint(
+                        &base_url,
+                        provider_type.as_deref(),
+                        use_full_url,
+                    ),
                     headers,
                     body: serde_json::json!({
                         "model": model,
@@ -4790,7 +5116,7 @@ async fn extract_stream_check_request(
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| "No Claude API token configured".to_string())?;
                 return Ok(StreamCheckRequestSpec {
-                    endpoint: join_api_endpoint(base_url, "v1/responses"),
+                    endpoint: join_api_endpoint(&base_url, "v1/responses", use_full_url),
                     headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
                     body: serde_json::json!({
                         "model": model,
@@ -4810,7 +5136,7 @@ async fn extract_stream_check_request(
                 .ok_or_else(|| "No Claude API token configured".to_string())?;
 
             Ok(StreamCheckRequestSpec {
-                endpoint: build_claude_messages_endpoint(base_url),
+                endpoint: build_claude_messages_endpoint(&base_url, use_full_url),
                 headers: vec![
                     ("x-api-key".to_string(), token.to_string()),
                     ("anthropic-version".to_string(), "2023-06-01".to_string()),
@@ -4837,15 +5163,19 @@ async fn extract_stream_check_request(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "No Codex OPENAI_API_KEY configured".to_string())?;
-            let base_url = parse_toml_assignment(config, "base_url")
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+            let explicit_base_url = parse_toml_assignment(config, "base_url");
+            let base_url = if use_full_url {
+                explicit_base_url.ok_or_else(|| "No Codex base URL configured".to_string())?
+            } else {
+                explicit_base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string())
+            };
             let wire_api = parse_toml_assignment(config, "wire_api")
                 .unwrap_or_else(|| "responses".to_string());
             let model =
                 parse_toml_assignment(config, "model").unwrap_or_else(|| "gpt-5.4".to_string());
             let (endpoint, body) = if wire_api == "chat" {
                 (
-                    join_api_endpoint(&base_url, "chat/completions"),
+                    join_api_endpoint(&base_url, "chat/completions", use_full_url),
                     serde_json::json!({
                         "model": model,
                         "stream": true,
@@ -4857,7 +5187,7 @@ async fn extract_stream_check_request(
                 )
             } else {
                 (
-                    join_api_endpoint(&base_url, "responses"),
+                    join_api_endpoint(&base_url, "responses", use_full_url),
                     serde_json::json!({
                         "model": model,
                         "stream": true,
@@ -4886,12 +5216,19 @@ async fn extract_stream_check_request(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "No Gemini API key configured".to_string())?;
-            let base_url = env
+            let explicit_base_url = env
                 .get("GOOGLE_GEMINI_BASE_URL")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .unwrap_or("https://generativelanguage.googleapis.com/v1beta");
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url.ok_or_else(|| "No Gemini base URL configured".to_string())?
+            } else {
+                explicit_base_url.unwrap_or_else(|| {
+                    "https://generativelanguage.googleapis.com/v1beta".to_string()
+                })
+            };
             let model = env
                 .get("GEMINI_MODEL")
                 .and_then(|value| value.as_str())
@@ -4900,7 +5237,7 @@ async fn extract_stream_check_request(
                 .unwrap_or("gemini-2.5-flash");
 
             Ok(StreamCheckRequestSpec {
-                endpoint: build_gemini_stream_endpoint(base_url, model),
+                endpoint: build_gemini_stream_endpoint(&base_url, model, use_full_url),
                 headers: vec![("x-goog-api-key".to_string(), token.to_string())],
                 body: serde_json::json!({
                     "contents": [
@@ -4920,12 +5257,17 @@ async fn extract_stream_check_request(
                 .get("api")
                 .and_then(|value| value.as_str())
                 .unwrap_or("openai-completions");
-            let base_url = parsed
+            let explicit_base_url = parsed
                 .get("baseUrl")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| "No OpenClaw baseUrl configured".to_string())?;
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url.ok_or_else(|| "No OpenClaw baseUrl configured".to_string())?
+            } else {
+                explicit_base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string())
+            };
             let api_key = parsed
                 .get("apiKey")
                 .and_then(|value| value.as_str())
@@ -4946,7 +5288,7 @@ async fn extract_stream_check_request(
                 "openai-responses" => {
                     let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
                     Ok(StreamCheckRequestSpec {
-                        endpoint: join_api_endpoint(base_url, "responses"),
+                        endpoint: join_api_endpoint(&base_url, "responses", use_full_url),
                         headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
                         body: serde_json::json!({
                             "model": model,
@@ -4959,7 +5301,7 @@ async fn extract_stream_check_request(
                 "anthropic-messages" => {
                     let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
                     Ok(StreamCheckRequestSpec {
-                        endpoint: build_claude_messages_endpoint(base_url),
+                        endpoint: build_claude_messages_endpoint(&base_url, use_full_url),
                         headers: vec![
                             ("x-api-key".to_string(), token),
                             ("anthropic-version".to_string(), "2023-06-01".to_string()),
@@ -4977,7 +5319,7 @@ async fn extract_stream_check_request(
                 "google-generative-ai" => {
                     let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
                     Ok(StreamCheckRequestSpec {
-                        endpoint: build_gemini_stream_endpoint(base_url, model),
+                        endpoint: build_gemini_stream_endpoint(&base_url, model, use_full_url),
                         headers: vec![("x-goog-api-key".to_string(), token)],
                         body: serde_json::json!({
                             "contents": [
@@ -4996,7 +5338,7 @@ async fn extract_stream_check_request(
                 _ => {
                     let token = api_key.ok_or_else(|| "No OpenClaw API key configured".to_string())?;
                     Ok(StreamCheckRequestSpec {
-                        endpoint: join_api_endpoint(base_url, "chat/completions"),
+                        endpoint: join_api_endpoint(&base_url, "chat/completions", use_full_url),
                         headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
                         body: serde_json::json!({
                             "model": model,
@@ -5030,12 +5372,19 @@ async fn extract_stream_check_request(
                 .get("provider")
                 .and_then(|value| value.as_str())
                 .unwrap_or("custom");
-            let base_url = model
+            let explicit_base_url = model
                 .get("base_url")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| "No Hermes base_url configured".to_string())?;
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url.ok_or_else(|| "No Hermes base_url configured".to_string())?
+            } else {
+                explicit_base_url
+                    .or_else(|| hermes::providers::default_base_url_for_provider(provider).map(str::to_string))
+                    .ok_or_else(|| "No Hermes base_url configured".to_string())?
+            };
             let model_id = model
                 .get("default")
                 .and_then(|value| value.as_str())
@@ -5060,7 +5409,7 @@ async fn extract_stream_check_request(
 
             if provider == "gemini" {
                 return Ok(StreamCheckRequestSpec {
-                    endpoint: build_gemini_stream_endpoint(base_url, model_id),
+                    endpoint: build_gemini_stream_endpoint(&base_url, model_id, use_full_url),
                     headers: vec![("x-goog-api-key".to_string(), token.to_string())],
                     body: serde_json::json!({
                         "contents": [{ "role": "user", "parts": [{ "text": "Reply with OK." }] }],
@@ -5071,7 +5420,7 @@ async fn extract_stream_check_request(
 
             if provider == "anthropic" {
                 return Ok(StreamCheckRequestSpec {
-                    endpoint: build_claude_messages_endpoint(base_url),
+                    endpoint: build_claude_messages_endpoint(&base_url, use_full_url),
                     headers: vec![
                         ("x-api-key".to_string(), token.to_string()),
                         ("anthropic-version".to_string(), "2023-06-01".to_string()),
@@ -5086,7 +5435,7 @@ async fn extract_stream_check_request(
             }
 
             Ok(StreamCheckRequestSpec {
-                endpoint: join_api_endpoint(base_url, "chat/completions"),
+                endpoint: join_api_endpoint(&base_url, "chat/completions", use_full_url),
                 headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
                 body: serde_json::json!({
                     "model": model_id,
@@ -5106,12 +5455,17 @@ async fn extract_stream_check_request(
                 .and_then(|value| value.as_object())
                 .cloned()
                 .unwrap_or_default();
-            let base_url = options
+            let explicit_base_url = options
                 .get("baseURL")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .unwrap_or("https://api.openai.com/v1");
+                .map(str::to_string);
+            let base_url = if use_full_url {
+                explicit_base_url.ok_or_else(|| "No OpenCode baseURL configured".to_string())?
+            } else {
+                explicit_base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string())
+            };
             let token = options
                 .get("apiKey")
                 .and_then(|value| value.as_str())
@@ -5126,7 +5480,7 @@ async fn extract_stream_check_request(
 
             if npm.contains("anthropic") {
                 Ok(StreamCheckRequestSpec {
-                    endpoint: build_claude_messages_endpoint(base_url),
+                    endpoint: build_claude_messages_endpoint(&base_url, use_full_url),
                     headers: vec![
                         ("x-api-key".to_string(), token.to_string()),
                         ("anthropic-version".to_string(), "2023-06-01".to_string()),
@@ -5142,7 +5496,7 @@ async fn extract_stream_check_request(
                 })
             } else if npm.contains("google") {
                 Ok(StreamCheckRequestSpec {
-                    endpoint: build_gemini_stream_endpoint(base_url, &model),
+                    endpoint: build_gemini_stream_endpoint(&base_url, &model, use_full_url),
                     headers: vec![("x-goog-api-key".to_string(), token.to_string())],
                     body: serde_json::json!({
                         "contents": [
@@ -5158,7 +5512,7 @@ async fn extract_stream_check_request(
                 })
             } else if npm == "@ai-sdk/openai" {
                 Ok(StreamCheckRequestSpec {
-                    endpoint: join_api_endpoint(base_url, "responses"),
+                    endpoint: join_api_endpoint(&base_url, "responses", use_full_url),
                     headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
                     body: serde_json::json!({
                         "model": model,
@@ -5169,7 +5523,7 @@ async fn extract_stream_check_request(
                 })
             } else {
                 Ok(StreamCheckRequestSpec {
-                    endpoint: join_api_endpoint(base_url, "chat/completions"),
+                    endpoint: join_api_endpoint(&base_url, "chat/completions", use_full_url),
                     headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
                     body: serde_json::json!({
                         "model": model,
@@ -5665,6 +6019,22 @@ pub fn set_visible_apps(
 }
 
 #[tauri::command]
+pub fn get_welcome_completed(db: State<'_, DbState>) -> Result<bool, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    Ok(get_json_app_setting::<bool>(&conn, WELCOME_COMPLETED_SETTING_KEY)?.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn set_welcome_completed(
+    completed: bool,
+    db: State<'_, DbState>,
+) -> Result<bool, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    set_json_app_setting(&conn, WELCOME_COMPLETED_SETTING_KEY, &completed)?;
+    Ok(completed)
+}
+
+#[tauri::command]
 pub fn get_hermes_root_override(db: State<'_, DbState>) -> Result<Option<String>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     hermes::read_root_override(&conn)
@@ -6019,6 +6389,16 @@ fn scan_codex_sessions(
                 continue;
             }
 
+            let rollout_file_path = {
+                let path = PathBuf::from(&rollout_path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    root.join(&rollout_path)
+                }
+            };
+            let token_totals = read_session_token_totals_from_jsonl(&rollout_file_path);
+
             let history_items = history_index.get(&id).cloned().unwrap_or_default();
             let preview_source = history_items
                 .last()
@@ -6028,7 +6408,7 @@ fn scan_codex_sessions(
                     let trimmed = first_user_message.trim();
                     (!trimmed.is_empty()).then(|| trimmed.to_string())
                 })
-                .unwrap_or_else(|| title.clone());
+                .unwrap_or_else(|| id.clone());
             let preview = truncate_session_text(&preview_source, 180);
             let search_values = vec![
                 title.clone(),
@@ -6042,11 +6422,16 @@ fn scan_codex_sessions(
             }
 
             sessions.push(SessionSummary {
-                id,
+                id: id.clone(),
                 tool_id: "codex".to_string(),
                 tool_name: "Codex".to_string(),
                 title: if title.trim().is_empty() {
-                    truncate_session_text(&preview_source, 80)
+                    let trimmed_first_user = first_user_message.trim();
+                    if trimmed_first_user.is_empty() {
+                        id.clone()
+                    } else {
+                        truncate_session_text(trimmed_first_user, 80)
+                    }
                 } else {
                     title
                 },
@@ -6058,6 +6443,9 @@ fn scan_codex_sessions(
                 updated_at: format_unix_timestamp(updated_at_raw),
                 preview,
                 message_count: history_items.len(),
+                input_tokens: token_totals.input_option(),
+                output_tokens: token_totals.output_option(),
+                tokens_used: token_totals.total_option(),
                 search_hit_count,
                 can_resume: tool_supports_session_resume("codex"),
                 can_delete: true,
@@ -6088,6 +6476,7 @@ fn parse_generic_jsonl_session_summary(
     let mut session_id = file_stem.clone();
     let mut title: Option<String> = None;
     let mut cwd: Option<String> = None;
+    let mut first_message_summary: Option<String> = None;
     let mut created_at: Option<String> = metadata
         .as_ref()
         .and_then(|value| value.created().ok())
@@ -6098,11 +6487,21 @@ fn parse_generic_jsonl_session_summary(
         .map(format_local_datetime);
     let mut preview: Option<String> = None;
     let mut message_count = 0usize;
+    let mut token_totals = SessionTokenTotals::default();
 
-    for line in BufReader::new(file).lines().map_while(Result::ok).take(120) {
+    for (line_index, line) in BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .enumerate()
+    {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
+        accumulate_token_usage_from_value(&value, &mut token_totals, 0);
+
+        if line_index >= 120 {
+            continue;
+        }
 
         if let Some(found_id) = value
             .get("sessionId")
@@ -6177,14 +6576,16 @@ fn parse_generic_jsonl_session_summary(
             if preview.is_none() {
                 preview = Some(truncate_session_text(&text, 180));
             }
-            if title.is_none() {
-                title = Some(truncate_session_text(&text, 80));
+            if first_message_summary.is_none() {
+                first_message_summary = Some(truncate_session_text(&text, 80));
             }
         }
     }
 
-    let preview = preview.unwrap_or_else(|| title.clone().unwrap_or_else(|| file_stem.clone()));
-    let title = title.unwrap_or_else(|| truncate_session_text(&preview, 80));
+    let title = title
+        .or(first_message_summary)
+        .unwrap_or_else(|| session_id.clone());
+    let preview = preview.unwrap_or_else(|| title.clone());
     let search_values = vec![
         title.clone(),
         preview.clone(),
@@ -6209,6 +6610,9 @@ fn parse_generic_jsonl_session_summary(
         updated_at,
         preview,
         message_count,
+        input_tokens: token_totals.input_option(),
+        output_tokens: token_totals.output_option(),
+        tokens_used: token_totals.total_option(),
         search_hit_count,
         can_resume: tool_supports_session_resume(tool_id),
         can_delete: true,
@@ -6371,6 +6775,9 @@ fn scan_generic_sqlite_sessions(
                 updated_at: updated_raw.as_deref().and_then(format_timestamp_text),
                 preview,
                 message_count: 0,
+                input_tokens: None,
+                output_tokens: None,
+                tokens_used: None,
                 search_hit_count,
                 can_resume: tool_supports_session_resume(tool_id),
                 can_delete: false,
@@ -6876,6 +7283,32 @@ fn delete_codex_session_records(root: &std::path::Path, session_id: &str) -> Res
     Ok(())
 }
 
+fn delete_session_impl(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    session_id: &str,
+    source_path: &str,
+    source_backend: &str,
+) -> Result<(), String> {
+    if !is_valid_session_source_path(conn, tool_id, source_path) {
+        return Err("Invalid session source path".to_string());
+    }
+    let root = resolve_tool_config_dir(conn, tool_id)?;
+
+    if tool_id == "codex" {
+        delete_codex_session_records(&root, session_id)?;
+    }
+
+    if source_backend == "jsonl" {
+        let path = PathBuf::from(source_path);
+        if path.exists() {
+            std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_sessions(
     tool_id: Option<String>,
@@ -6905,6 +7338,9 @@ pub fn get_session_detail(
     created_at: Option<String>,
     updated_at: Option<String>,
     message_count: usize,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    tokens_used: Option<u64>,
     can_resume: bool,
     can_delete: bool,
     db: State<'_, DbState>,
@@ -6929,6 +7365,9 @@ pub fn get_session_detail(
             updated_at,
             preview,
             message_count,
+            input_tokens,
+            output_tokens,
+            tokens_used,
             search_hit_count: 0,
             can_resume,
             can_delete,
@@ -6948,24 +7387,29 @@ pub fn delete_session(
     db: State<'_, DbState>,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    if !is_valid_session_source_path(&conn, &tool_id, &source_path) {
-        return Err("Invalid session source path".to_string());
-    }
-    let root = resolve_tool_config_dir(&conn, &tool_id)?;
-    drop(conn);
+    delete_session_impl(&conn, &tool_id, &session_id, &source_path, &source_backend)
+}
 
-    if tool_id == "codex" {
-        delete_codex_session_records(&root, &session_id)?;
+#[tauri::command]
+pub fn delete_sessions(
+    sessions: Vec<SessionDeleteTarget>,
+    db: State<'_, DbState>,
+) -> Result<usize, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut deleted = 0usize;
+
+    for session in sessions {
+        delete_session_impl(
+            &conn,
+            &session.tool_id,
+            &session.session_id,
+            &session.source_path,
+            &session.source_backend,
+        )?;
+        deleted += 1;
     }
 
-    if source_backend == "jsonl" {
-        let path = PathBuf::from(source_path);
-        if path.exists() {
-            std::fs::remove_file(path).map_err(|e| e.to_string())?;
-        }
-    }
-
-    Ok(())
+    Ok(deleted)
 }
 
 /// Write a tool's config file content

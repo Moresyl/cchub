@@ -157,14 +157,16 @@ function getConfigLanguage(toolId: string, content: string): "json" | "toml" {
   return "json";
 }
 
-function extractConfigSummary(toolId: string, content: string): { baseUrl?: string; model?: string } {
+function extractConfigSummary(toolId: string, content: string): { baseUrl?: string; model?: string; iconUrl?: string } {
   try {
     const parsed = JSON.parse(content) as Record<string, any>;
+    const metadata = (parsed.metadata || {}) as Record<string, string>;
     if (toolId === "claude") {
       const env = (parsed.env || {}) as Record<string, string>;
       return {
         baseUrl: env.ANTHROPIC_BASE_URL,
         model: env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+        iconUrl: metadata.iconUrl,
       };
     }
     if (toolId === "gemini") {
@@ -172,6 +174,7 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
       return {
         baseUrl: env.GOOGLE_GEMINI_BASE_URL,
         model: env.GEMINI_MODEL,
+        iconUrl: metadata.iconUrl,
       };
     }
     if (toolId === "codex") {
@@ -181,6 +184,7 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
       return {
         baseUrl: urlMatch?.[1],
         model: modelMatch?.[1],
+        iconUrl: metadata.iconUrl,
       };
     }
     if (toolId === "openclaw") {
@@ -189,6 +193,7 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
       return {
         baseUrl: parsed.baseUrl as string | undefined,
         model: firstModel?.id,
+        iconUrl: metadata.iconUrl,
       };
     }
     if (toolId === "hermes") {
@@ -197,6 +202,7 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
       return {
         baseUrl: model.base_url,
         model: model.default,
+        iconUrl: metadata.iconUrl,
       };
     }
     if (toolId === "opencode") {
@@ -206,10 +212,60 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
       return {
         baseUrl: options.baseURL,
         model: firstModelId,
+        iconUrl: metadata.iconUrl,
       };
     }
   } catch { /* ignore */ }
   return {};
+}
+
+const MODEL_FETCH_SUPPORTED_TOOLS = ["claude", "codex", "gemini", "openclaw", "opencode"] as const;
+
+function supportsModelFetch(toolId: string) {
+  return MODEL_FETCH_SUPPORTED_TOOLS.includes(toolId as (typeof MODEL_FETCH_SUPPORTED_TOOLS)[number]);
+}
+
+function formatModelFetchError(
+  error: unknown,
+  localeText: (zhText: string, enText: string, jaText?: string) => string,
+) {
+  const message = String(error);
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("401") || normalized.includes("403")) {
+    return localeText(
+      "模型拉取失败：API Key 无效或没有权限",
+      "Failed to fetch models: invalid API key or insufficient permission",
+      "モデル取得に失敗しました: API Key が無効か権限が不足しています",
+    );
+  }
+  if (normalized.includes("404")) {
+    return localeText(
+      "模型拉取失败：当前端点不支持模型列表，请检查 Base URL 或完整端点设置",
+      "Failed to fetch models: this endpoint does not expose model listing. Check the base URL or full endpoint setting.",
+      "モデル取得に失敗しました: このエンドポイントはモデル一覧を提供していません。Base URL または完全なエンドポイント設定を確認してください。",
+    );
+  }
+  if (normalized.includes("timed out") || normalized.includes("timeout")) {
+    return localeText(
+      "模型拉取超时：请检查网络、代理或供应商响应速度",
+      "Fetching models timed out. Check your network, proxy, or provider latency.",
+      "モデル取得がタイムアウトしました。ネットワーク、プロキシ、またはプロバイダーの応答速度を確認してください。",
+    );
+  }
+  if (normalized.includes("parse")) {
+    return localeText(
+      "模型拉取失败：供应商返回了无法识别的响应格式",
+      "Failed to fetch models: the provider returned an unrecognized response format",
+      "モデル取得に失敗しました: プロバイダーが認識できないレスポンス形式を返しました",
+    );
+  }
+
+  return localeText(
+    `模型拉取失败：${message}`,
+    `Failed to fetch models: ${message}`,
+    `モデル取得に失敗しました: ${message}`,
+  );
 }
 
 const CodexRawConfigEditor = memo(function CodexRawConfigEditor({
@@ -318,6 +374,8 @@ interface ProfileConnectionSectionProps {
   showApiKey: boolean;
   draftApiKey: string;
   draftBaseUrl: string;
+  draftUseFullUrl: boolean;
+  draftIconUrl: string;
   draftCostMultiplier: string;
   draftEndpointCandidates: string;
   draftAuthField: ClaudeAuthField;
@@ -557,6 +615,8 @@ const ProfileConnectionSection = memo(function ProfileConnectionSection({
   showApiKey,
   draftApiKey,
   draftBaseUrl,
+  draftUseFullUrl,
+  draftIconUrl,
   draftCostMultiplier,
   draftEndpointCandidates,
   draftAuthField,
@@ -626,7 +686,7 @@ const ProfileConnectionSection = memo(function ProfileConnectionSection({
             <TextInput
               value={draftBaseUrl}
               onChange={(event) => onDraftChange(draftTool, { baseUrl: event.target.value })}
-              placeholder="https://api.example.com"
+              placeholder={draftUseFullUrl ? "https://proxy.example.com/v1/messages" : "https://api.example.com"}
             />
           </Field>
           <Field label={localeText("成本倍率", "Cost Multiplier", "コスト倍率")}>
@@ -636,6 +696,45 @@ const ProfileConnectionSection = memo(function ProfileConnectionSection({
               placeholder="1.0"
             />
           </Field>
+        </div>
+
+        <Field label={localeText("图标 URL", "Icon URL", "アイコン URL")}>
+          <TextInput
+            value={draftIconUrl}
+            onChange={(event) => onDraftChange(draftTool, { iconUrl: event.target.value })}
+            placeholder="https://example.com/provider-icon.png"
+          />
+        </Field>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -8 }}>
+          {localeText(
+            "优先显示这里配置的远程图标；加载失败时会回退到工具默认图标。",
+            "This remote icon is preferred when present. If it fails to load, the default tool icon is used.",
+            "ここに設定したリモートアイコンを優先表示し、読み込みに失敗した場合は既定のツールアイコンへ戻します。",
+          )}
+        </div>
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={draftUseFullUrl}
+            onChange={(event) => onDraftChange(draftTool, { useFullUrl: event.target.checked })}
+          />
+          <span>
+            {localeText("将接口地址作为完整端点使用", "Use base URL as the full endpoint", "Base URL を完全なエンドポイントとして扱う")}
+          </span>
+        </label>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -8 }}>
+          {draftUseFullUrl
+            ? localeText(
+              "已启用完整端点模式，后端不会再自动补 `/v1/messages`、`/chat/completions` 等路径。",
+              "Full endpoint mode is enabled. The backend will stop appending paths such as `/v1/messages` or `/chat/completions`.",
+              "完全なエンドポイントモードが有効です。バックエンドは `/v1/messages` や `/chat/completions` などのパスを自動付与しません。",
+            )
+            : localeText(
+              "默认会按供应商协议自动补全标准路径。",
+              "Standard provider paths will be appended automatically by default.",
+              "デフォルトではプロバイダー規約に従って標準パスが自動補完されます。",
+            )}
         </div>
 
         <Field label={localeText("候选端点", "Endpoint Candidates", "候補エンドポイント")}>
@@ -759,6 +858,7 @@ const ProfileConnectionSection = memo(function ProfileConnectionSection({
 
 interface ProfileModelsSectionProps {
   locale: string;
+  localeText: (zhText: string, enText: string, jaText?: string) => string;
   draftTool: string;
   draftModel: string;
   draftReasoningModel: string;
@@ -770,11 +870,16 @@ interface ProfileModelsSectionProps {
   draftOpenCodeOutputLimit: string;
   draftOpenCodeInputModalities: string;
   draftOpenCodeOutputModalities: string;
+  fetchedModels: string[];
+  fetchingModels: boolean;
+  modelFetchError: string | null;
+  onFetchModels: () => void;
   onDraftChange: (toolId: string, next: Partial<StructuredDraftFields>) => void;
 }
 
 const ProfileModelsSection = memo(function ProfileModelsSection({
   locale,
+  localeText,
   draftTool,
   draftModel,
   draftReasoningModel,
@@ -786,27 +891,58 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
   draftOpenCodeOutputLimit,
   draftOpenCodeInputModalities,
   draftOpenCodeOutputModalities,
+  fetchedModels,
+  fetchingModels,
+  modelFetchError,
+  onFetchModels,
   onDraftChange,
 }: ProfileModelsSectionProps) {
+  const modelSuggestionsId = `profile-model-suggestions-${draftTool}`;
+  const canFetchModels = supportsModelFetch(draftTool);
+
   return (
     <div>
-      <SectionTitle>{locale === "zh" ? "模型配置" : "Models"}</SectionTitle>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+        <SectionTitle>{locale === "zh" ? "模型配置" : "Models"}</SectionTitle>
+        {canFetchModels && (
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={onFetchModels}
+            disabled={fetchingModels}
+            style={{ gap: 6, whiteSpace: "nowrap" }}
+          >
+            {fetchingModels ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
+            {localeText("拉取模型列表", "Fetch Models", "モデル一覧を取得")}
+          </button>
+        )}
+      </div>
+      {fetchedModels.length > 0 && (
+        <datalist id={modelSuggestionsId}>
+          {fetchedModels.map((model) => <option key={model} value={model} />)}
+        </datalist>
+      )}
+      {(modelFetchError || fetchedModels.length > 0) && (
+        <div style={{ fontSize: 12, color: modelFetchError ? "var(--danger)" : "var(--text-muted)", marginBottom: 12 }}>
+          {modelFetchError || localeText(`已发现 ${fetchedModels.length} 个模型`, `Discovered ${fetchedModels.length} models`, `${fetchedModels.length} 個のモデルを検出しました`)}
+        </div>
+      )}
       {draftTool === "claude" ? (
         <div style={TWO_COLUMN_GRID_STYLE}>
           <Field label={locale === "zh" ? "主模型" : "Main Model"}>
-            <TextInput value={draftModel} onChange={(event) => onDraftChange(draftTool, { model: event.target.value })} placeholder="claude-sonnet-4-5" />
+            <TextInput value={draftModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { model: event.target.value })} placeholder="claude-sonnet-4-5" />
           </Field>
           <Field label={locale === "zh" ? "推理模型" : "Reasoning Model"}>
-            <TextInput value={draftReasoningModel} onChange={(event) => onDraftChange(draftTool, { reasoningModel: event.target.value })} placeholder="claude-sonnet-4-5" />
+            <TextInput value={draftReasoningModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { reasoningModel: event.target.value })} placeholder="claude-sonnet-4-5" />
           </Field>
           <Field label={locale === "zh" ? "Haiku 默认模型" : "Default Haiku"}>
-            <TextInput value={draftHaikuModel} onChange={(event) => onDraftChange(draftTool, { haikuModel: event.target.value })} placeholder="claude-haiku-3-5" />
+            <TextInput value={draftHaikuModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { haikuModel: event.target.value })} placeholder="claude-haiku-3-5" />
           </Field>
           <Field label={locale === "zh" ? "Sonnet 默认模型" : "Default Sonnet"}>
-            <TextInput value={draftSonnetModel} onChange={(event) => onDraftChange(draftTool, { sonnetModel: event.target.value })} placeholder="claude-sonnet-4-5" />
+            <TextInput value={draftSonnetModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { sonnetModel: event.target.value })} placeholder="claude-sonnet-4-5" />
           </Field>
           <Field label={locale === "zh" ? "Opus 默认模型" : "Default Opus"}>
-            <TextInput value={draftOpusModel} onChange={(event) => onDraftChange(draftTool, { opusModel: event.target.value })} placeholder="claude-opus-4-5" />
+            <TextInput value={draftOpusModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { opusModel: event.target.value })} placeholder="claude-opus-4-5" />
           </Field>
         </div>
       ) : (
@@ -814,6 +950,7 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
           <Field label={locale === "zh" ? "模型 ID" : "Model ID"}>
             <TextInput
               value={draftModel}
+              list={fetchedModels.length ? modelSuggestionsId : undefined}
               onChange={(event) => onDraftChange(draftTool, { model: event.target.value })}
               placeholder={locale === "zh" ? "例如 deepseek-chat" : "e.g. deepseek-chat"}
             />
@@ -947,6 +1084,7 @@ function mergeSharedDraftFields(
 
   if (includeCommon) {
     next.baseUrl = parsed.baseUrl || next.baseUrl;
+    next.useFullUrl = parsed.useFullUrl;
     next.apiKey = parsed.apiKey || next.apiKey;
     next.model = parsed.model || next.model;
     next.websiteUrl = parsed.websiteUrl || next.websiteUrl;
@@ -1061,10 +1199,15 @@ export default function Profiles() {
   const [streamCheckingId, setStreamCheckingId] = useState<string | null>(null);
   const [streamCheckResults, setStreamCheckResults] = useState<Record<string, ProviderStreamCheckResult>>({});
   const [streamCheckConfirmProfile, setStreamCheckConfirmProfile] = useState<ConfigProfile | null>(null);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelFetchError, setModelFetchError] = useState<string | null>(null);
 
   const {
     presetId: draftPresetId,
     baseUrl: draftBaseUrl,
+    useFullUrl: draftUseFullUrl,
+    iconUrl: draftIconUrl,
     apiKey: draftApiKey,
     model: draftModel,
     reasoningModel: draftReasoningModel,
@@ -1205,6 +1348,9 @@ export default function Profiles() {
     setSaving(false);
     setNewTool(selectedTool);
     setShowApiKey(false);
+    setFetchingModels(false);
+    setFetchedModels([]);
+    setModelFetchError(null);
     updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
     if (supportsStructuredConfig(selectedTool)) {
       resetStructuredDraft(selectedTool);
@@ -1235,6 +1381,9 @@ export default function Profiles() {
     setDraftTargetTools(sharedProfiles.map((item) => item.tool_id));
     setDraftContent(prettyJson(profile.config_snapshot));
     setShowApiKey(false);
+    setFetchingModels(false);
+    setFetchedModels([]);
+    setModelFetchError(null);
     if (supportsStructuredConfig(profile.tool_id)) {
       let merged = createDefaultStructuredFields(profile.tool_id);
       for (const item of otherProfiles) {
@@ -1271,6 +1420,9 @@ export default function Profiles() {
     setDraftFragmentName("");
     setSaving(false);
     setShowApiKey(false);
+    setFetchingModels(false);
+    setFetchedModels([]);
+    setModelFetchError(null);
   }, [setDraftFields]);
 
   const doDeleteFragment = useCallback(async (fragment: ProviderConfigFragment) => {
@@ -1655,6 +1807,78 @@ export default function Profiles() {
   const handleSelectDraftOauthAccount = useCallback((accountId: string | null) => {
     updateStructuredDraft(draftTool, { oauthAccountId: accountId || "" });
   }, [draftTool, updateStructuredDraft]);
+  const handleFetchModels = useCallback(async () => {
+    if (fetchingModels || !supportsModelFetch(draftTool)) {
+      return;
+    }
+    if (!draftApiKey.trim()) {
+      showToast(
+        "error",
+        localeText(
+          "请先填写 API Key，再拉取模型列表",
+          "Enter an API key before fetching models",
+          "モデル一覧を取得する前に API Key を入力してください",
+        ),
+      );
+      return;
+    }
+    if (draftUseFullUrl && !draftBaseUrl.trim()) {
+      showToast(
+        "error",
+        localeText(
+          "完整端点模式下需要填写完整接口地址",
+          "Full endpoint mode requires a complete endpoint URL",
+          "完全なエンドポイントモードでは完全な URL が必要です",
+        ),
+      );
+      return;
+    }
+
+    setFetchingModels(true);
+    setModelFetchError(null);
+    try {
+      const models = await invoke<string[]>("fetch_provider_models", {
+        toolId: draftTool,
+        baseUrl: draftBaseUrl,
+        apiKey: draftApiKey,
+        useFullUrl: draftUseFullUrl,
+      });
+      setFetchedModels(models);
+      if (models.length === 0) {
+        showToast(
+          "success",
+          localeText(
+            "已连接成功，但供应商没有返回可选模型",
+            "Connected successfully, but the provider returned no models",
+            "接続には成功しましたが、プロバイダーは利用可能なモデルを返しませんでした",
+          ),
+        );
+      } else {
+        showToast(
+          "success",
+          localeText(
+            `已发现 ${models.length} 个模型`,
+            `Discovered ${models.length} models`,
+            `${models.length} 個のモデルを検出しました`,
+          ),
+        );
+      }
+    } catch (error) {
+      const message = formatModelFetchError(error, localeText);
+      setFetchedModels([]);
+      setModelFetchError(message);
+      showToast("error", message);
+    } finally {
+      setFetchingModels(false);
+    }
+  }, [
+    draftApiKey,
+    draftBaseUrl,
+    draftTool,
+    draftUseFullUrl,
+    fetchingModels,
+    localeText,
+  ]);
   const handleRequestFragmentDelete = useCallback((fragmentId: string) => {
     const fragment = providerFragments.find((item) => item.id === fragmentId);
     if (!fragment) return;
@@ -1691,6 +1915,9 @@ export default function Profiles() {
     const toolId = event.target.value;
     setDraftTool(toolId);
     setNewTool(toolId);
+    setFetchingModels(false);
+    setFetchedModels([]);
+    setModelFetchError(null);
     updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
     if (supportsStructuredConfig(toolId)) {
       if (draftTargetTools.length > 1 || editingProfile?.source_type === "shared") {
@@ -1871,6 +2098,8 @@ export default function Profiles() {
                 showApiKey={showApiKey}
                 draftApiKey={draftApiKey}
                 draftBaseUrl={draftBaseUrl}
+                draftUseFullUrl={draftUseFullUrl}
+                draftIconUrl={draftIconUrl}
                 draftCostMultiplier={draftCostMultiplier}
                 draftEndpointCandidates={draftEndpointCandidates}
                 draftAuthField={draftAuthField}
@@ -1890,6 +2119,7 @@ export default function Profiles() {
 
               <ProfileModelsSection
                 locale={locale}
+                localeText={localeText}
                 draftTool={draftTool}
                 draftModel={draftModel}
                 draftReasoningModel={draftReasoningModel}
@@ -1901,6 +2131,10 @@ export default function Profiles() {
                 draftOpenCodeOutputLimit={draftOpenCodeOutputLimit}
                 draftOpenCodeInputModalities={draftOpenCodeInputModalities}
                 draftOpenCodeOutputModalities={draftOpenCodeOutputModalities}
+                fetchedModels={fetchedModels}
+                fetchingModels={fetchingModels}
+                modelFetchError={modelFetchError}
+                onFetchModels={handleFetchModels}
                 onDraftChange={updateStructuredDraft}
               />
 
@@ -2020,6 +2254,7 @@ export default function Profiles() {
                 icon={Icon}
                 isActive={isActive}
                 toolTag={profile.tool_id}
+                iconUrl={summary.iconUrl}
                 sharedTag={localeText(`共享 ${sharedCount} App`, `Shared ${sharedCount} apps`, `${sharedCount} App 共有`)}
                 baseUrl={summary.baseUrl}
                 model={summary.model}

@@ -8,6 +8,7 @@ export interface WindowPreferences {
   launch_at_login: boolean;
   launch_hidden: boolean;
   close_to_tray: boolean;
+  lightweight_mode: boolean;
 }
 
 export interface TerminalOption {

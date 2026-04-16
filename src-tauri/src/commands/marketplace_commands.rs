@@ -1,7 +1,7 @@
 use crate::db::models::McpServer;
 use crate::db::{record_activity, DbState};
 use crate::mcp::registry;
-use crate::skills::scanner;
+use crate::skills::{scanner, updater};
 use std::collections::HashMap;
 use tauri::State;
 
@@ -146,6 +146,9 @@ pub async fn get_skillhub_skill_content(slug: String) -> Result<String, String> 
 pub fn install_skill_from_marketplace(
     name: String,
     content: String,
+    description: Option<String>,
+    trigger_command: Option<String>,
+    source_url: Option<String>,
     target_dir: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<String, String> {
@@ -167,6 +170,15 @@ pub fn install_skill_from_marketplace(
         .map_err(|e| format!("Failed to write skill file: {}", e))?;
 
     if let Ok(conn) = db.0.lock() {
+        let _ = updater::persist_marketplace_skill_install(
+            &conn,
+            &file_path.to_string_lossy(),
+            &name,
+            description.as_deref(),
+            trigger_command.as_deref(),
+            source_url.as_deref(),
+            &content,
+        );
         record_activity(&conn, &name, "skill_install", "success", None);
     }
 

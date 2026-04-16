@@ -39,6 +39,11 @@ pub struct Skill {
     pub file_path: Option<String>,
     pub version: Option<String>,
     pub installed_at: Option<String>,
+    pub source_url: Option<String>,
+    pub baseline_sha256: Option<String>,
+    pub latest_sha256: Option<String>,
+    pub last_checked_at: Option<i64>,
+    pub current_sha256: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

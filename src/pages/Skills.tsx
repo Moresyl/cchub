@@ -57,6 +57,15 @@ function isStandaloneSkill(skill: Skill) {
   return !skill.plugin_id && !isPromptSkill(skill) && !isCommandSkill(skill);
 }
 
+function hasSkillUpdate(skill: Skill) {
+  return Boolean(
+    skill.source_url
+    && skill.latest_sha256
+    && skill.current_sha256
+    && skill.latest_sha256 !== skill.current_sha256,
+  );
+}
+
 export default function Skills() {
   const queryClient = useQueryClient();
   const cachedSkillsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchSkillsPageData>>>(
@@ -91,9 +100,44 @@ export default function Skills() {
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
     cachedSkillsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
   );
+  const [checkingSkillIds, setCheckingSkillIds] = useState<string[]>([]);
+  const [batchUpdating, setBatchUpdating] = useState(false);
   const i = t();
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const refreshSkillUpdates = useCallback(async (targetSkills: Skill[]) => {
+    const ids = targetSkills
+      .filter((skill) => skill.file_path && skill.source_url)
+      .map((skill) => skill.file_path!) ;
+    if (ids.length === 0) return;
+    setCheckingSkillIds(ids);
+    try {
+      const statuses = await invoke<Array<{
+        id: string;
+        latest_sha256: string | null;
+        current_sha256: string | null;
+        last_checked_at: number | null;
+        update_available: boolean;
+        error: string | null;
+      }>>("check_skill_updates", { ids });
+      setSkills((current) => current.map((skill) => {
+        const key = skill.file_path || skill.id;
+        const next = statuses.find((item) => item.id === key);
+        if (!next) return skill;
+        return {
+          ...skill,
+          latest_sha256: next.latest_sha256,
+          current_sha256: next.current_sha256 ?? skill.current_sha256,
+          last_checked_at: next.last_checked_at,
+        };
+      }));
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setCheckingSkillIds([]);
+    }
+  }, []);
 
   const load = useCallback(async (options: { force?: boolean } = {}) => {
     const { force = false } = options;
@@ -112,11 +156,12 @@ export default function Skills() {
       setSkillSyncMethod(data.skillSyncMethod);
       setVisibleApps(data.visibleApps);
       setSkillBackups(data.skillBackups);
+      void refreshSkillUpdates(data.skills);
       const firstInstalled = data.tools.find((t) => t.installed && data.visibleApps.includes(t.id as ManagedAppId));
       if (firstInstalled) setActiveTool(firstInstalled.id);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [queryClient]);
+  }, [queryClient, refreshSkillUpdates]);
 
   const handleImportSkill = useCallback(async () => {
     const tool = tools.find((t) => t.id === activeTool);
@@ -243,6 +288,28 @@ export default function Skills() {
     void openEditSkill(skill);
   }, [openEditSkill]);
 
+  const handleBatchUpdateSkills = useCallback(async () => {
+    const ids = skills
+      .filter((skill) => (skill.tool_id ? skill.tool_id === activeTool : activeTool === "claude"))
+      .filter((skill) => skill.file_path && hasSkillUpdate(skill))
+      .map((skill) => skill.file_path!);
+    if (ids.length === 0) return;
+    setBatchUpdating(true);
+    try {
+      const updated = await invoke<number>("batch_update_skills", { ids });
+      showToast(
+        "success",
+        locale === "zh" ? `已更新 ${updated} 个技能` : `Updated ${updated} skill(s)`,
+      );
+      await load({ force: true });
+    } catch (error) {
+      console.error(error);
+      showToast("error", String(error));
+    } finally {
+      setBatchUpdating(false);
+    }
+  }, [activeTool, load, locale, skills]);
+
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (visibleApps.includes(activeTool as ManagedAppId)) return;
@@ -283,6 +350,7 @@ export default function Skills() {
   });
 
   const visiblePlugins = activeTool === "claude" ? plugins : [];
+  const updatableVisibleSkillCount = visibleSkills.filter(hasSkillUpdate).length;
 
   const filteredSkills = visibleSkills.filter((s) => {
     if (search) {
@@ -442,6 +510,15 @@ export default function Skills() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => void handleBatchUpdateSkills()}
+            disabled={updatableVisibleSkillCount === 0 || batchUpdating}
+            style={{ gap: 6 }}
+          >
+            {batchUpdating ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Check size={14} />}
+            {locale === "zh" ? `全部更新 (${updatableVisibleSkillCount})` : `Update All (${updatableVisibleSkillCount})`}
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={handleImportSkill} style={{ gap: 6 }}>
             <Upload size={14} />{i.skills.importSkill}
           </button>
@@ -621,6 +698,10 @@ export default function Skills() {
                   deleteTitle={locale === "zh" ? "删除" : "Delete"}
                   enableTitle={locale === "zh" ? "启用" : "Enable"}
                   disableTitle={locale === "zh" ? "禁用" : "Disable"}
+                  updateAvailable={hasSkillUpdate(skill)}
+                  updateLabel={locale === "zh" ? "有更新" : "Update"}
+                  latestLabel={locale === "zh" ? "最新" : "Latest"}
+                  checkingUpdates={checkingSkillIds.includes(skill.file_path || skill.id)}
                   onView={handleViewSkill}
                   onToggle={handleToggleSkill}
                   onEdit={handleOpenEditSkill}

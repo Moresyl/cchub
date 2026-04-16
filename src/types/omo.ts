@@ -38,6 +38,7 @@ export const OMO_BUILTIN_CATEGORIES: OmoCategoryDef[] = [
 
 export const OMO_SLIM_BUILTIN_AGENTS: OmoAgentDef[] = [
   { key: "orchestrator", display: "Orchestrator", recommended: "claude-opus-4-6", group: "main" },
+  { key: "council", display: "Council", recommended: "gpt-5.4", group: "main" },
   { key: "oracle", display: "Oracle", recommended: "gpt-5.4", group: "sub" },
   { key: "librarian", display: "Librarian", recommended: "gemini-3-flash", group: "sub" },
   { key: "explorer", display: "Explorer", recommended: "grok-code-fast-1", group: "sub" },

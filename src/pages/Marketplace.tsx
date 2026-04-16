@@ -430,7 +430,12 @@ export default function Marketplace() {
     setInstalling(skill.id);
     try {
       await invoke<string>("install_skill_from_marketplace", {
-        name: skill.id, content: skill.content, targetDir: null,
+        name: skill.id,
+        content: skill.content,
+        description: skill.description,
+        triggerCommand: null,
+        sourceUrl: skill.github_url,
+        targetDir: null,
       });
       setInstalledSkills(prev => new Set([...prev, skill.name.toLowerCase()]));
     } catch (e) {

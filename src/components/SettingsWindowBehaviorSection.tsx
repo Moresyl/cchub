@@ -13,10 +13,14 @@ interface SettingsWindowBehaviorSectionProps {
   closeToTrayTitle: string;
   closeToTrayDescription: string;
   closeToTrayEnabled: boolean;
-  savingWindowKey: "launch_at_login" | "launch_hidden" | "close_to_tray" | null;
+  lightweightModeTitle: string;
+  lightweightModeDescription: string;
+  lightweightModeEnabled: boolean;
+  savingWindowKey: "launch_at_login" | "launch_hidden" | "close_to_tray" | "lightweight_mode" | null;
   onToggleLaunchAtLogin: () => void | Promise<void>;
   onToggleLaunchHidden: () => void | Promise<void>;
   onToggleCloseToTray: () => void | Promise<void>;
+  onToggleLightweightMode: () => void | Promise<void>;
 }
 
 function SettingsWindowBehaviorSectionComponent({
@@ -30,10 +34,14 @@ function SettingsWindowBehaviorSectionComponent({
   closeToTrayTitle,
   closeToTrayDescription,
   closeToTrayEnabled,
+  lightweightModeTitle,
+  lightweightModeDescription,
+  lightweightModeEnabled,
   savingWindowKey,
   onToggleLaunchAtLogin,
   onToggleLaunchHidden,
   onToggleCloseToTray,
+  onToggleLightweightMode,
 }: SettingsWindowBehaviorSectionProps) {
   return (
     <div className="section-card">
@@ -68,6 +76,16 @@ function SettingsWindowBehaviorSectionComponent({
           enabled={closeToTrayEnabled}
           disabled={savingWindowKey === "close_to_tray"}
           onToggle={onToggleCloseToTray}
+        />
+
+        <div className="divider" />
+
+        <SettingsToggleRow
+          title={lightweightModeTitle}
+          description={lightweightModeDescription}
+          enabled={lightweightModeEnabled}
+          disabled={savingWindowKey === "lightweight_mode"}
+          onToggle={onToggleLightweightMode}
         />
       </div>
     </div>

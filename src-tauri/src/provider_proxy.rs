@@ -109,6 +109,7 @@ struct UpstreamTarget {
     profile_id: String,
     profile_name: String,
     base_url: String,
+    use_full_url: bool,
     candidate_base_urls: Vec<String>,
     headers: Vec<(String, String)>,
     claude_api_format: Option<ClaudeApiFormat>,
@@ -709,6 +710,13 @@ fn extract_provider_type(parsed: &Value) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn extract_use_full_url(parsed: &Value) -> bool {
+    extract_metadata_object(parsed)
+        .get("useFullUrl")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
 fn extract_cost_multiplier(parsed: &Value) -> f64 {
     let metadata = extract_metadata_object(parsed);
     let value = metadata.get("costMultiplier");
@@ -1011,6 +1019,7 @@ async fn extract_upstream_target(
     let provider_type = extract_provider_type(&parsed);
     let is_github_copilot = provider_type.as_deref() == Some("github_copilot");
     let cost_multiplier = extract_cost_multiplier(&parsed);
+    let use_full_url = extract_use_full_url(&parsed);
 
     match tool_id {
         "claude" => {
@@ -1072,6 +1081,7 @@ async fn extract_upstream_target(
                 profile_name,
                 candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
                 base_url,
+                use_full_url,
                 headers,
                 claude_api_format: Some(claude_api_format),
                 is_github_copilot,
@@ -1100,6 +1110,7 @@ async fn extract_upstream_target(
                 profile_name,
                 candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
                 base_url,
+                use_full_url,
                 headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
                 claude_api_format: None,
                 is_github_copilot: false,
@@ -1134,6 +1145,7 @@ async fn extract_upstream_target(
                 profile_name,
                 candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
                 base_url,
+                use_full_url,
                 headers: vec![("x-goog-api-key".to_string(), token.to_string())],
                 claude_api_format: None,
                 is_github_copilot: false,
@@ -1176,6 +1188,7 @@ async fn extract_upstream_target(
                 profile_name,
                 candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
                 base_url,
+                use_full_url,
                 headers,
                 claude_api_format: None,
                 is_github_copilot: false,
@@ -1249,6 +1262,7 @@ async fn extract_upstream_target(
                 profile_name,
                 candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
                 base_url,
+                use_full_url,
                 headers,
                 claude_api_format: None,
                 is_github_copilot: false,
@@ -1304,6 +1318,7 @@ async fn extract_upstream_target(
                 profile_name,
                 candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
                 base_url,
+                use_full_url,
                 headers,
                 claude_api_format: None,
                 is_github_copilot: false,
@@ -1330,7 +1345,22 @@ fn extract_toml_string(content: &str, key: &str) -> Option<String> {
     })
 }
 
-fn build_upstream_request_url(base_url: &str, relative_path: &str, query: Option<&str>) -> String {
+fn build_upstream_request_url(
+    base_url: &str,
+    relative_path: &str,
+    query: Option<&str>,
+    use_full_url: bool,
+) -> String {
+    if use_full_url {
+        let trimmed = base_url.trim();
+        if let Some(query) = query.filter(|value| !value.is_empty()) {
+            if trimmed.contains('?') {
+                return trimmed.to_string();
+            }
+            return format!("{trimmed}?{query}");
+        }
+        return trimmed.to_string();
+    }
     let base = base_url.trim().trim_end_matches('/');
     let relative = relative_path.trim_start_matches('/');
     let adjusted = if relative.is_empty() {
@@ -2340,6 +2370,7 @@ async fn forward_proxy_request(
                     base_url,
                     &effective_relative_path,
                     effective_request_query.as_deref(),
+                    upstream.use_full_url,
                 );
                 let mut builder = client.request(method.clone(), upstream_url.clone());
                 for (name, value) in &forwarded_headers {

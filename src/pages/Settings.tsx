@@ -72,6 +72,7 @@ export default function Settings() {
     launch_at_login: false,
     launch_hidden: false,
     close_to_tray: true,
+    lightweight_mode: false,
   });
   const [terminalPreferences, setTerminalPreferences] = useState<TerminalPreferences | null>(null);
   const [environmentConflicts, setEnvironmentConflicts] = useState<EnvironmentConflict[]>([]);
@@ -527,6 +528,10 @@ export default function Settings() {
     void updateWindowPreference("close_to_tray", !windowPreferences.close_to_tray);
   }, [windowPreferences.close_to_tray]);
 
+  const handleToggleLightweightMode = useCallback(() => {
+    void updateWindowPreference("lightweight_mode", !windowPreferences.lightweight_mode);
+  }, [windowPreferences.lightweight_mode]);
+
   const handleCheckUpdate = useCallback(async () => {
     if (updaterEnvironmentState?.disabled_by_env) {
       let currentVersion: string | null = null;
@@ -763,10 +768,18 @@ export default function Settings() {
             "メインウィンドウを閉じたときに終了せず、システムトレイへ隠します。",
           )}
           closeToTrayEnabled={windowPreferences.close_to_tray}
+          lightweightModeTitle={uiText("轻量模式", "Lightweight mode", "軽量モード")}
+          lightweightModeDescription={uiText(
+            "关闭主窗口时直接销毁窗口，仅保留托盘常驻；下次从托盘打开时会重建主窗口，以换取更低后台内存占用。",
+            "Destroy the main window when it is closed and keep only the tray resident. Opening from the tray will recreate the window to reduce background memory usage.",
+            "メインウィンドウを閉じると破棄し、トレイのみ常駐させます。トレイから再度開く際にウィンドウを再生成し、バックグラウンドのメモリ使用量を抑えます。",
+          )}
+          lightweightModeEnabled={windowPreferences.lightweight_mode}
           savingWindowKey={savingWindowKey}
           onToggleLaunchAtLogin={handleToggleLaunchAtLogin}
           onToggleLaunchHidden={handleToggleLaunchHidden}
           onToggleCloseToTray={handleToggleCloseToTray}
+          onToggleLightweightMode={handleToggleLightweightMode}
         />
 
         <SettingsPreferredTerminalSection

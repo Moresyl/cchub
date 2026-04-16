@@ -1,6 +1,6 @@
 use crate::db::models::{Plugin, Skill};
 use crate::db::{record_activity, DbState};
-use crate::skills::{installer, scanner, tools};
+use crate::skills::{installer, scanner, tools, updater};
 use tauri::State;
 
 fn log_command_timing(command: &str, started_at: std::time::Instant) {
@@ -25,7 +25,11 @@ pub fn scan_skills(db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
 pub fn get_skills(db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, description, plugin_id, trigger_command, file_path, version, installed_at FROM skills")
+        .prepare(
+            "SELECT id, name, description, plugin_id, trigger_command, file_path, version, installed_at,
+                    source_url, baseline_sha256, latest_sha256, last_checked_at
+             FROM skills",
+        )
         .map_err(|e| e.to_string())?;
 
     let skills = stmt
@@ -40,6 +44,11 @@ pub fn get_skills(db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
                 file_path: row.get(5)?,
                 version: row.get(6)?,
                 installed_at: row.get(7)?,
+                source_url: row.get(8)?,
+                baseline_sha256: row.get(9)?,
+                latest_sha256: row.get(10)?,
+                last_checked_at: row.get(11)?,
+                current_sha256: None,
             })
         })
         .map_err(|e| e.to_string())?
@@ -152,6 +161,7 @@ pub fn uninstall_skill_file(path: String, db: State<'_, DbState>) -> Result<(), 
         .unwrap_or_else(|| path.clone());
     installer::uninstall_skill_file(&path)?;
     if let Ok(conn) = db.0.lock() {
+        let _ = updater::remove_skill_metadata(&conn, &path);
         record_activity(&conn, &skill_name, "skill_uninstall", "success", None);
     }
     Ok(())
@@ -226,9 +236,17 @@ pub fn remove_synced_skill(skill_name: String, target_skills_dir: String) -> Res
 }
 
 #[tauri::command]
-pub fn write_skill_content(file_path: String, content: String) -> Result<(), String> {
+pub fn write_skill_content(
+    file_path: String,
+    content: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
     crate::utils::atomic_write_string(std::path::Path::new(&file_path), &content)
-        .map_err(|e| format!("Failed to write {}: {}", file_path, e))
+        .map_err(|e| format!("Failed to write {}: {}", file_path, e))?;
+    if let Ok(conn) = db.0.lock() {
+        let _ = updater::sync_skill_baseline_to_current(&conn, &file_path);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -251,7 +269,7 @@ pub fn toggle_skill_file(
                 .map_err(|e| format!("Failed to enable: {}", e))?;
             Ok(new_path.to_string())
         } else {
-            Ok(file_path) // Already enabled
+            Ok(file_path.clone()) // Already enabled
         }
     } else {
         // Add .disabled suffix
@@ -261,10 +279,13 @@ pub fn toggle_skill_file(
                 .map_err(|e| format!("Failed to disable: {}", e))?;
             Ok(new_path)
         } else {
-            Ok(file_path) // Already disabled
+            Ok(file_path.clone()) // Already disabled
         }
     };
     if let Ok(conn) = db.0.lock() {
+        if let Ok(new_path) = &result {
+            let _ = updater::rename_skill_metadata(&conn, &file_path, new_path);
+        }
         record_activity(
             &conn,
             &skill_name,
@@ -278,6 +299,118 @@ pub fn toggle_skill_file(
         );
     }
     result
+}
+
+#[tauri::command]
+pub async fn check_skill_updates(
+    ids: Vec<String>,
+    db: State<'_, DbState>,
+) -> Result<Vec<updater::SkillUpdateStatus>, String> {
+    let metadata_map = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        updater::load_skill_metadata_map(&conn)?
+    };
+
+    let mut result = Vec::new();
+    for id in ids {
+        let metadata = metadata_map.get(&id);
+        let current_sha256 = updater::file_sha256(std::path::Path::new(&id)).ok();
+        let Some(source_url) = metadata.and_then(|item| item.source_url.as_deref()) else {
+            result.push(updater::SkillUpdateStatus {
+                id,
+                update_available: false,
+                latest_sha256: metadata.and_then(|item| item.latest_sha256.clone()),
+                current_sha256,
+                last_checked_at: metadata.and_then(|item| item.last_checked_at),
+                error: Some("No upstream source URL is recorded for this skill".to_string()),
+            });
+            continue;
+        };
+
+        let now = chrono::Utc::now().timestamp();
+        match updater::fetch_remote_skill_content(source_url).await {
+            Ok(content) => {
+                let latest_sha256 = updater::sha256_hex(&content);
+                {
+                    let conn = db.0.lock().map_err(|e| e.to_string())?;
+                    conn.execute(
+                        "UPDATE skills SET latest_sha256 = ?1, last_checked_at = ?2 WHERE id = ?3 OR file_path = ?3",
+                        rusqlite::params![latest_sha256, now, id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                let update_available = current_sha256
+                    .as_ref()
+                    .map(|current| current != &latest_sha256)
+                    .unwrap_or(false);
+                result.push(updater::SkillUpdateStatus {
+                    id,
+                    update_available,
+                    latest_sha256: Some(latest_sha256),
+                    current_sha256,
+                    last_checked_at: Some(now),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                {
+                    let conn = db.0.lock().map_err(|e| e.to_string())?;
+                    conn.execute(
+                        "UPDATE skills SET last_checked_at = ?1 WHERE id = ?2 OR file_path = ?2",
+                        rusqlite::params![now, id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                result.push(updater::SkillUpdateStatus {
+                    id,
+                    update_available: false,
+                    latest_sha256: metadata.and_then(|item| item.latest_sha256.clone()),
+                    current_sha256,
+                    last_checked_at: Some(now),
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn batch_update_skills(
+    ids: Vec<String>,
+    db: State<'_, DbState>,
+) -> Result<usize, String> {
+    let metadata_map = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        updater::load_skill_metadata_map(&conn)?
+    };
+
+    let mut updated = 0usize;
+    for id in ids {
+        let Some(source_url) = metadata_map
+            .get(&id)
+            .and_then(|item| item.source_url.as_deref())
+        else {
+            continue;
+        };
+        let content = updater::fetch_remote_skill_content(source_url).await?;
+        crate::utils::atomic_write_string(std::path::Path::new(&id), &content)
+            .map_err(|e| format!("Failed to write updated skill {}: {}", id, e))?;
+        let hash = updater::sha256_hex(&content);
+        let now = chrono::Utc::now().timestamp();
+        {
+            let conn = db.0.lock().map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE skills SET baseline_sha256 = ?1, latest_sha256 = ?1, last_checked_at = ?2 WHERE id = ?3 OR file_path = ?3",
+                rusqlite::params![hash, now, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        updated += 1;
+    }
+
+    Ok(updated)
 }
 
 #[tauri::command]

@@ -74,6 +74,8 @@ export interface ConfigPreset {
 export interface StructuredDraftFields {
   presetId: string;
   baseUrl: string;
+  useFullUrl: boolean;
+  iconUrl: string;
   apiKey: string;
   model: string;
   reasoningModel: string;
@@ -272,6 +274,8 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
   return {
     presetId: preset?.id || "custom",
     baseUrl: preset?.baseUrl || "",
+    useFullUrl: false,
+    iconUrl: "",
     apiKey: "",
     model,
     reasoningModel: model,
@@ -329,6 +333,8 @@ export function applyPresetToFields(
       ...createDefaultStructuredFields(toolId),
       presetId,
       baseUrl: current?.baseUrl || "",
+      useFullUrl: current?.useFullUrl || false,
+      iconUrl: current?.iconUrl || "",
       apiKey: current?.apiKey || "",
       model: current?.model || "",
       reasoningModel: current?.reasoningModel || "",
@@ -381,6 +387,8 @@ export function applyPresetToFields(
     ...current,
     presetId,
     baseUrl: preset.baseUrl,
+    useFullUrl: current?.useFullUrl || defaults.useFullUrl,
+    iconUrl: current?.iconUrl || defaults.iconUrl,
     model: preset.model,
     reasoningModel: preset.model || current?.reasoningModel || defaults.reasoningModel,
     haikuModel: preset.model || current?.haikuModel || defaults.haikuModel,
@@ -463,6 +471,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
         apiKeyUrl: fields.apiKeyUrl,
         endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
         costMultiplier: fields.costMultiplier.trim() || undefined,
+        useFullUrl: fields.useFullUrl || undefined,
+        iconUrl: fields.iconUrl.trim() || undefined,
         templateValues: parseTemplateValues(fields.templateValues),
         requiresOAuth: fields.requiresOAuth,
         providerType: fields.providerType || undefined,
@@ -516,6 +526,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           apiKeyUrl: fields.apiKeyUrl,
           endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
           costMultiplier: fields.costMultiplier.trim() || undefined,
+          useFullUrl: fields.useFullUrl || undefined,
+          iconUrl: fields.iconUrl.trim() || undefined,
         },
       },
       null,
@@ -561,6 +573,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           apiKeyUrl: fields.apiKeyUrl,
           endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
           costMultiplier: fields.costMultiplier.trim() || undefined,
+          useFullUrl: fields.useFullUrl || undefined,
+          iconUrl: fields.iconUrl.trim() || undefined,
         },
       },
       null,
@@ -592,6 +606,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           apiKeyUrl: fields.apiKeyUrl,
           endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
           costMultiplier: fields.costMultiplier.trim() || undefined,
+          useFullUrl: fields.useFullUrl || undefined,
+          iconUrl: fields.iconUrl.trim() || undefined,
           hermesProvider: provider,
           hermesApiKeyEnv: envKey || undefined,
         },
@@ -649,6 +665,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           apiKeyUrl: fields.apiKeyUrl,
           endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
           costMultiplier: fields.costMultiplier.trim() || undefined,
+          useFullUrl: fields.useFullUrl || undefined,
+          iconUrl: fields.iconUrl.trim() || undefined,
         },
         options: {
           baseURL: fields.baseUrl.trim(),
@@ -678,6 +696,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
         apiKeyUrl: fields.apiKeyUrl,
         endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
         costMultiplier: fields.costMultiplier.trim() || undefined,
+        useFullUrl: fields.useFullUrl || undefined,
+        iconUrl: fields.iconUrl.trim() || undefined,
         requiresOAuth: fields.requiresOAuth,
         providerType: fields.providerType || undefined,
       },
@@ -718,6 +738,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         category: metadata.category || defaults.category,
         endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
         costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        useFullUrl: parseBooleanLike(metadata.useFullUrl),
+        iconUrl: metadata.iconUrl || defaults.iconUrl,
         templateValues: stringifyTemplateValues(metadata.templateValues),
         requiresOAuth: Boolean(metadata.requiresOAuth),
         providerType: metadata.providerType || defaults.providerType,
@@ -743,6 +765,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         category: metadata.category || defaults.category,
         endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
         costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        useFullUrl: parseBooleanLike(metadata.useFullUrl),
+        iconUrl: metadata.iconUrl || defaults.iconUrl,
       };
     }
 
@@ -766,6 +790,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         category: metadata.category || defaults.category,
         endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
         costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        useFullUrl: parseBooleanLike(metadata.useFullUrl),
+        iconUrl: metadata.iconUrl || defaults.iconUrl,
         openClawContextWindow: firstModel?.contextWindow ? String(firstModel.contextWindow) : "",
         openClawCostInput: firstModel?.cost?.input !== undefined ? String(firstModel.cost.input) : "",
         openClawCostOutput: firstModel?.cost?.output !== undefined ? String(firstModel.cost.output) : "",
@@ -790,6 +816,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         category: metadata.category || defaults.category,
         endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
         costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        useFullUrl: parseBooleanLike(metadata.useFullUrl),
+        iconUrl: metadata.iconUrl || defaults.iconUrl,
         hermesProvider: modelConfig.provider || metadata.hermesProvider || defaults.hermesProvider,
         hermesApiKeyEnv,
       };
@@ -819,6 +847,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         category: metadata.category || defaults.category,
         endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
         costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        useFullUrl: parseBooleanLike(metadata.useFullUrl),
+        iconUrl: metadata.iconUrl || defaults.iconUrl,
         openCodeContextLimit: firstModel.contextLimit !== undefined ? String(firstModel.contextLimit) : "",
         openCodeOutputLimit: firstModel.outputLimit !== undefined ? String(firstModel.outputLimit) : "",
         openCodeInputModalities: Array.isArray(modalities.input) ? modalities.input.join(",") : "",
@@ -843,6 +873,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       category: metadata.category || defaults.category,
       endpointCandidates: Array.isArray(metadata.endpointCandidates) ? metadata.endpointCandidates.join("\n") : defaults.endpointCandidates,
       costMultiplier: metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+      useFullUrl: parseBooleanLike(metadata.useFullUrl),
+      iconUrl: metadata.iconUrl || defaults.iconUrl,
       requiresOAuth: Boolean(metadata.requiresOAuth),
       providerType: metadata.providerType || defaults.providerType,
       oauthAccountId:

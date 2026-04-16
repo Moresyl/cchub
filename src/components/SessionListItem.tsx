@@ -1,5 +1,6 @@
 import { memo } from "react";
-import { Clock3, Copy, FileText, FolderOpen, Trash2 } from "lucide-react";
+import { CheckSquare, Clock3, Copy, FileText, FolderOpen, Hash, Trash2 } from "lucide-react";
+import HighlightedText from "./HighlightedText";
 
 export interface SessionListItemSession {
   id: string;
@@ -14,6 +15,9 @@ export interface SessionListItemSession {
   updated_at: string | null;
   preview: string;
   message_count: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  tokens_used: number | null;
   search_hit_count: number;
   can_resume: boolean;
   can_delete: boolean;
@@ -25,14 +29,18 @@ interface SessionListItemProps {
   query: string;
   resumeCommand: string | null;
   deleting: boolean;
+  checked: boolean;
   copyLabel: string;
   copyTitle: string;
   deleteTitle: string;
   deleteLabel: string;
+  selectLabel: string;
+  tokenLabel: (count: number) => string;
   unknownTimeLabel: string;
   matchLabel: (count: number) => string;
   itemsLabel: (count: number) => string;
   onOpen: (session: SessionListItemSession) => void;
+  onToggleChecked: (session: SessionListItemSession) => void;
   onCopyResume: (command: string) => void;
   onDelete: (session: SessionListItemSession) => void;
 }
@@ -43,14 +51,18 @@ function SessionListItemComponent({
   query,
   resumeCommand,
   deleting,
+  checked,
   copyLabel,
   copyTitle,
   deleteTitle,
   deleteLabel,
+  selectLabel,
+  tokenLabel,
   unknownTimeLabel,
   matchLabel,
   itemsLabel,
   onOpen,
+  onToggleChecked,
   onCopyResume,
   onDelete,
 }: SessionListItemProps) {
@@ -68,6 +80,16 @@ function SessionListItemComponent({
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            <button
+              className={`btn btn-ghost btn-icon-sm ${checked ? "selected" : ""}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleChecked(session);
+              }}
+              title={selectLabel}
+            >
+              <CheckSquare size={14} style={{ color: checked ? "var(--accent)" : undefined }} />
+            </button>
             <span className="badge badge-accent" style={{ fontSize: 10 }}>{session.tool_name}</span>
             <span className="badge badge-muted" style={{ fontSize: 10 }}>{session.source_backend}</span>
             {session.search_hit_count > 0 && query.trim() && (
@@ -77,10 +99,10 @@ function SessionListItemComponent({
             )}
           </div>
           <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.35 }}>
-            {session.title}
+            <HighlightedText text={session.title} query={query} />
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5 }}>
-            {session.preview}
+            <HighlightedText text={session.preview} query={query} />
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
@@ -91,11 +113,17 @@ function SessionListItemComponent({
               <FileText size={12} />
               {itemsLabel(session.message_count)}
             </span>
+            {session.tokens_used != null && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <Hash size={12} />
+                {tokenLabel(session.tokens_used)}
+              </span>
+            )}
             {session.cwd && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0 }}>
                 <FolderOpen size={12} />
                 <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {session.cwd}
+                  <HighlightedText text={session.cwd} query={query} />
                 </span>
               </span>
             )}

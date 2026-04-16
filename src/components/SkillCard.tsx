@@ -9,6 +9,11 @@ export interface SkillCardSkill {
   plugin_id: string | null;
   trigger_command: string | null;
   file_path: string | null;
+  source_url?: string | null;
+  baseline_sha256?: string | null;
+  latest_sha256?: string | null;
+  last_checked_at?: number | null;
+  current_sha256?: string | null;
 }
 
 interface SkillCardProps {
@@ -19,6 +24,10 @@ interface SkillCardProps {
   deleteTitle: string;
   enableTitle: string;
   disableTitle: string;
+  updateAvailable: boolean;
+  updateLabel: string;
+  latestLabel: string;
+  checkingUpdates: boolean;
   onView: (skill: SkillCardSkill) => void;
   onToggle: (skill: SkillCardSkill) => void;
   onEdit: (skill: SkillCardSkill) => void;
@@ -33,6 +42,10 @@ function SkillCardComponent({
   deleteTitle,
   enableTitle,
   disableTitle,
+  updateAvailable,
+  updateLabel,
+  latestLabel,
+  checkingUpdates,
   onView,
   onToggle,
   onEdit,
@@ -55,6 +68,11 @@ function SkillCardComponent({
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>{skill.name}</span>
               {skill.plugin_id && <span className="badge badge-muted" style={{ fontSize: 10 }}>{skill.plugin_id}</span>}
+              {skill.source_url && (
+                <span className={`badge ${updateAvailable ? "badge-warning" : "badge-success"}`} style={{ fontSize: 10 }}>
+                  {checkingUpdates ? "..." : updateAvailable ? updateLabel : latestLabel}
+                </span>
+              )}
               {isDisabled && (
                 <span className="badge badge-muted" style={{ fontSize: 10 }}>{disabledLabel}</span>
               )}

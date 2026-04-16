@@ -1,7 +1,9 @@
 use super::tools::{detect_tools, detect_tools_for_conn};
+use super::updater;
 use crate::db::models::{Plugin, Skill};
 use rusqlite::Connection;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,11 +182,20 @@ pub fn scan_local_skills_for_conn(conn: &Connection) -> Vec<Skill> {
 
 fn scan_local_skills_with_conn(conn: Option<&Connection>) -> Vec<Skill> {
     let mut skills = Vec::new();
+    let metadata_map = conn
+        .and_then(|value| updater::load_skill_metadata_map(value).ok())
+        .unwrap_or_default();
 
     // Scan skills within plugins
     if let Some(plugins_dir) = get_plugins_dir() {
         if plugins_dir.exists() {
-            scan_skills_in_dir(&plugins_dir, &mut skills, true, Some("claude"));
+            scan_skills_in_dir(
+                &plugins_dir,
+                &mut skills,
+                true,
+                Some("claude"),
+                &metadata_map,
+            );
         }
     }
 
@@ -193,7 +204,13 @@ fn scan_local_skills_with_conn(conn: Option<&Connection>) -> Vec<Skill> {
     for tool in detected_tools.into_iter().filter(|tool| tool.installed) {
         let skills_dir = PathBuf::from(&tool.skills_dir);
         if skills_dir.exists() {
-            scan_skills_in_dir(&skills_dir, &mut skills, false, Some(tool.id.as_str()));
+            scan_skills_in_dir(
+                &skills_dir,
+                &mut skills,
+                false,
+                Some(tool.id.as_str()),
+                &metadata_map,
+            );
         }
     }
 
@@ -205,10 +222,11 @@ fn scan_skills_in_dir(
     skills: &mut Vec<Skill>,
     is_plugin_dir: bool,
     tool_id: Option<&str>,
+    metadata_map: &HashMap<String, updater::SkillSourceMetadata>,
 ) {
     let walker = walkdir(dir, is_plugin_dir);
     for skill_file in walker {
-        if let Some(skill) = parse_skill_file(&skill_file, is_plugin_dir, tool_id) {
+        if let Some(skill) = parse_skill_file(&skill_file, is_plugin_dir, tool_id, metadata_map) {
             skills.push(skill);
         }
     }
@@ -249,9 +267,17 @@ fn walk_recursive(
     }
 }
 
-fn parse_skill_file(path: &PathBuf, is_plugin_dir: bool, tool_id: Option<&str>) -> Option<Skill> {
+fn parse_skill_file(
+    path: &PathBuf,
+    is_plugin_dir: bool,
+    tool_id: Option<&str>,
+    metadata_map: &HashMap<String, updater::SkillSourceMetadata>,
+) -> Option<Skill> {
     let content = std::fs::read_to_string(path).ok()?;
     let file_name = path.file_stem()?.to_string_lossy().to_string();
+    let path_key = path.to_string_lossy().to_string();
+    let metadata = metadata_map.get(&path_key);
+    let current_sha256 = Some(updater::sha256_hex(&content));
 
     // Extract frontmatter metadata
     let (name, description, trigger) = if content.starts_with("---") {
@@ -271,7 +297,7 @@ fn parse_skill_file(path: &PathBuf, is_plugin_dir: bool, tool_id: Option<&str>) 
     };
 
     Some(Skill {
-        id: path.to_string_lossy().to_string(),
+        id: path_key,
         name,
         description,
         tool_id: tool_id.map(str::to_string),
@@ -280,6 +306,11 @@ fn parse_skill_file(path: &PathBuf, is_plugin_dir: bool, tool_id: Option<&str>) 
         file_path: Some(path.to_string_lossy().to_string()),
         version: None,
         installed_at: get_file_created_time(path),
+        source_url: metadata.and_then(|item| item.source_url.clone()),
+        baseline_sha256: metadata.and_then(|item| item.baseline_sha256.clone()),
+        latest_sha256: metadata.and_then(|item| item.latest_sha256.clone()),
+        last_checked_at: metadata.and_then(|item| item.last_checked_at),
+        current_sha256,
     })
 }
 

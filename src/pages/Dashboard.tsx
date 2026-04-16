@@ -4,7 +4,12 @@ import { Plug, Zap, Package, Monitor, Terminal, Code, Wind, Activity, ArrowRight
 import { t, getLocale } from "../lib/i18n";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { useDetectTools, queryKeys } from "../hooks/queries";
+import {
+  fetchMcpServersPageData,
+  fetchSkillsPageData,
+  useDetectTools,
+  queryKeys,
+} from "../hooks/queries";
 import DashboardToolChip from "../components/DashboardToolChip";
 import DashboardHermesRootOverride from "../components/DashboardHermesRootOverride";
 import DashboardServerRow, { type DashboardServerRowServer } from "../components/DashboardServerRow";
@@ -62,16 +67,17 @@ export default function Dashboard() {
       refreshRequestIdRef.current = requestId;
 
       try {
-        const [scannedServers, scannedSkills, scannedPlugins] = await Promise.all([
-          queryClient.fetchQuery({
-            queryKey: queryKeys.mcpServers,
-            queryFn: () => invoke<McpServer[]>("scan_mcp_servers"),
+        const [mcpPage, skillsPage, scannedPlugins] = await Promise.all([
+          // 复用 App.tsx 预热的 mcpServersPage/skillsPage 缓存，避免重复 scan_mcp_servers / scan_skills
+          queryClient.ensureQueryData({
+            queryKey: queryKeys.mcpServersPage,
+            queryFn: fetchMcpServersPageData,
           }),
-          queryClient.fetchQuery({
-            queryKey: queryKeys.skills,
-            queryFn: () => invoke<Skill[]>("scan_skills"),
+          queryClient.ensureQueryData({
+            queryKey: queryKeys.skillsPage,
+            queryFn: fetchSkillsPageData,
           }),
-          queryClient.fetchQuery({
+          queryClient.ensureQueryData({
             queryKey: queryKeys.plugins,
             queryFn: () => invoke<Plugin[]>("get_plugins"),
           }),
@@ -81,8 +87,8 @@ export default function Dashboard() {
         }
 
         startTransition(() => {
-          setServers(scannedServers);
-          setSkills(scannedSkills);
+          setServers(mcpPage.servers as McpServer[]);
+          setSkills(skillsPage.skills as Skill[]);
           setPlugins(scannedPlugins);
         });
         void refetchTools();

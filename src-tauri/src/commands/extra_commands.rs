@@ -7748,7 +7748,11 @@ pub fn get_codex_settings() -> Result<serde_json::Value, String> {
         }));
     }
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let doc: toml::Value = content
+    // NOTE: `content.parse::<toml::Value>()` is broken in toml 1.0 — the
+    // `FromStr for Value` impl only parses a single TOML value expression,
+    // not a whole document, so it fails on any real config.toml with
+    // "unexpected content, expected nothing". Parse as `toml::Table` instead.
+    let doc: toml::Table = content
         .parse()
         .map_err(|e: toml::de::Error| e.to_string())?;
 

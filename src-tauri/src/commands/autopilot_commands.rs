@@ -3,13 +3,14 @@ use serde_json::Value;
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::utils;
@@ -237,6 +238,7 @@ pub async fn pick_autopilot_file() -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub fn start_autopilot(
+    app: AppHandle,
     request: AutopilotStartRequest,
     runtime: State<'_, AutopilotRuntime>,
 ) -> Result<AutopilotStatus, String> {
@@ -330,7 +332,8 @@ pub fn start_autopilot(
     };
     thread::spawn({
         let runtime = runtime.clone();
-        move || run_native_autopilot(runtime, context)
+        let app = app.clone();
+        move || run_native_autopilot(app, runtime, context)
     });
 
     runtime.snapshot()
@@ -457,8 +460,8 @@ pub fn clear_autopilot_logs(
     Ok(AutopilotClearResult { deleted_count })
 }
 
-fn run_native_autopilot(runtime: AutopilotRuntime, context: NativeAutopilotContext) {
-    if let Err(error) = run_native_autopilot_inner(&runtime, &context) {
+fn run_native_autopilot(app: AppHandle, runtime: AutopilotRuntime, context: NativeAutopilotContext) {
+    if let Err(error) = run_native_autopilot_inner(&app, &runtime, &context) {
         let _ = append_main_log(&context.paths.main_log, "ERROR", &error);
         let _ = runtime.update_status(|status| {
             status.running = false;
@@ -467,11 +470,13 @@ fn run_native_autopilot(runtime: AutopilotRuntime, context: NativeAutopilotConte
             status.last_error = error.clone();
             push_stage(status, "failed", error.clone(), Some(status.attempt));
         });
+        emit_stage(&app, "failed", &error, None);
     }
     let _ = runtime.clear_child();
 }
 
 fn run_native_autopilot_inner(
+    app: &AppHandle,
     runtime: &AutopilotRuntime,
     context: &NativeAutopilotContext,
 ) -> Result<(), String> {
@@ -502,6 +507,7 @@ fn run_native_autopilot_inner(
     runtime.update_status(|status| {
         push_stage(status, "running", "开始执行任务".to_string(), None);
     })?;
+    emit_stage(app, "running", "开始执行任务", None);
 
     if context.request.dry_run {
         append_main_log(&context.paths.main_log, "INFO", "Dry Run 完成，未执行 Codex")?;
@@ -511,6 +517,7 @@ fn run_native_autopilot_inner(
             status.finished_at = Some(now_string());
             push_stage(status, "completed", "Dry Run 已完成".to_string(), None);
         })?;
+        emit_stage(app, "completed", "Dry Run 已完成", None);
         return Ok(());
     }
 
@@ -551,6 +558,7 @@ fn run_native_autopilot_inner(
                         Some(status.attempt),
                     );
                 })?;
+                emit_stage(app, "max_attempts", "达到最大尝试次数，任务已停止", Some(attempt));
                 return Ok(());
             }
         }
@@ -558,6 +566,7 @@ fn run_native_autopilot_inner(
         runtime.update_status(|status| {
             push_stage(status, "attempt", format!("开始第 {attempt} 轮执行"), Some(attempt));
         })?;
+        emit_stage(app, "attempt", &format!("开始第 {attempt} 轮执行"), Some(attempt));
 
         let round_start = Instant::now();
         let exec_mode = if attempt == 1 || session_id.is_none() {
@@ -566,7 +575,7 @@ fn run_native_autopilot_inner(
             ExecMode::Resume
         };
         let exec_result =
-            run_codex_round(runtime, context, exec_mode, session_id.as_deref(), attempt)?;
+            run_codex_round(app, runtime, context, exec_mode, session_id.as_deref(), attempt)?;
         let round_elapsed = round_start.elapsed();
 
         snapshot_last_message(&context.paths, attempt)?;
@@ -602,6 +611,7 @@ fn run_native_autopilot_inner(
                     Some(attempt),
                 );
             })?;
+            emit_stage(app, "completed", "完成协议校验通过，任务已完成", Some(attempt));
             return Ok(());
         }
 
@@ -647,6 +657,7 @@ fn run_native_autopilot_inner(
                     };
                     push_stage(status, "idle_stopped", summary, Some(attempt));
                 })?;
+                emit_stage(app, "idle_stopped", "检测到连续空转，已自动停止", Some(attempt));
                 return Ok(());
             }
         } else {
@@ -669,6 +680,7 @@ fn run_native_autopilot_inner(
                 Some(attempt),
             );
         })?;
+        emit_stage(app, "waiting_retry", &format!("第 {attempt} 轮未完成，等待下次续跑"), Some(attempt));
 
         if !sleep_with_stop(runtime, interval_secs) {
             finalize_stopped(runtime)?;
@@ -678,6 +690,7 @@ fn run_native_autopilot_inner(
 }
 
 fn run_codex_round(
+    app: &AppHandle,
     runtime: &AutopilotRuntime,
     context: &NativeAutopilotContext,
     requested_mode: ExecMode,
@@ -701,17 +714,14 @@ fn run_codex_round(
         ExecMode::Initial => "正在启动新的 Codex 会话".to_string(),
         ExecMode::Resume => "正在续跑现有会话".to_string(),
     };
+    let phase_tag = match mode {
+        ExecMode::Initial => "starting_session",
+        ExecMode::Resume => "resuming_session",
+    };
     runtime.update_status(|status| {
-        push_stage(
-            status,
-            match mode {
-                ExecMode::Initial => "starting_session",
-                ExecMode::Resume => "resuming_session",
-            },
-            phase_message,
-            Some(attempt),
-        );
+        push_stage(status, phase_tag, phase_message.clone(), Some(attempt));
     })?;
+    emit_stage(app, phase_tag, &phase_message, Some(attempt));
 
     append_main_log(
         &context.paths.main_log,
@@ -734,14 +744,66 @@ fn run_codex_round(
     let stderr = child.stderr.take();
     runtime.set_child(child)?;
 
+    // round_start 事件 + heartbeat 状态
+    let round_start_ms = now_epoch_ms();
+    let last_event_ms: Arc<AtomicI64> = Arc::new(AtomicI64::new(round_start_ms));
+    let _ = app.emit(
+        "autopilot://round-start",
+        serde_json::json!({
+            "attempt": attempt,
+            "mode": match mode {
+                ExecMode::Initial => "initial",
+                ExecMode::Resume => "resume",
+            },
+            "started_at_ms": round_start_ms,
+        }),
+    );
+
     let out_handle = stdout.map(|pipe| {
         let path = context.paths.event_log.clone();
-        thread::spawn(move || stream_pipe_to_file(pipe, &path))
+        let app = app.clone();
+        let last = last_event_ms.clone();
+        thread::spawn(move || stream_codex_pipe(pipe, &path, app, "stdout", last, attempt))
     });
     let err_handle = stderr.map(|pipe| {
         let path = context.paths.runner_log.clone();
-        thread::spawn(move || stream_pipe_to_file(pipe, &path))
+        let app = app.clone();
+        let last = last_event_ms.clone();
+        thread::spawn(move || stream_codex_pipe(pipe, &path, app, "stderr", last, attempt))
     });
+
+    // 心跳：child 跑期间每 5s 推送 elapsed + last_event_age
+    let heartbeat_stop = Arc::new(AtomicBool::new(false));
+    let hb_handle = {
+        let stop = heartbeat_stop.clone();
+        let app = app.clone();
+        let last_event_ms = last_event_ms.clone();
+        thread::spawn(move || {
+            // 启动后延迟首帧 1s，让 round-start 先到 UI
+            thread::sleep(Duration::from_millis(1000));
+            while !stop.load(Ordering::Relaxed) {
+                let now = now_epoch_ms();
+                let elapsed_ms = now - round_start_ms;
+                let last_evt = last_event_ms.load(Ordering::Relaxed);
+                let last_event_age_ms = if last_evt > 0 { now - last_evt } else { -1 };
+                let _ = app.emit(
+                    "autopilot://tick",
+                    serde_json::json!({
+                        "attempt": attempt,
+                        "elapsed_ms": elapsed_ms,
+                        "last_event_age_ms": last_event_age_ms,
+                    }),
+                );
+                // 分片 sleep，使 stop 响应 ≤ 500ms
+                for _ in 0..10 {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(500));
+                }
+            }
+        })
+    };
 
     let return_code = runtime.with_child(|slot| {
         if let Some(child) = slot.as_mut() {
@@ -755,12 +817,24 @@ fn run_codex_round(
     })?;
 
     let _ = runtime.clear_child();
+    heartbeat_stop.store(true, Ordering::Relaxed);
+    let _ = hb_handle.join();
     if let Some(handle) = out_handle {
         let _ = handle.join();
     }
     if let Some(handle) = err_handle {
         let _ = handle.join();
     }
+
+    let round_end_ms = now_epoch_ms();
+    let _ = app.emit(
+        "autopilot://round-end",
+        serde_json::json!({
+            "attempt": attempt,
+            "return_code": return_code,
+            "elapsed_ms": round_end_ms - round_start_ms,
+        }),
+    );
 
     if return_code != 0 && !runtime.is_stop_requested() {
         append_main_log(
@@ -1118,21 +1192,74 @@ fn append_main_log(path: &Path, level: &str, message: &str) -> Result<(), String
     file.flush().map_err(|e| format!("写入主日志失败: {e}"))
 }
 
-fn stream_pipe_to_file<R: std::io::Read>(pipe: R, path: &Path) {
+fn stream_codex_pipe<R: std::io::Read>(
+    pipe: R,
+    path: &Path,
+    app: AppHandle,
+    stream_kind: &'static str,
+    last_event_ms: Arc<AtomicI64>,
+    attempt: u32,
+) {
     let Some(parent) = path.parent() else {
         return;
     };
     if fs::create_dir_all(parent).is_err() {
         return;
     }
-    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
+    let Ok(file) = OpenOptions::new().create(true).append(true).open(path) else {
         return;
     };
+    // BufWriter 累积写入，不再每行 fsync；每 16 行或 stream 结束时 flush
+    let mut writer = BufWriter::with_capacity(8 * 1024, file);
     let reader = BufReader::new(pipe);
+    let mut line_count: u32 = 0;
     for line in reader.lines().map_while(Result::ok) {
-        let _ = writeln!(file, "{line}");
-        let _ = file.flush();
+        let _ = writeln!(writer, "{line}");
+        line_count = line_count.saturating_add(1);
+        if line_count % 16 == 0 {
+            let _ = writer.flush();
+        }
+        last_event_ms.store(now_epoch_ms(), Ordering::Relaxed);
+        let payload = if stream_kind == "stdout" {
+            // codex exec --json 模式下每行一个事件对象
+            match serde_json::from_str::<Value>(&line) {
+                Ok(value) => serde_json::json!({
+                    "kind": "stdout",
+                    "attempt": attempt,
+                    "json": value,
+                }),
+                Err(_) => serde_json::json!({
+                    "kind": "stdout",
+                    "attempt": attempt,
+                    "raw": line,
+                }),
+            }
+        } else {
+            serde_json::json!({
+                "kind": "stderr",
+                "attempt": attempt,
+                "raw": line,
+            })
+        };
+        let _ = app.emit("autopilot://codex-event", payload);
     }
+    let _ = writer.flush();
+}
+
+fn now_epoch_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn emit_stage(app: &AppHandle, phase: &str, message: &str, attempt: Option<u32>) {
+    let _ = app.emit(
+        "autopilot://stage",
+        serde_json::json!({
+            "phase": phase,
+            "message": message,
+            "attempt": attempt,
+            "at_ms": now_epoch_ms(),
+        }),
+    );
 }
 
 fn finalize_stopped(runtime: &AutopilotRuntime) -> Result<(), String> {

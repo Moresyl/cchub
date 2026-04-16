@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   Bot,
   FileSearch,
@@ -10,7 +11,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { showToast } from "../components/Toast";
 import { getLocale } from "../lib/i18n";
@@ -69,13 +70,50 @@ interface AutopilotClearResult {
   deletedCount: number;
 }
 
+// 后端实时事件：codex 子进程 stdout/stderr + 心跳 + 轮次/阶段切换
+interface CodexEventPayload {
+  kind: "stdout" | "stderr";
+  attempt: number;
+  json?: unknown;
+  raw?: string;
+}
+interface TickPayload {
+  attempt: number;
+  elapsed_ms: number;
+  last_event_age_ms: number;
+}
+interface RoundStartPayload {
+  attempt: number;
+  mode: "initial" | "resume";
+  started_at_ms: number;
+}
+interface RoundEndPayload {
+  attempt: number;
+  return_code: number;
+  elapsed_ms: number;
+}
+interface StagePayload {
+  phase: string;
+  message: string;
+  attempt: number | null;
+  at_ms: number;
+}
+type LiveEvent =
+  | { id: number; kind: "codex"; payload: CodexEventPayload }
+  | { id: number; kind: "round-start"; payload: RoundStartPayload }
+  | { id: number; kind: "round-end"; payload: RoundEndPayload }
+  | { id: number; kind: "stage"; payload: StagePayload };
+
 type DialogState =
   | { type: "delete"; runId: string; name: string }
   | { type: "clear" }
   | null;
 
 const STORAGE_KEY = "cchub-autopilot-form";
-const POLL_INTERVAL_MS = 2500;
+// 事件流接入后，轮询只做兜底：事件丢失/崩溃恢复/最终状态持久化
+const POLL_INTERVAL_MS = 10000;
+// 实时输出面板最多保留的条数，再多就丢弃最旧的（避免内存膨胀）
+const MAX_LIVE_EVENTS = 300;
 const DEFAULT_FORM: AutopilotFormState = {
   taskFile: "",
   workdir: "",
@@ -269,6 +307,14 @@ export default function Autopilot() {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [busyRunId, setBusyRunId] = useState<string | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
+  // L1 实时事件流：codex stdout/stderr + stage 事件累积
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
+  // L2 心跳：本轮 elapsed 与最近事件距今毫秒数
+  const [tick, setTick] = useState<TickPayload | null>(null);
+  // 实时输出面板可折叠
+  const [liveOutputOpen, setLiveOutputOpen] = useState(true);
+  const liveEventIdRef = useRef(0);
+  const liveListRef = useRef<HTMLDivElement | null>(null);
   const locale = getLocale();
   const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
@@ -316,6 +362,72 @@ export default function Autopilot() {
     void loadAll();
   }, [loadAll]);
 
+  // L1+L2 实时事件订阅：codex 输出流、心跳、轮次与阶段切换
+  // Tauri 事件通道一旦建立就是进程内直通的，不依赖 status.running，
+  // 因为 running=false → true 的翻转本身就是通过事件先到达前端的
+  useEffect(() => {
+    let unlistenAll: UnlistenFn[] = [];
+    let cancelled = false;
+
+    const appendEvent = (event: Omit<LiveEvent, "id">) => {
+      liveEventIdRef.current += 1;
+      const id = liveEventIdRef.current;
+      setLiveEvents((prev) => {
+        const next = [...prev, { ...event, id } as LiveEvent];
+        if (next.length > MAX_LIVE_EVENTS) {
+          next.splice(0, next.length - MAX_LIVE_EVENTS);
+        }
+        return next;
+      });
+    };
+
+    (async () => {
+      const subs = await Promise.all([
+        listen<CodexEventPayload>("autopilot://codex-event", (e) => {
+          appendEvent({ kind: "codex", payload: e.payload });
+        }),
+        listen<TickPayload>("autopilot://tick", (e) => {
+          setTick(e.payload);
+        }),
+        listen<RoundStartPayload>("autopilot://round-start", (e) => {
+          appendEvent({ kind: "round-start", payload: e.payload });
+          setTick({ attempt: e.payload.attempt, elapsed_ms: 0, last_event_age_ms: -1 });
+        }),
+        listen<RoundEndPayload>("autopilot://round-end", (e) => {
+          appendEvent({ kind: "round-end", payload: e.payload });
+          // 轮次结束立即刷状态，不等 10s 轮询
+          void loadAll(true);
+        }),
+        listen<StagePayload>("autopilot://stage", (e) => {
+          appendEvent({ kind: "stage", payload: e.payload });
+          // 阶段切换往往伴随 status/finished 变化，同步一次
+          void loadAll(true);
+        }),
+      ]);
+      if (cancelled) {
+        subs.forEach((fn) => fn());
+      } else {
+        unlistenAll = subs;
+      }
+    })().catch((error) => console.error("autopilot listen failed:", error));
+
+    return () => {
+      cancelled = true;
+      unlistenAll.forEach((fn) => fn());
+    };
+  }, [loadAll]);
+
+  // 新一轮启动时自动滚到底部
+  useEffect(() => {
+    if (!liveOutputOpen) return;
+    const el = liveListRef.current;
+    if (!el) return;
+    // 小幅超时让 DOM 更新先完成
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [liveEvents, liveOutputOpen]);
+
   useEffect(() => {
     if (!status.running) return undefined;
     const timer = window.setInterval(() => {
@@ -323,6 +435,13 @@ export default function Autopilot() {
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadAll, status.running]);
+
+  // running 结束后清理心跳 state，避免旧值残留
+  useEffect(() => {
+    if (!status.running) {
+      setTick(null);
+    }
+  }, [status.running]);
 
   useEffect(() => {
     if (!status.running) return undefined;
@@ -479,6 +598,26 @@ export default function Autopilot() {
   const runtimeLabel = formatRuntime(status.startedAt, status.finishedAt, nowTs);
   const runtimeTone = status.running ? "#2563eb" : "var(--text-primary)";
 
+  // 心跳展示：本轮已执行 Xm Ys · 最近事件 Zs 前
+  const heartbeatLabel = useMemo(() => {
+    if (!status.running || !tick) return null;
+    const elapsedSec = Math.max(0, Math.floor(tick.elapsed_ms / 1000));
+    const m = Math.floor(elapsedSec / 60);
+    const s = elapsedSec % 60;
+    const elapsedText = m > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+    if (tick.last_event_age_ms < 0) {
+      return uiText(`本轮 ${elapsedText}`, `Round ${elapsedText}`, `ラウンド ${elapsedText}`);
+    }
+    const ageSec = Math.max(0, Math.floor(tick.last_event_age_ms / 1000));
+    const stall = ageSec >= 120;
+    const ageText = ageSec >= 60 ? `${Math.floor(ageSec / 60)}m${ageSec % 60}s` : `${ageSec}s`;
+    return uiText(
+      `本轮 ${elapsedText} · 最近事件 ${ageText} 前${stall ? " ⚠" : ""}`,
+      `Round ${elapsedText} · last event ${ageText} ago${stall ? " ⚠" : ""}`,
+      `ラウンド ${elapsedText} · 最新イベント ${ageText} 前${stall ? " ⚠" : ""}`,
+    );
+  }, [status.running, tick, uiText]);
+
   if (loading) {
     return (
       <div className="loading-center">
@@ -587,6 +726,34 @@ export default function Autopilot() {
           <MetricCard title={uiText("最近一次运行", "Latest Run", "最新の実行")} value={latestRun ? leafName(latestRun.taskFile || latestRun.taskName) : "--"} tone="var(--text-primary)" icon={<FileSearch size={16} />} />
         </div>
 
+        {heartbeatLabel && (
+          <div
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-default)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: 12,
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#2563eb",
+                boxShadow: "0 0 6px rgba(37, 99, 235, 0.6)",
+                flexShrink: 0,
+              }}
+            />
+            <span>{heartbeatLabel}</span>
+          </div>
+        )}
+
         <div className="section-card">
           <div className="section-card-title">
             <RefreshCw size={16} />
@@ -614,6 +781,72 @@ export default function Autopilot() {
             <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: "var(--danger-subtle)", border: "1px solid rgba(220, 38, 38, 0.18)", color: "var(--danger)" }}>
               {status.lastError}
             </div>
+          )}
+        </div>
+
+        <div className="section-card">
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+            <div className="section-card-title" style={{ marginBottom: 0, display: "flex", alignItems: "center", gap: 8 }}>
+              <Bot size={16} />
+              {uiText("实时输出", "Live Output", "リアルタイム出力")}
+              <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
+                {liveEvents.length > 0 ? `(${liveEvents.length})` : ""}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                className="btn btn-ghost btn-xs"
+                onClick={() => setLiveEvents([])}
+                disabled={liveEvents.length === 0}
+              >
+                {uiText("清空", "Clear", "クリア")}
+              </button>
+              <button
+                className="btn btn-ghost btn-xs"
+                onClick={() => setLiveOutputOpen((v) => !v)}
+              >
+                {liveOutputOpen
+                  ? uiText("收起", "Collapse", "折りたたむ")
+                  : uiText("展开", "Expand", "展開")}
+              </button>
+            </div>
+          </div>
+          {liveOutputOpen && (
+            liveEvents.length === 0 ? (
+              <div
+                style={{
+                  padding: "24px 12px",
+                  textAlign: "center",
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                }}
+              >
+                {uiText(
+                  "Autopilot 启动后，这里会实时显示 Codex 输出与轮次进度",
+                  "Codex output and round progress will stream here once Autopilot starts",
+                  "Autopilot 起動後、Codex の出力とラウンド進捗がここに流れます",
+                )}
+              </div>
+            ) : (
+              <div
+                ref={liveListRef}
+                style={{
+                  maxHeight: 320,
+                  overflowY: "auto",
+                  fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+                  fontSize: 11.5,
+                  lineHeight: 1.55,
+                  background: "var(--bg-app)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                }}
+              >
+                {liveEvents.map((evt) => (
+                  <LiveEventRow key={evt.id} event={evt} uiText={uiText} />
+                ))}
+              </div>
+            )
           )}
         </div>
 
@@ -857,6 +1090,137 @@ function SummaryItem(props: {
       <div style={{ fontSize: props.strong ? 15 : 13, fontWeight: props.strong ? 600 : 400, color: props.strong ? "var(--text-primary)" : "var(--text-secondary)", lineHeight: 1.6 }}>
         {props.value}
       </div>
+    </div>
+  );
+}
+
+// 把 codex --json 的事件对象压成一行友好摘要。不认识的字段就回落到 JSON 单行。
+function summarizeCodexJson(value: unknown): { label: string; tone: string; detail: string } {
+  const tone = "var(--text-secondary)";
+  if (!value || typeof value !== "object") {
+    return { label: "event", tone, detail: typeof value === "string" ? value : JSON.stringify(value) };
+  }
+  const obj = value as Record<string, unknown>;
+  // codex v1: { type, msg: {...} } 或 { type, role, content }
+  const type = typeof obj.type === "string" ? (obj.type as string) : "";
+  const msg = (obj.msg as Record<string, unknown> | undefined) ?? undefined;
+  const content = (obj.content as unknown) ?? (msg?.content as unknown);
+  if (type.includes("delta") || type.includes("token")) {
+    const text = typeof content === "string" ? content : (msg?.text as string) ?? "";
+    return { label: "delta", tone: "var(--text-primary)", detail: text };
+  }
+  if (type.includes("tool") && type.includes("call")) {
+    const name = (msg?.name as string) ?? (obj.name as string) ?? "tool";
+    return { label: `tool→${name}`, tone: "#2563eb", detail: JSON.stringify(obj.arguments ?? msg?.arguments ?? "") };
+  }
+  if (type.includes("tool") && (type.includes("result") || type.includes("output"))) {
+    const out = JSON.stringify(obj.output ?? msg?.output ?? obj.result ?? msg?.result ?? "");
+    return { label: "tool←", tone: "#059669", detail: out };
+  }
+  if (type.includes("turn") || type.includes("complete")) {
+    return { label: type, tone: "#059669", detail: JSON.stringify(msg ?? obj) };
+  }
+  if (type.includes("error")) {
+    return { label: type, tone: "#dc2626", detail: JSON.stringify(msg ?? obj) };
+  }
+  if (type) {
+    return { label: type, tone, detail: JSON.stringify(msg ?? obj) };
+  }
+  // 无 type 字段：直接把整对象单行序列化
+  return { label: "event", tone, detail: JSON.stringify(obj) };
+}
+
+function LiveEventRow({
+  event,
+  uiText,
+}: {
+  event: LiveEvent;
+  uiText: (zh: string, en: string, ja?: string) => string;
+}) {
+  const rowBase: React.CSSProperties = {
+    display: "flex",
+    gap: 8,
+    padding: "3px 0",
+    borderBottom: "1px dashed var(--border-subtle)",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  };
+  const labelStyle: React.CSSProperties = {
+    flexShrink: 0,
+    minWidth: 72,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+    paddingTop: 1,
+  };
+
+  if (event.kind === "round-start") {
+    const p = event.payload;
+    const modeText = p.mode === "initial"
+      ? uiText("启动新会话", "initial", "新規セッション")
+      : uiText("续跑会话", "resume", "継続セッション");
+    return (
+      <div style={{ ...rowBase, background: "var(--accent-subtle)", padding: "6px 8px", borderRadius: 6, borderBottom: "none", margin: "6px 0" }}>
+        <span style={{ ...labelStyle, color: "var(--accent)" }}>ROUND {p.attempt}</span>
+        <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>
+          {uiText(`第 ${p.attempt} 轮开始（${modeText}）`, `Round ${p.attempt} started (${modeText})`, `ラウンド ${p.attempt} 開始（${modeText}）`)}
+        </span>
+      </div>
+    );
+  }
+
+  if (event.kind === "round-end") {
+    const p = event.payload;
+    const sec = Math.floor(p.elapsed_ms / 1000);
+    const ok = p.return_code === 0;
+    return (
+      <div style={{ ...rowBase, padding: "6px 8px", borderRadius: 6, borderBottom: "none", margin: "6px 0", background: ok ? "rgba(5, 150, 105, 0.08)" : "rgba(220, 38, 38, 0.08)" }}>
+        <span style={{ ...labelStyle, color: ok ? "#059669" : "#dc2626" }}>END {p.attempt}</span>
+        <span style={{ color: "var(--text-primary)" }}>
+          {uiText(
+            `第 ${p.attempt} 轮结束 · 退出码 ${p.return_code} · 耗时 ${sec}s`,
+            `Round ${p.attempt} ended · exit ${p.return_code} · ${sec}s`,
+            `ラウンド ${p.attempt} 終了 · exit ${p.return_code} · ${sec}s`,
+          )}
+        </span>
+      </div>
+    );
+  }
+
+  if (event.kind === "stage") {
+    return (
+      <div style={rowBase}>
+        <span style={{ ...labelStyle, color: "var(--accent)" }}>{event.payload.phase}</span>
+        <span style={{ color: "var(--text-secondary)" }}>{event.payload.message}</span>
+      </div>
+    );
+  }
+
+  // codex stdout / stderr
+  const { kind, raw, json } = event.payload;
+  if (kind === "stderr") {
+    return (
+      <div style={rowBase}>
+        <span style={{ ...labelStyle, color: "#dc2626" }}>STDERR</span>
+        <span style={{ color: "#dc2626" }}>{raw ?? ""}</span>
+      </div>
+    );
+  }
+  if (json !== undefined) {
+    const s = summarizeCodexJson(json);
+    return (
+      <div style={rowBase}>
+        <span style={{ ...labelStyle, color: s.tone }}>{s.label}</span>
+        <span style={{ color: "var(--text-secondary)" }}>{s.detail}</span>
+      </div>
+    );
+  }
+  return (
+    <div style={rowBase}>
+      <span style={labelStyle}>stdout</span>
+      <span style={{ color: "var(--text-secondary)" }}>{raw ?? ""}</span>
     </div>
   );
 }

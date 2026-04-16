@@ -1,6 +1,6 @@
-import { Profiler, lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Profiler, lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, Settings2, X } from "lucide-react";
 import Sidebar from "./components/layout/Sidebar";
@@ -9,7 +9,9 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import CommandPalette from "./components/CommandPalette";
 import { ToastContainer } from "./components/Toast";
 import DeepLinkImportDialog from "./components/DeepLinkImportDialog";
-import { getLocale } from "./lib/i18n";
+import WelcomeDialog from "./components/WelcomeDialog";
+import { getLocale, setLocale, type Locale } from "./lib/i18n";
+import { getTheme, setTheme, type Theme } from "./lib/theme";
 import type { EnvironmentConflict } from "./lib/appPreferences";
 import { queryClient } from "./lib/queryClient";
 
@@ -71,29 +73,59 @@ function RouteProfiler({
   );
 }
 
-function RouteContent({ location }: { location: ReturnType<typeof useLocation> }) {
+const routeComponents: ReadonlyArray<{ path: string; Component: React.LazyExoticComponent<ComponentType> }> = [
+  { path: "/", Component: Dashboard },
+  { path: "/mcp-servers", Component: McpServers },
+  { path: "/mcp-clients", Component: McpClients },
+  { path: "/logs", Component: Logs },
+  { path: "/skills", Component: Skills },
+  { path: "/workflows", Component: Workflows },
+  { path: "/autopilot", Component: Autopilot },
+  { path: "/marketplace", Component: Marketplace },
+  { path: "/hooks", Component: Hooks },
+  { path: "/workspaces", Component: Workspaces },
+  { path: "/profiles", Component: Profiles },
+  { path: "/sessions", Component: Sessions },
+  { path: "/claude-md", Component: ClaudeMd },
+  { path: "/config-files", Component: ConfigFiles },
+  { path: "/tools", Component: Tools },
+  { path: "/security", Component: Security },
+  { path: "/settings", Component: Settings },
+];
+
+function KeepAliveRoutes({ pathname }: { pathname: string }) {
+  const [mountedPaths, setMountedPaths] = useState<Set<string>>(() => new Set([pathname]));
+
+  useEffect(() => {
+    setMountedPaths((prev) => {
+      if (prev.has(pathname)) return prev;
+      const next = new Set(prev);
+      next.add(pathname);
+      return next;
+    });
+  }, [pathname]);
+
   return (
-    <div key={location.pathname} className="page-enter" style={{ height: "100%" }}>
-      <Routes location={location}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/mcp-servers" element={<McpServers />} />
-        <Route path="/mcp-clients" element={<McpClients />} />
-        <Route path="/logs" element={<Logs />} />
-        <Route path="/skills" element={<Skills />} />
-        <Route path="/workflows" element={<Workflows />} />
-        <Route path="/autopilot" element={<Autopilot />} />
-        <Route path="/marketplace" element={<Marketplace />} />
-        <Route path="/hooks" element={<Hooks />} />
-        <Route path="/workspaces" element={<Workspaces />} />
-        <Route path="/profiles" element={<Profiles />} />
-        <Route path="/sessions" element={<Sessions />} />
-        <Route path="/claude-md" element={<ClaudeMd />} />
-        <Route path="/config-files" element={<ConfigFiles />} />
-        <Route path="/tools" element={<Tools />} />
-        <Route path="/security" element={<Security />} />
-        <Route path="/settings" element={<Settings />} />
-      </Routes>
-    </div>
+    <>
+      {routeComponents.map(({ path, Component }) => {
+        if (!mountedPaths.has(path)) return null;
+        const isActive = path === pathname;
+        return (
+          <div
+            key={path}
+            className={isActive ? "page-enter" : undefined}
+            style={{
+              display: isActive ? "block" : "none",
+              height: "100%",
+            }}
+          >
+            <Suspense fallback={<RouteFallback />}>
+              <Component />
+            </Suspense>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -113,13 +145,18 @@ function AppShell() {
   const [envConflicts, setEnvConflicts] = useState<EnvironmentConflict[]>([]);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const locale = getLocale();
+  const [locale, setLocaleState] = useState<Locale>(getLocale());
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [welcomeTheme, setWelcomeTheme] = useState<Theme>(getTheme());
+  const [installedToolCount, setInstalledToolCount] = useState(0);
+  const [profileCount, setProfileCount] = useState(0);
   const uiText = (zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
   );
 
   useEffect(() => {
     void loadEnvConflicts();
+    void loadWelcomeState();
     const handleFocus = () => void loadEnvConflicts();
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -196,6 +233,45 @@ function AppShell() {
     }
   }
 
+  async function loadWelcomeState() {
+    try {
+      const completed = await invoke<boolean>("get_welcome_completed");
+      if (completed) {
+        setWelcomeOpen(false);
+        return;
+      }
+      await invoke("sync_config_profiles");
+      const [tools, profiles] = await Promise.all([
+        invoke<Array<{ installed: boolean }>>("detect_tools"),
+        invoke<Array<unknown>>("get_config_profiles"),
+      ]);
+      setInstalledToolCount(tools.filter((tool) => tool.installed).length);
+      setProfileCount(profiles.length);
+      setWelcomeOpen(true);
+    } catch {
+      setWelcomeOpen(false);
+    }
+  }
+
+  const handleWelcomeLocaleChange = useCallback((nextLocale: Locale) => {
+    setLocale(nextLocale);
+    setLocaleState(nextLocale);
+  }, []);
+
+  const handleWelcomeThemeChange = useCallback((nextTheme: Theme) => {
+    setTheme(nextTheme);
+    setWelcomeTheme(nextTheme);
+  }, []);
+
+  const handleWelcomeFinish = useCallback(async () => {
+    try {
+      await invoke("set_welcome_completed", { completed: true });
+      setWelcomeOpen(false);
+    } catch (error) {
+      console.error(error);
+    }
+  }, []);
+
   const highlightVariables = Array.from(new Set(envConflicts.flatMap((item) => item.variables))).slice(0, 4);
   const showConflictBanner = envConflicts.length > 0 && !bannerDismissed && location.pathname !== "/settings";
 
@@ -203,6 +279,16 @@ function AppShell() {
     <>
       <ToastContainer />
       <DeepLinkImportDialog />
+      <WelcomeDialog
+        open={welcomeOpen}
+        locale={locale}
+        theme={welcomeTheme}
+        installedToolCount={installedToolCount}
+        profileCount={profileCount}
+        onSelectLocale={handleWelcomeLocaleChange}
+        onSelectTheme={handleWelcomeThemeChange}
+        onFinish={() => void handleWelcomeFinish()}
+      />
       <CommandPalette
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}
@@ -247,9 +333,7 @@ function AppShell() {
           <main className="page-content">
             <ErrorBoundary resetKey={location.pathname}>
               <RouteProfiler pathname={location.pathname}>
-                <Suspense fallback={<RouteFallback />}>
-                  <RouteContent location={location} />
-                </Suspense>
+                <KeepAliveRoutes pathname={location.pathname} />
               </RouteProfiler>
             </ErrorBoundary>
           </main>

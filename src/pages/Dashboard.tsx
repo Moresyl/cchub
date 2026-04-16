@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { Plug, Zap, Package, Monitor, Terminal, Code, Wind, Activity, ArrowRight, Shield, Layers } from "lucide-react";
 import { t, getLocale } from "../lib/i18n";
 import { useNavigate } from "react-router-dom";
-import { useDetectTools } from "../hooks/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import { useDetectTools, queryKeys } from "../hooks/queries";
 import DashboardToolChip from "../components/DashboardToolChip";
 import DashboardHermesRootOverride from "../components/DashboardHermesRootOverride";
 import DashboardServerRow, { type DashboardServerRowServer } from "../components/DashboardServerRow";
@@ -21,6 +22,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const refreshRequestIdRef = useRef(0);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: tools = [], refetch: refetchTools } = useDetectTools();
   const i = t();
   const locale = getLocale();
@@ -61,9 +63,18 @@ export default function Dashboard() {
 
       try {
         const [scannedServers, scannedSkills, scannedPlugins] = await Promise.all([
-          invoke<McpServer[]>("scan_mcp_servers"),
-          invoke<Skill[]>("scan_skills"),
-          invoke<Plugin[]>("get_plugins"),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.mcpServers,
+            queryFn: () => invoke<McpServer[]>("scan_mcp_servers"),
+          }),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.skills,
+            queryFn: () => invoke<Skill[]>("scan_skills"),
+          }),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.plugins,
+            queryFn: () => invoke<Plugin[]>("get_plugins"),
+          }),
         ]);
         if (cancelled || requestId !== refreshRequestIdRef.current) {
           return;

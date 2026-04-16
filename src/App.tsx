@@ -10,6 +10,7 @@ import CommandPalette from "./components/CommandPalette";
 import { ToastContainer } from "./components/Toast";
 import DeepLinkImportDialog from "./components/DeepLinkImportDialog";
 import WelcomeDialog from "./components/WelcomeDialog";
+import NavigationProgress from "./components/NavigationProgress";
 import { getLocale, setLocale, type Locale } from "./lib/i18n";
 import { getTheme, setTheme, type Theme } from "./lib/theme";
 import type { EnvironmentConflict } from "./lib/appPreferences";
@@ -304,6 +305,7 @@ function AppShell() {
       <div className="app-layout">
         <Sidebar />
         <div className="main-area">
+          <NavigationProgress />
           <Header />
           {showConflictBanner && (
             <div className="env-warning-banner">

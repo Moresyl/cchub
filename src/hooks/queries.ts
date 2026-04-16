@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import { queryClient } from "../lib/queryClient";
 import type { FolderNode } from "../types/skills";
 
 export interface DetectedToolQueryResult {
@@ -431,12 +432,19 @@ export async function fetchClaudeMdPageData() {
 }
 
 export async function fetchMarketplaceLocalData() {
-  const [servers, installedSkills] = await Promise.all([
-    invoke<McpServerQueryResult[]>("scan_mcp_servers"),
-    invoke<SkillQueryResult[]>("scan_skills"),
+  // 复用 mcpServersPage / skillsPage 的缓存，避免重复扫描 scan_mcp_servers / scan_skills
+  const [mcpPage, skillsPage] = await Promise.all([
+    queryClient.ensureQueryData({
+      queryKey: queryKeys.mcpServersPage,
+      queryFn: fetchMcpServersPageData,
+    }),
+    queryClient.ensureQueryData({
+      queryKey: queryKeys.skillsPage,
+      queryFn: fetchSkillsPageData,
+    }),
   ]);
 
-  return { servers, installedSkills };
+  return { servers: mcpPage.servers, installedSkills: skillsPage.skills };
 }
 
 export function fetchMarketplaceCatalogPage(page = 1, limit = 50, category = "") {

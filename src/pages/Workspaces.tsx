@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderOpen, Plus, X } from "lucide-react";
+import { FolderOpen, Layers, Plus, X } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import ConfirmDialog from "../components/ConfirmDialog";
 import WorkspaceCard, { type WorkspaceCardWorkspace } from "../components/WorkspaceCard";
@@ -215,6 +215,21 @@ export default function Workspaces() {
       )}
 
       {/* Workspace List */}
+      {workspaces.length === 0 ? (
+        <div className="card empty-state">
+          <div className="empty-icon"><Layers size={28} style={{ color: "var(--text-muted)" }} /></div>
+          <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>
+            {uiText("还没有工作区", "No workspaces yet", "ワークスペースがありません")}
+          </p>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>
+            {uiText(
+              "工作区可以隔离不同项目的 MCP Server、Profile 和配置，点击上方「新建」开始创建。",
+              "Workspaces isolate MCP servers, profiles, and configs for different projects. Click \"New\" above to get started.",
+              "ワークスペースでプロジェクトごとに MCP Server、Profile、設定を分離できます。上の「新規」をクリックして作成してください。",
+            )}
+          </p>
+        </div>
+      ) : (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }} className="stagger">
         {workspaces.map((ws) => (
           <WorkspaceCard
@@ -242,6 +257,7 @@ export default function Workspaces() {
           />
         ))}
       </div>
+      )}
       <ConfirmDialog
         isOpen={!!pendingDelete}
         title={uiText("删除工作区", "Delete Workspace", "ワークスペースを削除")}

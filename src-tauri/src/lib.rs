@@ -422,7 +422,7 @@ pub fn run() {
                         let profile_id = id.trim_start_matches("profile:");
                         if let Ok(conn) = handle.state::<db::DbState>().0.lock() {
                             let _ =
-                                extra_commands::apply_config_profile_from_conn(&conn, profile_id);
+                                extra_commands::apply_config_profile_from_conn(&conn, profile_id, false);
                         }
                         let _ = refresh_tray_menu(&handle);
                     }

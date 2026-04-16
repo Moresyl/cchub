@@ -7613,7 +7613,10 @@ pub fn get_claude_permissions_level() -> Result<u32, String> {
         .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
         .unwrap_or_default();
 
-    if allow.iter().any(|s| *s == "Bash(*)") && allow.iter().any(|s| *s == "Write(*)") {
+    // NOTE: level 3 is already short-circuited above via `mode == "bypassPermissions"`.
+    // The setter writes level 2 with Write(*) but NOT Bash(*), so checking both
+    // here misses level 2 and falsely reports it as level 1. Use Write(*) alone.
+    if allow.iter().any(|s| *s == "Write(*)") {
         Ok(2)
     } else if allow.iter().any(|s| *s == "Read(*)") {
         Ok(1)
@@ -7704,6 +7707,19 @@ pub fn get_claude_auto_update() -> Result<String, String> {
     }
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let settings: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    // Canonical disable: env.DISABLE_AUTOUPDATER = "1". Check this first, since
+    // Claude Code's autoUpdatesChannel only accepts "stable"/"latest" — there is
+    // no "disabled" channel value, so removing the key alone round-trips back
+    // to the default ("latest").
+    let disabled = settings
+        .get("env")
+        .and_then(|e| e.get("DISABLE_AUTOUPDATER"))
+        .and_then(|v| v.as_str())
+        .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if disabled {
+        return Ok("disabled".to_string());
+    }
     Ok(settings
         .get("autoUpdatesChannel")
         .and_then(|v| v.as_str())
@@ -7723,10 +7739,37 @@ pub fn set_claude_auto_update(channel: String) -> Result<String, String> {
         serde_json::json!({})
     };
     if channel == "disabled" {
-        settings
+        // Canonical disable: env.DISABLE_AUTOUPDATER = "1". Also clear the
+        // channel key so the getter has a single source of truth.
+        if !settings.is_object() {
+            settings = serde_json::json!({});
+        }
+        let obj = settings.as_object_mut().unwrap();
+        obj.remove("autoUpdatesChannel");
+        let env_entry = obj
+            .entry("env".to_string())
+            .or_insert_with(|| serde_json::json!({}));
+        if !env_entry.is_object() {
+            *env_entry = serde_json::json!({});
+        }
+        env_entry
             .as_object_mut()
-            .map(|o| o.remove("autoUpdatesChannel"));
+            .unwrap()
+            .insert("DISABLE_AUTOUPDATER".to_string(), serde_json::json!("1"));
     } else {
+        // Re-enable: clear the env flag (if present) and write the channel.
+        if let Some(env_obj) = settings.get_mut("env").and_then(|v| v.as_object_mut()) {
+            env_obj.remove("DISABLE_AUTOUPDATER");
+        }
+        // Drop an empty env object to keep settings.json tidy.
+        if settings
+            .get("env")
+            .and_then(|v| v.as_object())
+            .map(|o| o.is_empty())
+            .unwrap_or(false)
+        {
+            settings.as_object_mut().map(|o| o.remove("env"));
+        }
         settings["autoUpdatesChannel"] = serde_json::json!(channel);
     }
     let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;

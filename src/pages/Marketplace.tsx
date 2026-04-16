@@ -5,6 +5,7 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
   Store, Search, Download, CheckCircle, X, ExternalLink, Key,
   Plug, Zap, Plus, Globe, Edit3, Trash2, Save, ArrowLeft, RotateCcw, Wand2,
+  Terminal, Monitor, Sparkles,
 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
@@ -14,14 +15,41 @@ import MarketplaceCustomSourceRow from "../components/MarketplaceCustomSourceRow
 import MarketplaceMcpCard, { type MarketplaceMcpCardEntry } from "../components/MarketplaceMcpCard";
 import MarketplaceRecommendedRepoRow from "../components/MarketplaceRecommendedRepoRow";
 import MarketplaceSkillCard, { type MarketplaceSkillCardEntry } from "../components/MarketplaceSkillCard";
+import FeaturedSkillBundleCard, { type FeaturedSkillBundle } from "../components/FeaturedSkillBundleCard";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { DetectedTool } from "../types/skills";
+import { type ManagedAppId } from "../lib/appPreferences";
 import {
   fetchMarketplaceCatalogPage,
   fetchMarketplaceLocalData,
   fetchMarketplaceSearchPage,
+  fetchSkillsPageData,
   queryKeys,
 } from "../hooks/queries";
+
+const TOOL_ICONS: Record<string, typeof Monitor> = {
+  claude: Terminal,
+  codex: Monitor,
+  gemini: Sparkles,
+  opencode: Globe,
+  hermes: Monitor,
+};
+
+// scan_mcp_servers / scan_skills 按工具返回每条记录；同名 skill/server 装到
+// 多个工具时会出现多条。列表视图按 name.toLowerCase() 去重，per-tool 的
+// "已安装"状态另由 installedIdsByTool / installedSkillsByTool 驱动。
+function dedupByName<T extends { name: string }>(arr: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of arr) {
+    const key = item.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
@@ -38,6 +66,7 @@ interface InstalledMcpServer {
 
 interface InstalledSkillRecord {
   id: string; name: string; description: string | null;
+  tool_id: string | null;
   plugin_id: string | null; trigger_command: string | null; file_path: string | null;
 }
 
@@ -64,7 +93,10 @@ export default function Marketplace() {
   const cachedSearchData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMarketplaceSearchPage>>>(
     queryKeys.marketplaceSearch("mcp server"),
   );
-  const initialLocalEntries: RegistryEntry[] = (cachedLocalData?.servers ?? []).map((s) => ({
+  // scan_mcp_servers / scan_skills 会按工具返回每条记录，同名 skill/server 装到
+  // 多个工具时会出现多条 —— 列表视图只需要每个 name 一条，per-tool 的"已安装"
+  // 状态另由 installedIdsByTool / installedSkillsByTool 驱动。
+  const initialLocalEntries: RegistryEntry[] = dedupByName(cachedLocalData?.servers ?? []).map((s) => ({
     id: s.id,
     name: s.name,
     description: s.command ? `${s.command} ${(() => { try { return JSON.parse(s.args || "[]").join(" "); } catch { return ""; } })()}` : "",
@@ -77,7 +109,7 @@ export default function Marketplace() {
     env_keys: (() => { try { return Object.keys(JSON.parse(s.env || "{}")); } catch { return []; } })(),
     source: "local",
   }));
-  const initialLocalSkills: SkillEntry[] = (cachedLocalData?.installedSkills ?? []).map((s) => ({
+  const initialLocalSkills: SkillEntry[] = dedupByName(cachedLocalData?.installedSkills ?? []).map((s) => ({
     id: `local-${s.name}`,
     name: s.name,
     description: s.description || (s.trigger_command ? `/${s.trigger_command}` : ""),
@@ -110,12 +142,19 @@ export default function Marketplace() {
   const [search, setSearch] = useState("");
   const [mcpCategory, setMcpCategory] = useState<McpCategory>("all");
   const [skillCategory, setSkillCategory] = useState<SkillCategory>("all");
-  const [installedIds, setInstalledIds] = useState<Set<string>>(
-    new Set(cachedLocalData?.servers.flatMap((server) => [server.id, server.name]) ?? []),
-  );
-  const [installedSkills, setInstalledSkills] = useState<Set<string>>(
-    new Set(cachedLocalData?.installedSkills.map((skill) => skill.name.toLowerCase()) ?? []),
-  );
+  const [activeTool, setActiveTool] = useState<string>("claude");
+  const [tools, setTools] = useState<DetectedTool[]>([]);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>([
+    "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+  ]);
+  // Per-tool installed indices: { toolId -> Set of server names/ids } and { toolId -> Set of skill names (lowercase) }
+  // Initial Claude state derived from `cachedLocalData` so the UI doesn't flash empty.
+  const [installedIdsByTool, setInstalledIdsByTool] = useState<Record<string, Set<string>>>(() => ({
+    claude: new Set(cachedLocalData?.servers.flatMap((server) => [server.id, server.name]) ?? []),
+  }));
+  const [installedSkillsByTool, setInstalledSkillsByTool] = useState<Record<string, Set<string>>>(() => ({
+    claude: new Set(cachedLocalData?.installedSkills.map((skill) => skill.name.toLowerCase()) ?? []),
+  }));
   const [installing, setInstalling] = useState<string | null>(null);
   const [showEnvModal, setShowEnvModal] = useState<RegistryEntry | null>(null);
   const [envValues, setEnvValues] = useState<Record<string, string>>({});
@@ -141,12 +180,60 @@ export default function Marketplace() {
   const [editArgs, setEditArgs] = useState("");
   const [editEnv, setEditEnv] = useState("");
   const [pendingUninstall, setPendingUninstall] = useState<SkillEntry | null>(null);
+  const [installingBundle, setInstallingBundle] = useState<string | null>(null);
+  const [bundleProgress, setBundleProgress] = useState<Record<string, number>>({});
   const i = t();
   const locale = localStorage.getItem("cchub-locale") || "zh";
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const localeText = useCallback((zhText: string, enText: string, jaText?: string) => (
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
   ), [locale]);
+
+  // Stable empty set so memos don't re-fire when active tool has no installs
+  const emptySetRef = useRef<Set<string>>(new Set<string>());
+  const currentToolInstalledIds = installedIdsByTool[activeTool] ?? emptySetRef.current;
+  const currentToolInstalledSkills = installedSkillsByTool[activeTool] ?? emptySetRef.current;
+  const visibleToolIds = useMemo(() => new Set(visibleApps), [visibleApps]);
+  const visibleTools = useMemo(
+    () => tools.filter((tool) => visibleToolIds.has(tool.id as ManagedAppId)),
+    [tools, visibleToolIds],
+  );
+
+  // Helper: rebuild per-tool installed sets after a fresh `scan_skills` run.
+  const rebuildSkillsByTool = useCallback((records: InstalledSkillRecord[]) => {
+    const map: Record<string, Set<string>> = {};
+    for (const s of records) {
+      const tid = s.tool_id ?? "claude";
+      if (!map[tid]) map[tid] = new Set();
+      map[tid].add(s.name.toLowerCase());
+    }
+    return map;
+  }, []);
+
+  // Helper: probe each MCP server name across all 6 tools so the per-tool
+  // map covers Claude AND any tool the server has been synced to.
+  const rebuildMcpByTool = useCallback(async (serverNames: string[]) => {
+    if (serverNames.length === 0) return {} as Record<string, Set<string>>;
+    const results = await Promise.all(
+      serverNames.map(async (name) => {
+        try {
+          const map = await invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: name });
+          return { name, map };
+        } catch {
+          return { name, map: { claude: true } as Record<string, boolean> };
+        }
+      }),
+    );
+    const out: Record<string, Set<string>> = {};
+    for (const { name, map } of results) {
+      for (const [toolId, present] of Object.entries(map)) {
+        if (!present) continue;
+        if (!out[toolId]) out[toolId] = new Set();
+        out[toolId].add(name);
+      }
+    }
+    return out;
+  }, []);
 
   const loadAll = useCallback(async (options: { force?: boolean } = {}) => {
     const { force = false } = options;
@@ -159,7 +246,7 @@ export default function Marketplace() {
         queryFn: fetchMarketplaceLocalData,
         staleTime: force ? 0 : 30_000,
       });
-      const localSkillEntries: SkillEntry[] = localData.installedSkills.map((s) => ({
+      const localSkillEntries: SkillEntry[] = dedupByName(localData.installedSkills).map((s) => ({
         id: `local-${s.name}`,
         name: s.name,
         description: s.description || (s.trigger_command ? `/${s.trigger_command}` : ""),
@@ -172,7 +259,7 @@ export default function Marketplace() {
         content: "",
         file_path: s.file_path,
       }));
-      const scannedEntries: RegistryEntry[] = localData.servers.map((s) => ({
+      const scannedEntries: RegistryEntry[] = dedupByName(localData.servers).map((s) => ({
         id: s.id,
         name: s.name,
         description: s.command ? `${s.command} ${(() => { try { return JSON.parse(s.args || "[]").join(" "); } catch { return ""; } })()}` : "",
@@ -186,9 +273,58 @@ export default function Marketplace() {
         source: "local",
       }));
       setInstalledMcpDetails(localData.servers);
-      setInstalledIds(new Set(localData.servers.flatMap((s) => [s.id, s.name])));
-      setInstalledSkills(new Set(localData.installedSkills.map((s) => s.name.toLowerCase())));
+      // Build initial Claude-only per-tool sets so the UI doesn't blank out;
+      // the full per-tool probe runs afterwards (see rebuildMcpByTool).
+      setInstalledIdsByTool({
+        claude: new Set(localData.servers.flatMap((s) => [s.id, s.name])),
+      });
       setEntries(scannedEntries);
+
+      // Skills: scan_skills already labels each record with tool_id, so we
+      // can group in one pass without extra invokes.
+      try {
+        const allSkills = await invoke<InstalledSkillRecord[]>("scan_skills");
+        setInstalledSkillsByTool(rebuildSkillsByTool(allSkills));
+      } catch (err) {
+        console.warn("scan_skills failed; falling back to Claude-only set", err);
+        setInstalledSkillsByTool({
+          claude: new Set(localData.installedSkills.map((s) => s.name.toLowerCase())),
+        });
+      }
+
+      // MCP per-tool: probe every installed server across all 6 tools in parallel.
+      // This is N invokes but each is just a small config-file read.
+      void rebuildMcpByTool(localData.servers.map((s) => s.name)).then((map) => {
+        if (Object.keys(map).length > 0) setInstalledIdsByTool(map);
+      });
+
+      // Tools + visibleApps for the tab strip; fetched via the same query as
+      // the Skills page so cache is shared. Defaults survive any errors.
+      try {
+        const skillsPageData = await queryClient.fetchQuery({
+          queryKey: queryKeys.skillsPage,
+          queryFn: fetchSkillsPageData,
+          staleTime: force ? 0 : 30_000,
+        });
+        setTools(skillsPageData.tools);
+        setVisibleApps(skillsPageData.visibleApps);
+        // Auto-select the first installed visible tool so a fresh open lands
+        // on something usable instead of an empty Claude tab on machines
+        // without Claude installed.
+        const firstInstalled = skillsPageData.tools.find(
+          (t) => t.installed && skillsPageData.visibleApps.includes(t.id as ManagedAppId),
+        );
+        if (firstInstalled) {
+          setActiveTool((prev) => {
+            const prevTool = skillsPageData.tools.find((t) => t.id === prev);
+            const prevVisible = skillsPageData.visibleApps.includes(prev as ManagedAppId);
+            // Stay on the user's active tab unless it's hidden or uninstalled.
+            return prevTool?.installed && prevVisible ? prev : firstInstalled.id;
+          });
+        }
+      } catch (err) {
+        console.warn("fetchSkillsPageData failed for marketplace tool tabs", err);
+      }
 
       const catalogPromise = queryClient.fetchQuery({
         queryKey: queryKeys.marketplaceCatalog(),
@@ -226,7 +362,7 @@ export default function Marketplace() {
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [queryClient]);
+  }, [queryClient, rebuildMcpByTool, rebuildSkillsByTool]);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
   useEffect(() => {
@@ -250,17 +386,25 @@ export default function Marketplace() {
       staleTime: 0,
     });
     setInstalledMcpDetails(servers);
-    setInstalledIds(new Set(servers.flatMap((s) => [s.id, s.name])));
+    // Re-probe per-tool presence after a config change to keep the tab badges accurate.
+    void rebuildMcpByTool(servers.map((s) => s.name)).then((map) => {
+      setInstalledIdsByTool(Object.keys(map).length > 0 ? map : { claude: new Set(servers.map((s) => s.name)) });
+    });
     return servers;
-  }, [queryClient]);
+  }, [queryClient, rebuildMcpByTool]);
 
   const findInstalledSkill = useCallback(async (skill: SkillEntry) => {
     const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
-    return skills.find((item) => (
+    // Prefer skills installed under the active tool so cross-tool name collisions
+    // resolve to the file the user is currently looking at.
+    const matches = skills.filter((item) => (
       item.name.toLowerCase() === skill.name.toLowerCase() ||
       item.name.toLowerCase() === skill.id.toLowerCase()
-    )) || null;
-  }, []);
+    ));
+    if (matches.length === 0) return null;
+    const inActiveTool = matches.find((m) => (m.tool_id ?? "claude") === activeTool);
+    return inActiveTool ?? matches[0];
+  }, [activeTool]);
 
   const openSkillPreview = useCallback(async (skill: SkillEntry) => {
     if (!skill.content && skill.file_path) {
@@ -404,16 +548,48 @@ export default function Marketplace() {
     setInstalling(entry.id);
     setShowEnvModal(null);
     try {
+      // install_from_marketplace writes to Claude's MCP DB and settings.json — that's
+      // the only install path the backend exposes. When the user picked a non-Claude
+      // tool, sync to that target, then unsync from Claude so we honor the
+      // "only install where I asked" intent.
       await invoke("install_from_marketplace", {
         name: entry.name, command: entry.command, args: entry.args, envValues: envVals,
       });
-      setInstalledIds(prev => new Set([...prev, entry.name, entry.id]));
+      if (activeTool && activeTool !== "claude") {
+        try {
+          await invoke("sync_mcp_server_to_tool", { serverName: entry.name, targetTool: activeTool });
+          await invoke("unsync_mcp_server_from_tool", { serverName: entry.name, targetTool: "claude" });
+        } catch (syncErr) {
+          // Surface the actual error (e.g. OpenClaw "not yet supported") so the user
+          // understands the partial state instead of silently ending up in Claude.
+          showToast(
+            "error",
+            locale === "zh" ? `同步到 ${activeTool} 失败: ${syncErr}` : `Sync to ${activeTool} failed: ${syncErr}`,
+          );
+          throw syncErr;
+        }
+      }
+      setInstalledIdsByTool((prev) => {
+        const next = { ...prev };
+        const set = new Set(next[activeTool] ?? []);
+        set.add(entry.name);
+        set.add(entry.id);
+        next[activeTool] = set;
+        // Roll back the Claude entry we just created when the install was redirected.
+        if (activeTool !== "claude" && next.claude) {
+          const claudeSet = new Set(next.claude);
+          claudeSet.delete(entry.name);
+          claudeSet.delete(entry.id);
+          next.claude = claudeSet;
+        }
+        return next;
+      });
     } catch (e) {
       console.error(e);
       showToast("error", locale === "zh" ? "安装失败" : "Installation failed");
     }
     finally { setInstalling(null); }
-  }, [locale]);
+  }, [activeTool, locale]);
 
   const handleInstallMcp = useCallback(async (entry: RegistryEntry) => {
     if (entry.env_keys.length > 0) {
@@ -429,21 +605,31 @@ export default function Marketplace() {
   const handleInstallSkill = useCallback(async (skill: SkillEntry) => {
     setInstalling(skill.id);
     try {
+      // Route the skill file to the active tool's skills_dir. Backend defaults
+      // to ~/.claude/skills when target_dir is null — we only fall back when
+      // we genuinely don't know the active tool's path.
+      const tool = tools.find((t) => t.id === activeTool);
       await invoke<string>("install_skill_from_marketplace", {
         name: skill.id,
         content: skill.content,
         description: skill.description,
         triggerCommand: null,
         sourceUrl: skill.github_url,
-        targetDir: null,
+        targetDir: tool?.skills_dir ?? null,
       });
-      setInstalledSkills(prev => new Set([...prev, skill.name.toLowerCase()]));
+      setInstalledSkillsByTool((prev) => {
+        const next = { ...prev };
+        const set = new Set(next[activeTool] ?? []);
+        set.add(skill.name.toLowerCase());
+        next[activeTool] = set;
+        return next;
+      });
     } catch (e) {
       console.error(e);
       showToast("error", locale === "zh" ? "安装失败" : "Installation failed");
     }
     finally { setInstalling(null); }
-  }, [locale]);
+  }, [activeTool, locale, tools]);
 
   const handleUninstallSkill = useCallback(async (skill: SkillEntry) => {
     setPendingUninstall(skill);
@@ -452,27 +638,52 @@ export default function Marketplace() {
   const doUninstallSkill = useCallback(async (skill: SkillEntry) => {
     try {
       const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
-      const installed = skills.find(s => s.name.toLowerCase() === skill.name.toLowerCase() || s.name.toLowerCase() === skill.id.toLowerCase());
+      // Only delete the file under the active tool's skills_dir so a Codex
+      // uninstall doesn't wipe the same-named skill the user keeps in Claude.
+      const installed = skills.find(s => (
+        (s.name.toLowerCase() === skill.name.toLowerCase() || s.name.toLowerCase() === skill.id.toLowerCase())
+        && (s.tool_id ?? "claude") === activeTool
+      ));
       if (installed?.file_path) {
         await invoke("uninstall_skill_file", { path: installed.file_path });
-        setInstalledSkills(prev => {
-          const next = new Set(prev);
-          next.delete(skill.name.toLowerCase());
+        setInstalledSkillsByTool((prev) => {
+          const next = { ...prev };
+          if (next[activeTool]) {
+            const set = new Set(next[activeTool]);
+            set.delete(skill.name.toLowerCase());
+            next[activeTool] = set;
+          }
           return next;
         });
-        setSkillEntries(prev => prev.map(item => (
-          item.id === skill.id || item.name.toLowerCase() === skill.name.toLowerCase()
-            ? { ...item, file_path: null, content: "" }
-            : item
-        )));
+        // Re-derive skill entries: only clear file_path/content if no other
+        // tool still hosts a copy (otherwise the entry should stay "installed"
+        // for those tools).
+        const otherToolsHave = skills.some((s) => (
+          (s.name.toLowerCase() === skill.name.toLowerCase() || s.name.toLowerCase() === skill.id.toLowerCase())
+          && (s.tool_id ?? "claude") !== activeTool
+        ));
+        if (!otherToolsHave) {
+          setSkillEntries(prev => prev.map(item => (
+            item.id === skill.id || item.name.toLowerCase() === skill.name.toLowerCase()
+              ? { ...item, file_path: null, content: "" }
+              : item
+          )));
+        }
         if (editingSkill && editingSkill.name.toLowerCase() === skill.name.toLowerCase()) {
           setEditingSkill(null);
           setSkillContent("");
           setEditSkillContent("");
         }
+      } else {
+        showToast(
+          "error",
+          locale === "zh"
+            ? `当前工具（${activeTool}）下未找到该技能文件`
+            : `Skill file not found under active tool (${activeTool})`,
+        );
       }
     } catch (e) { console.error(e); }
-  }, [editingSkill]);
+  }, [activeTool, editingSkill, locale]);
 
   const handleCustomSource = useCallback(async () => {
     if (!customUrl.trim()) return;
@@ -563,37 +774,167 @@ export default function Marketplace() {
     }
   }, [locale]);
 
+  // Featured curated skill bundles — rendered as a single "install all" card
+  // at the very top of the skills tab. The bundle's component skills are also
+  // merged into the regular skill list so the user can later inspect / uninstall
+  // individual ones.
+  const featuredBundles = useMemo<FeaturedSkillBundle[]>(() => [
+    {
+      id: "obra/superpowers",
+      title: "Superpowers",
+      owner: "obra",
+      repo: "superpowers",
+      branch: "main",
+      totalSkills: 14,
+      starsLabel: "154k★",
+      description: locale === "zh"
+        ? "Jesse Vincent 的 agentic 开发方法论：TDD、代码评审、并行 agents、系统化调试 —— 一次安装 14 个协同技能"
+        : locale === "ja"
+          ? "Jesse Vincent 氏のエージェント開発方法論：TDD・コードレビュー・並列エージェント・体系的デバッグ — 14 件の連携スキルを一括インストール"
+          : "Jesse Vincent's agentic delivery framework: TDD, code review, parallel agents, systematic debugging — install 14 coordinated skills at once",
+      tags: [
+        "brainstorming",
+        "writing-plans",
+        "test-driven-development",
+        "subagent-driven-development",
+        "systematic-debugging",
+        "using-git-worktrees",
+        "requesting-code-review",
+        "receiving-code-review",
+        "executing-plans",
+        "verification-before-completion",
+      ],
+      githubUrl: "https://github.com/obra/superpowers",
+    },
+  ], [locale]);
+
+  const bundleInstalledCount = useCallback((bundle: FeaturedSkillBundle) => {
+    // Count how many of this bundle's skills appear under the active tool.
+    // Falls back to the in-flight progress counter while a fresh install is
+    // running and the entry list hasn't been merged yet.
+    const prefix = `${bundle.owner}/${bundle.repo}:`;
+    const bundleEntries = skillEntries.filter((s) => s.id.startsWith(prefix));
+    if (bundleEntries.length === 0) {
+      return bundleProgress[bundle.id] ?? 0;
+    }
+    return bundleEntries.filter((s) => currentToolInstalledSkills.has(s.name.toLowerCase())).length;
+  }, [bundleProgress, currentToolInstalledSkills, skillEntries]);
+
+  const handleInstallBundle = useCallback(async (bundle: FeaturedSkillBundle) => {
+    setInstallingBundle(bundle.id);
+    setBundleProgress((prev) => ({ ...prev, [bundle.id]: 0 }));
+    try {
+      const skills = await invoke<SkillEntry[]>("fetch_skills_from_repo", {
+        owner: bundle.owner,
+        repo: bundle.repo,
+        branch: bundle.branch,
+      });
+
+      // Merge into skillEntries so the user can later see / uninstall them individually
+      setSkillEntries((prev) => {
+        const existingIds = new Set(prev.map((s) => s.id));
+        const newEntries = skills.filter((s) => !existingIds.has(s.id));
+        return [...prev, ...newEntries];
+      });
+
+      // Track as a custom source row so "Loaded sources" shows it
+      const sourceUrl = `github:${bundle.owner}/${bundle.repo}`;
+      setCustomSources((prev) => {
+        if (prev.some((s) => s.url === sourceUrl)) return prev;
+        return [...prev, { url: sourceUrl, count: skills.length, skillIds: skills.map((s) => s.id) }];
+      });
+
+      // Sequentially install each skill — keeps progress responsive and
+      // avoids hammering the backend with parallel writes to the same SQLite db.
+      const tool = tools.find((t) => t.id === activeTool);
+      let installedCount = 0;
+      const newlyInstalledNames: string[] = [];
+      for (const skill of skills) {
+        try {
+          await invoke<string>("install_skill_from_marketplace", {
+            name: skill.id,
+            content: skill.content,
+            description: skill.description,
+            triggerCommand: null,
+            sourceUrl: skill.github_url,
+            targetDir: tool?.skills_dir ?? null,
+          });
+          newlyInstalledNames.push(skill.name.toLowerCase());
+          installedCount += 1;
+          setBundleProgress((prev) => ({ ...prev, [bundle.id]: installedCount }));
+        } catch (err) {
+          console.error(`Failed to install ${skill.id}`, err);
+        }
+      }
+
+      if (newlyInstalledNames.length > 0) {
+        setInstalledSkillsByTool((prev) => {
+          const next = { ...prev };
+          const set = new Set(next[activeTool] ?? []);
+          newlyInstalledNames.forEach((n) => set.add(n));
+          next[activeTool] = set;
+          return next;
+        });
+      }
+
+      const failedCount = skills.length - newlyInstalledNames.length;
+      if (failedCount === 0) {
+        showToast(
+          "success",
+          locale === "zh"
+            ? `${bundle.title}：${skills.length} 个技能全部安装完成`
+            : `${bundle.title}: installed ${skills.length} skills`,
+        );
+      } else {
+        showToast(
+          "error",
+          locale === "zh"
+            ? `${bundle.title}：${newlyInstalledNames.length} / ${skills.length} 安装成功，${failedCount} 个失败`
+            : `${bundle.title}: ${newlyInstalledNames.length}/${skills.length} installed, ${failedCount} failed`,
+        );
+      }
+    } catch (e) {
+      console.error(e);
+      showToast(
+        "error",
+        locale === "zh" ? `${bundle.title} 安装失败: ${e}` : `${bundle.title} install failed: ${e}`,
+      );
+    } finally {
+      setInstallingBundle(null);
+    }
+  }, [activeTool, locale, tools]);
+
   const mcpCategories = useMemo<{ key: McpCategory; label: string }[]>(() => [
     { key: "all", label: `${locale === "zh" ? "全部" : "All"} (${entries.length})` },
-    { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${entries.filter(e => installedIds.has(e.name) || installedIds.has(e.id)).length})` },
-  ], [entries, installedIds, locale]);
+    { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${entries.filter(e => currentToolInstalledIds.has(e.name) || currentToolInstalledIds.has(e.id)).length})` },
+  ], [entries, currentToolInstalledIds, locale]);
 
   const skillCategories = useMemo<{ key: SkillCategory; label: string }[]>(() => [
     { key: "all", label: `${locale === "zh" ? "全部" : "All"} (${skillEntries.length})` },
-    { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${skillEntries.filter(s => installedSkills.has(s.name.toLowerCase())).length})` },
-  ], [installedSkills, locale, skillEntries]);
+    { key: "installed", label: `${locale === "zh" ? "已安装" : "Installed"} (${skillEntries.filter(s => currentToolInstalledSkills.has(s.name.toLowerCase())).length})` },
+  ], [currentToolInstalledSkills, locale, skillEntries]);
 
   const filteredMcp = useMemo(() => entries.filter(e => {
     if (mcpCategory === "installed") {
-      if (!installedIds.has(e.name) && !installedIds.has(e.id)) return false;
+      if (!currentToolInstalledIds.has(e.name) && !currentToolInstalledIds.has(e.id)) return false;
     } else if (mcpCategory !== "all" && e.category !== mcpCategory) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!e.name.toLowerCase().includes(q) && !e.description.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [entries, installedIds, mcpCategory, search]);
+  }), [entries, currentToolInstalledIds, mcpCategory, search]);
 
   const filteredSkills = useMemo(() => skillEntries.filter(s => {
     if (skillCategory === "installed") {
-      if (!installedSkills.has(s.name.toLowerCase())) return false;
+      if (!currentToolInstalledSkills.has(s.name.toLowerCase())) return false;
     } else if (skillCategory !== "all" && s.category !== skillCategory) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!s.name.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q) && !(s.description_zh || "").toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [installedSkills, search, skillCategory, skillEntries]);
+  }), [currentToolInstalledSkills, search, skillCategory, skillEntries]);
 
   const recommendedRepos = useMemo(() => [
     {
@@ -635,6 +976,34 @@ export default function Marketplace() {
   const handleInstallMcpCard = useCallback((entry: RegistryEntry) => {
     void handleInstallMcp(entry);
   }, [handleInstallMcp]);
+  const handleUninstallMcpCard = useCallback(async (entry: RegistryEntry) => {
+    // Per-tool uninstall: only unsync from the active tool. Other tools that
+    // also have this server keep their copy. We deliberately avoid the global
+    // uninstall_mcp_server command (it'd nuke the DB row + Claude config).
+    try {
+      await invoke("unsync_mcp_server_from_tool", { serverName: entry.name, targetTool: activeTool });
+      setInstalledIdsByTool((prev) => {
+        const next = { ...prev };
+        if (next[activeTool]) {
+          const set = new Set(next[activeTool]);
+          set.delete(entry.name);
+          set.delete(entry.id);
+          next[activeTool] = set;
+        }
+        return next;
+      });
+      showToast(
+        "success",
+        locale === "zh" ? `已从 ${activeTool} 卸载 ${entry.name}` : `Removed ${entry.name} from ${activeTool}`,
+      );
+    } catch (e) {
+      console.error(e);
+      showToast(
+        "error",
+        locale === "zh" ? `卸载失败: ${e}` : `Uninstall failed: ${e}`,
+      );
+    }
+  }, [activeTool, locale]);
   const handleEditMarketSkill = useCallback((skill: SkillEntry) => {
     void startSkillEdit(skill);
   }, [startSkillEdit]);
@@ -837,6 +1206,43 @@ export default function Marketplace() {
         </div>
       </div>
 
+      {/* Tool Selector — install/uninstall actions follow this active tab */}
+      {visibleTools.length > 0 && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {visibleTools.map((tool) => {
+            const Icon = TOOL_ICONS[tool.id] || Monitor;
+            const isActive = activeTool === tool.id;
+            return (
+              <div key={tool.id} style={{ position: "relative" }}>
+                <button
+                  className={`btn btn-sm ${isActive ? "btn-primary" : tool.installed ? "btn-secondary" : "btn-ghost"}`}
+                  onClick={() => {
+                    if (!tool.installed) return;
+                    setActiveTool(tool.id);
+                    setSearch("");
+                    setPreviewSkill(null);
+                    setPreviewMcp(null);
+                  }}
+                  style={{ gap: 6, opacity: tool.installed ? 1 : 0.5, cursor: tool.installed ? "pointer" : "default" }}
+                  title={tool.installed ? tool.name : (locale === "zh" ? `${tool.name} 未安装` : `${tool.name} not installed`)}
+                >
+                  <Icon size={14} />
+                  {tool.name}
+                  {!tool.installed && (
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0 }} />
+                  )}
+                </button>
+              </div>
+            );
+          })}
+          {visibleTools.filter((t) => !t.installed).length > 0 && (
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
+              {locale === "zh" ? "红点 = 未安装" : "red dot = not installed"}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Tab Switch: MCP Servers / Skills */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <button
@@ -906,7 +1312,7 @@ export default function Marketplace() {
             <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }} className="stagger">
               {filteredMcp.map(entry => {
-                const isInstalled = installedIds.has(entry.name) || installedIds.has(entry.id);
+                const isInstalled = currentToolInstalledIds.has(entry.name) || currentToolInstalledIds.has(entry.id);
                 const isInstalling = installing === entry.id;
                 return (
                   <MarketplaceMcpCard
@@ -919,11 +1325,13 @@ export default function Marketplace() {
                     installLabel={i.marketplace.install}
                     installingLabel={i.marketplace.installing}
                     editTitle={locale === "zh" ? "编辑" : "Edit"}
+                    uninstallTitle={locale === "zh" ? `从 ${activeTool} 卸载` : `Remove from ${activeTool}`}
                     githubLabel="GitHub"
                     keysLabel={locale === "zh" ? "密钥" : "keys"}
                     onPreview={handlePreviewMcp}
                     onInstall={handleInstallMcpCard}
                     onEdit={handleEditMcp}
+                    onUninstall={handleUninstallMcpCard}
                     onOpenGithub={handleOpenGithub}
                   />
                 );
@@ -957,37 +1365,89 @@ export default function Marketplace() {
           )
         ) : (
           /* Skills Grid */
-          filteredSkills.length === 0 ? (
-            <EmptyState icon={Zap} text={locale === "zh" ? "未找到技能" : "No skills found"} sub={locale === "zh" ? "尝试其他关键词或添加自定义源" : "Try different keywords or add custom source"} />
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }} className="stagger">
-              {filteredSkills.map(skill => {
-                const isInstalled = installedSkills.has(skill.name.toLowerCase());
-                const isInstalling = installing === skill.id;
-                const desc = showTranslation && locale === "zh" && skill.description_zh ? skill.description_zh : skill.description;
-                return (
-                  <MarketplaceSkillCard
-                    key={skill.id}
-                    skill={skill}
-                    description={desc}
-                    installed={isInstalled}
-                    installing={isInstalling}
-                    installedLabel={i.marketplace.installed}
-                    installLabel={i.marketplace.install}
-                    installingLabel={i.marketplace.installing}
-                    editTitle={locale === "zh" ? "编辑" : "Edit"}
-                    uninstallTitle={locale === "zh" ? "卸载" : "Uninstall"}
-                    githubLabel="GitHub"
-                    onPreview={handleOpenSkillPreview}
-                    onInstall={handleInstallMarketSkill}
-                    onEdit={handleEditMarketSkill}
-                    onUninstall={handleUninstallMarketSkill}
-                    onOpenGithub={handleOpenGithub}
-                  />
-                );
-              })}
-            </div>
-          )
+          <>
+            {/* Featured curated bundles — always rendered at the top, with
+                un-installed bundles ordered first so they're most visible. */}
+            {featuredBundles.length > 0 && (() => {
+              const sorted = [...featuredBundles].sort((a, b) => {
+                const aFull = bundleInstalledCount(a) >= a.totalSkills;
+                const bFull = bundleInstalledCount(b) >= b.totalSkills;
+                if (aFull === bFull) return 0;
+                return aFull ? 1 : -1; // un-installed first
+              });
+              return (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <span style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--text-muted)",
+                    }}>
+                      {locale === "zh" ? "精选打包" : locale === "ja" ? "厳選パッケージ" : "Featured bundles"}
+                    </span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 16 }}>
+                    {sorted.map((bundle) => {
+                      const installedCount = bundleInstalledCount(bundle);
+                      const fullyInstalled = installedCount >= bundle.totalSkills;
+                      const isInstalling = installingBundle === bundle.id;
+                      return (
+                        <FeaturedSkillBundleCard
+                          key={bundle.id}
+                          bundle={bundle}
+                          fullyInstalled={fullyInstalled}
+                          installing={isInstalling}
+                          installedCount={installedCount}
+                          installAllLabel={locale === "zh" ? "一键安装全部" : locale === "ja" ? "すべてインストール" : "Install all"}
+                          installingLabel={locale === "zh" ? "安装中" : locale === "ja" ? "インストール中" : "Installing"}
+                          installedLabel={locale === "zh" ? "已安装" : locale === "ja" ? "インストール済み" : "Installed"}
+                          reinstallLabel={locale === "zh" ? "重新安装" : locale === "ja" ? "再インストール" : "Reinstall"}
+                          bundleBadgeLabel={locale === "zh" ? "精选" : locale === "ja" ? "厳選" : "Featured"}
+                          githubLabel="GitHub"
+                          onInstallAll={handleInstallBundle}
+                          onOpenGithub={handleOpenGithub}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {filteredSkills.length === 0 ? (
+              <EmptyState icon={Zap} text={locale === "zh" ? "未找到技能" : "No skills found"} sub={locale === "zh" ? "尝试其他关键词或添加自定义源" : "Try different keywords or add custom source"} />
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }} className="stagger">
+                {filteredSkills.map(skill => {
+                  const isInstalled = currentToolInstalledSkills.has(skill.name.toLowerCase());
+                  const isInstalling = installing === skill.id;
+                  const desc = showTranslation && locale === "zh" && skill.description_zh ? skill.description_zh : skill.description;
+                  return (
+                    <MarketplaceSkillCard
+                      key={skill.id}
+                      skill={skill}
+                      description={desc}
+                      installed={isInstalled}
+                      installing={isInstalling}
+                      installedLabel={i.marketplace.installed}
+                      installLabel={i.marketplace.install}
+                      installingLabel={i.marketplace.installing}
+                      editTitle={locale === "zh" ? "编辑" : "Edit"}
+                      uninstallTitle={locale === "zh" ? `从 ${activeTool} 卸载` : `Remove from ${activeTool}`}
+                      githubLabel="GitHub"
+                      onPreview={handleOpenSkillPreview}
+                      onInstall={handleInstallMarketSkill}
+                      onEdit={handleEditMarketSkill}
+                      onUninstall={handleUninstallMarketSkill}
+                      onOpenGithub={handleOpenGithub}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -1165,7 +1625,7 @@ export default function Marketplace() {
             {/* Content preview */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span className="field-label" style={{ marginBottom: 0 }}>{locale === "zh" ? "技能内容" : "Content"}</span>
-              {installedSkills.has(previewSkill.name.toLowerCase()) && (
+              {currentToolInstalledSkills.has(previewSkill.name.toLowerCase()) && (
                 <button className="btn btn-secondary btn-xs" onClick={() => void startSkillEdit(previewSkill)} style={{ gap: 5 }}>
                   <Edit3 size={12} />{locale === "zh" ? "编辑" : "Edit"}
                 </button>
@@ -1176,7 +1636,7 @@ export default function Marketplace() {
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setPreviewSkill(null)}>{i.common.cancel}</button>
-              {installedSkills.has(previewSkill.name.toLowerCase()) ? (
+              {currentToolInstalledSkills.has(previewSkill.name.toLowerCase()) ? (
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <button className="btn btn-danger-ghost btn-sm" onClick={() => { handleUninstallSkill(previewSkill); setPreviewSkill(null); }} style={{ gap: 5 }}>
                     <Trash2 size={13} />{locale === "zh" ? "卸载" : "Uninstall"}
@@ -1196,7 +1656,7 @@ export default function Marketplace() {
       )}
       {/* MCP Preview Modal */}
       {previewMcp && (() => {
-        const isInstalled = installedIds.has(previewMcp.name) || installedIds.has(previewMcp.id);
+        const isInstalled = currentToolInstalledIds.has(previewMcp.name) || currentToolInstalledIds.has(previewMcp.id);
         return (
           <div style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
             onClick={() => setPreviewMcp(null)}>

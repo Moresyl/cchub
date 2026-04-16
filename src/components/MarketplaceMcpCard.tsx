@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { CheckCircle, Download, Edit3, ExternalLink, Key } from "lucide-react";
+import { CheckCircle, Download, Edit3, ExternalLink, Key, Trash2 } from "lucide-react";
 
 export interface MarketplaceMcpCardEntry {
   id: string;
@@ -24,11 +24,13 @@ interface MarketplaceMcpCardProps {
   installLabel: string;
   installingLabel: string;
   editTitle: string;
+  uninstallTitle?: string;
   githubLabel: string;
   keysLabel: string;
   onPreview: (entry: MarketplaceMcpCardEntry) => void;
   onInstall: (entry: MarketplaceMcpCardEntry) => void;
   onEdit: (entry: MarketplaceMcpCardEntry) => void;
+  onUninstall?: (entry: MarketplaceMcpCardEntry) => void;
   onOpenGithub: (url: string) => void;
 }
 
@@ -41,11 +43,13 @@ function MarketplaceMcpCardComponent({
   installLabel,
   installingLabel,
   editTitle,
+  uninstallTitle,
   githubLabel,
   keysLabel,
   onPreview,
   onInstall,
   onEdit,
+  onUninstall,
   onOpenGithub,
 }: MarketplaceMcpCardProps) {
   return (
@@ -96,6 +100,18 @@ function MarketplaceMcpCardComponent({
             >
               <Edit3 size={13} style={{ color: "var(--text-muted)" }} />
             </button>
+            {onUninstall && (
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onUninstall(entry);
+                }}
+                title={uninstallTitle ?? "Uninstall"}
+              >
+                <Trash2 size={13} style={{ color: "var(--danger)" }} />
+              </button>
+            )}
             <span className="badge badge-success" style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <CheckCircle size={12} />{installedLabel}
             </span>

@@ -2801,7 +2801,16 @@ fn reapply_active_profiles(conn: &Connection) -> Result<(), String> {
             .ok();
 
         if let Some(profile_id) = active_profile_id {
-            crate::commands::extra_commands::apply_config_profile_from_conn(conn, &profile_id)?;
+            // Startup reapply: preserve user-managed keys (e.g., codex personality /
+            // model_reasoning_effort) written through the Tools page. The only reason
+            // we reapply at startup is to rewrite the proxy base_url — we must not
+            // clobber unrelated per-tool settings the user edited after the profile
+            // was captured.
+            crate::commands::extra_commands::apply_config_profile_from_conn(
+                conn,
+                &profile_id,
+                true,
+            )?;
         }
     }
     Ok(())

@@ -3705,6 +3705,68 @@ fn apply_tool_snapshot(
     tool_id: &str,
     snapshot: &str,
 ) -> Result<(), String> {
+    apply_tool_snapshot_with_options(conn, tool_id, snapshot, false)
+}
+
+/// Codex TOML keys that are managed by the Tools page / ConfigFiles page and should survive
+/// startup reapply of the active profile. On explicit profile switch we intentionally overwrite
+/// them, but on unattended startup reapply (whose only real job is to rewrite the proxy base_url)
+/// we want the user's last-known values to persist across restarts.
+const CODEX_USER_MANAGED_KEYS: &[&str] = &[
+    "personality",
+    "model_reasoning_effort",
+    "disable_response_storage",
+    "model_context_window",
+    "model_auto_compact_token_limit",
+];
+
+/// Overlay the Tools-page-managed codex fields from the existing config.toml on disk onto
+/// the snapshot's inline config TOML. Returns the updated snapshot JSON string.
+fn overlay_codex_user_fields_into_snapshot(
+    snapshot_json: &str,
+    existing_config_path: &std::path::Path,
+) -> String {
+    if !existing_config_path.exists() {
+        return snapshot_json.to_string();
+    }
+    let Ok(existing_text) = std::fs::read_to_string(existing_config_path) else {
+        return snapshot_json.to_string();
+    };
+    let Ok(existing_doc) = existing_text.parse::<toml_edit::DocumentMut>() else {
+        return snapshot_json.to_string();
+    };
+    let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(snapshot_json) else {
+        return snapshot_json.to_string();
+    };
+    let Some(obj) = parsed.as_object_mut() else {
+        return snapshot_json.to_string();
+    };
+    let Some(config_text) = obj.get("config").and_then(|v| v.as_str()).map(str::to_string) else {
+        return snapshot_json.to_string();
+    };
+    let Ok(mut snapshot_doc) = config_text.parse::<toml_edit::DocumentMut>() else {
+        return snapshot_json.to_string();
+    };
+
+    for key in CODEX_USER_MANAGED_KEYS {
+        if let Some(existing_value) = existing_doc.get(*key) {
+            snapshot_doc[*key] = existing_value.clone();
+        }
+    }
+
+    obj.insert(
+        "config".to_string(),
+        serde_json::Value::String(snapshot_doc.to_string()),
+    );
+    serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| snapshot_json.to_string())
+}
+
+fn apply_tool_snapshot_with_options(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+    snapshot: &str,
+    preserve_user_edits: bool,
+) -> Result<(), String> {
     let effective_snapshot = crate::provider_proxy::materialize_tool_snapshot_for_runtime(
         conn,
         tool_id,
@@ -3718,7 +3780,13 @@ fn apply_tool_snapshot(
             let auth_path = dir.join("auth.json");
             let config_path = dir.join("config.toml");
 
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&effective_snapshot) {
+            let snapshot_to_apply = if preserve_user_edits {
+                overlay_codex_user_fields_into_snapshot(&effective_snapshot, &config_path)
+            } else {
+                effective_snapshot.clone()
+            };
+
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&snapshot_to_apply) {
                 if let (Some(auth), Some(config)) = (
                     value.get("auth"),
                     value.get("config").and_then(|v| v.as_str()),
@@ -3733,7 +3801,7 @@ fn apply_tool_snapshot(
                 }
             }
 
-            crate::utils::atomic_write_string(&config_path, &effective_snapshot)
+            crate::utils::atomic_write_string(&config_path, &snapshot_to_apply)
                 .map_err(|e| e.to_string())
         }
         "gemini" => {
@@ -4217,6 +4285,7 @@ pub fn update_config_profile(
 pub fn apply_config_profile_from_conn(
     conn: &rusqlite::Connection,
     id: &str,
+    preserve_user_edits: bool,
 ) -> Result<(String, String), String> {
     let (tool_id, snapshot): (String, String) = conn
         .query_row(
@@ -4226,7 +4295,7 @@ pub fn apply_config_profile_from_conn(
         )
         .map_err(|e| format!("Profile not found: {}", e))?;
 
-    apply_tool_snapshot(conn, &tool_id, &snapshot)?;
+    apply_tool_snapshot_with_options(conn, &tool_id, &snapshot, preserve_user_edits)?;
 
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
@@ -4256,7 +4325,7 @@ pub fn apply_config_profile(
     db: State<'_, DbState>,
 ) -> Result<ApplyConfigProfileResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let (tool_id, _) = apply_config_profile_from_conn(&conn, &id)?;
+    let (tool_id, _) = apply_config_profile_from_conn(&conn, &id, false)?;
     let active_profile_ids = get_active_config_profile_ids_from_conn(&conn)?;
     Ok(ApplyConfigProfileResult {
         tool_id,

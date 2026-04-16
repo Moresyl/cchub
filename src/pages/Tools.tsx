@@ -25,6 +25,7 @@ import {
   useHudStatus,
   type Hello2ccConfigQueryResult,
   type Hello2ccStatusQueryResult,
+  type ToolSettingsQueryResult,
 } from "../hooks/queries";
 
 type ToolTab = "claude" | "codex";
@@ -211,10 +212,29 @@ export default function Tools() {
     setHello2ccDraft(hello2ccStatus?.config ?? DEFAULT_HELLO2CC_CONFIG);
   }, [hello2ccStatus]);
 
-  const setClaudeSetting = useCallback(async <T,>(fn: string, args: Record<string, unknown>, onSuccess: (value: T) => void) => {
+  const patchToolsPageCache = useCallback(
+    (partial: Partial<ToolSettingsQueryResult>) => {
+      queryClient.setQueryData<ToolSettingsQueryResult>(queryKeys.toolsPage, (prev) =>
+        prev ? { ...prev, ...partial } : prev,
+      );
+    },
+    [queryClient],
+  );
+
+  const patchCodexCache = useCallback(
+    (partial: Partial<ToolSettingsQueryResult["codexSettings"]>) => {
+      queryClient.setQueryData<ToolSettingsQueryResult>(queryKeys.toolsPage, (prev) =>
+        prev ? { ...prev, codexSettings: { ...prev.codexSettings, ...partial } } : prev,
+      );
+    },
+    [queryClient],
+  );
+
+  const setClaudeSetting = useCallback(async <T,>(fn: string, args: Record<string, unknown>, onSuccess: (value: T) => void, syncCache?: (value: T) => void) => {
     try {
       const value = await invoke<T>(fn, args);
       onSuccess(value);
+      syncCache?.(value);
       showToast("success", uiText("已更新", "Updated", "更新しました"));
     } catch (e) { showToast("error", `${e}`); }
   }, [uiText]);
@@ -222,9 +242,26 @@ export default function Tools() {
   const setCodex = useCallback(async (key: string, value: string) => {
     try {
       await invoke("set_codex_setting", { key, value });
+      // Keep the react-query cache in sync; otherwise remounting the page within
+      // staleTime (30s) seeds local state from the stale cache and the select
+      // visually reverts to the pre-save value.
+      switch (key) {
+        case "approval_mode":
+          patchCodexCache({ approval_mode: value });
+          break;
+        case "reasoning_effort":
+          patchCodexCache({ reasoning_effort: value });
+          break;
+        case "disable_response_storage":
+          patchCodexCache({ disable_response_storage: value === "true" });
+          break;
+        case "context_window_1m":
+          patchCodexCache({ context_window_1m: value === "true" });
+          break;
+      }
       showToast("success", uiText("已更新", "Updated", "更新しました"));
     } catch (e) { showToast("error", `${e}`); }
-  }, [uiText]);
+  }, [patchCodexCache, uiText]);
 
   const handleInstallHud = useCallback(async () => {
     setHudInstalling(true);
@@ -398,8 +435,13 @@ export default function Tools() {
 
   const commitPermLevel = useCallback(async (nextLevel = pendingPermLevelRef.current ?? permLevel) => {
     pendingPermLevelRef.current = null;
-    await setClaudeSetting<number>("set_claude_permissions_level", { level: nextLevel }, setPermLevel);
-  }, [permLevel, setClaudeSetting]);
+    await setClaudeSetting<number>(
+      "set_claude_permissions_level",
+      { level: nextLevel },
+      setPermLevel,
+      (v) => patchToolsPageCache({ permissionsLevel: v }),
+    );
+  }, [patchToolsPageCache, permLevel, setClaudeSetting]);
 
   const unavailableLabel = useMemo(() => uiText("未安装", "N/A", "未インストール"), [uiText]);
   const permLevelLabels = useMemo(
@@ -561,13 +603,23 @@ export default function Tools() {
   const handleSelectAutoUpdate = useCallback((value: string | number) => {
     const nextValue = String(value);
     setAutoUpdate(nextValue);
-    void setClaudeSetting<string>("set_claude_auto_update", { channel: nextValue }, setAutoUpdate);
-  }, [setClaudeSetting]);
+    void setClaudeSetting<string>(
+      "set_claude_auto_update",
+      { channel: nextValue },
+      setAutoUpdate,
+      (v) => patchToolsPageCache({ autoUpdateChannel: v }),
+    );
+  }, [patchToolsPageCache, setClaudeSetting]);
   const handleSelectClaudeModel = useCallback((value: string | number) => {
     const nextValue = String(value);
     setClaudeModel(nextValue);
-    void setClaudeSetting<string>("set_claude_model", { model: nextValue }, setClaudeModel);
-  }, [setClaudeSetting]);
+    void setClaudeSetting<string>(
+      "set_claude_model",
+      { model: nextValue },
+      setClaudeModel,
+      (v) => patchToolsPageCache({ claudeModel: v }),
+    );
+  }, [patchToolsPageCache, setClaudeSetting]);
   const handleSelectHudLayout = useCallback((value: string | number) => {
     void updateHudConfig({ lineLayout: value as HudConfig["lineLayout"] });
   }, [updateHudConfig]);
@@ -601,8 +653,13 @@ export default function Tools() {
   }, [commitPermLevel]);
   const handleToggleToolSearch = useCallback((enabled: boolean) => {
     setToolSearch(enabled);
-    void setClaudeSetting<boolean>("set_claude_tool_search", { enabled }, setToolSearch);
-  }, [setClaudeSetting]);
+    void setClaudeSetting<boolean>(
+      "set_claude_tool_search",
+      { enabled },
+      setToolSearch,
+      (v) => patchToolsPageCache({ toolSearchEnabled: v }),
+    );
+  }, [patchToolsPageCache, setClaudeSetting]);
   const handleChangePermLevelRange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const nextLevel = Number(event.target.value);
     pendingPermLevelRef.current = nextLevel;

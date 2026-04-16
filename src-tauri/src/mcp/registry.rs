@@ -451,18 +451,39 @@ fn scan_skills_recursive(
                     .unwrap_or(&dir_name),
             );
 
-            // Read all .md files in this skill directory as the content
+            // Read all .md files in this skill directory as the content.
+            // Order MUST match updater::fetch_github_tree_content (SKILL.md first,
+            // then the rest by ASCII-lowercased file name) so that baseline_sha256
+            // computed from local scan matches latest_sha256 fetched from GitHub.
+            let mut extra_paths: Vec<std::path::PathBuf> = std::fs::read_dir(current)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_file()
+                        && p.extension().map(|e| e == "md").unwrap_or(false)
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|n| !n.eq_ignore_ascii_case("SKILL.md"))
+                            .unwrap_or(false)
+                })
+                .collect();
+            extra_paths.sort_by(|a, b| {
+                let key = |p: &std::path::Path| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.to_ascii_lowercase())
+                        .unwrap_or_default()
+                };
+                key(a).cmp(&key(b))
+            });
+
             let mut full_content = content.clone();
-            for entry in std::fs::read_dir(current).into_iter().flatten().flatten() {
-                let path = entry.path();
-                if path.is_file()
-                    && path.extension().map(|e| e == "md").unwrap_or(false)
-                    && path.file_name().map(|n| n != "SKILL.md").unwrap_or(false)
-                {
-                    if let Ok(extra) = std::fs::read_to_string(&path) {
-                        full_content.push_str("\n\n---\n\n");
-                        full_content.push_str(&extra);
-                    }
+            for path in &extra_paths {
+                if let Ok(extra) = std::fs::read_to_string(path) {
+                    full_content.push_str("\n\n---\n\n");
+                    full_content.push_str(&extra);
                 }
             }
 

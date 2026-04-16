@@ -1,4 +1,4 @@
-import { Profiler, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { Profiler, lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -56,11 +56,11 @@ const routeComponents: ReadonlyArray<{
   Component: lazy(pageImports[path]),
 }));
 
-// App 启动后空闲时预加载所有页面 chunk 和关键数据，消除首次点击延迟
+// App 模块加载后立即并发预加载所有页面 chunk，消除首次点击延迟
+Object.values(pageImports).forEach((loader) => void loader());
+
+// 空闲时预热后端数据缓存，不与首屏数据请求抢后端
 {
-  const preloadChunks = () => {
-    Object.values(pageImports).forEach((loader) => void loader());
-  };
   const preloadData = () => {
     const today = new Date().toISOString().slice(0, 10);
     const prefetchers: Array<{ key: readonly unknown[]; fn: () => Promise<unknown> }> = [
@@ -79,19 +79,10 @@ const routeComponents: ReadonlyArray<{
       Promise.resolve(),
     );
   };
-  const warmup = () => {
-    preloadChunks();
-    // 再空闲一次再预热数据，避免与首屏数据加载抢后端
-    if (typeof window.requestIdleCallback === "function") {
-      window.requestIdleCallback(preloadData, { timeout: 5000 });
-    } else {
-      setTimeout(preloadData, 2500);
-    }
-  };
   if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(warmup, { timeout: 3000 });
+    window.requestIdleCallback(preloadData, { timeout: 5000 });
   } else {
-    setTimeout(warmup, 1500);
+    setTimeout(preloadData, 2500);
   }
 }
 
@@ -136,50 +127,14 @@ function RouteProfiler({
 }
 
 
-const RouteSlot = memo(function RouteSlot({
-  isActive,
-  Component,
-}: {
-  isActive: boolean;
-  Component: React.LazyExoticComponent<ComponentType>;
-}) {
+function ActiveRoute({ pathname }: { pathname: string }) {
+  const route = routeComponents.find((r) => r.path === pathname);
+  if (!route) return null;
+  const { Component } = route;
   return (
-    <div
-      style={{
-        display: isActive ? "block" : "none",
-        height: "100%",
-      }}
-    >
-      <Suspense fallback={<RouteFallback />}>
-        <Component />
-      </Suspense>
-    </div>
-  );
-});
-
-function KeepAliveRoutes({ pathname }: { pathname: string }) {
-  // useDeferredValue: 新页面 render 作为低优先级 transition，
-  // 主线程被重页面占用时，当前页面能保持可见、不阻塞输入
-  const deferredPathname = useDeferredValue(pathname);
-  const [mountedPaths, setMountedPaths] = useState<Set<string>>(() => new Set([pathname]));
-
-  // 同步更新：用 urgent pathname（立即挂载新页面，数据请求可提前触发）
-  // 用 deferredPathname 控制 display（旧页面留屏直到新页面就绪）
-  if (!mountedPaths.has(pathname)) {
-    const next = new Set(mountedPaths);
-    next.add(pathname);
-    setMountedPaths(next);
-  }
-
-  return (
-    <>
-      {routeComponents.map(({ path, Component }) => {
-        if (!mountedPaths.has(path)) return null;
-        // 用 deferred 值决定可见性 —— 非活动页面的 isActive 不变，memo 跳过重渲染
-        const isActive = path === deferredPathname;
-        return <RouteSlot key={path} isActive={isActive} Component={Component} />;
-      })}
-    </>
+    <Suspense fallback={<RouteFallback />}>
+      <Component />
+    </Suspense>
   );
 }
 
@@ -387,7 +342,7 @@ function AppShell() {
           <main className="page-content">
             <ErrorBoundary resetKey={location.pathname}>
               <RouteProfiler pathname={location.pathname}>
-                <KeepAliveRoutes pathname={location.pathname} />
+                <ActiveRoute pathname={location.pathname} />
               </RouteProfiler>
             </ErrorBoundary>
           </main>

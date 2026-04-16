@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch, History, Bot } from "lucide-react";
@@ -42,6 +42,7 @@ interface SidebarNavItemProps {
   label: string;
   icon: LucideIcon;
   onPrefetch: (path: string) => void;
+  onPrefetchCancel: () => void;
 }
 
 function SidebarNavItemComponent({
@@ -49,18 +50,22 @@ function SidebarNavItemComponent({
   label,
   icon: Icon,
   onPrefetch,
+  onPrefetchCancel,
 }: SidebarNavItemProps) {
   return (
     <NavLink
       to={path}
       end={path === "/"}
       onClick={(event) => {
+        onPrefetchCancel();
         if (event.currentTarget.classList.contains("active")) {
           event.preventDefault();
         }
       }}
       onPointerEnter={() => onPrefetch(path)}
+      onPointerLeave={onPrefetchCancel}
       onFocus={() => onPrefetch(path)}
+      onBlur={onPrefetchCancel}
       className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
     >
       <Icon size={15} />
@@ -74,7 +79,17 @@ const SidebarNavItem = memo(SidebarNavItemComponent);
 function SidebarComponent() {
   const i = t();
   const queryClient = useQueryClient();
-  const prefetchRoute = useCallback((path: string) => {
+  // 悬停节流：鼠标掠过不触发预取，停留 180ms 才开始
+  const hoverTimerRef = useRef<number | null>(null);
+  const cancelHover = useCallback(() => {
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => cancelHover, [cancelHover]);
+
+  const runPrefetch = useCallback((path: string) => {
     switch (path) {
       case "/mcp-servers":
         void Promise.all([
@@ -155,6 +170,16 @@ function SidebarComponent() {
     }
   }, [queryClient]);
 
+  const prefetchRoute = useCallback((path: string) => {
+    cancelHover();
+    // chunk 预加载立即执行（廉价，浏览器会去重）
+    // 数据预取延迟 180ms，避免鼠标掠过时触发昂贵的后端扫描
+    hoverTimerRef.current = window.setTimeout(() => {
+      hoverTimerRef.current = null;
+      runPrefetch(path);
+    }, 180);
+  }, [cancelHover, runPrefetch]);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -179,6 +204,7 @@ function SidebarComponent() {
             label={i.nav[item.key]}
             icon={item.icon}
             onPrefetch={prefetchRoute}
+            onPrefetchCancel={cancelHover}
           />
         ))}
       </nav>

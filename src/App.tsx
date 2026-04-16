@@ -15,23 +15,47 @@ import { getTheme, setTheme, type Theme } from "./lib/theme";
 import type { EnvironmentConflict } from "./lib/appPreferences";
 import { queryClient } from "./lib/queryClient";
 
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const McpServers = lazy(() => import("./pages/McpServers"));
-const McpClients = lazy(() => import("./pages/McpClients"));
-const Logs = lazy(() => import("./pages/Logs"));
-const Skills = lazy(() => import("./pages/Skills"));
-const Workflows = lazy(() => import("./pages/Workflows"));
-const Autopilot = lazy(() => import("./pages/Autopilot"));
-const Hooks = lazy(() => import("./pages/Hooks"));
-const Settings = lazy(() => import("./pages/Settings"));
-const Security = lazy(() => import("./pages/Security"));
-const Marketplace = lazy(() => import("./pages/Marketplace"));
-const Workspaces = lazy(() => import("./pages/Workspaces"));
-const Profiles = lazy(() => import("./pages/Profiles"));
-const Sessions = lazy(() => import("./pages/Sessions"));
-const Tools = lazy(() => import("./pages/Tools"));
-const ClaudeMd = lazy(() => import("./pages/ClaudeMd"));
-const ConfigFiles = lazy(() => import("./pages/ConfigFiles"));
+const pageImports = {
+  "/": () => import("./pages/Dashboard"),
+  "/mcp-servers": () => import("./pages/McpServers"),
+  "/mcp-clients": () => import("./pages/McpClients"),
+  "/logs": () => import("./pages/Logs"),
+  "/skills": () => import("./pages/Skills"),
+  "/workflows": () => import("./pages/Workflows"),
+  "/autopilot": () => import("./pages/Autopilot"),
+  "/marketplace": () => import("./pages/Marketplace"),
+  "/hooks": () => import("./pages/Hooks"),
+  "/workspaces": () => import("./pages/Workspaces"),
+  "/profiles": () => import("./pages/Profiles"),
+  "/sessions": () => import("./pages/Sessions"),
+  "/claude-md": () => import("./pages/ClaudeMd"),
+  "/config-files": () => import("./pages/ConfigFiles"),
+  "/tools": () => import("./pages/Tools"),
+  "/security": () => import("./pages/Security"),
+  "/settings": () => import("./pages/Settings"),
+} as const;
+
+type RoutePath = keyof typeof pageImports;
+
+const routeComponents: ReadonlyArray<{
+  path: RoutePath;
+  Component: React.LazyExoticComponent<ComponentType>;
+}> = (Object.keys(pageImports) as RoutePath[]).map((path) => ({
+  path,
+  Component: lazy(pageImports[path]),
+}));
+
+// App 启动后空闲时预加载所有页面 chunk，消除首次点击延迟
+{
+  const preloadAll = () => {
+    Object.values(pageImports).forEach((loader) => void loader());
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(preloadAll, { timeout: 3000 });
+  } else {
+    setTimeout(preloadAll, 1500);
+  }
+}
 
 function RouteFallback() {
   return (
@@ -73,37 +97,17 @@ function RouteProfiler({
   );
 }
 
-const routeComponents: ReadonlyArray<{ path: string; Component: React.LazyExoticComponent<ComponentType> }> = [
-  { path: "/", Component: Dashboard },
-  { path: "/mcp-servers", Component: McpServers },
-  { path: "/mcp-clients", Component: McpClients },
-  { path: "/logs", Component: Logs },
-  { path: "/skills", Component: Skills },
-  { path: "/workflows", Component: Workflows },
-  { path: "/autopilot", Component: Autopilot },
-  { path: "/marketplace", Component: Marketplace },
-  { path: "/hooks", Component: Hooks },
-  { path: "/workspaces", Component: Workspaces },
-  { path: "/profiles", Component: Profiles },
-  { path: "/sessions", Component: Sessions },
-  { path: "/claude-md", Component: ClaudeMd },
-  { path: "/config-files", Component: ConfigFiles },
-  { path: "/tools", Component: Tools },
-  { path: "/security", Component: Security },
-  { path: "/settings", Component: Settings },
-];
 
 function KeepAliveRoutes({ pathname }: { pathname: string }) {
   const [mountedPaths, setMountedPaths] = useState<Set<string>>(() => new Set([pathname]));
 
-  useEffect(() => {
-    setMountedPaths((prev) => {
-      if (prev.has(pathname)) return prev;
-      const next = new Set(prev);
-      next.add(pathname);
-      return next;
-    });
-  }, [pathname]);
+  // 同步更新：在 render 阶段立即加入新路径，避免空白帧
+  // React 允许在 render 中调用 setState 作为 derived state 模式
+  if (!mountedPaths.has(pathname)) {
+    const next = new Set(mountedPaths);
+    next.add(pathname);
+    setMountedPaths(next);
+  }
 
   return (
     <>
@@ -113,7 +117,6 @@ function KeepAliveRoutes({ pathname }: { pathname: string }) {
         return (
           <div
             key={path}
-            className={isActive ? "page-enter" : undefined}
             style={{
               display: isActive ? "block" : "none",
               height: "100%",

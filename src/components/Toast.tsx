@@ -14,10 +14,10 @@ interface ToastItemProps {
   onDismiss: (id: string) => void;
 }
 
-let addToastFn: ((type: ToastType, message: string) => void) | null = null;
+let addToastFn: ((type: ToastType, message: string, duration?: number) => void) | null = null;
 
-export function showToast(type: ToastType, message: string) {
-  addToastFn?.(type, message);
+export function showToast(type: ToastType, message: string, duration?: number) {
+  addToastFn?.(type, message, duration);
 }
 
 function ToastItemComponent({ toast, onDismiss }: ToastItemProps) {
@@ -62,12 +62,12 @@ export const ToastContainer = memo(function ToastContainer() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  const addToast = useCallback((type: ToastType, message: string) => {
+  const addToast = useCallback((type: ToastType, message: string, duration?: number) => {
     const id = Date.now().toString() + Math.random().toString(36).slice(2);
     setToasts(prev => [...prev, { id, type, message }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+    }, duration ?? 4000);
   }, []);
 
   useEffect(() => {

@@ -43,15 +43,23 @@ jobs:
           releaseBody: |
             ## 更新内容 / Highlights
 
-            - 新增 Autopilot 自动驾驶页面，支持 Claude/Codex 任务编排与自动执行
-            - 大型页面拆分重构（Settings/Tools/Profiles/Marketplace → 60+ 子组件）
-            - 引入 TanStack React Query 数据管理层
-            - 新增 hello2cc 第三方兼容客户端插件管理
-            - 新增 CommandPalette (Ctrl+K) 全局命令面板
-            - 新增 ErrorBoundary 全局错误边界
-            - Autopilot 停止逻辑异步化，Windows codex 兼容优化
-            - 修复 Windows 下 claude-hud 多行 StatusLine 显示问题
-            - Vite manualChunks 分包优化
+            ### 新功能
+            - 应用更新自动通知 — 启动时检测新版本弹出 toast 提示，Header 可点击徽章跳转设置页
+            - Marketplace 按工具分装 MCP/技能 + 精选打包一键安装
+            - Autopilot 接入实时事件流 + 心跳 + 日志写入节流，消除长轮次 UI 盲区
+
+            ### 问题修复
+            - 修复 Codex CLI 审批模式/推理强度重启后被 profile 重播覆盖
+            - 修复 Tools 页切换后 Codex/Claude 设置因 React Query 缓存回退
+            - 修复 get_codex_settings 在 toml 1.0 下整份解析失败导致每次读取都回退默认值
+            - 修复 Claude 权限级别 2（宽松）误判为级别 1（标准）
+            - 修复 Claude 自动更新"禁用"选项无法持久化（改用 env.DISABLE_AUTOUPDATER 规范机制）
+            - 修复技能扫描 .md 合并顺序对齐 GitHub 拉取，修正 baseline_sha256
+
+            ### 体验优化
+            - 侧边栏悬停节流 + 全局路由切换进度条
+            - 统一 scan 缓存 key + 移除空闲预热
+            - Toast 组件支持自定义显示时长
 
             ## 下载 / Download
 

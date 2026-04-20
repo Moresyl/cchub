@@ -89,6 +89,7 @@ pub struct ToolEnvironmentReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ApplyConfigProfileResult {
     pub tool_id: String,
     pub profile_id: String,

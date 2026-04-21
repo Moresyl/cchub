@@ -6,15 +6,15 @@
 
 ### Stop editing JSON files. Manage your Claude Code ecosystem from one app.
 
-[![GitHub Stars](https://img.shields.io/github/stars/Moresl/cchub?style=social)](https://github.com/Moresl/cchub/stargazers)
-[![Latest Release](https://img.shields.io/github/v/release/Moresl/cchub?color=green)](https://github.com/Moresl/cchub/releases)
-[![Downloads](https://img.shields.io/github/downloads/Moresl/cchub/total?color=blue)](https://github.com/Moresl/cchub/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/Moresll/cchub?style=social)](https://github.com/Moresll/cchub/stargazers)
+[![Latest Release](https://img.shields.io/github/v/release/Moresll/cchub?color=green)](https://github.com/Moresll/cchub/releases)
+[![Downloads](https://img.shields.io/github/downloads/Moresll/cchub/total?color=blue)](https://github.com/Moresll/cchub/releases)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tauri 2.0](https://img.shields.io/badge/Tauri-2.0-orange.svg)](https://tauri.app)
 
 **Windows** · **macOS** · **Linux** &nbsp;|&nbsp; [中文](README.zh-CN.md) · English
 
-[**Download**](https://github.com/Moresl/cchub/releases/latest) &nbsp;&nbsp;·&nbsp;&nbsp; [Report Bug](https://github.com/Moresl/cchub/issues) &nbsp;&nbsp;·&nbsp;&nbsp; [Request Feature](https://github.com/Moresl/cchub/issues)
+[**Download**](https://github.com/Moresll/cchub/releases/latest) &nbsp;&nbsp;·&nbsp;&nbsp; [Report Bug](https://github.com/Moresll/cchub/issues) &nbsp;&nbsp;·&nbsp;&nbsp; [Request Feature](https://github.com/Moresll/cchub/issues)
 
 </div>
 
@@ -97,14 +97,14 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 
 | File | Platform | Description |
 |------|----------|-------------|
-| [`CCHub_x64-setup.exe`](https://github.com/Moresl/cchub/releases/latest) | Windows | **Recommended** — NSIS installer with auto-update |
-| [`CCHub_x64_en-US.msi`](https://github.com/Moresl/cchub/releases/latest) | Windows | MSI format for enterprise deployment |
-| [`CCHub_x64_portable.exe`](https://github.com/Moresl/cchub/releases/latest) | Windows | No install needed — double-click and run |
-| [`CCHub_aarch64.dmg`](https://github.com/Moresl/cchub/releases/latest) | macOS | Apple Silicon (M1/M2/M3/M4) |
-| [`CCHub_x64.dmg`](https://github.com/Moresl/cchub/releases/latest) | macOS | Intel |
-| [`CCHub_amd64.deb`](https://github.com/Moresl/cchub/releases/latest) | Linux | Debian / Ubuntu |
-| [`CCHub_amd64.AppImage`](https://github.com/Moresl/cchub/releases/latest) | Linux | Universal AppImage |
-| [`CCHub_x86_64.rpm`](https://github.com/Moresl/cchub/releases/latest) | Linux | Fedora / RHEL |
+| [`CCHub_x64-setup.exe`](https://github.com/Moresll/cchub/releases/latest) | Windows | **Recommended** — NSIS installer with auto-update |
+| [`CCHub_x64_en-US.msi`](https://github.com/Moresll/cchub/releases/latest) | Windows | MSI format for enterprise deployment |
+| [`CCHub_x64_portable.exe`](https://github.com/Moresll/cchub/releases/latest) | Windows | No install needed — double-click and run |
+| [`CCHub_aarch64.dmg`](https://github.com/Moresll/cchub/releases/latest) | macOS | Apple Silicon (M1/M2/M3/M4) |
+| [`CCHub_x64.dmg`](https://github.com/Moresll/cchub/releases/latest) | macOS | Intel |
+| [`CCHub_amd64.deb`](https://github.com/Moresll/cchub/releases/latest) | Linux | Debian / Ubuntu |
+| [`CCHub_amd64.AppImage`](https://github.com/Moresll/cchub/releases/latest) | Linux | Universal AppImage |
+| [`CCHub_x86_64.rpm`](https://github.com/Moresll/cchub/releases/latest) | Linux | Fedora / RHEL |
 
 ---
 
@@ -134,7 +134,7 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 ### Quick Start
 
 ```bash
-git clone https://github.com/Moresl/cchub.git
+git clone https://github.com/Moresll/cchub.git
 cd cchub
 pnpm install
 pnpm tauri dev
@@ -194,7 +194,7 @@ CCHub auto-scans MCP server configs from:
 
 ## Contributing
 
-Contributions welcome! See [issues](https://github.com/Moresl/cchub/issues) for ideas.
+Contributions welcome! See [issues](https://github.com/Moresll/cchub/issues) for ideas.
 
 ```
 Fork → Branch → Commit → Push → Pull Request
@@ -208,7 +208,7 @@ Fork → Branch → Commit → Push → Pull Request
 
 If CCHub saves you time, consider giving it a star. It helps others discover the project.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Moresl/cchub&type=Date)](https://star-history.com/#Moresl/cchub&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Moresll/cchub&type=Date)](https://star-history.com/#Moresll/cchub&Date)
 
 </div>
 

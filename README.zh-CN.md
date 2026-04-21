@@ -6,15 +6,15 @@
 
 ### 告别手动编辑 JSON，一个应用管理整个 Claude Code 生态
 
-[![GitHub Stars](https://img.shields.io/github/stars/Moresl/cchub?style=social)](https://github.com/Moresl/cchub/stargazers)
-[![Latest Release](https://img.shields.io/github/v/release/Moresl/cchub?color=green)](https://github.com/Moresl/cchub/releases)
-[![Downloads](https://img.shields.io/github/downloads/Moresl/cchub/total?color=blue)](https://github.com/Moresl/cchub/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/Moresll/cchub?style=social)](https://github.com/Moresll/cchub/stargazers)
+[![Latest Release](https://img.shields.io/github/v/release/Moresll/cchub?color=green)](https://github.com/Moresll/cchub/releases)
+[![Downloads](https://img.shields.io/github/downloads/Moresll/cchub/total?color=blue)](https://github.com/Moresll/cchub/releases)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Tauri 2.0](https://img.shields.io/badge/Tauri-2.0-orange.svg)](https://tauri.app)
 
 **Windows** · **macOS** · **Linux** &nbsp;|&nbsp; 中文 · [English](README.md)
 
-[**立即下载**](https://github.com/Moresl/cchub/releases/latest) &nbsp;&nbsp;·&nbsp;&nbsp; [反馈问题](https://github.com/Moresl/cchub/issues) &nbsp;&nbsp;·&nbsp;&nbsp; [功能建议](https://github.com/Moresl/cchub/issues)
+[**立即下载**](https://github.com/Moresll/cchub/releases/latest) &nbsp;&nbsp;·&nbsp;&nbsp; [反馈问题](https://github.com/Moresll/cchub/issues) &nbsp;&nbsp;·&nbsp;&nbsp; [功能建议](https://github.com/Moresll/cchub/issues)
 
 </div>
 
@@ -97,14 +97,14 @@ Claude Code 生态正在爆发式增长 — MCP 服务、技能、插件、钩�
 
 | 文件 | 平台 | 说明 |
 |------|------|------|
-| [`CCHub_x64-setup.exe`](https://github.com/Moresl/cchub/releases/latest) | Windows | **推荐** — NSIS 安装包，支持自动更新 |
-| [`CCHub_x64_en-US.msi`](https://github.com/Moresl/cchub/releases/latest) | Windows | MSI 格式，适合企业部署 |
-| [`CCHub_x64_portable.exe`](https://github.com/Moresl/cchub/releases/latest) | Windows | 免安装便携版，双击即用 |
-| [`CCHub_aarch64.dmg`](https://github.com/Moresl/cchub/releases/latest) | macOS | Apple Silicon (M1/M2/M3/M4) |
-| [`CCHub_x64.dmg`](https://github.com/Moresl/cchub/releases/latest) | macOS | Intel |
-| [`CCHub_amd64.deb`](https://github.com/Moresl/cchub/releases/latest) | Linux | Debian / Ubuntu |
-| [`CCHub_amd64.AppImage`](https://github.com/Moresl/cchub/releases/latest) | Linux | 通用 AppImage |
-| [`CCHub_x86_64.rpm`](https://github.com/Moresl/cchub/releases/latest) | Linux | Fedora / RHEL |
+| [`CCHub_x64-setup.exe`](https://github.com/Moresll/cchub/releases/latest) | Windows | **推荐** — NSIS 安装包，支持自动更新 |
+| [`CCHub_x64_en-US.msi`](https://github.com/Moresll/cchub/releases/latest) | Windows | MSI 格式，适合企业部署 |
+| [`CCHub_x64_portable.exe`](https://github.com/Moresll/cchub/releases/latest) | Windows | 免安装便携版，双击即用 |
+| [`CCHub_aarch64.dmg`](https://github.com/Moresll/cchub/releases/latest) | macOS | Apple Silicon (M1/M2/M3/M4) |
+| [`CCHub_x64.dmg`](https://github.com/Moresll/cchub/releases/latest) | macOS | Intel |
+| [`CCHub_amd64.deb`](https://github.com/Moresll/cchub/releases/latest) | Linux | Debian / Ubuntu |
+| [`CCHub_amd64.AppImage`](https://github.com/Moresll/cchub/releases/latest) | Linux | 通用 AppImage |
+| [`CCHub_x86_64.rpm`](https://github.com/Moresll/cchub/releases/latest) | Linux | Fedora / RHEL |
 
 ---
 
@@ -134,7 +134,7 @@ Claude Code 生态正在爆发式增长 — MCP 服务、技能、插件、钩�
 ### 快速开始
 
 ```bash
-git clone https://github.com/Moresl/cchub.git
+git clone https://github.com/Moresll/cchub.git
 cd cchub
 pnpm install
 pnpm tauri dev
@@ -194,7 +194,7 @@ CCHub 自动扫描以下配置源：
 
 ## 参与贡献
 
-欢迎提交 PR！查看 [Issues](https://github.com/Moresl/cchub/issues) 获取灵感。
+欢迎提交 PR！查看 [Issues](https://github.com/Moresll/cchub/issues) 获取灵感。
 
 ```
 Fork → 创建分支 → 提交更改 → 推送 → 发起 PR
@@ -208,7 +208,7 @@ Fork → 创建分支 → 提交更改 → 推送 → 发起 PR
 
 如果 CCHub 帮你省了时间，给个 Star 支持一下，让更多人发现这个项目。
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Moresl/cchub&type=Date)](https://star-history.com/#Moresl/cchub&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Moresll/cchub&type=Date)](https://star-history.com/#Moresll/cchub&Date)
 
 </div>
 

@@ -269,7 +269,13 @@ function ToolsPanel() {
   async function loadTools() {
     try {
       const data = await invoke<ToolsConfig>("get_openclaw_tools");
-      setConfig(data);
+      // Backend uses skip_serializing_if = "Vec::is_empty", so allow/deny may
+      // be undefined when empty. Normalize to empty arrays.
+      setConfig({
+        profile: data?.profile ?? null,
+        allow: data?.allow ?? [],
+        deny: data?.deny ?? [],
+      });
     } catch {
       // keep defaults
     } finally {
@@ -421,7 +427,14 @@ function AgentsPanel() {
   async function loadAgents() {
     try {
       const data = await invoke<AgentsDefaults>("get_openclaw_agents_defaults");
-      setDefaults(data);
+      // Normalize: model.fallbacks may be undefined due to backend's
+      // skip_serializing_if = "Vec::is_empty"; ensure it's at least [].
+      setDefaults({
+        model: data?.model
+          ? { primary: data.model.primary ?? "", fallbacks: data.model.fallbacks ?? [] }
+          : null,
+        models: data?.models ?? null,
+      });
     } catch {
       // keep defaults
     } finally {

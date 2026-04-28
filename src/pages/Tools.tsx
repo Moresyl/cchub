@@ -1068,7 +1068,7 @@ export default function Tools() {
             {/* Proxy Advanced — 代理增强（仅 Claude） */}
             <div className="card" style={{ padding: "16px 18px" }}>
               <Suspense fallback={<div style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center" }}><div className="spinner" /></div>}>
-                <ProxyAdvancedPanel embedded />
+                <ProxyAdvancedPanel embedded mode="claude" />
               </Suspense>
             </div>
           </div>
@@ -1112,6 +1112,13 @@ export default function Tools() {
               labelOn={uiText("已开启", "Enabled", "有効")}
               labelOff={uiText("默认", "Default", "既定")}
             />
+
+            {/* Proxy Advanced — Codex OAuth 字段剥离 */}
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <Suspense fallback={<div style={{ minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center" }}><div className="spinner" /></div>}>
+                <ProxyAdvancedPanel embedded mode="codex" />
+              </Suspense>
+            </div>
           </div>
         )}
 

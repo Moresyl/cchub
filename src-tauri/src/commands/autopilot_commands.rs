@@ -66,6 +66,10 @@ pub struct AutopilotStatus {
     pub last_error: String,
     pub dry_run: bool,
     pub recent_stages: Vec<AutopilotStageEntry>,
+    #[serde(default)]
+    pub task_queue: Vec<String>,
+    #[serde(default)]
+    pub current_task_index: usize,
 }
 
 impl Default for AutopilotStatus {
@@ -95,6 +99,8 @@ impl Default for AutopilotStatus {
             last_error: String::new(),
             dry_run: false,
             recent_stages: Vec::new(),
+            task_queue: Vec::new(),
+            current_task_index: 0,
         }
     }
 }
@@ -102,12 +108,16 @@ impl Default for AutopilotStatus {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutopilotStartRequest {
+    #[serde(default)]
     pub task_file: String,
+    #[serde(default)]
+    pub task_files: Option<Vec<String>>,
     pub workdir: String,
     pub model: String,
     pub profile: String,
     pub interval: Option<u64>,
     pub max_attempts: Option<u32>,
+    #[serde(default)]
     pub codex_bin: Option<String>,
     pub fresh: bool,
     pub dry_run: bool,
@@ -237,26 +247,63 @@ pub async fn pick_autopilot_file() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-pub fn start_autopilot(
-    app: AppHandle,
-    request: AutopilotStartRequest,
-    runtime: State<'_, AutopilotRuntime>,
-) -> Result<AutopilotStatus, String> {
-    let runtime = runtime.inner().clone();
-    if runtime.snapshot()?.running {
-        return Err("Autopilot 正在运行，请先停止当前任务".to_string());
-    }
+pub async fn pick_autopilot_files() -> Result<Vec<String>, String> {
+    let files = rfd::AsyncFileDialog::new()
+        .set_title("Select task files")
+        .pick_files()
+        .await;
+    Ok(files
+        .map(|list| {
+            list.into_iter()
+                .map(|f| f.path().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default())
+}
 
-    let task_file = canonicalize_existing_file(&request.task_file, "任务文件")?;
-    let workdir = resolve_workdir(&request.workdir, &task_file)?;
-    let codex_bin = resolve_codex_bin(request.codex_bin.as_deref().unwrap_or("codex"))?;
+/// Resolve task files from request (task_files preferred over single task_file).
+/// Returns canonicalized absolute paths after validating each exists.
+fn collect_task_files(request: &AutopilotStartRequest) -> Result<Vec<PathBuf>, String> {
+    let raw: Vec<String> = match &request.task_files {
+        Some(list) if !list.is_empty() => list.clone(),
+        _ => {
+            if request.task_file.trim().is_empty() {
+                return Err("请至少选择一个任务文件".to_string());
+            }
+            vec![request.task_file.clone()]
+        }
+    };
+    let mut resolved = Vec::with_capacity(raw.len());
+    for raw_path in raw {
+        if raw_path.trim().is_empty() {
+            continue;
+        }
+        let abs = canonicalize_existing_file(&raw_path, "任务文件")?;
+        resolved.push(abs);
+    }
+    if resolved.is_empty() {
+        return Err("请至少选择一个任务文件".to_string());
+    }
+    Ok(resolved)
+}
+
+/// Prepare per-task paths, status, and context. Each task in a queue gets
+/// its own run_dir / log_dir / state_dir under autopilot_runs_dir.
+fn prepare_task_run(
+    request: &AutopilotStartRequest,
+    task_file_abs: &Path,
+    task_index: usize,
+    queue: &[String],
+    codex_bin: &str,
+) -> Result<(AutopilotStatus, NativeAutopilotContext), String> {
+    let workdir = resolve_workdir(&request.workdir, task_file_abs)?;
     let run_id = format!(
         "{}-{}",
         chrono::Local::now().format("%Y%m%d-%H%M%S"),
         Uuid::new_v4().simple()
     );
     let task_name = sanitize_task_name(
-        task_file
+        task_file_abs
             .file_stem()
             .and_then(OsStr::to_str)
             .unwrap_or("autopilot-task"),
@@ -280,7 +327,7 @@ pub fn start_autopilot(
         initial_prompt_file: state_dir.join("initial-prompt.txt"),
         resume_prompt_file: state_dir.join("resume-prompt.txt"),
         current_prompt_file: state_dir.join("_current_prompt.txt"),
-        task_file_abs: task_file.clone(),
+        task_file_abs: task_file_abs.to_path_buf(),
     };
 
     if request.fresh {
@@ -289,20 +336,25 @@ pub fn start_autopilot(
 
     let (nonce, done_token) = generate_nonce();
     let started_at = now_string();
-    let mut initial_status = AutopilotStatus {
+    let queue_summary = if queue.len() > 1 {
+        format!("准备启动 Autopilot（{}/{}）", task_index + 1, queue.len())
+    } else {
+        "准备启动 Autopilot".to_string()
+    };
+    let mut status = AutopilotStatus {
         running: true,
         stop_requested: false,
         status: AUTOPILOT_STATUS_RUNNING.to_string(),
         phase: "preparing".to_string(),
-        summary: "准备启动 Autopilot".to_string(),
-        message: "准备启动 Autopilot".to_string(),
+        summary: queue_summary.clone(),
+        message: queue_summary.clone(),
         started_at: Some(started_at),
         finished_at: None,
         current_run_id: Some(run_id),
-        task_file: task_file.to_string_lossy().to_string(),
+        task_file: task_file_abs.to_string_lossy().to_string(),
         task_name,
         workdir: workdir.to_string_lossy().to_string(),
-        codex_bin: codex_bin.clone(),
+        codex_bin: codex_bin.to_string(),
         logs_root_dir: utils::autopilot_runs_dir().to_string_lossy().to_string(),
         run_dir: run_dir.to_string_lossy().to_string(),
         log_dir: log_dir.to_string_lossy().to_string(),
@@ -314,26 +366,90 @@ pub fn start_autopilot(
         last_error: String::new(),
         dry_run: request.dry_run,
         recent_stages: Vec::new(),
+        task_queue: queue.to_vec(),
+        current_task_index: task_index,
     };
-    push_stage(
-        &mut initial_status,
-        "preparing",
-        "准备启动原生 Autopilot".to_string(),
-        None,
-    );
-    runtime.replace_status(initial_status)?;
+    push_stage(&mut status, "preparing", queue_summary, None);
 
     let context = NativeAutopilotContext {
-        request,
+        request: request.clone(),
         paths,
-        codex_bin,
+        codex_bin: codex_bin.to_string(),
         nonce,
         done_token,
     };
+    Ok((status, context))
+}
+
+#[tauri::command]
+pub fn start_autopilot(
+    app: AppHandle,
+    request: AutopilotStartRequest,
+    runtime: State<'_, AutopilotRuntime>,
+) -> Result<AutopilotStatus, String> {
+    let runtime = runtime.inner().clone();
+    if runtime.snapshot()?.running {
+        return Err("Autopilot 正在运行，请先停止当前任务".to_string());
+    }
+
+    let task_files = collect_task_files(&request)?;
+    let codex_bin = resolve_codex_bin(request.codex_bin.as_deref().unwrap_or("codex"))?;
+    let queue: Vec<String> = task_files
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    let (initial_status, first_context) =
+        prepare_task_run(&request, &task_files[0], 0, &queue, &codex_bin)?;
+    runtime.replace_status(initial_status)?;
+
     thread::spawn({
         let runtime = runtime.clone();
         let app = app.clone();
-        move || run_native_autopilot(app, runtime, context)
+        let request = request.clone();
+        let queue = queue.clone();
+        let codex_bin = codex_bin.clone();
+        let task_files = task_files.clone();
+        move || {
+            // First task uses the already-prepared context to avoid double prep work.
+            run_native_autopilot(app.clone(), runtime.clone(), first_context);
+            // Subsequent tasks: stop if user requested, or any task fails.
+            for (idx, task_path) in task_files.iter().enumerate().skip(1) {
+                if runtime.is_stop_requested() {
+                    break;
+                }
+                let last_status = match runtime.snapshot() {
+                    Ok(s) => s.status,
+                    Err(_) => break,
+                };
+                // Continue on completed/max_attempts/idle_stopped; halt on failed/stopped.
+                if matches!(
+                    last_status.as_str(),
+                    AUTOPILOT_STATUS_FAILED | AUTOPILOT_STATUS_STOPPED
+                ) {
+                    break;
+                }
+                match prepare_task_run(&request, task_path, idx, &queue, &codex_bin) {
+                    Ok((next_status, next_context)) => {
+                        if let Err(e) = runtime.replace_status(next_status) {
+                            eprintln!("autopilot queue: replace_status failed: {e}");
+                            break;
+                        }
+                        run_native_autopilot(app.clone(), runtime.clone(), next_context);
+                    }
+                    Err(e) => {
+                        let _ = runtime.update_status(|status| {
+                            status.running = false;
+                            status.status = AUTOPILOT_STATUS_FAILED.to_string();
+                            status.finished_at = Some(now_string());
+                            status.last_error = e.clone();
+                            push_stage(status, "failed", e.clone(), None);
+                        });
+                        break;
+                    }
+                }
+            }
+        }
     });
 
     runtime.snapshot()
@@ -1504,6 +1620,7 @@ mod tests {
     fn test_request(task_file: &std::path::Path, workdir: &std::path::Path) -> AutopilotStartRequest {
         AutopilotStartRequest {
             task_file: task_file.to_string_lossy().to_string(),
+            task_files: None,
             workdir: workdir.to_string_lossy().to_string(),
             model: String::new(),
             profile: String::new(),

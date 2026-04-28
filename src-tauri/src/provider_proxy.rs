@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, State as TauriState};
+use tauri::{AppHandle, Emitter, Manager, State as TauriState};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -22,8 +22,9 @@ use crate::copilot_auth::{self, CopilotAuthState};
 use crate::db::DbState;
 use crate::provider_proxy_transform::{
     anthropic_to_openai, anthropic_to_responses, create_anthropic_sse_stream,
-    create_anthropic_sse_stream_from_responses, openai_error_to_anthropic, openai_to_anthropic,
-    rectify_anthropic_request_bytes, responses_to_anthropic,
+    create_anthropic_sse_stream_from_gemini, create_anthropic_sse_stream_from_responses,
+    openai_error_to_anthropic, openai_to_anthropic, rectify_anthropic_request_bytes,
+    responses_to_anthropic,
 };
 
 const LOCAL_PROVIDER_PROXY_SETTINGS_KEY: &str = "local_provider_proxy_settings";
@@ -33,9 +34,6 @@ const DEFAULT_LOCAL_PROVIDER_PROXY_PORT: u16 = 34567;
 const MAX_PROXY_BODY_BYTES: usize = 64 * 1024 * 1024;
 const MANAGED_PROXY_TOOLS: [&str; 6] =
     ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
-const ENDPOINT_CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
-const ENDPOINT_CIRCUIT_BREAKER_COOLDOWN: Duration = Duration::from_secs(30);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalProviderProxySettings {
@@ -61,10 +59,94 @@ pub struct LocalProviderProxyStatus {
     pub enabled_apps: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CircuitState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+impl Default for CircuitState {
+    fn default() -> Self {
+        Self::Closed
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct EndpointCircuitState {
+    state: CircuitState,
     consecutive_failures: u32,
+    consecutive_successes: u32,
     open_until: Option<Instant>,
+    half_open_permit_taken: bool,
+}
+
+impl EndpointCircuitState {
+    fn is_available(&mut self) -> bool {
+        match self.state {
+            CircuitState::Closed => true,
+            CircuitState::Open => {
+                if self.open_until.is_some_and(|until| Instant::now() >= until) {
+                    self.state = CircuitState::HalfOpen;
+                    self.half_open_permit_taken = false;
+                    self.consecutive_successes = 0;
+                    if !self.half_open_permit_taken {
+                        self.half_open_permit_taken = true;
+                        return true;
+                    }
+                }
+                false
+            }
+            CircuitState::HalfOpen => {
+                if !self.half_open_permit_taken {
+                    self.half_open_permit_taken = true;
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    fn record_success(&mut self, success_threshold: u32) {
+        self.consecutive_failures = 0;
+        match self.state {
+            CircuitState::HalfOpen => {
+                self.consecutive_successes += 1;
+                if self.consecutive_successes >= success_threshold {
+                    self.state = CircuitState::Closed;
+                    self.open_until = None;
+                    self.half_open_permit_taken = false;
+                } else {
+                    self.half_open_permit_taken = false;
+                }
+            }
+            _ => {
+                self.state = CircuitState::Closed;
+                self.open_until = None;
+            }
+        }
+    }
+
+    fn record_failure(&mut self, failure_threshold: u32, timeout_secs: u64) {
+        self.consecutive_successes = 0;
+        match self.state {
+            CircuitState::HalfOpen => {
+                self.state = CircuitState::Open;
+                self.open_until = Some(Instant::now() + Duration::from_secs(timeout_secs));
+                self.half_open_permit_taken = false;
+                self.consecutive_failures = 0;
+            }
+            _ => {
+                self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+                if self.consecutive_failures >= failure_threshold {
+                    self.state = CircuitState::Open;
+                    self.open_until = Some(Instant::now() + Duration::from_secs(timeout_secs));
+                    self.consecutive_failures = 0;
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -88,6 +170,7 @@ enum ClaudeApiFormat {
     Anthropic,
     OpenAiChat,
     OpenAiResponses,
+    GeminiNative,
 }
 
 impl ClaudeApiFormat {
@@ -95,12 +178,13 @@ impl ClaudeApiFormat {
         match value {
             "openai_chat" => Self::OpenAiChat,
             "openai_responses" => Self::OpenAiResponses,
+            "gemini_native" => Self::GeminiNative,
             _ => Self::Anthropic,
         }
     }
 
     fn needs_transform(self) -> bool {
-        matches!(self, Self::OpenAiChat | Self::OpenAiResponses)
+        matches!(self, Self::OpenAiChat | Self::OpenAiResponses | Self::GeminiNative)
     }
 }
 
@@ -641,19 +725,36 @@ fn rewrite_claude_request_target(
     query: Option<&str>,
     api_format: ClaudeApiFormat,
     is_github_copilot: bool,
+    body_bytes: Option<&[u8]>,
 ) -> (String, Option<String>) {
     if !api_format.needs_transform() || !is_claude_messages_path(relative_path) {
         return (relative_path.to_string(), query.map(str::to_string));
     }
 
     let target_path = match api_format {
-        ClaudeApiFormat::OpenAiChat if is_github_copilot => "chat/completions",
-        ClaudeApiFormat::OpenAiChat => "v1/chat/completions",
-        ClaudeApiFormat::OpenAiResponses => "v1/responses",
-        ClaudeApiFormat::Anthropic => relative_path,
+        ClaudeApiFormat::OpenAiChat if is_github_copilot => "chat/completions".to_string(),
+        ClaudeApiFormat::OpenAiChat => "v1/chat/completions".to_string(),
+        ClaudeApiFormat::OpenAiResponses => "v1/responses".to_string(),
+        ClaudeApiFormat::GeminiNative => {
+            let model = body_bytes
+                .and_then(|b| serde_json::from_slice::<Value>(b).ok())
+                .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from))
+                .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+            let model_id = model
+                .strip_prefix('/')
+                .unwrap_or(&model)
+                .strip_prefix("models/")
+                .unwrap_or(&model);
+            let stream = body_bytes
+                .and_then(|b| serde_json::from_slice::<Value>(b).ok())
+                .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
+                .unwrap_or(false);
+            crate::gemini_transform::build_gemini_endpoint(model_id, stream)
+        }
+        ClaudeApiFormat::Anthropic => relative_path.to_string(),
     };
 
-    (target_path.to_string(), strip_beta_query(query))
+    (target_path, strip_beta_query(query))
 }
 
 fn should_strip_claude_transform_header(
@@ -788,16 +889,15 @@ fn ordered_profile_candidates(
         .0
         .lock()
         .ok()
-        .map(|runtime| {
-            let now = Instant::now();
+        .map(|mut runtime| {
             ordered
                 .iter()
                 .filter(|profile| {
-                    !runtime
-                        .profile_circuits
-                        .get(&profile_circuit_key(tool_id, &profile.profile_id))
-                        .and_then(|state| state.open_until)
-                        .is_some_and(|until| until > now)
+                    let key = profile_circuit_key(tool_id, &profile.profile_id);
+                    match runtime.profile_circuits.get_mut(&key) {
+                        Some(state) => state.is_available(),
+                        None => true,
+                    }
                 })
                 .cloned()
                 .collect::<Vec<_>>()
@@ -851,16 +951,15 @@ fn ordered_upstream_base_urls(app_handle: &AppHandle, upstream: &UpstreamTarget)
         .0
         .lock()
         .ok()
-        .map(|runtime| {
-            let now = Instant::now();
+        .map(|mut runtime| {
             ordered
                 .iter()
                 .filter(|base_url| {
-                    !runtime
-                        .endpoint_circuits
-                        .get(&endpoint_circuit_key(&upstream.profile_id, base_url))
-                        .and_then(|state| state.open_until)
-                        .is_some_and(|until| until > now)
+                    let key = endpoint_circuit_key(&upstream.profile_id, base_url);
+                    match runtime.endpoint_circuits.get_mut(&key) {
+                        Some(state) => state.is_available(),
+                        None => true,
+                    }
                 })
                 .cloned()
                 .collect::<Vec<_>>()
@@ -901,14 +1000,19 @@ fn remember_preferred_upstream_base_url(
     }
 }
 
-fn record_profile_success(app_handle: &AppHandle, tool_id: &str, profile_id: &str) {
+fn record_profile_success(
+    app_handle: &AppHandle,
+    tool_id: &str,
+    profile_id: &str,
+    config: &crate::proxy_optimizer::OptimizerConfig,
+) {
     let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
     let Ok(mut runtime) = runtime_state.0.lock() else {
         return;
     };
-    runtime
-        .profile_circuits
-        .remove(&profile_circuit_key(tool_id, profile_id));
+    let key = profile_circuit_key(tool_id, profile_id);
+    let state = runtime.profile_circuits.entry(key).or_default();
+    state.record_success(config.circuit_success_threshold);
 }
 
 fn record_profile_failure(
@@ -916,48 +1020,44 @@ fn record_profile_failure(
     tool_id: &str,
     profile_id: &str,
     profile_name: &str,
+    config: &crate::proxy_optimizer::OptimizerConfig,
 ) {
     let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
     let Ok(mut runtime) = runtime_state.0.lock() else {
         return;
     };
 
-    let now = Instant::now();
     let key = profile_circuit_key(tool_id, profile_id);
     let state = runtime.profile_circuits.entry(key).or_default();
-
-    if state.open_until.is_some_and(|until| until <= now) {
-        state.open_until = None;
-        state.consecutive_failures = 0;
+    let was_open = state.state == CircuitState::Open;
+    state.record_failure(config.circuit_failure_threshold, config.circuit_timeout_secs);
+    if !was_open && state.state == CircuitState::Open {
+        crate::utils::append_runtime_log(
+            "warn",
+            "provider_proxy",
+            &format!(
+                "Proxy profile circuit opened [{tool_id}] {} ({}) for {}s",
+                profile_name,
+                profile_id,
+                config.circuit_timeout_secs
+            ),
+        );
     }
-
-    state.consecutive_failures = state.consecutive_failures.saturating_add(1);
-    if state.consecutive_failures < ENDPOINT_CIRCUIT_BREAKER_THRESHOLD {
-        return;
-    }
-
-    state.consecutive_failures = 0;
-    state.open_until = Some(now + ENDPOINT_CIRCUIT_BREAKER_COOLDOWN);
-    crate::utils::append_runtime_log(
-        "warn",
-        "provider_proxy",
-        &format!(
-            "Proxy profile circuit opened [{tool_id}] {} ({}) for {}s",
-            profile_name,
-            profile_id,
-            ENDPOINT_CIRCUIT_BREAKER_COOLDOWN.as_secs()
-        ),
-    );
 }
 
-fn record_endpoint_success(app_handle: &AppHandle, upstream: &UpstreamTarget, base_url: &str) {
+fn record_endpoint_success(
+    app_handle: &AppHandle,
+    upstream: &UpstreamTarget,
+    base_url: &str,
+    config: &crate::proxy_optimizer::OptimizerConfig,
+) {
     let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
     let Ok(mut runtime) = runtime_state.0.lock() else {
         return;
     };
-    runtime
-        .endpoint_circuits
-        .remove(&endpoint_circuit_key(&upstream.profile_id, base_url));
+    let key = endpoint_circuit_key(&upstream.profile_id, base_url);
+    let state = runtime.endpoint_circuits.entry(key).or_default();
+    state.record_success(config.circuit_success_threshold);
 }
 
 fn record_endpoint_failure(
@@ -965,39 +1065,30 @@ fn record_endpoint_failure(
     tool_id: &str,
     upstream: &UpstreamTarget,
     base_url: &str,
+    config: &crate::proxy_optimizer::OptimizerConfig,
 ) {
     let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
     let Ok(mut runtime) = runtime_state.0.lock() else {
         return;
     };
 
-    let now = Instant::now();
     let key = endpoint_circuit_key(&upstream.profile_id, base_url);
     let state = runtime.endpoint_circuits.entry(key).or_default();
-
-    if state.open_until.is_some_and(|until| until <= now) {
-        state.open_until = None;
-        state.consecutive_failures = 0;
+    let was_open = state.state == CircuitState::Open;
+    state.record_failure(config.circuit_failure_threshold, config.circuit_timeout_secs);
+    if !was_open && state.state == CircuitState::Open {
+        crate::utils::append_runtime_log(
+            "warn",
+            "provider_proxy",
+            &format!(
+                "Proxy circuit opened [{tool_id}] {} (profile {}) @ {} for {}s",
+                upstream.profile_name,
+                upstream.profile_id,
+                base_url,
+                config.circuit_timeout_secs
+            ),
+        );
     }
-
-    state.consecutive_failures = state.consecutive_failures.saturating_add(1);
-    if state.consecutive_failures < ENDPOINT_CIRCUIT_BREAKER_THRESHOLD {
-        return;
-    }
-
-    state.consecutive_failures = 0;
-    state.open_until = Some(now + ENDPOINT_CIRCUIT_BREAKER_COOLDOWN);
-    crate::utils::append_runtime_log(
-        "warn",
-        "provider_proxy",
-        &format!(
-            "Proxy circuit opened [{tool_id}] {} (profile {}) @ {} for {}s",
-            upstream.profile_name,
-            upstream.profile_id,
-            base_url,
-            ENDPOINT_CIRCUIT_BREAKER_COOLDOWN.as_secs()
-        ),
-    );
 }
 
 fn is_retryable_upstream_status(status: StatusCode) -> bool {
@@ -1524,6 +1615,10 @@ fn transform_claude_request_body(
         ClaudeApiFormat::Anthropic => parsed,
         ClaudeApiFormat::OpenAiChat => anthropic_to_openai(parsed)?,
         ClaudeApiFormat::OpenAiResponses => anthropic_to_responses(parsed)?,
+        ClaudeApiFormat::GeminiNative => {
+            let (gemini_body, _model_id) = crate::gemini_transform::anthropic_to_gemini(parsed)?;
+            gemini_body
+        }
     };
     serde_json::to_vec(&transformed)
         .map(Bytes::from)
@@ -1899,6 +1994,8 @@ fn create_usage_tracking_stream<S, E>(
     tool_id: String,
     upstream: UpstreamTarget,
     insights: ProxyRequestInsights,
+    first_byte_timeout_secs: u64,
+    idle_timeout_secs: u64,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
@@ -1908,21 +2005,43 @@ where
         let mut buffer = String::new();
         let mut merged_usage = ProxyUsageMetrics::default();
         let mut saw_usage = false;
+        let mut is_first_chunk = true;
 
         tokio::pin!(stream);
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
+        loop {
+            let timeout_secs = if is_first_chunk { first_byte_timeout_secs } else { idle_timeout_secs };
+            let next_chunk = if timeout_secs > 0 {
+                match tokio::time::timeout(
+                    Duration::from_secs(timeout_secs),
+                    stream.next(),
+                ).await {
+                    Ok(chunk) => chunk,
+                    Err(_) => {
+                        let kind = if is_first_chunk { "first byte" } else { "idle" };
+                        let msg = format!("Stream {kind} timeout after {timeout_secs}s");
+                        crate::utils::append_runtime_log("warn", "provider_proxy", &msg);
+                        yield Err(std::io::Error::new(std::io::ErrorKind::TimedOut, msg));
+                        break;
+                    }
+                }
+            } else {
+                stream.next().await
+            };
+
+            match next_chunk {
+                Some(Ok(bytes)) => {
+                    is_first_chunk = false;
                     let normalized = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
                     if scan_stream_usage_buffer(&mut buffer, &normalized, &mut merged_usage) {
                         saw_usage = true;
                     }
                     yield Ok(bytes);
                 }
-                Err(error) => {
+                Some(Err(error)) => {
                     yield Err(std::io::Error::new(std::io::ErrorKind::Other, error.to_string()));
                     break;
                 }
+                None => break,
             }
         }
 
@@ -1956,12 +2075,17 @@ fn transform_claude_response_body(
     api_format: ClaudeApiFormat,
     status: StatusCode,
     body: Value,
+    request_model: Option<&str>,
 ) -> Result<Value, String> {
     if status.is_success() {
         match api_format {
             ClaudeApiFormat::Anthropic => Ok(body),
             ClaudeApiFormat::OpenAiChat => openai_to_anthropic(body),
             ClaudeApiFormat::OpenAiResponses => responses_to_anthropic(body),
+            ClaudeApiFormat::GeminiNative => {
+                let model = request_model.unwrap_or("gemini-2.5-flash");
+                crate::gemini_transform::gemini_to_anthropic(body, model)
+            }
         }
     } else {
         Ok(openai_error_to_anthropic(status.as_u16(), Some(&body)))
@@ -2275,8 +2399,22 @@ async fn forward_proxy_request(
     let request_id = next_proxy_request_id();
     let started_at = Instant::now();
     let mut last_error: Option<String> = None;
+    let rectifier_config = read_rectifier_config(&app_handle);
+    let optimizer_config = read_optimizer_config(&app_handle);
+
+    let mut total_profile_retries: u32 = 0;
 
     'profiles: for (profile_index, candidate) in profile_candidates.into_iter().enumerate() {
+        if profile_index > 0 {
+            if !optimizer_config.failover_enabled {
+                break;
+            }
+            total_profile_retries += 1;
+            if total_profile_retries > optimizer_config.max_profile_retries {
+                break;
+            }
+        }
+
         let upstream = match extract_upstream_target(
             &app_handle,
             &tool_id,
@@ -2338,6 +2476,7 @@ async fn forward_proxy_request(
                         request_query.as_deref(),
                         api_format,
                         upstream.is_github_copilot,
+                        Some(body_bytes.as_ref()),
                     );
                     let transformed_body =
                         match transform_claude_request_body(api_format, body_bytes.as_ref()) {
@@ -2352,6 +2491,28 @@ async fn forward_proxy_request(
                     body_bytes.clone(),
                 ),
             };
+
+        let optimizer_result = apply_proxy_optimizers(
+            &app_handle,
+            &tool_id,
+            effective_body_bytes,
+            &original_headers,
+        );
+        let effective_body_bytes = if tool_id == "codex" && optimizer_config.codex_field_stripping {
+            match serde_json::from_slice::<Value>(optimizer_result.body.as_ref()) {
+                Ok(mut body) => {
+                    crate::provider_proxy_transform::strip_codex_oauth_fields(&mut body);
+                    match serde_json::to_vec(&body) {
+                        Ok(v) => Bytes::from(v),
+                        Err(_) => optimizer_result.body,
+                    }
+                }
+                Err(_) => optimizer_result.body,
+            }
+        } else {
+            optimizer_result.body
+        };
+        let optimizer_extra_headers = optimizer_result.extra_headers;
 
         let request_insights = extract_request_insights(
             &tool_id,
@@ -2379,6 +2540,9 @@ async fn forward_proxy_request(
                 for (name, value) in &upstream.headers {
                     builder = builder.header(name, value);
                 }
+                for (name, value) in &optimizer_extra_headers {
+                    builder = builder.header(name.as_str(), value.as_str());
+                }
                 if !request_insights.is_streaming && !has_accept_encoding_header {
                     builder = builder.header(reqwest::header::ACCEPT_ENCODING, "gzip, deflate, br");
                 }
@@ -2391,12 +2555,13 @@ async fn forward_proxy_request(
                         let status = response.status();
                         let is_retryable_status = is_retryable_upstream_status(status);
                         if is_retryable_status {
-                            record_endpoint_failure(&app_handle, &tool_id, &upstream, base_url);
+                            record_endpoint_failure(&app_handle, &tool_id, &upstream, base_url, &optimizer_config);
                             record_profile_failure(
                                 &app_handle,
                                 &tool_id,
                                 &upstream.profile_id,
                                 &upstream.profile_name,
+                                &optimizer_config,
                             );
                             if index + 1 < attempt_count {
                                 crate::utils::append_runtime_log(
@@ -2429,8 +2594,8 @@ async fn forward_proxy_request(
                         let latency_ms =
                             started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
                         if status.is_success() {
-                            record_endpoint_success(&app_handle, &upstream, base_url);
-                            record_profile_success(&app_handle, &tool_id, &upstream.profile_id);
+                            record_endpoint_success(&app_handle, &upstream, base_url, &optimizer_config);
+                            record_profile_success(&app_handle, &tool_id, &upstream.profile_id, &optimizer_config);
                             remember_preferred_upstream_base_url(
                                 &app_handle,
                                 &upstream.profile_id,
@@ -2448,6 +2613,13 @@ async fn forward_proxy_request(
                                         upstream.base_url, base_url
                                     ),
                                 );
+                            }
+                            if profile_index > 0 {
+                                let _ = app_handle.emit("provider-failover", serde_json::json!({
+                                    "tool_id": &tool_id,
+                                    "profile_name": &upstream.profile_name,
+                                    "profile_id": &upstream.profile_id,
+                                }));
                             }
                         }
 
@@ -2485,6 +2657,7 @@ async fn forward_proxy_request(
                                         match rectify_anthropic_request_bytes(
                                             request_body_bytes.as_ref(),
                                             upstream_error_message.as_deref(),
+                                            &rectifier_config,
                                         ) {
                                             Ok(Some(rectified_body)) => {
                                                 rectifier_attempts += 1;
@@ -2521,6 +2694,7 @@ async fn forward_proxy_request(
                                         (Some(api_format), Some(parsed)) => {
                                             match transform_claude_response_body(
                                                 api_format, status, parsed,
+                                                request_insights.request_model.as_deref(),
                                             ) {
                                                 Ok(value) => Some(value),
                                                 Err(error) => {
@@ -2650,6 +2824,8 @@ async fn forward_proxy_request(
                                             tool_id.clone(),
                                             upstream.clone(),
                                             request_insights.clone(),
+                                            optimizer_config.streaming_first_byte_timeout,
+                                            optimizer_config.streaming_idle_timeout,
                                         ))
                                     }
                                     ClaudeApiFormat::OpenAiResponses => {
@@ -2662,6 +2838,21 @@ async fn forward_proxy_request(
                                             tool_id.clone(),
                                             upstream.clone(),
                                             request_insights.clone(),
+                                            optimizer_config.streaming_first_byte_timeout,
+                                            optimizer_config.streaming_idle_timeout,
+                                        ))
+                                    }
+                                    ClaudeApiFormat::GeminiNative => {
+                                        let gemini_model = request_insights.request_model.clone().unwrap_or_else(|| "gemini-2.5-flash".to_string());
+                                        Body::from_stream(create_usage_tracking_stream(
+                                            create_anthropic_sse_stream_from_gemini(response.bytes_stream(), gemini_model),
+                                            app_handle.clone(),
+                                            request_id.clone(),
+                                            tool_id.clone(),
+                                            upstream.clone(),
+                                            request_insights.clone(),
+                                            optimizer_config.streaming_first_byte_timeout,
+                                            optimizer_config.streaming_idle_timeout,
                                         ))
                                     }
                                     ClaudeApiFormat::Anthropic => {
@@ -2672,6 +2863,8 @@ async fn forward_proxy_request(
                                             tool_id.clone(),
                                             upstream.clone(),
                                             request_insights.clone(),
+                                            optimizer_config.streaming_first_byte_timeout,
+                                            optimizer_config.streaming_idle_timeout,
                                         ))
                                     }
                                 };
@@ -2685,6 +2878,8 @@ async fn forward_proxy_request(
                                     tool_id.clone(),
                                     upstream.clone(),
                                     request_insights.clone(),
+                                    optimizer_config.streaming_first_byte_timeout,
+                                    optimizer_config.streaming_idle_timeout,
                                 ));
                                 return build_forward_response_from_parts(status, &headers, body);
                             }
@@ -2715,7 +2910,7 @@ async fn forward_proxy_request(
                             upstream.profile_name, tool_id, upstream.profile_id, base_url
                         );
                         last_error = Some(message.clone());
-                        record_endpoint_failure(&app_handle, &tool_id, &upstream, base_url);
+                        record_endpoint_failure(&app_handle, &tool_id, &upstream, base_url, &optimizer_config);
                         if index + 1 < attempt_count {
                             crate::utils::append_runtime_log(
                                 "warn",
@@ -2733,6 +2928,7 @@ async fn forward_proxy_request(
                             &tool_id,
                             &upstream.profile_id,
                             &upstream.profile_name,
+                            &optimizer_config,
                         );
                         if profile_index + 1 < profile_candidate_count {
                             crate::utils::append_runtime_log(
@@ -2893,4 +3089,145 @@ pub fn set_local_provider_proxy_settings(
     );
 
     build_local_provider_proxy_status(&app_handle, normalized)
+}
+
+fn read_optimizer_config(app_handle: &AppHandle) -> crate::proxy_optimizer::OptimizerConfig {
+    let db = app_handle.state::<DbState>();
+    let conn = match db.0.lock() {
+        Ok(conn) => conn,
+        Err(_) => return crate::proxy_optimizer::OptimizerConfig::default(),
+    };
+
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![crate::proxy_optimizer::config::OPTIMIZER_CONFIG_SETTINGS_KEY],
+            |row| row.get(0),
+        )
+        .ok();
+
+    raw.and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default()
+}
+
+fn read_rectifier_config(app_handle: &AppHandle) -> crate::proxy_optimizer::config::RectifierConfig {
+    let db = app_handle.state::<DbState>();
+    let conn = match db.0.lock() {
+        Ok(conn) => conn,
+        Err(_) => return crate::proxy_optimizer::config::RectifierConfig::default(),
+    };
+
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![crate::proxy_optimizer::config::RECTIFIER_CONFIG_SETTINGS_KEY],
+            |row| row.get(0),
+        )
+        .ok();
+
+    raw.and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default()
+}
+
+struct OptimizerResult {
+    body: Bytes,
+    extra_headers: Vec<(String, String)>,
+}
+
+fn apply_proxy_optimizers(
+    app_handle: &AppHandle,
+    tool_id: &str,
+    body_bytes: Bytes,
+    original_headers: &[(axum::http::HeaderName, axum::http::HeaderValue)],
+) -> OptimizerResult {
+    if tool_id != "claude" {
+        return OptimizerResult { body: body_bytes, extra_headers: Vec::new() };
+    }
+
+    let config = read_optimizer_config(app_handle);
+    if !config.enabled {
+        return OptimizerResult { body: body_bytes, extra_headers: Vec::new() };
+    }
+
+    let mut body: Value = match serde_json::from_slice(&body_bytes) {
+        Ok(value) => value,
+        Err(_) => return OptimizerResult { body: body_bytes, extra_headers: Vec::new() },
+    };
+
+    let mut extra_headers: Vec<(String, String)> = Vec::new();
+
+    // 0. Copilot model normalization (before classification)
+    if config.copilot_model_normalization {
+        crate::proxy_optimizer::copilot_optimizer::apply_copilot_model_normalization(&mut body);
+    }
+
+    // 0b. Copilot optimizer (classify before body modifications, inject headers)
+    if config.copilot_optimizer {
+        let has_anthropic_beta = original_headers
+            .iter()
+            .any(|(name, _)| name.as_str().eq_ignore_ascii_case("anthropic-beta"));
+
+        let classification = crate::proxy_optimizer::copilot_optimizer::classify_request(
+            &body,
+            has_anthropic_beta,
+            config.copilot_compact_detection,
+            config.copilot_subagent_detection,
+        );
+
+        extra_headers.push(("x-initiator".to_string(), classification.initiator.to_string()));
+
+        if classification.is_subagent {
+            extra_headers.push(("x-interaction-type".to_string(), "conversation-subagent".to_string()));
+        }
+
+        let session_id = original_headers
+            .iter()
+            .find(|(name, _)| name.as_str().eq_ignore_ascii_case("x-session-id"))
+            .and_then(|(_, v)| v.to_str().ok())
+            .unwrap_or("");
+
+        let request_id = crate::proxy_optimizer::copilot_optimizer::deterministic_request_id(&body, session_id);
+        extra_headers.push(("x-request-id".to_string(), request_id));
+
+        if let Some(interaction_id) = crate::proxy_optimizer::copilot_optimizer::deterministic_interaction_id(session_id) {
+            extra_headers.push(("x-interaction-id".to_string(), interaction_id));
+        }
+
+        if config.copilot_sanitize_orphans {
+            body = crate::proxy_optimizer::copilot_optimizer::sanitize_orphan_tool_results(body);
+        }
+        if config.copilot_merge_tool_results {
+            body = crate::proxy_optimizer::copilot_optimizer::merge_tool_results(body);
+        }
+        if config.copilot_strip_thinking {
+            body = crate::proxy_optimizer::copilot_optimizer::strip_thinking_blocks(body);
+        }
+    }
+
+    // 1. Body filter
+    body = crate::proxy_optimizer::body_filter::filter(body, &config);
+
+    // 2. Model mapper
+    if config.model_mapper {
+        let mapping = crate::proxy_optimizer::model_mapper::ModelMapping {
+            default_model: if config.model_mapper_default.is_empty() { None } else { Some(config.model_mapper_default.clone()) },
+            custom_rules: config.model_mapper_rules.clone(),
+            ..Default::default()
+        };
+        let (mapped_body, _, _) = crate::proxy_optimizer::model_mapper::apply_model_mapping(body, &mapping);
+        body = mapped_body;
+    }
+
+    // 3. Thinking optimizer
+    crate::proxy_optimizer::thinking_optimizer::optimize(&mut body, &config);
+
+    // 4. Cache injector
+    crate::proxy_optimizer::cache_injector::inject(&mut body, &config);
+
+    let result_body = match serde_json::to_vec(&body) {
+        Ok(bytes) => Bytes::from(bytes),
+        Err(_) => body_bytes,
+    };
+
+    OptimizerResult { body: result_body, extra_headers }
 }

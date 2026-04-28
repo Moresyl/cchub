@@ -4,13 +4,16 @@ mod copilot_auth;
 mod db;
 mod deeplink;
 mod error;
+mod gemini_transform;
 mod hermes;
 mod hooks;
 mod mcp;
 mod omo;
+mod openclaw_config;
 mod lightweight;
 mod provider_proxy;
 mod provider_proxy_transform;
+mod proxy_optimizer;
 mod security;
 mod skills;
 mod updater;
@@ -28,6 +31,7 @@ use commands::hook_commands;
 use commands::marketplace_commands;
 use commands::mcp_commands;
 use commands::omo_commands;
+use commands::openclaw_commands;
 use commands::provider_models;
 use commands::security_commands;
 use commands::skill_commands;
@@ -631,6 +635,9 @@ pub fn run() {
             extra_commands::resume_session_in_preferred_terminal,
             extra_commands::get_environment_conflicts,
             provider_models::fetch_provider_models,
+            provider_models::fetch_provider_models_cached,
+            provider_models::fetch_provider_models_detailed,
+            provider_models::get_cached_provider_models,
             provider_proxy::get_local_provider_proxy_settings,
             provider_proxy::get_local_provider_proxy_status,
             provider_proxy::set_local_provider_proxy_settings,
@@ -696,6 +703,31 @@ pub fn run() {
             autopilot_commands::list_autopilot_logs,
             autopilot_commands::delete_autopilot_log,
             autopilot_commands::clear_autopilot_logs,
+            // Optimizer commands
+            commands::optimizer_commands::get_optimizer_config,
+            commands::optimizer_commands::set_optimizer_config,
+            commands::optimizer_commands::get_rectifier_config,
+            commands::optimizer_commands::set_rectifier_config,
+            // Hermes commands
+            commands::hermes_commands::get_hermes_memory_limits,
+            commands::hermes_commands::get_hermes_memory_content,
+            commands::hermes_commands::save_hermes_memory_content,
+            commands::hermes_commands::toggle_hermes_memory_enabled,
+            commands::hermes_commands::list_hermes_providers,
+            commands::hermes_commands::get_hermes_provider,
+            commands::hermes_commands::save_hermes_provider,
+            commands::hermes_commands::delete_hermes_provider,
+            commands::hermes_commands::set_hermes_active_provider,
+            commands::hermes_commands::get_hermes_active_provider,
+            // OpenClaw commands
+            openclaw_commands::get_openclaw_env,
+            openclaw_commands::set_openclaw_env,
+            openclaw_commands::get_openclaw_tools,
+            openclaw_commands::set_openclaw_tools,
+            openclaw_commands::get_openclaw_agents_defaults,
+            openclaw_commands::set_openclaw_agents_defaults,
+            openclaw_commands::scan_openclaw_health,
+            openclaw_commands::get_openclaw_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

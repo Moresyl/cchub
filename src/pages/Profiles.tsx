@@ -34,6 +34,7 @@ import ProfileFragmentCard from "../components/ProfileFragmentCard";
 import ProfilePresetButton from "../components/ProfilePresetButton";
 import ProfileTargetToolToggle from "../components/ProfileTargetToolToggle";
 import ProfileToolFilterTab from "../components/ProfileToolFilterTab";
+import ModelSelector, { type ModelInfo } from "../components/ModelSelector";
 import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
@@ -871,6 +872,7 @@ interface ProfileModelsSectionProps {
   draftOpenCodeInputModalities: string;
   draftOpenCodeOutputModalities: string;
   fetchedModels: string[];
+  fetchedModelDetails: ModelInfo[];
   fetchingModels: boolean;
   modelFetchError: string | null;
   onFetchModels: () => void;
@@ -892,13 +894,21 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
   draftOpenCodeInputModalities,
   draftOpenCodeOutputModalities,
   fetchedModels,
+  fetchedModelDetails,
   fetchingModels,
   modelFetchError,
   onFetchModels,
   onDraftChange,
 }: ProfileModelsSectionProps) {
-  const modelSuggestionsId = `profile-model-suggestions-${draftTool}`;
   const canFetchModels = supportsModelFetch(draftTool);
+  const hasDetails = fetchedModelDetails.length > 0;
+
+  const ModelInput = useCallback(({ value, onChange: onValueChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) => {
+    if (hasDetails) {
+      return <ModelSelector value={value} models={fetchedModelDetails} onChange={onValueChange} placeholder={placeholder} />;
+    }
+    return <TextInput value={value} onChange={(e) => onValueChange(e.target.value)} placeholder={placeholder} />;
+  }, [hasDetails, fetchedModelDetails]);
 
   return (
     <div>
@@ -917,11 +927,6 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
           </button>
         )}
       </div>
-      {fetchedModels.length > 0 && (
-        <datalist id={modelSuggestionsId}>
-          {fetchedModels.map((model) => <option key={model} value={model} />)}
-        </datalist>
-      )}
       {(modelFetchError || fetchedModels.length > 0) && (
         <div style={{ fontSize: 12, color: modelFetchError ? "var(--danger)" : "var(--text-muted)", marginBottom: 12 }}>
           {modelFetchError || localeText(`已发现 ${fetchedModels.length} 个模型`, `Discovered ${fetchedModels.length} models`, `${fetchedModels.length} 個のモデルを検出しました`)}
@@ -930,28 +935,27 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
       {draftTool === "claude" ? (
         <div style={TWO_COLUMN_GRID_STYLE}>
           <Field label={locale === "zh" ? "主模型" : "Main Model"}>
-            <TextInput value={draftModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { model: event.target.value })} placeholder="claude-sonnet-4-5" />
+            <ModelInput value={draftModel} onChange={(v) => onDraftChange(draftTool, { model: v })} placeholder="claude-sonnet-4-5" />
           </Field>
           <Field label={locale === "zh" ? "推理模型" : "Reasoning Model"}>
-            <TextInput value={draftReasoningModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { reasoningModel: event.target.value })} placeholder="claude-sonnet-4-5" />
+            <ModelInput value={draftReasoningModel} onChange={(v) => onDraftChange(draftTool, { reasoningModel: v })} placeholder="claude-sonnet-4-5" />
           </Field>
           <Field label={locale === "zh" ? "Haiku 默认模型" : "Default Haiku"}>
-            <TextInput value={draftHaikuModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { haikuModel: event.target.value })} placeholder="claude-haiku-3-5" />
+            <ModelInput value={draftHaikuModel} onChange={(v) => onDraftChange(draftTool, { haikuModel: v })} placeholder="claude-haiku-3-5" />
           </Field>
           <Field label={locale === "zh" ? "Sonnet 默认模型" : "Default Sonnet"}>
-            <TextInput value={draftSonnetModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { sonnetModel: event.target.value })} placeholder="claude-sonnet-4-5" />
+            <ModelInput value={draftSonnetModel} onChange={(v) => onDraftChange(draftTool, { sonnetModel: v })} placeholder="claude-sonnet-4-5" />
           </Field>
           <Field label={locale === "zh" ? "Opus 默认模型" : "Default Opus"}>
-            <TextInput value={draftOpusModel} list={fetchedModels.length ? modelSuggestionsId : undefined} onChange={(event) => onDraftChange(draftTool, { opusModel: event.target.value })} placeholder="claude-opus-4-5" />
+            <ModelInput value={draftOpusModel} onChange={(v) => onDraftChange(draftTool, { opusModel: v })} placeholder="claude-opus-4-5" />
           </Field>
         </div>
       ) : (
         <div style={TWO_COLUMN_GRID_STYLE}>
           <Field label={locale === "zh" ? "模型 ID" : "Model ID"}>
-            <TextInput
+            <ModelInput
               value={draftModel}
-              list={fetchedModels.length ? modelSuggestionsId : undefined}
-              onChange={(event) => onDraftChange(draftTool, { model: event.target.value })}
+              onChange={(v) => onDraftChange(draftTool, { model: v })}
               placeholder={locale === "zh" ? "例如 deepseek-chat" : "e.g. deepseek-chat"}
             />
           </Field>
@@ -1200,6 +1204,7 @@ export default function Profiles() {
   const [streamCheckResults, setStreamCheckResults] = useState<Record<string, ProviderStreamCheckResult>>({});
   const [streamCheckConfirmProfile, setStreamCheckConfirmProfile] = useState<ConfigProfile | null>(null);
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [fetchedModelDetails, setFetchedModelDetails] = useState<ModelInfo[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelFetchError, setModelFetchError] = useState<string | null>(null);
 
@@ -1349,7 +1354,7 @@ export default function Profiles() {
     setNewTool(selectedTool);
     setShowApiKey(false);
     setFetchingModels(false);
-    setFetchedModels([]);
+    setFetchedModels([]); setFetchedModelDetails([]);
     setModelFetchError(null);
     updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
     if (supportsStructuredConfig(selectedTool)) {
@@ -1382,7 +1387,7 @@ export default function Profiles() {
     setDraftContent(prettyJson(profile.config_snapshot));
     setShowApiKey(false);
     setFetchingModels(false);
-    setFetchedModels([]);
+    setFetchedModels([]); setFetchedModelDetails([]);
     setModelFetchError(null);
     if (supportsStructuredConfig(profile.tool_id)) {
       let merged = createDefaultStructuredFields(profile.tool_id);
@@ -1421,7 +1426,7 @@ export default function Profiles() {
     setSaving(false);
     setShowApiKey(false);
     setFetchingModels(false);
-    setFetchedModels([]);
+    setFetchedModels([]); setFetchedModelDetails([]);
     setModelFetchError(null);
   }, [setDraftFields]);
 
@@ -1837,12 +1842,14 @@ export default function Profiles() {
     setFetchingModels(true);
     setModelFetchError(null);
     try {
-      const models = await invoke<string[]>("fetch_provider_models", {
+      const details = await invoke<ModelInfo[]>("fetch_provider_models_detailed", {
         toolId: draftTool,
         baseUrl: draftBaseUrl,
         apiKey: draftApiKey,
         useFullUrl: draftUseFullUrl,
       });
+      setFetchedModelDetails(details);
+      const models = details.map((m) => m.id);
       setFetchedModels(models);
       if (models.length === 0) {
         showToast(
@@ -1865,7 +1872,8 @@ export default function Profiles() {
       }
     } catch (error) {
       const message = formatModelFetchError(error, localeText);
-      setFetchedModels([]);
+      setFetchedModels([]); setFetchedModelDetails([]);
+      setFetchedModelDetails([]);
       setModelFetchError(message);
       showToast("error", message);
     } finally {
@@ -1916,7 +1924,7 @@ export default function Profiles() {
     setDraftTool(toolId);
     setNewTool(toolId);
     setFetchingModels(false);
-    setFetchedModels([]);
+    setFetchedModels([]); setFetchedModelDetails([]);
     setModelFetchError(null);
     updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
     if (supportsStructuredConfig(toolId)) {
@@ -2132,6 +2140,7 @@ export default function Profiles() {
                 draftOpenCodeInputModalities={draftOpenCodeInputModalities}
                 draftOpenCodeOutputModalities={draftOpenCodeOutputModalities}
                 fetchedModels={fetchedModels}
+                fetchedModelDetails={fetchedModelDetails}
                 fetchingModels={fetchingModels}
                 modelFetchError={modelFetchError}
                 onFetchModels={handleFetchModels}

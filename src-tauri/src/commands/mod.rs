@@ -1,5 +1,6 @@
 pub mod autopilot_commands;
 pub mod claude_md_commands;
+pub mod hermes_commands;
 pub mod config_files_commands;
 pub mod copilot_commands;
 pub mod deeplink_commands;
@@ -8,6 +9,8 @@ pub mod hook_commands;
 pub mod marketplace_commands;
 pub mod mcp_commands;
 pub mod omo_commands;
+pub mod openclaw_commands;
+pub mod optimizer_commands;
 pub mod provider_models;
 pub mod security_commands;
 pub mod skill_commands;

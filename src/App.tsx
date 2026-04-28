@@ -2,12 +2,13 @@ import { Profiler, lazy, Suspense, useCallback, useEffect, useState, type Compon
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { AlertTriangle, Settings2, X } from "lucide-react";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import ErrorBoundary from "./components/ErrorBoundary";
 import CommandPalette from "./components/CommandPalette";
-import { ToastContainer } from "./components/Toast";
+import { showToast, ToastContainer } from "./components/Toast";
 import DeepLinkImportDialog from "./components/DeepLinkImportDialog";
 import WelcomeDialog from "./components/WelcomeDialog";
 import NavigationProgress from "./components/NavigationProgress";
@@ -39,6 +40,10 @@ const pageImports = {
   "/workspaces": () => import("./pages/Workspaces"),
   "/profiles": () => import("./pages/Profiles"),
   "/sessions": () => import("./pages/Sessions"),
+  "/hermes-memory": () => import("./pages/HermesMemory"),
+  "/hermes-providers": () => import("./pages/HermesProviders"),
+  "/openclaw": () => import("./pages/OpenClaw"),
+  "/proxy-advanced": () => import("./pages/ProxyAdvanced"),
   "/claude-md": () => import("./pages/ClaudeMd"),
   "/config-files": () => import("./pages/ConfigFiles"),
   "/tools": () => import("./pages/Tools"),
@@ -216,9 +221,13 @@ function AppShell() {
 
     window.addEventListener("focus", handleFocus);
     window.addEventListener("keydown", handleKeyDown);
+    const unlistenFailover = listen<{ profile_name: string }>("provider-failover", (event) => {
+      showToast("info", `Failover → ${event.payload.profile_name}`);
+    });
     return () => {
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("keydown", handleKeyDown);
+      void unlistenFailover.then((fn) => fn());
     };
   }, [navigate]);
 

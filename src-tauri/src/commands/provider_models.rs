@@ -1,5 +1,5 @@
 use reqwest::Url;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::db::DbState;
@@ -17,13 +17,62 @@ struct OpenAiModelEntry {
 }
 
 #[derive(Debug, Deserialize)]
+struct OpenAiModelDetailedEntry {
+    id: Option<String>,
+    context_window: Option<u64>,
+    max_completion_tokens: Option<u64>,
+    // OpenRouter extends with pricing info
+    pricing: Option<OpenRouterPricing>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterPricing {
+    prompt: Option<String>,
+    completion: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiModelsDetailedResponse {
+    data: Option<Vec<OpenAiModelDetailedEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicModelEntry {
+    id: Option<String>,
+    display_name: Option<String>,
+    #[serde(default)]
+    max_tokens: Option<u64>,
+    // Anthropic returns context window as "max_input_tokens" on some endpoints
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicModelsResponse {
+    data: Option<Vec<AnthropicModelEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
 struct GeminiModelsResponse {
     models: Option<Vec<GeminiModelEntry>>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GeminiModelEntry {
     name: Option<String>,
+    display_name: Option<String>,
+    input_token_limit: Option<u64>,
+    output_token_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub display_name: Option<String>,
+    pub context_window: Option<u64>,
+    pub max_output_tokens: Option<u64>,
+    pub input_price: Option<String>,
+    pub output_price: Option<String>,
 }
 
 fn build_provider_models_client(conn: &rusqlite::Connection) -> Result<reqwest::Client, String> {
@@ -313,6 +362,242 @@ pub async fn fetch_provider_models(
                     .filter_map(|item| item.name)
                     .collect(),
             ))
+        }
+        _ => Err(format!("Fetching models is not supported for {tool_id}")),
+    }
+}
+
+const MODEL_CACHE_TTL_SECS: i64 = 600; // 10 minutes
+
+fn model_cache_key(tool_id: &str, base_url: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    tool_id.hash(&mut hasher);
+    base_url.hash(&mut hasher);
+    format!("model_cache_{:x}", hasher.finish())
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ModelCache {
+    models: Vec<String>,
+    fetched_at: i64,
+}
+
+fn read_model_cache(conn: &rusqlite::Connection, key: &str) -> Option<Vec<String>> {
+    let raw: String = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let cache: ModelCache = serde_json::from_str(&raw).ok()?;
+    let now = chrono::Utc::now().timestamp();
+    if now - cache.fetched_at > MODEL_CACHE_TTL_SECS {
+        return None;
+    }
+    Some(cache.models)
+}
+
+fn write_model_cache(conn: &rusqlite::Connection, key: &str, models: &[String]) {
+    let cache = ModelCache {
+        models: models.to_vec(),
+        fetched_at: chrono::Utc::now().timestamp(),
+    };
+    if let Ok(json) = serde_json::to_string(&cache) {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, json],
+        );
+    }
+}
+
+#[tauri::command]
+pub async fn fetch_provider_models_cached(
+    tool_id: String,
+    base_url: String,
+    api_key: String,
+    use_full_url: Option<bool>,
+    force_refresh: Option<bool>,
+    db: State<'_, DbState>,
+) -> Result<Vec<String>, String> {
+    let cache_key = model_cache_key(&tool_id, &base_url);
+    let force = force_refresh.unwrap_or(false);
+
+    if !force {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        if let Some(cached) = read_model_cache(&conn, &cache_key) {
+            return Ok(cached);
+        }
+    }
+
+    let models = fetch_provider_models(
+        tool_id,
+        base_url,
+        api_key,
+        use_full_url,
+        db.clone(),
+    )
+    .await?;
+
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    write_model_cache(&conn, &cache_key, &models);
+
+    Ok(models)
+}
+
+#[tauri::command]
+pub fn get_cached_provider_models(
+    tool_id: String,
+    base_url: String,
+    db: State<'_, DbState>,
+) -> Result<Option<Vec<String>>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let key = model_cache_key(&tool_id, &base_url);
+    Ok(read_model_cache(&conn, &key))
+}
+
+#[tauri::command]
+pub async fn fetch_provider_models_detailed(
+    tool_id: String,
+    base_url: String,
+    api_key: String,
+    use_full_url: Option<bool>,
+    db: State<'_, DbState>,
+) -> Result<Vec<ModelInfo>, String> {
+    let client = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        build_provider_models_client(&conn)?
+    };
+
+    let normalized_tool = tool_id.trim().to_ascii_lowercase();
+    let use_full_url = use_full_url.unwrap_or(false);
+
+    match normalized_tool.as_str() {
+        "claude" => {
+            if api_key.trim().is_empty() {
+                return Err("API key is required".to_string());
+            }
+            let models_url = build_claude_models_url(&base_url, use_full_url)?;
+            let response = client
+                .get(&models_url)
+                .header("x-api-key", api_key.trim())
+                .header("anthropic-version", "2023-06-01")
+                .send()
+                .await
+                .map_err(|e| format!("Request failed: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!("HTTP {status}: {body}"));
+            }
+            let parsed: AnthropicModelsResponse = response
+                .json()
+                .await
+                .map_err(|e| format!("Parse failed: {e}"))?;
+            let mut models: Vec<ModelInfo> = parsed
+                .data
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|entry| {
+                    let id = normalize_model_id(entry.id.as_deref().unwrap_or(""))?;
+                    Some(ModelInfo {
+                        id,
+                        display_name: entry.display_name,
+                        context_window: None,
+                        max_output_tokens: entry.max_tokens,
+                        input_price: None,
+                        output_price: None,
+                    })
+                })
+                .collect();
+            models.sort_by(|a, b| a.id.cmp(&b.id));
+            models.dedup_by(|a, b| a.id == b.id);
+            Ok(models)
+        }
+        "codex" | "openclaw" | "opencode" => {
+            if api_key.trim().is_empty() {
+                return Err("API key is required".to_string());
+            }
+            let models_url = build_openai_models_url(&base_url, use_full_url)?;
+            let response = client
+                .get(&models_url)
+                .header("authorization", format!("Bearer {}", api_key.trim()))
+                .send()
+                .await
+                .map_err(|e| format!("Request failed: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!("HTTP {status}: {body}"));
+            }
+            let parsed: OpenAiModelsDetailedResponse = response
+                .json()
+                .await
+                .map_err(|e| format!("Parse failed: {e}"))?;
+            let mut models: Vec<ModelInfo> = parsed
+                .data
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|entry| {
+                    let id = normalize_model_id(entry.id.as_deref().unwrap_or(""))?;
+                    Some(ModelInfo {
+                        id,
+                        display_name: None,
+                        context_window: entry.context_window,
+                        max_output_tokens: entry.max_completion_tokens,
+                        input_price: entry.pricing.as_ref().and_then(|p| p.prompt.clone()),
+                        output_price: entry.pricing.as_ref().and_then(|p| p.completion.clone()),
+                    })
+                })
+                .collect();
+            models.sort_by(|a, b| a.id.cmp(&b.id));
+            models.dedup_by(|a, b| a.id == b.id);
+            Ok(models)
+        }
+        "gemini" => {
+            if api_key.trim().is_empty() {
+                return Err("API key is required".to_string());
+            }
+            let mut url =
+                Url::parse(&build_gemini_models_url(&base_url, use_full_url)?).map_err(|e| {
+                    format!("Invalid URL: {e}")
+                })?;
+            url.query_pairs_mut().append_pair("key", api_key.trim());
+            let response = client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| format!("Request failed: {e}"))?;
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!("HTTP {status}: {body}"));
+            }
+            let parsed: GeminiModelsResponse = response
+                .json()
+                .await
+                .map_err(|e| format!("Parse failed: {e}"))?;
+            let mut models: Vec<ModelInfo> = parsed
+                .models
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|entry| {
+                    let id = normalize_model_id(entry.name.as_deref().unwrap_or(""))?;
+                    Some(ModelInfo {
+                        id,
+                        display_name: entry.display_name,
+                        context_window: entry.input_token_limit,
+                        max_output_tokens: entry.output_token_limit,
+                        input_price: None,
+                        output_price: None,
+                    })
+                })
+                .collect();
+            models.sort_by(|a, b| a.id.cmp(&b.id));
+            models.dedup_by(|a, b| a.id == b.id);
+            Ok(models)
         }
         _ => Err(format!("Fetching models is not supported for {tool_id}")),
     }

@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw, Save, X, ArrowRightLeft,
@@ -37,6 +37,7 @@ import ProfileToolFilterTab from "../components/ProfileToolFilterTab";
 import ModelSelector, { type ModelInfo } from "../components/ModelSelector";
 import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
+const HermesProvidersPanel = lazy(() => import("./HermesProviders"));
 
 interface ConfigProfile {
   id: string;
@@ -2182,16 +2183,18 @@ export default function Profiles() {
             {locale === "zh" ? `共 ${profiles.length} 个配置，当前生效 ${activeIds.length} 个` : `${profiles.length} profiles, ${activeIds.length} active`}
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={handleRefreshProfiles} style={{ gap: 6 }}>
-            <RefreshCw size={14} />
-            {locale === "zh" ? "刷新" : "Refresh"}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={handleOpenCreateProfile} disabled={installedTools.length === 0} style={{ gap: 6 }}>
-            <Plus size={14} />
-            {locale === "zh" ? "新增" : "New"}
-          </button>
-        </div>
+        {filterTool !== "hermes" && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleRefreshProfiles} style={{ gap: 6 }}>
+              <RefreshCw size={14} />
+              {locale === "zh" ? "刷新" : "Refresh"}
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={handleOpenCreateProfile} disabled={installedTools.length === 0} style={{ gap: 6 }}>
+              <Plus size={14} />
+              {locale === "zh" ? "新增" : "New"}
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
@@ -2219,7 +2222,15 @@ export default function Profiles() {
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+      {filterTool === "hermes" && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+          <Suspense fallback={<div className="loading-center"><div className="spinner" /></div>}>
+            <HermesProvidersPanel embedded />
+          </Suspense>
+        </div>
+      )}
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: filterTool === "hermes" ? "none" : "flex", flexDirection: "column", gap: 10 }}>
         {filteredProfiles.length === 0 ? (
           <div className="card empty-state" style={{ flex: 1 }}>
             <div className="empty-icon"><ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} /></div>

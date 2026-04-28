@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal, Code, Download, RefreshCw, Trash2 } from "lucide-react";
 import Hello2ccConfigSection, { type Hello2ccConfigField } from "../components/Hello2ccConfigSection";
@@ -16,6 +16,8 @@ import ToolsTabButton from "../components/ToolsTabButton";
 import ToolsToggleCard from "../components/ToolsToggleCard";
 import { showToast } from "../components/Toast";
 import { type ManagedAppId } from "../lib/appPreferences";
+
+const ProxyAdvancedPanel = lazy(() => import("./ProxyAdvanced"));
 import { useSetClaudeHudConfigMutation, useSetHello2ccConfigMutation } from "../hooks/mutations";
 import {
   useDetectTools,
@@ -1061,6 +1063,13 @@ export default function Tools() {
                   onSave={handleSaveHello2ccConfigClick}
                 />
               )}
+            </div>
+
+            {/* Proxy Advanced — 代理增强（仅 Claude） */}
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <Suspense fallback={<div style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center" }}><div className="spinner" /></div>}>
+                <ProxyAdvancedPanel embedded />
+              </Suspense>
             </div>
           </div>
         )}

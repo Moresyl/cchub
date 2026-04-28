@@ -28,6 +28,7 @@ pub struct ModelMapping {
 }
 
 impl ModelMapping {
+    #[allow(dead_code)]
     pub fn from_env(env: Option<&Value>) -> Self {
         let get_str = |key: &str| -> Option<String> {
             env.and_then(|e| e.get(key))

@@ -45,9 +45,10 @@ interface RectifierConfig {
 
 interface ProxyAdvancedProps {
   embedded?: boolean;
+  mode?: "all" | "claude" | "codex";
 }
 
-function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
+function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = {}) {
   const i = t();
   const [config, setConfig] = useState<OptimizerConfig | null>(null);
   const [rectConfig, setRectConfig] = useState<RectifierConfig | null>(null);
@@ -143,7 +144,7 @@ function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
 
       <div style={{ flex: 1, overflow: "auto", padding: embedded ? 0 : "16px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
         {/* Rectifier */}
-        {rectConfig && (
+        {mode !== "codex" && rectConfig && (
           <div>
             <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
               {i.proxyAdvanced.rectifierTitle}
@@ -171,20 +172,25 @@ function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
           </div>
         )}
 
-        <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-            {i.proxyAdvanced.optimizerTitle}
+        {mode !== "codex" && (
+          <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+              {i.proxyAdvanced.optimizerTitle}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Master switch */}
-        <ToggleRow
-          label={i.proxyAdvanced.masterSwitch}
-          description={i.proxyAdvanced.masterSwitchDesc}
-          checked={config.enabled}
-          onChange={(v) => update({ enabled: v })}
-        />
+        {mode !== "codex" && (
+          <ToggleRow
+            label={i.proxyAdvanced.masterSwitch}
+            description={i.proxyAdvanced.masterSwitchDesc}
+            checked={config.enabled}
+            onChange={(v) => update({ enabled: v })}
+          />
+        )}
 
+        {mode !== "codex" && (
         <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16, opacity: config.enabled ? 1 : 0.5, pointerEvents: config.enabled ? "auto" : "none" }}>
           {/* Thinking Optimizer */}
           <ToggleRow
@@ -413,8 +419,10 @@ function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
 
 
         </div>
+        )}
 
         {/* Circuit Breaker */}
+        {mode !== "codex" && (
         <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
             {i.proxyAdvanced.circuitBreakerTitle}
@@ -425,8 +433,10 @@ function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
             <NumberRow label={i.proxyAdvanced.circuitTimeout} description={i.proxyAdvanced.circuitTimeoutDesc} value={config.circuitTimeoutSecs} onChange={(v) => update({ circuitTimeoutSecs: v })} min={5} max={600} />
           </div>
         </div>
+        )}
 
         {/* Failover */}
+        {mode !== "codex" && (
         <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
             {i.proxyAdvanced.failoverTitle}
@@ -443,8 +453,10 @@ function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
             </div>
           )}
         </div>
+        )}
 
         {/* Stream Timeout */}
+        {mode !== "codex" && (
         <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
             {i.proxyAdvanced.streamTimeoutTitle}
@@ -454,9 +466,11 @@ function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
             <NumberRow label={i.proxyAdvanced.streamIdle} description={i.proxyAdvanced.streamIdleDesc} value={config.streamingIdleTimeout} onChange={(v) => update({ streamingIdleTimeout: v })} min={0} max={600} />
           </div>
         </div>
+        )}
 
         {/* Codex OAuth */}
-        <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+        {mode !== "claude" && (
+        <div style={{ borderTop: mode === "codex" ? "none" : "1px solid var(--border-default)", paddingTop: mode === "codex" ? 0 : 16 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
             {i.proxyAdvanced.codexTitle}
           </div>
@@ -467,6 +481,7 @@ function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
             onChange={(v) => update({ codexFieldStripping: v })}
           />
         </div>
+        )}
       </div>
 
       {/* Footer */}

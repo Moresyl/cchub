@@ -8158,6 +8158,34 @@ fn find_bun_path(home: &std::path::Path) -> Option<String> {
     None
 }
 
+/// Fetch latest claude-hud release info from GitHub Releases API.
+/// Returns (version_without_v_prefix, tag_name).
+/// Source of truth for version is GitHub Releases, NOT plugin.json (main branch
+/// can be ahead of latest published release).
+async fn fetch_claude_hud_latest_release(
+    client: &reqwest::Client,
+) -> Result<(String, String), String> {
+    let urls = [
+        "https://api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
+        "https://ghgo.xyz/api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
+    ];
+    for url in &urls {
+        if let Ok(resp) = client.get(*url).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(tag) = json.get("tag_name").and_then(|v| v.as_str()) {
+                            let version = tag.trim_start_matches('v').to_string();
+                            return Ok((version, tag.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Err("Failed to fetch latest release from GitHub Releases API".to_string())
+}
+
 /// Install claude-hud plugin from GitHub repository
 #[tauri::command]
 pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(), String> {
@@ -8179,30 +8207,10 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
             .map_err(|e| format!("Client build failed: {}", e))?
     };
 
-    // Fetch plugin version from GitHub
-    let plugin_json_urls = [
-        "https://raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
-        "https://ghgo.xyz/raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
-    ];
-
-    let mut version = String::new();
-    for url in &plugin_json_urls {
-        if let Ok(resp) = client.get(*url).send().await {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text().await {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(v) = json.get("version").and_then(|v| v.as_str()) {
-                            version = v.to_string();
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if version.is_empty() {
-        version = "0.0.11".to_string(); // fallback
-    }
+    // Fetch latest published version from GitHub Releases (not plugin.json)
+    let (version, tag_name) = fetch_claude_hud_latest_release(&client)
+        .await
+        .unwrap_or(("0.0.12".to_string(), "v0.0.12".to_string())); // fallback
 
     let cache_dir = home
         .join(".claude")
@@ -8222,16 +8230,22 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
 
     std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
 
-    // Download tarball from GitHub
+    // Download tarball for this specific tag from GitHub
     let tarball_urls = [
-        "https://github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
-        "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
+        format!(
+            "https://github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
+            tag_name
+        ),
+        format!(
+            "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
+            tag_name
+        ),
     ];
 
     let mut bytes = None;
     let mut last_err = String::new();
     for url in &tarball_urls {
-        match client.get(*url).send().await {
+        match client.get(url).send().await {
             Ok(resp) if resp.status().is_success() => match resp.bytes().await {
                 Ok(b) => {
                     bytes = Some(b);
@@ -8245,19 +8259,22 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
     }
     let bytes = bytes.ok_or(format!("All sources failed: {}", last_err))?;
 
-    // Extract tarball: GitHub format is claude-hud-main/{dist,src}/*
+    // Extract tarball: GitHub tag tarball format is claude-hud-{version}/{dist,src}/*
     let gz = flate2::read::GzDecoder::new(&bytes[..]);
     let mut archive = tar::Archive::new(gz);
     let entries = archive
         .entries()
         .map_err(|e| format!("Tar read failed: {}", e))?;
 
-    // Extract both dist/ and src/ (src/ needed for bun TypeScript support)
+    // Extract both dist/ and src/. Try version-named, branch-named (legacy), and
+    // any single-prefix folder (fallback) since GitHub uses different layouts.
     let prefix_candidates = [
-        "claude-hud-main/dist/",
-        "claude-hud-master/dist/",
-        "claude-hud-main/src/",
-        "claude-hud-master/src/",
+        format!("claude-hud-{}/dist/", version),
+        format!("claude-hud-{}/src/", version),
+        "claude-hud-main/dist/".to_string(),
+        "claude-hud-master/dist/".to_string(),
+        "claude-hud-main/src/".to_string(),
+        "claude-hud-master/src/".to_string(),
     ];
 
     for entry in entries {
@@ -8376,19 +8393,21 @@ pub async fn check_claude_hud_update(
             .map_err(|e| format!("Client build failed: {}", e))?
     };
 
-    let plugin_json_urls = [
-        "https://raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
-        "https://ghgo.xyz/raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
+    // Prefer GitHub Releases API as source of truth (plugin.json on main branch
+    // is dev version, can be ahead of actual published releases).
+    let release_api_urls = [
+        "https://api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
+        "https://ghgo.xyz/api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
     ];
 
     let mut latest_version = String::new();
-    for url in &plugin_json_urls {
+    for url in &release_api_urls {
         if let Ok(resp) = client.get(*url).send().await {
             if resp.status().is_success() {
                 if let Ok(text) = resp.text().await {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(v) = json.get("version").and_then(|v| v.as_str()) {
-                            latest_version = v.to_string();
+                        if let Some(tag) = json.get("tag_name").and_then(|v| v.as_str()) {
+                            latest_version = tag.trim_start_matches('v').to_string();
                             break;
                         }
                     }
@@ -8398,10 +8417,11 @@ pub async fn check_claude_hud_update(
     }
 
     if latest_version.is_empty() {
-        return Err("Failed to check latest version from GitHub".to_string());
+        return Err("Failed to check latest version from GitHub Releases".to_string());
     }
 
-    let has_update = latest_version != current_version;
+    let normalize = |v: &str| v.trim_start_matches('v').to_string();
+    let has_update = normalize(&latest_version) != normalize(&current_version);
 
     Ok(serde_json::json!({
         "currentVersion": current_version,
@@ -8439,31 +8459,8 @@ pub async fn update_claude_hud(
             .map_err(|e| format!("Client build failed: {}", e))?
     };
 
-    // Get latest version from GitHub plugin.json
-    let plugin_json_urls = [
-        "https://raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
-        "https://ghgo.xyz/raw.githubusercontent.com/jarrodwatts/claude-hud/main/.claude-plugin/plugin.json",
-    ];
-
-    let mut version = String::new();
-    for url in &plugin_json_urls {
-        if let Ok(resp) = client.get(*url).send().await {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text().await {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(v) = json.get("version").and_then(|v| v.as_str()) {
-                            version = v.to_string();
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if version.is_empty() {
-        return Err("Failed to get latest version from GitHub".to_string());
-    }
+    // Get latest published version from GitHub Releases API
+    let (version, tag_name) = fetch_claude_hud_latest_release(&client).await?;
 
     let dist_dir = cache_dir.join(&version).join("dist");
 
@@ -8474,16 +8471,22 @@ pub async fn update_claude_hud(
 
     std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
 
-    // Download tarball from GitHub
+    // Download tarball for this specific tag from GitHub
     let tarball_urls = [
-        "https://github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
-        "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/heads/main.tar.gz",
+        format!(
+            "https://github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
+            tag_name
+        ),
+        format!(
+            "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
+            tag_name
+        ),
     ];
 
     let mut bytes = None;
     let mut last_err = String::new();
     for url in &tarball_urls {
-        match client.get(*url).send().await {
+        match client.get(url).send().await {
             Ok(resp) if resp.status().is_success() => match resp.bytes().await {
                 Ok(b) => {
                     bytes = Some(b);
@@ -8504,12 +8507,14 @@ pub async fn update_claude_hud(
         .entries()
         .map_err(|e| format!("Tar read failed: {}", e))?;
 
-    // Extract both dist/ and src/ (src/ needed for bun TypeScript support)
+    // Extract both dist/ and src/. GitHub tag tarball uses claude-hud-{version}/.
     let prefix_candidates = [
-        "claude-hud-main/dist/",
-        "claude-hud-master/dist/",
-        "claude-hud-main/src/",
-        "claude-hud-master/src/",
+        format!("claude-hud-{}/dist/", version),
+        format!("claude-hud-{}/src/", version),
+        "claude-hud-main/dist/".to_string(),
+        "claude-hud-master/dist/".to_string(),
+        "claude-hud-main/src/".to_string(),
+        "claude-hud-master/src/".to_string(),
     ];
 
     let version_dir = cache_dir.join(&version);

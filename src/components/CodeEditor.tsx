@@ -35,6 +35,12 @@ const cmTheme = EditorView.theme({
   "&": {
     fontSize: "12.5px",
     fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+    flex: "1 1 auto",
+    minHeight: "0",
+    height: "100%",
+  },
+  ".cm-scroller": {
+    overflow: "auto",
   },
   ".cm-content": {
     padding: "12px 0",
@@ -152,9 +158,11 @@ function CodeEditorComponent({
         borderRadius: 6,
         border: "1px solid var(--border-default)",
         background: "var(--bg-input)",
-        overflow: "auto",
+        overflow: "hidden",
         minHeight,
         maxHeight,
+        display: "flex",
+        flexDirection: "column",
       }}
     />
   );

@@ -43,7 +43,11 @@ interface RectifierConfig {
   thinkingBudget: boolean;
 }
 
-function ProxyAdvanced() {
+interface ProxyAdvancedProps {
+  embedded?: boolean;
+}
+
+function ProxyAdvanced({ embedded = false }: ProxyAdvancedProps = {}) {
   const i = t();
   const [config, setConfig] = useState<OptimizerConfig | null>(null);
   const [rectConfig, setRectConfig] = useState<RectifierConfig | null>(null);
@@ -128,14 +132,16 @@ function ProxyAdvanced() {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">{i.proxyAdvanced.title}</h2>
-          <p className="page-subtitle">{i.proxyAdvanced.subtitle}</p>
+      {!embedded && (
+        <div className="page-header">
+          <div>
+            <h2 className="page-title">{i.proxyAdvanced.title}</h2>
+            <p className="page-subtitle">{i.proxyAdvanced.subtitle}</p>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div style={{ flex: 1, overflow: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ flex: 1, overflow: "auto", padding: embedded ? 0 : "16px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
         {/* Rectifier */}
         {rectConfig && (
           <div>
@@ -464,7 +470,7 @@ function ProxyAdvanced() {
       </div>
 
       {/* Footer */}
-      <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 20px", borderTop: "1px solid var(--border-default)" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", padding: embedded ? "12px 0 0 0" : "12px 20px", borderTop: embedded ? "none" : "1px solid var(--border-default)", marginTop: embedded ? 12 : 0 }}>
         <button
           className="btn btn-primary btn-sm"
           onClick={() => void handleSave()}

@@ -40,7 +40,11 @@ function emptyProvider(): HermesProvider {
   return { name: "", baseUrl: "", apiMode: "chat_completions", model: "", apiKeyEnv: "" };
 }
 
-export default function HermesProviders() {
+interface HermesProvidersProps {
+  embedded?: boolean;
+}
+
+export default function HermesProviders({ embedded = false }: HermesProvidersProps = {}) {
   const i = t();
   const [providers, setProviders] = useState<HermesProvider[]>([]);
   const [activeProvider, setActiveProvider] = useState("");
@@ -145,12 +149,14 @@ export default function HermesProviders() {
   if (notInstalled) {
     return (
       <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-        <div className="page-header">
-          <div>
-            <h2 className="page-title">{i.hermesProviders.title}</h2>
-            <p className="page-subtitle">{i.hermesProviders.subtitle}</p>
+        {!embedded && (
+          <div className="page-header">
+            <div>
+              <h2 className="page-title">{i.hermesProviders.title}</h2>
+              <p className="page-subtitle">{i.hermesProviders.subtitle}</p>
+            </div>
           </div>
-        </div>
+        )}
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div className="card" style={{ padding: 32, textAlign: "center", maxWidth: 400 }}>
             <h3 style={{ fontSize: 15, marginBottom: 8 }}>{i.hermesProviders.notInstalled}</h3>
@@ -163,18 +169,28 @@ export default function HermesProviders() {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">{i.hermesProviders.title}</h2>
-          <p className="page-subtitle">{i.hermesProviders.subtitle}</p>
+      {!embedded && (
+        <div className="page-header">
+          <div>
+            <h2 className="page-title">{i.hermesProviders.title}</h2>
+            <p className="page-subtitle">{i.hermesProviders.subtitle}</p>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={handleAdd} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Plus size={14} />
+            {i.hermesProviders.addProvider}
+          </button>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={handleAdd} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <Plus size={14} />
-          {i.hermesProviders.addProvider}
-        </button>
-      </div>
+      )}
+      {embedded && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button className="btn btn-primary btn-sm" onClick={handleAdd} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Plus size={14} />
+            {i.hermesProviders.addProvider}
+          </button>
+        </div>
+      )}
 
-      <div style={{ flex: 1, overflow: "auto", padding: "16px 20px" }}>
+      <div style={{ flex: 1, overflow: "auto", padding: embedded ? 0 : "16px 20px" }}>
         {providers.length === 0 && !editing ? (
           <div className="card" style={{ padding: 32, textAlign: "center" }}>
             <h3 style={{ fontSize: 14, marginBottom: 8 }}>{i.hermesProviders.noProviders}</h3>

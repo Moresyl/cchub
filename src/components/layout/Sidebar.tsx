@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch, History, Bot, Brain, Terminal, Sparkles } from "lucide-react";
+import { LayoutDashboard, Plug, Zap, Webhook, Settings, Shield, Store, Monitor, Activity, Layers, ArrowRightLeft, Wrench, FileText, FolderOpen, GitBranch, History, Bot, Brain, Terminal } from "lucide-react";
 import { t } from "../../lib/i18n";
 import {
   fetchClaudeMdPageData,
@@ -31,9 +31,7 @@ const navItems = [
   { path: "/profiles", key: "profiles" as const, icon: ArrowRightLeft },
   { path: "/sessions", key: "sessions" as const, icon: History },
   { path: "/hermes-memory", key: "hermesMemory" as const, icon: Brain },
-  { path: "/hermes-providers", key: "hermesProviders" as const, icon: Bot },
   { path: "/openclaw", key: "openClaw" as const, icon: Terminal },
-  { path: "/proxy-advanced", key: "proxyAdvanced" as const, icon: Sparkles },
   { path: "/claude-md", key: "claudeMd" as const, icon: FileText },
   { path: "/config-files", key: "configFiles" as const, icon: FolderOpen },
   { path: "/tools", key: "tools" as const, icon: Wrench },

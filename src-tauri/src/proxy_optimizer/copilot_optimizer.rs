@@ -7,7 +7,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct CopilotClassification {
     pub initiator: &'static str,
+    #[allow(dead_code)]
     pub is_warmup: bool,
+    #[allow(dead_code)]
     pub is_compact: bool,
     pub is_subagent: bool,
 }

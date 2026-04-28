@@ -88,12 +88,9 @@ impl EndpointCircuitState {
             CircuitState::Open => {
                 if self.open_until.is_some_and(|until| Instant::now() >= until) {
                     self.state = CircuitState::HalfOpen;
-                    self.half_open_permit_taken = false;
+                    self.half_open_permit_taken = true;
                     self.consecutive_successes = 0;
-                    if !self.half_open_permit_taken {
-                        self.half_open_permit_taken = true;
-                        return true;
-                    }
+                    return true;
                 }
                 false
             }
@@ -2493,10 +2490,10 @@ async fn forward_proxy_request(
             };
 
         let optimizer_result = apply_proxy_optimizers(
-            &app_handle,
             &tool_id,
             effective_body_bytes,
             &original_headers,
+            &optimizer_config,
         );
         let effective_body_bytes = if tool_id == "codex" && optimizer_config.codex_field_stripping {
             match serde_json::from_slice::<Value>(optimizer_result.body.as_ref()) {
@@ -3135,16 +3132,15 @@ struct OptimizerResult {
 }
 
 fn apply_proxy_optimizers(
-    app_handle: &AppHandle,
     tool_id: &str,
     body_bytes: Bytes,
     original_headers: &[(axum::http::HeaderName, axum::http::HeaderValue)],
+    config: &crate::proxy_optimizer::OptimizerConfig,
 ) -> OptimizerResult {
     if tool_id != "claude" {
         return OptimizerResult { body: body_bytes, extra_headers: Vec::new() };
     }
 
-    let config = read_optimizer_config(app_handle);
     if !config.enabled {
         return OptimizerResult { body: body_bytes, extra_headers: Vec::new() };
     }
@@ -3205,7 +3201,7 @@ fn apply_proxy_optimizers(
     }
 
     // 1. Body filter
-    body = crate::proxy_optimizer::body_filter::filter(body, &config);
+    body = crate::proxy_optimizer::body_filter::filter(body, config);
 
     // 2. Model mapper
     if config.model_mapper {
@@ -3219,10 +3215,10 @@ fn apply_proxy_optimizers(
     }
 
     // 3. Thinking optimizer
-    crate::proxy_optimizer::thinking_optimizer::optimize(&mut body, &config);
+    crate::proxy_optimizer::thinking_optimizer::optimize(&mut body, config);
 
     // 4. Cache injector
-    crate::proxy_optimizer::cache_injector::inject(&mut body, &config);
+    crate::proxy_optimizer::cache_injector::inject(&mut body, config);
 
     let result_body = match serde_json::to_vec(&body) {
         Ok(bytes) => Bytes::from(bytes),

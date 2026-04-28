@@ -405,59 +405,61 @@ function ProxyAdvanced() {
             )}
           </div>
 
-          {/* Circuit Breaker */}
-          <div style={{ marginTop: 20, borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-              {i.proxyAdvanced.circuitBreakerTitle}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <NumberRow label={i.proxyAdvanced.circuitFailure} description={i.proxyAdvanced.circuitFailureDesc} value={config.circuitFailureThreshold} onChange={(v) => update({ circuitFailureThreshold: v })} min={1} max={20} />
-              <NumberRow label={i.proxyAdvanced.circuitSuccess} description={i.proxyAdvanced.circuitSuccessDesc} value={config.circuitSuccessThreshold} onChange={(v) => update({ circuitSuccessThreshold: v })} min={1} max={20} />
-              <NumberRow label={i.proxyAdvanced.circuitTimeout} description={i.proxyAdvanced.circuitTimeoutDesc} value={config.circuitTimeoutSecs} onChange={(v) => update({ circuitTimeoutSecs: v })} min={5} max={600} />
-            </div>
-          </div>
 
-          {/* Failover */}
-          <div style={{ marginTop: 20, borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-              {i.proxyAdvanced.failoverTitle}
-            </div>
-            <ToggleRow
-              label={i.proxyAdvanced.failoverSwitch}
-              description={i.proxyAdvanced.failoverSwitchDesc}
-              checked={config.failoverEnabled}
-              onChange={(v) => update({ failoverEnabled: v })}
-            />
-            {config.failoverEnabled && (
-              <div style={{ marginTop: 8, paddingLeft: 28 }}>
-                <NumberRow label={i.proxyAdvanced.maxRetries} description={i.proxyAdvanced.maxRetriesDesc} value={config.maxProfileRetries} onChange={(v) => update({ maxProfileRetries: v })} min={1} max={10} />
-              </div>
-            )}
-          </div>
+        </div>
 
-          {/* Stream Timeout */}
-          <div style={{ marginTop: 20, borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-              {i.proxyAdvanced.streamTimeoutTitle}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <NumberRow label={i.proxyAdvanced.streamFirstByte} description={i.proxyAdvanced.streamFirstByteDesc} value={config.streamingFirstByteTimeout} onChange={(v) => update({ streamingFirstByteTimeout: v })} min={0} max={600} />
-              <NumberRow label={i.proxyAdvanced.streamIdle} description={i.proxyAdvanced.streamIdleDesc} value={config.streamingIdleTimeout} onChange={(v) => update({ streamingIdleTimeout: v })} min={0} max={600} />
-            </div>
+        {/* Circuit Breaker */}
+        <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+            {i.proxyAdvanced.circuitBreakerTitle}
           </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <NumberRow label={i.proxyAdvanced.circuitFailure} description={i.proxyAdvanced.circuitFailureDesc} value={config.circuitFailureThreshold} onChange={(v) => update({ circuitFailureThreshold: v })} min={1} max={20} />
+            <NumberRow label={i.proxyAdvanced.circuitSuccess} description={i.proxyAdvanced.circuitSuccessDesc} value={config.circuitSuccessThreshold} onChange={(v) => update({ circuitSuccessThreshold: v })} min={1} max={20} />
+            <NumberRow label={i.proxyAdvanced.circuitTimeout} description={i.proxyAdvanced.circuitTimeoutDesc} value={config.circuitTimeoutSecs} onChange={(v) => update({ circuitTimeoutSecs: v })} min={5} max={600} />
+          </div>
+        </div>
 
-          {/* Codex OAuth */}
-          <div style={{ marginTop: 20, borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-              {i.proxyAdvanced.codexTitle}
-            </div>
-            <ToggleRow
-              label={i.proxyAdvanced.codexSwitch}
-              description={i.proxyAdvanced.codexSwitchDesc}
-              checked={config.codexFieldStripping}
-              onChange={(v) => update({ codexFieldStripping: v })}
-            />
+        {/* Failover */}
+        <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+            {i.proxyAdvanced.failoverTitle}
           </div>
+          <ToggleRow
+            label={i.proxyAdvanced.failoverSwitch}
+            description={i.proxyAdvanced.failoverSwitchDesc}
+            checked={config.failoverEnabled}
+            onChange={(v) => update({ failoverEnabled: v })}
+          />
+          {config.failoverEnabled && (
+            <div style={{ marginTop: 8, paddingLeft: 28 }}>
+              <NumberRow label={i.proxyAdvanced.maxRetries} description={i.proxyAdvanced.maxRetriesDesc} value={config.maxProfileRetries} onChange={(v) => update({ maxProfileRetries: v })} min={1} max={10} />
+            </div>
+          )}
+        </div>
+
+        {/* Stream Timeout */}
+        <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+            {i.proxyAdvanced.streamTimeoutTitle}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <NumberRow label={i.proxyAdvanced.streamFirstByte} description={i.proxyAdvanced.streamFirstByteDesc} value={config.streamingFirstByteTimeout} onChange={(v) => update({ streamingFirstByteTimeout: v })} min={0} max={600} />
+            <NumberRow label={i.proxyAdvanced.streamIdle} description={i.proxyAdvanced.streamIdleDesc} value={config.streamingIdleTimeout} onChange={(v) => update({ streamingIdleTimeout: v })} min={0} max={600} />
+          </div>
+        </div>
+
+        {/* Codex OAuth */}
+        <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+            {i.proxyAdvanced.codexTitle}
+          </div>
+          <ToggleRow
+            label={i.proxyAdvanced.codexSwitch}
+            description={i.proxyAdvanced.codexSwitchDesc}
+            checked={config.codexFieldStripping}
+            onChange={(v) => update({ codexFieldStripping: v })}
+          />
         </div>
       </div>
 
@@ -541,7 +543,9 @@ function NumberRow({ label, description, value, onChange, min, max }: {
         max={max}
         onChange={(e) => {
           const n = parseInt(e.target.value, 10);
-          if (!isNaN(n)) onChange(n);
+          if (isNaN(n)) return;
+          const clamped = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, n));
+          onChange(clamped);
         }}
       />
     </div>

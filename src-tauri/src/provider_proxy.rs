@@ -94,14 +94,7 @@ impl EndpointCircuitState {
                 }
                 false
             }
-            CircuitState::HalfOpen => {
-                if !self.half_open_permit_taken {
-                    self.half_open_permit_taken = true;
-                    true
-                } else {
-                    false
-                }
-            }
+            CircuitState::HalfOpen => false,
         }
     }
 
@@ -2495,20 +2488,7 @@ async fn forward_proxy_request(
             &original_headers,
             &optimizer_config,
         );
-        let effective_body_bytes = if tool_id == "codex" && optimizer_config.codex_field_stripping {
-            match serde_json::from_slice::<Value>(optimizer_result.body.as_ref()) {
-                Ok(mut body) => {
-                    crate::provider_proxy_transform::strip_codex_oauth_fields(&mut body);
-                    match serde_json::to_vec(&body) {
-                        Ok(v) => Bytes::from(v),
-                        Err(_) => optimizer_result.body,
-                    }
-                }
-                Err(_) => optimizer_result.body,
-            }
-        } else {
-            optimizer_result.body
-        };
+        let effective_body_bytes = optimizer_result.body;
         let optimizer_extra_headers = optimizer_result.extra_headers;
 
         let request_insights = extract_request_insights(
@@ -3137,6 +3117,20 @@ fn apply_proxy_optimizers(
     original_headers: &[(axum::http::HeaderName, axum::http::HeaderValue)],
     config: &crate::proxy_optimizer::OptimizerConfig,
 ) -> OptimizerResult {
+    if tool_id == "codex" && config.codex_field_stripping {
+        let result_body = match serde_json::from_slice::<Value>(&body_bytes) {
+            Ok(mut body) => {
+                crate::provider_proxy_transform::strip_codex_oauth_fields(&mut body);
+                match serde_json::to_vec(&body) {
+                    Ok(v) => Bytes::from(v),
+                    Err(_) => body_bytes,
+                }
+            }
+            Err(_) => body_bytes,
+        };
+        return OptimizerResult { body: result_body, extra_headers: Vec::new() };
+    }
+
     if tool_id != "claude" {
         return OptimizerResult { body: body_bytes, extra_headers: Vec::new() };
     }
@@ -3152,13 +3146,12 @@ fn apply_proxy_optimizers(
 
     let mut extra_headers: Vec<(String, String)> = Vec::new();
 
-    // 0. Copilot model normalization (before classification)
-    if config.copilot_model_normalization {
-        crate::proxy_optimizer::copilot_optimizer::apply_copilot_model_normalization(&mut body);
-    }
-
-    // 0b. Copilot optimizer (classify before body modifications, inject headers)
+    // 0. Copilot optimizer (classify before body modifications, inject headers)
     if config.copilot_optimizer {
+        if config.copilot_model_normalization {
+            crate::proxy_optimizer::copilot_optimizer::apply_copilot_model_normalization(&mut body);
+        }
+
         let has_anthropic_beta = original_headers
             .iter()
             .any(|(name, _)| name.as_str().eq_ignore_ascii_case("anthropic-beta"));

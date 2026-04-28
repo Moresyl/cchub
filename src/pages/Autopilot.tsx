@@ -48,16 +48,17 @@ interface AutopilotStatus {
   lastError: string;
   dryRun: boolean;
   recentStages: AutopilotStageEntry[];
+  taskQueue: string[];
+  currentTaskIndex: number;
 }
 
 interface AutopilotFormState {
-  taskFile: string;
+  taskFiles: string[];
   workdir: string;
   model: string;
   profile: string;
   interval: string;
   maxAttempts: string;
-  codexBin: string;
   fresh: boolean;
   dryRun: boolean;
   skipGitCheck: boolean;
@@ -115,13 +116,12 @@ const POLL_INTERVAL_MS = 10000;
 // 实时输出面板最多保留的条数，再多就丢弃最旧的（避免内存膨胀）
 const MAX_LIVE_EVENTS = 300;
 const DEFAULT_FORM: AutopilotFormState = {
-  taskFile: "",
+  taskFiles: [],
   workdir: "",
   model: "",
   profile: "",
   interval: "3",
   maxAttempts: "0",
-  codexBin: "",
   fresh: false,
   dryRun: false,
   skipGitCheck: false,
@@ -154,13 +154,23 @@ const EMPTY_STATUS: AutopilotStatus = {
   lastError: "",
   dryRun: false,
   recentStages: [],
+  taskQueue: [],
+  currentTaskIndex: 0,
 };
 
 function loadStoredForm(): AutopilotFormState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_FORM;
-    return { ...DEFAULT_FORM, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    // Migrate legacy single-task field
+    const taskFiles: string[] = Array.isArray(parsed?.taskFiles)
+      ? parsed.taskFiles
+      : typeof parsed?.taskFile === "string" && parsed.taskFile.trim()
+        ? [parsed.taskFile]
+        : [];
+    const { taskFile: _legacyTaskFile, codexBin: _legacyCodexBin, ...rest } = parsed ?? {};
+    return { ...DEFAULT_FORM, ...rest, taskFiles };
   } catch {
     return DEFAULT_FORM;
   }
@@ -455,16 +465,44 @@ export default function Autopilot() {
     setForm((current) => ({ ...current, [key]: value }));
   }, []);
 
-  const handlePickFile = useCallback(async () => {
+  const handlePickFiles = useCallback(async () => {
     try {
-      const picked = await invoke<string | null>("pick_autopilot_file");
-      if (picked) {
-        updateField("taskFile", picked);
+      const picked = await invoke<string[]>("pick_autopilot_files");
+      if (picked && picked.length > 0) {
+        setForm((current) => {
+          const existing = new Set(current.taskFiles);
+          const merged = [...current.taskFiles];
+          for (const p of picked) {
+            if (!existing.has(p)) merged.push(p);
+          }
+          return { ...current, taskFiles: merged };
+        });
       }
     } catch (error) {
       showToast("error", `${error}`);
     }
-  }, [updateField]);
+  }, []);
+
+  const handleRemoveTaskFile = useCallback((idx: number) => {
+    setForm((current) => ({
+      ...current,
+      taskFiles: current.taskFiles.filter((_, i) => i !== idx),
+    }));
+  }, []);
+
+  const handleMoveTaskFile = useCallback((idx: number, direction: -1 | 1) => {
+    setForm((current) => {
+      const next = [...current.taskFiles];
+      const target = idx + direction;
+      if (target < 0 || target >= next.length) return current;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return { ...current, taskFiles: next };
+    });
+  }, []);
+
+  const handleClearTaskFiles = useCallback(() => {
+    setForm((current) => ({ ...current, taskFiles: [] }));
+  }, []);
 
   const handlePickFolder = useCallback(async () => {
     try {
@@ -482,13 +520,13 @@ export default function Autopilot() {
     try {
       const nextStatus = await invoke<AutopilotStatus>("start_autopilot", {
         request: {
-          taskFile: form.taskFile,
+          taskFile: form.taskFiles[0] ?? "",
+          taskFiles: form.taskFiles,
           workdir: form.workdir,
           model: form.model,
           profile: form.profile,
           interval: Number(form.interval || "0"),
           maxAttempts: Number(form.maxAttempts || "0"),
-          codexBin: form.codexBin,
           fresh: form.fresh,
           dryRun: form.dryRun,
           skipGitCheck: form.skipGitCheck,
@@ -585,8 +623,8 @@ export default function Autopilot() {
   }, [loadAll, uiText]);
 
   const canStart = useMemo(
-    () => !status.running && !starting && form.taskFile.trim() !== "",
-    [form.taskFile, starting, status.running],
+    () => !status.running && !starting && form.taskFiles.length > 0,
+    [form.taskFiles, starting, status.running],
   );
   const stageItems = status.recentStages.slice().reverse();
   const currentSummary = status.summary || status.message || uiText("尚未开始执行", "No run in progress", "まだ実行されていません");
@@ -671,15 +709,24 @@ export default function Autopilot() {
             {uiText("界面只显示阶段和摘要，不直接展示原始 Codex 日志。完整日志会统一保存到专用目录，可单独打开和清理。后端直接调用 Codex。", "The UI shows stages and summaries only. Full logs are stored in a dedicated folder. The backend now invokes Codex directly instead of relying on an external Python script.", "画面には段階と要約のみを表示し、生ログは専用フォルダに保存します。バックエンドは Python スクリプトではなく Codex を直接呼び出します。")}
           </p>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
-            <PathField
-              label={uiText("任务文件", "Task File", "タスクファイル")}
-              value={form.taskFile}
-              placeholder={"D:\\work\\tasks\\my-task.md"}
-              onChange={(value) => updateField("taskFile", value)}
-              onPick={() => void handlePickFile()}
-              buttonLabel={uiText("选择任务", "Pick Task", "タスクを選択")}
-            />
+          <TaskFileList
+            files={form.taskFiles}
+            label={uiText("任务文件", "Task Files", "タスクファイル")}
+            description={uiText(
+              "支持选择多个任务文件，按列表顺序依次执行（队列模式）。",
+              "Select multiple task files; they execute sequentially in order (queue mode).",
+              "複数のタスクファイルを選択でき、リスト順に順次実行されます（キューモード）。",
+            )}
+            addLabel={uiText("添加任务", "Add Tasks", "タスクを追加")}
+            clearLabel={uiText("清空", "Clear", "クリア")}
+            emptyLabel={uiText("尚未选择任务文件", "No task file selected", "タスクファイル未選択")}
+            onPick={() => void handlePickFiles()}
+            onRemove={handleRemoveTaskFile}
+            onMove={handleMoveTaskFile}
+            onClear={handleClearTaskFiles}
+          />
+
+          <div style={{ marginTop: 14 }}>
             <PathField
               label={uiText("工作目录", "Working Directory", "作業ディレクトリ")}
               value={form.workdir}
@@ -695,7 +742,6 @@ export default function Autopilot() {
             <TextField label={uiText("Profile", "Profile", "プロファイル")} value={form.profile} onChange={(value) => updateField("profile", value)} placeholder="default" />
             <TextField label={uiText("轮询间隔(秒)", "Retry Interval (s)", "間隔(秒)")} value={form.interval} onChange={(value) => updateField("interval", value)} placeholder="3" />
             <TextField label={uiText("最大轮次", "Max Attempts", "最大試行回数")} value={form.maxAttempts} onChange={(value) => updateField("maxAttempts", value)} placeholder="0" />
-            <TextField label={uiText("Codex 命令", "Codex Command", "Codex コマンド")} value={form.codexBin} onChange={(value) => updateField("codexBin", value)} placeholder="codex" />
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginTop: 16 }}>
@@ -723,8 +769,71 @@ export default function Autopilot() {
           <MetricCard title={uiText("当前阶段", "Current Phase", "現在の段階")} value={phaseLabel} tone="var(--accent)" icon={<Bot size={16} />} />
           <MetricCard title={uiText("运行时长", "Runtime", "実行時間")} value={runtimeLabel} tone={runtimeTone} icon={<Play size={16} />} />
           <MetricCard title={uiText("执行轮次", "Attempt", "実行回数")} value={status.attempt > 0 ? String(status.attempt) : "--"} tone="var(--text-primary)" icon={<RefreshCw size={16} />} />
-          <MetricCard title={uiText("最近一次运行", "Latest Run", "最新の実行")} value={latestRun ? leafName(latestRun.taskFile || latestRun.taskName) : "--"} tone="var(--text-primary)" icon={<FileSearch size={16} />} />
+          {status.taskQueue && status.taskQueue.length > 1 ? (
+            <MetricCard
+              title={uiText("队列进度", "Queue Progress", "キュー進行")}
+              value={`${status.currentTaskIndex + 1} / ${status.taskQueue.length}`}
+              tone="var(--accent)"
+              icon={<FileSearch size={16} />}
+            />
+          ) : (
+            <MetricCard title={uiText("最近一次运行", "Latest Run", "最新の実行")} value={latestRun ? leafName(latestRun.taskFile || latestRun.taskName) : "--"} tone="var(--text-primary)" icon={<FileSearch size={16} />} />
+          )}
         </div>
+
+        {status.taskQueue && status.taskQueue.length > 1 && (
+          <div className="section-card">
+            <div className="section-card-title">
+              <Bot size={16} />
+              {uiText("任务队列", "Task Queue", "タスクキュー")}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {status.taskQueue.map((file, idx) => {
+                const parts = file.split(/[\\/]/).filter(Boolean);
+                const name = parts[parts.length - 1] || file;
+                const isCurrent = idx === status.currentTaskIndex;
+                const isDone = idx < status.currentTaskIndex;
+                return (
+                  <div
+                    key={`${file}-${idx}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "6px 10px",
+                      borderRadius: 6,
+                      background: isCurrent ? "var(--bg-elevated)" : "transparent",
+                      border: isCurrent ? "1px solid var(--accent)" : "1px solid transparent",
+                      opacity: isDone ? 0.55 : 1,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: "50%",
+                        background: isCurrent ? "var(--accent)" : isDone ? "var(--success, #22c55e)" : "var(--bg-app)",
+                        color: isCurrent || isDone ? "#fff" : "var(--text-secondary)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isDone ? "✓" : idx + 1}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: isCurrent ? 600 : 400, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {heartbeatLabel && (
           <div
@@ -982,6 +1091,127 @@ export default function Autopilot() {
           }
         }}
       />
+    </div>
+  );
+}
+
+function TaskFileList(props: {
+  files: string[];
+  label: string;
+  description: string;
+  addLabel: string;
+  clearLabel: string;
+  emptyLabel: string;
+  onPick: () => void;
+  onRemove: (idx: number) => void;
+  onMove: (idx: number, direction: -1 | 1) => void;
+  onClear: () => void;
+}) {
+  const { files } = props;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <label className="field-label" style={{ marginBottom: 0 }}>
+          {props.label}
+          {files.length > 0 && (
+            <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
+              ({files.length})
+            </span>
+          )}
+        </label>
+        <div style={{ display: "flex", gap: 6 }}>
+          {files.length > 0 && (
+            <button className="btn btn-ghost btn-xs" onClick={props.onClear}>
+              {props.clearLabel}
+            </button>
+          )}
+          <button className="btn btn-secondary btn-sm" onClick={props.onPick} style={{ gap: 6 }}>
+            <FolderOpen size={13} />
+            {props.addLabel}
+          </button>
+        </div>
+      </div>
+      <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>{props.description}</p>
+      {files.length === 0 ? (
+        <div
+          style={{
+            padding: "14px 12px",
+            border: "1px dashed var(--border-default)",
+            borderRadius: 8,
+            fontSize: 12,
+            color: "var(--text-muted)",
+            textAlign: "center",
+          }}
+        >
+          {props.emptyLabel}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {files.map((f, idx) => {
+            const parts = f.split(/[\\/]/).filter(Boolean);
+            const name = parts[parts.length - 1] || f;
+            return (
+              <div
+                key={`${f}-${idx}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                <span
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: "50%",
+                    background: "var(--bg-app)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--text-secondary)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {idx + 1}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</div>
+                </div>
+                <button
+                  className="btn btn-ghost btn-icon-sm"
+                  onClick={() => props.onMove(idx, -1)}
+                  disabled={idx === 0}
+                  title="Up"
+                >
+                  ↑
+                </button>
+                <button
+                  className="btn btn-ghost btn-icon-sm"
+                  onClick={() => props.onMove(idx, 1)}
+                  disabled={idx === files.length - 1}
+                  title="Down"
+                >
+                  ↓
+                </button>
+                <button
+                  className="btn btn-ghost btn-icon-sm"
+                  onClick={() => props.onRemove(idx)}
+                  title="Remove"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

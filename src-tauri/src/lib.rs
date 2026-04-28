@@ -698,6 +698,7 @@ pub fn run() {
             workflow_commands::import_workflow_file,
             autopilot_commands::get_autopilot_status,
             autopilot_commands::pick_autopilot_file,
+            autopilot_commands::pick_autopilot_files,
             autopilot_commands::start_autopilot,
             autopilot_commands::stop_autopilot,
             autopilot_commands::list_autopilot_logs,

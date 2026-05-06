@@ -35,16 +35,12 @@ function HeaderComponent() {
   }, [currentTheme]);
 
   const handleOpenGithub = useCallback(() => {
-    void open("https://github.com/Moresll/cchub");
+    void open("https://github.com/Moresl/cchub");
   }, []);
 
   return (
     <header className="topbar">
-      <button
-        className="theme-btn"
-        title="GitHub"
-        onClick={handleOpenGithub}
-      >
+      <button className="theme-btn" title="GitHub" onClick={handleOpenGithub}>
         <Github size={16} />
       </button>
 

@@ -4,6 +4,8 @@ import { Brain, Loader2, Save, User } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import MarkdownEditor from "../components/MarkdownEditor";
+import LoadingState from "../components/states/LoadingState";
+import { useSaveHermesMemoryContentMutation, useToggleHermesMemoryEnabledMutation } from "../hooks/mutations";
 
 type MemoryKind = "memory" | "user";
 
@@ -21,13 +23,16 @@ function HermesMemory() {
   const [content, setContent] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const saveHermesMemoryContentMutation = useSaveHermesMemoryContentMutation();
+  const toggleHermesMemoryEnabledMutation = useToggleHermesMemoryEnabledMutation();
 
   const fetchLimits = useCallback(async () => {
     try {
       const data = await invoke<MemoryLimits>("get_hermes_memory_limits");
       setLimits(data);
-    } catch {
-      // hermes not installed — silent fail
+    } catch (error) {
+      console.warn("Failed to load Hermes memory limits", error);
+      setLimits(null);
     }
   }, []);
 
@@ -36,7 +41,8 @@ function HermesMemory() {
       const data = await invoke<string>("get_hermes_memory_content", { kind });
       setContent(data);
       setLoaded(true);
-    } catch {
+    } catch (error) {
+      console.warn("Failed to load Hermes memory content", error);
       setContent("");
       setLoaded(true);
     }
@@ -54,7 +60,7 @@ function HermesMemory() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await invoke("save_hermes_memory_content", { kind: activeTab, content });
+      await saveHermesMemoryContentMutation.mutateAsync({ kind: activeTab, content });
       showToast("success", i.hermesMemory.saveSuccess);
     } catch (e) {
       showToast("error", `${i.hermesMemory.saveFailed}: ${e}`);
@@ -65,7 +71,7 @@ function HermesMemory() {
 
   const handleToggle = async (enabled: boolean) => {
     try {
-      await invoke("toggle_hermes_memory_enabled", { kind: activeTab, enabled });
+      await toggleHermesMemoryEnabledMutation.mutateAsync({ kind: activeTab, enabled });
       await fetchLimits();
       showToast("success", enabled ? i.hermesMemory.enabled : i.hermesMemory.disabled);
     } catch (e) {
@@ -81,8 +87,25 @@ function HermesMemory() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--border-default)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--bg-app)", borderRadius: 8, padding: 3 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 20px",
+          borderBottom: "1px solid var(--border-default)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            background: "var(--bg-app)",
+            borderRadius: 8,
+            padding: 3,
+          }}
+        >
           <button
             onClick={() => setActiveTab("memory")}
             className={`btn btn-sm ${activeTab === "memory" ? "btn-primary" : "btn-ghost"}`}
@@ -118,16 +141,18 @@ function HermesMemory() {
               transition: "background 0.2s",
             }}
           >
-            <span style={{
-              position: "absolute",
-              top: 2,
-              left: currentEnabled ? 18 : 2,
-              width: 16,
-              height: 16,
-              borderRadius: "50%",
-              background: "#fff",
-              transition: "left 0.2s",
-            }} />
+            <span
+              style={{
+                position: "absolute",
+                top: 2,
+                left: currentEnabled ? 18 : 2,
+                width: 16,
+                height: 16,
+                borderRadius: "50%",
+                background: "#fff",
+                transition: "left 0.2s",
+              }}
+            />
           </button>
         </label>
       </div>
@@ -135,23 +160,25 @@ function HermesMemory() {
       {/* Editor area */}
       <div style={{ flex: 1, padding: "16px 20px", overflow: "auto" }}>
         {!loaded ? (
-          <div className="loading-center">
-            <div className="spinner" />
-            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              {i.hermesMemory.loading}
-            </span>
-          </div>
+          <LoadingState label={i.hermesMemory.loading} />
         ) : (
-          <MarkdownEditor
-            value={content}
-            onChange={setContent}
-          />
+          <MarkdownEditor value={content} onChange={setContent} />
         )}
       </div>
 
       {/* Footer */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", borderTop: "1px solid var(--border-default)" }}>
-        <span style={{ fontSize: 12, fontWeight: isOver ? 600 : 400, color: isOver ? "var(--error)" : "var(--text-muted)" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 20px",
+          borderTop: "1px solid var(--border-default)",
+        }}
+      >
+        <span
+          style={{ fontSize: 12, fontWeight: isOver ? 600 : 400, color: isOver ? "var(--error)" : "var(--text-muted)" }}
+        >
           {charCount} / {currentLimit} {i.hermesMemory.chars}
           {isOver && ` — ${i.hermesMemory.overLimit}`}
         </span>

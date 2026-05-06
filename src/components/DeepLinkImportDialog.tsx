@@ -16,6 +16,12 @@ import {
   type DeepLinkImportRequest,
   type DeepLinkMcpImportResult,
 } from "../lib/deeplink";
+import {
+  useActivatePromptPresetMutation,
+  useApplyConfigProfileMutation,
+  useSaveConfigProfileMutation,
+  useSavePromptPresetMutation,
+} from "../hooks/mutations";
 
 interface PromptPreset {
   id: string;
@@ -108,9 +114,7 @@ function ProviderPreviewSectionComponent({
         {current.apiKey && (
           <div>
             <div className="field-label">API Key</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>
-              {maskSecret(current.apiKey)}
-            </div>
+            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{maskSecret(current.apiKey)}</div>
           </div>
         )}
         {current.homepage && (
@@ -172,13 +176,14 @@ function PromptPreviewSectionComponent({
 
 const PromptPreviewSection = memo(PromptPreviewSectionComponent);
 
-function McpPreviewSectionComponent({
-  current,
-  unavailablePreviewLabel,
-}: McpPreviewSectionProps) {
+function McpPreviewSectionComponent({ current, unavailablePreviewLabel }: McpPreviewSectionProps) {
   const mcpServers = useMemo(() => parseMcpPreviewServers(current), [current]);
   const appBadges = useMemo(
-    () => (current.apps || "").split(",").map((app) => app.trim()).filter(Boolean),
+    () =>
+      (current.apps || "")
+        .split(",")
+        .map((app) => app.trim())
+        .filter(Boolean),
     [current.apps],
   );
 
@@ -188,24 +193,44 @@ function McpPreviewSectionComponent({
       <div style={{ display: "grid", gap: 12 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {appBadges.map((app) => (
-            <span key={app} className="badge badge-accent">{app}</span>
+            <span key={app} className="badge badge-accent">
+              {app}
+            </span>
           ))}
         </div>
         {mcpServers.length > 0 ? (
           <div style={{ display: "grid", gap: 10 }}>
             {mcpServers.map((server) => (
-              <div key={server.name} style={{ padding: "12px 14px", borderRadius: 8, background: "var(--bg-input)", border: "1px solid var(--border-default)" }}>
+              <div
+                key={server.name}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 8,
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-default)",
+                }}
+              >
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <strong style={{ fontSize: 13 }}>{server.name}</strong>
                   <span className="badge badge-muted">{server.transport}</span>
                 </div>
-                <div style={{ marginTop: 6, fontSize: 12, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
-                  {server.command}{server.args.length ? ` ${server.args.join(" ")}` : ""}
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 12,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {server.command}
+                  {server.args.length ? ` ${server.args.join(" ")}` : ""}
                 </div>
                 {server.envKeys.length > 0 && (
                   <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
                     {server.envKeys.map((key) => (
-                      <span key={key} className="badge badge-muted">{key}</span>
+                      <span key={key} className="badge badge-muted">
+                        {key}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -213,9 +238,7 @@ function McpPreviewSectionComponent({
             ))}
           </div>
         ) : (
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            {unavailablePreviewLabel}
-          </div>
+          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{unavailablePreviewLabel}</div>
         )}
       </div>
     </section>
@@ -224,10 +247,7 @@ function McpPreviewSectionComponent({
 
 const McpPreviewSection = memo(McpPreviewSectionComponent);
 
-function SkillPreviewSectionComponent({
-  current,
-  fetchDescription,
-}: SkillPreviewSectionProps) {
+function SkillPreviewSectionComponent({ current, fetchDescription }: SkillPreviewSectionProps) {
   return (
     <section className="section-card" style={{ padding: 14 }}>
       <div className="field-label">Skill</div>
@@ -245,9 +265,7 @@ function SkillPreviewSectionComponent({
             {current.directory && <span className="badge badge-muted">{`Dir: ${current.directory}`}</span>}
           </div>
         )}
-        <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-          {fetchDescription}
-        </div>
+        <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{fetchDescription}</div>
       </div>
     </section>
   );
@@ -267,63 +285,76 @@ function DeepLinkImportDialogComponent() {
   const [queue, setQueue] = useState<DeepLinkImportRequest[]>([]);
   const [importing, setImporting] = useState(false);
   const locale = getLocale();
+  const saveConfigProfileMutation = useSaveConfigProfileMutation<string>();
+  const applyConfigProfileMutation = useApplyConfigProfileMutation();
+  const savePromptPresetMutation = useSavePromptPresetMutation<PromptPreset>();
+  const activatePromptPresetMutation = useActivatePromptPresetMutation();
   const current = queue[0] || null;
 
-  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  ), [locale]);
+  const uiText = useCallback(
+    (zhText: string, enText: string, jaText?: string) =>
+      locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+    [locale],
+  );
 
-  const enqueueRequest = useCallback(async (request: DeepLinkImportRequest, disposed = false) => {
-    try {
-      const prepared = request.resource === "provider" && (request.config || request.configUrl)
-        ? await deeplinkApi.mergeRequest(request)
-        : request;
-      if (disposed) return;
-      setQueue((currentQueue) => (
-        currentQueue.some((item) => requestFingerprint(item) === requestFingerprint(prepared))
-          ? currentQueue
-          : [...currentQueue, prepared]
-      ));
-    } catch (error) {
-      if (disposed) return;
-      showToast(
-        "error",
-        uiText(
-          `Deep Link 解析失败: ${error}`,
-          `Failed to prepare deep link: ${error}`,
-          `Deep Link の準備に失敗しました: ${error}`,
-        ),
-      );
-    }
-  }, [uiText]);
-
-  const loadPending = useCallback(async (disposed = false) => {
-    try {
-      const [pendingErrors, pendingImports] = await Promise.all([
-        deeplinkApi.takePendingErrors(),
-        deeplinkApi.takePendingImports(),
-      ]);
-      if (disposed) return;
-      for (const item of pendingErrors) {
-        showToast("error", item.error);
-      }
-      for (const item of pendingImports) {
-        // eslint-disable-next-line no-await-in-loop
-        await enqueueRequest(item, disposed);
-      }
-    } catch (error) {
-      if (!disposed) {
+  const enqueueRequest = useCallback(
+    async (request: DeepLinkImportRequest, disposed = false) => {
+      try {
+        const prepared =
+          request.resource === "provider" && (request.config || request.configUrl)
+            ? await deeplinkApi.mergeRequest(request)
+            : request;
+        if (disposed) return;
+        setQueue((currentQueue) =>
+          currentQueue.some((item) => requestFingerprint(item) === requestFingerprint(prepared))
+            ? currentQueue
+            : [...currentQueue, prepared],
+        );
+      } catch (error) {
+        if (disposed) return;
         showToast(
           "error",
           uiText(
-            `读取待处理 Deep Link 失败: ${error}`,
-            `Failed to load pending deep links: ${error}`,
-            `保留中の Deep Link 読み込みに失敗しました: ${error}`,
+            `Deep Link 解析失败: ${error}`,
+            `Failed to prepare deep link: ${error}`,
+            `Deep Link の準備に失敗しました: ${error}`,
           ),
         );
       }
-    }
-  }, [enqueueRequest, uiText]);
+    },
+    [uiText],
+  );
+
+  const loadPending = useCallback(
+    async (disposed = false) => {
+      try {
+        const [pendingErrors, pendingImports] = await Promise.all([
+          deeplinkApi.takePendingErrors(),
+          deeplinkApi.takePendingImports(),
+        ]);
+        if (disposed) return;
+        for (const item of pendingErrors) {
+          showToast("error", item.error);
+        }
+        for (const item of pendingImports) {
+          // eslint-disable-next-line no-await-in-loop
+          await enqueueRequest(item, disposed);
+        }
+      } catch (error) {
+        if (!disposed) {
+          showToast(
+            "error",
+            uiText(
+              `读取待处理 Deep Link 失败: ${error}`,
+              `Failed to load pending deep links: ${error}`,
+              `保留中の Deep Link 読み込みに失敗しました: ${error}`,
+            ),
+          );
+        }
+      }
+    },
+    [enqueueRequest, uiText],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -344,45 +375,56 @@ function DeepLinkImportDialogComponent() {
     };
   }, [enqueueRequest, loadPending]);
 
-  const resolveSkill = useCallback(async (request: DeepLinkImportRequest): Promise<SkillRegistryEntry> => {
-    const repo = request.repo?.trim();
-    if (!repo) {
-      throw new Error(uiText("技能 Deep Link 缺少 repo 参数", "Skill deep link is missing repo", "Skill Deep Link に repo がありません"));
-    }
+  const resolveSkill = useCallback(
+    async (request: DeepLinkImportRequest): Promise<SkillRegistryEntry> => {
+      const repo = request.repo?.trim();
+      if (!repo) {
+        throw new Error(
+          uiText(
+            "技能 Deep Link 缺少 repo 参数",
+            "Skill deep link is missing repo",
+            "Skill Deep Link に repo がありません",
+          ),
+        );
+      }
 
-    const [owner, repoName] = repo.split("/");
-    const branch = request.branch?.trim() || "main";
-    const entries = await invoke<SkillRegistryEntry[]>("fetch_skills_from_repo", {
-      owner,
-      repo: repoName,
-      branch,
-    });
-
-    const targetDirectory = normalizeDirectory(request.directory);
-    if (targetDirectory) {
-      const matchedByDirectory = entries.find((entry) => {
-        const entryDirectory = entry.id.split(":").slice(1).join(":");
-        return normalizeDirectory(entryDirectory) === targetDirectory;
+      const [owner, repoName] = repo.split("/");
+      const branch = request.branch?.trim() || "main";
+      const entries = await invoke<SkillRegistryEntry[]>("fetch_skills_from_repo", {
+        owner,
+        repo: repoName,
+        branch,
       });
-      if (matchedByDirectory) return matchedByDirectory;
-    }
 
-    const targetName = request.name?.trim().toLowerCase();
-    if (targetName) {
-      const matchedByName = entries.find((entry) => entry.name.trim().toLowerCase() === targetName);
-      if (matchedByName) return matchedByName;
-    }
+      const targetDirectory = normalizeDirectory(request.directory);
+      if (targetDirectory) {
+        const matchedByDirectory = entries.find((entry) => {
+          const entryDirectory = entry.id.split(":").slice(1).join(":");
+          return normalizeDirectory(entryDirectory) === targetDirectory;
+        });
+        if (matchedByDirectory) return matchedByDirectory;
+      }
 
-    if (entries.length === 1) {
-      return entries[0];
-    }
+      const targetName = request.name?.trim().toLowerCase();
+      if (targetName) {
+        const matchedByName = entries.find((entry) => entry.name.trim().toLowerCase() === targetName);
+        if (matchedByName) return matchedByName;
+      }
 
-    throw new Error(uiText(
-      "技能仓库包含多个技能，请在 Deep Link 中补充 directory 参数",
-      "Skill repository contains multiple skills. Add a directory parameter to the deep link.",
-      "Skill リポジトリに複数のスキルがあります。Deep Link に directory を指定してください。",
-    ));
-  }, [uiText]);
+      if (entries.length === 1) {
+        return entries[0];
+      }
+
+      throw new Error(
+        uiText(
+          "技能仓库包含多个技能，请在 Deep Link 中补充 directory 参数",
+          "Skill repository contains multiple skills. Add a directory parameter to the deep link.",
+          "Skill リポジトリに複数のスキルがあります。Deep Link に directory を指定してください。",
+        ),
+      );
+    },
+    [uiText],
+  );
 
   const handleConfirm = useCallback(async () => {
     if (!current || importing) return;
@@ -390,13 +432,13 @@ function DeepLinkImportDialogComponent() {
     try {
       if (current.resource === "provider") {
         const profile = buildProviderProfileFromDeepLink(current);
-        const profileId = await invoke<string>("save_config_profile", {
+        const profileId = await saveConfigProfileMutation.mutateAsync({
           name: profile.name,
           toolId: profile.toolId,
           configSnapshot: profile.configSnapshot,
         });
         if (current.enabled) {
-          await invoke("apply_config_profile", { id: profileId });
+          await applyConfigProfileMutation.mutateAsync(profileId);
         }
         await invoke("refresh_tray_provider_menu");
         showToast(
@@ -408,13 +450,13 @@ function DeepLinkImportDialogComponent() {
           ),
         );
       } else if (current.resource === "prompt") {
-        const preset = await invoke<PromptPreset>("save_prompt_preset", {
+        const preset = await savePromptPresetMutation.mutateAsync({
           id: null,
           name: current.name?.trim() || uiText("导入提示词", "Imported Prompt", "インポートした Prompt"),
           content: decodeDeepLinkText(current.content),
         });
         if (current.enabled) {
-          await invoke("activate_prompt_preset", { id: preset.id });
+          await activatePromptPresetMutation.mutateAsync({ id: preset.id });
         }
         showToast(
           "success",
@@ -463,23 +505,27 @@ function DeepLinkImportDialogComponent() {
           ),
         );
       } else {
-        throw new Error(uiText("暂不支持的 Deep Link 类型", "Unsupported deep link type", "未対応の Deep Link 種別です"));
+        throw new Error(
+          uiText("暂不支持的 Deep Link 类型", "Unsupported deep link type", "未対応の Deep Link 種別です"),
+        );
       }
 
       setQueue((currentQueue) => currentQueue.slice(1));
     } catch (error) {
-      showToast(
-        "error",
-        uiText(
-          `导入失败: ${error}`,
-          `Import failed: ${error}`,
-          `インポートに失敗しました: ${error}`,
-        ),
-      );
+      showToast("error", uiText(`导入失败: ${error}`, `Import failed: ${error}`, `インポートに失敗しました: ${error}`));
     } finally {
       setImporting(false);
     }
-  }, [current, importing, resolveSkill, uiText]);
+  }, [
+    activatePromptPresetMutation,
+    applyConfigProfileMutation,
+    current,
+    importing,
+    resolveSkill,
+    saveConfigProfileMutation,
+    savePromptPresetMutation,
+    uiText,
+  ]);
 
   const handleCancel = useCallback(() => {
     if (importing) return;
@@ -487,26 +533,22 @@ function DeepLinkImportDialogComponent() {
   }, [importing]);
 
   const resourceTitle = current
-    ? (
-      current.resource === "provider"
-        ? uiText("导入 Provider", "Import Provider", "Provider をインポート")
-        : current.resource === "prompt"
-          ? uiText("导入提示词", "Import Prompt", "Prompt をインポート")
-          : current.resource === "mcp"
-            ? uiText("导入 MCP", "Import MCP", "MCP をインポート")
-            : uiText("导入技能", "Import Skill", "Skill をインポート")
-    )
+    ? current.resource === "provider"
+      ? uiText("导入 Provider", "Import Provider", "Provider をインポート")
+      : current.resource === "prompt"
+        ? uiText("导入提示词", "Import Prompt", "Prompt をインポート")
+        : current.resource === "mcp"
+          ? uiText("导入 MCP", "Import MCP", "MCP をインポート")
+          : uiText("导入技能", "Import Skill", "Skill をインポート")
     : "";
   const ResourceIcon = current
-    ? (
-      current.resource === "provider"
-        ? Globe
-        : current.resource === "prompt"
-          ? FileText
-          : current.resource === "mcp"
-            ? Wrench
-            : Package
-    )
+    ? current.resource === "provider"
+      ? Globe
+      : current.resource === "prompt"
+        ? FileText
+        : current.resource === "mcp"
+          ? Wrench
+          : Package
     : Package;
   const providerUnnamedLabel = uiText("未命名 Provider", "Unnamed Provider", "無名の Provider");
   const promptUnnamedLabel = uiText("未命名提示词", "Unnamed Prompt", "無名の Prompt");
@@ -515,7 +557,11 @@ function DeepLinkImportDialogComponent() {
   const homepageLabel = uiText("主页", "Homepage", "ホームページ");
   const contentPreviewLabel = uiText("内容预览", "Content Preview", "内容プレビュー");
   const emptyContentLabel = uiText("无内容", "No content", "内容なし");
-  const unavailablePreviewLabel = uiText("无法预览 MCP 配置，将在导入时校验。", "MCP config preview is unavailable and will be validated on import.", "MCP 設定はプレビューできません。インポート時に検証します。");
+  const unavailablePreviewLabel = uiText(
+    "无法预览 MCP 配置，将在导入时校验。",
+    "MCP config preview is unavailable and will be validated on import.",
+    "MCP 設定はプレビューできません。インポート時に検証します。",
+  );
   const skillFetchDescription = uiText(
     "确认时将从远程仓库拉取技能内容并安装到当前技能目录。",
     "The skill content will be fetched from the repository and installed into the current skills directory on confirmation.",
@@ -592,17 +638,11 @@ function DeepLinkImportDialogComponent() {
           )}
 
           {current.resource === "mcp" && (
-            <McpPreviewSection
-              current={current}
-              unavailablePreviewLabel={unavailablePreviewLabel}
-            />
+            <McpPreviewSection current={current} unavailablePreviewLabel={unavailablePreviewLabel} />
           )}
 
           {current.resource === "skill" && (
-            <SkillPreviewSection
-              current={current}
-              fetchDescription={skillFetchDescription}
-            />
+            <SkillPreviewSection current={current} fetchDescription={skillFetchDescription} />
           )}
 
           <div

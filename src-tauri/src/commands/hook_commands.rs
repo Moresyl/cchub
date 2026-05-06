@@ -163,6 +163,7 @@ pub fn delete_hook(id: String, db: State<'_, DbState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn save_hook_to_settings(
     event: String,
     matcher: Option<String>,

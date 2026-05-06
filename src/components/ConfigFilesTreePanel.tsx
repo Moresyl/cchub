@@ -10,6 +10,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { FolderNode } from "../types/skills";
+import EmptyState from "./states/EmptyState";
+import LoadingState from "./states/LoadingState";
 
 type EditorLanguage = "json" | "markdown" | "yaml" | "toml" | "text";
 
@@ -118,25 +120,19 @@ function ConfigFilesTreePanelComponent({
     <div className="card" style={{ minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border-default)" }}>
         <div style={{ fontSize: 13, fontWeight: 700 }}>{title}</div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-          {rootPath}
-        </div>
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{rootPath}</div>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 10 }}>
         {loading ? (
-          <div className="loading-center" style={{ height: "100%" }}>
-            <div className="spinner" />
-          </div>
+          <LoadingState />
         ) : tree ? (
           renderNode(tree)
         ) : (
-          <div className="empty-state" style={{ minHeight: 260 }}>
-            <div className="empty-icon">
-              <FolderOpen size={28} style={{ color: "var(--text-muted)" }} />
-            </div>
-            <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>{noRootLabel}</p>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, maxWidth: 240 }}>{noRootTip}</p>
-          </div>
+          <EmptyState
+            title={noRootLabel}
+            description={noRootTip}
+            icon={<FolderOpen size={28} style={{ color: "var(--text-muted)" }} />}
+          />
         )}
       </div>
     </div>

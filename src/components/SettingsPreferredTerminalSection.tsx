@@ -3,6 +3,7 @@ import { FolderOpen, Link2 } from "lucide-react";
 import type { Locale } from "../lib/i18n";
 import type { TerminalPreferences } from "../lib/appPreferences";
 import SettingsTerminalOptionCard from "./SettingsTerminalOptionCard";
+import LoadingState from "./states/LoadingState";
 
 interface SettingsPreferredTerminalSectionProps {
   locale: Locale;
@@ -60,20 +61,16 @@ function SettingsPreferredTerminalSectionComponent({
                 `現在のプラットフォーム: ${terminalPreferences.platform}`,
               )}
             </span>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ gap: 6 }}
-              onClick={onOpenHomeInTerminal}
-            >
+            <button className="btn btn-secondary btn-sm" style={{ gap: 6 }} onClick={onOpenHomeInTerminal}>
               <FolderOpen size={14} />
               {uiText(locale, "在终端中打开主目录", "Open Home In Terminal", "ホームをターミナルで開く")}
             </button>
           </div>
         </>
       ) : (
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          {uiText(locale, "正在读取终端列表...", "Loading terminal options...", "ターミナル一覧を読み込み中...")}
-        </div>
+        <LoadingState
+          label={uiText(locale, "正在读取终端列表...", "Loading terminal options...", "ターミナル一覧を読み込み中...")}
+        />
       )}
     </div>
   );

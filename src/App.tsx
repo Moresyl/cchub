@@ -26,6 +26,7 @@ import {
   fetchToolsPageData,
   queryKeys,
 } from "./hooks/queries";
+import { useSetWelcomeCompletedMutation } from "./hooks/mutations";
 
 const pageImports = {
   "/": () => import("./pages/Dashboard"),
@@ -61,8 +62,19 @@ const routeComponents: ReadonlyArray<{
   Component: lazy(pageImports[path]),
 }));
 
-// App 模块加载后立即并发预加载所有页面 chunk，消除首次点击延迟
-Object.values(pageImports).forEach((loader) => void loader());
+const highFrequencyRoutePreloads: RoutePath[] = ["/", "/mcp-servers", "/logs", "/skills", "/profiles"];
+
+// App 模块加载后只预加载高频页面 chunk，避免冷启动一次性拉起所有页面。
+highFrequencyRoutePreloads.forEach((path) => void pageImports[path]());
+
+async function runWithConcurrencyLimit(tasks: Array<() => Promise<unknown>>, limit: number) {
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async (_, workerIndex) => {
+    for (let index = workerIndex; index < tasks.length; index += limit) {
+      await tasks[index]();
+    }
+  });
+  await Promise.all(workers);
+}
 
 // 空闲时预热后端数据缓存，不与首屏数据请求抢后端
 {
@@ -77,10 +89,15 @@ Object.values(pageImports).forEach((loader) => void loader());
       { key: queryKeys.claudeMdPage, fn: fetchClaudeMdPageData },
       { key: queryKeys.logsPage(today), fn: () => fetchLogsPageData(today) },
     ];
-    // 串行而非并行，避免一次性打爆后端
-    prefetchers.reduce<Promise<unknown>>(
-      (acc, { key, fn }) => acc.then(() => queryClient.prefetchQuery({ queryKey: key, queryFn: fn }).catch(() => {})),
-      Promise.resolve(),
+    void runWithConcurrencyLimit(
+      prefetchers.map(
+        ({ key, fn }) =>
+          () =>
+            queryClient.prefetchQuery({ queryKey: key, queryFn: fn }).catch((error) => {
+              console.debug("Background query prefetch failed", key, error);
+            }),
+      ),
+      2,
     );
   };
   if (typeof window.requestIdleCallback === "function") {
@@ -103,22 +120,14 @@ function RouteFallback() {
   );
 }
 
-function RouteProfiler({
-  children,
-  pathname,
-}: {
-  children: ReactNode;
-  pathname: string;
-}) {
+function RouteProfiler({ children, pathname }: { children: ReactNode; pathname: string }) {
   const handleRender = useCallback(
     (_id: string, phase: string, actualDuration: number) => {
       if (!import.meta.env.DEV || phase !== "update") {
         return;
       }
 
-      console.debug(
-        `[route-profiler] ${pathname} commit ${actualDuration.toFixed(2)}ms`,
-      );
+      console.debug(`[route-profiler] ${pathname} commit ${actualDuration.toFixed(2)}ms`);
     },
     [pathname],
   );
@@ -129,7 +138,6 @@ function RouteProfiler({
     </Profiler>
   );
 }
-
 
 function ActiveRoute({ pathname }: { pathname: string }) {
   const route = routeComponents.find((r) => r.path === pathname);
@@ -155,6 +163,7 @@ function App() {
 function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
+  const setWelcomeCompletedMutation = useSetWelcomeCompletedMutation();
   const [envConflicts, setEnvConflicts] = useState<EnvironmentConflict[]>([]);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -163,9 +172,8 @@ function AppShell() {
   const [welcomeTheme, setWelcomeTheme] = useState<Theme>(getTheme());
   const [installedToolCount, setInstalledToolCount] = useState(0);
   const [profileCount, setProfileCount] = useState(0);
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  const uiText = (zhText: string, enText: string, jaText?: string) =>
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 
   useEffect(() => {
     void loadEnvConflicts();
@@ -173,9 +181,7 @@ function AppShell() {
     const handleFocus = () => void loadEnvConflicts();
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      const isTextEditingTarget = Boolean(
-        target?.closest("input, textarea, [contenteditable='true'], .cm-editor"),
-      );
+      const isTextEditingTarget = Boolean(target?.closest("input, textarea, [contenteditable='true'], .cm-editor"));
 
       if ((event.ctrlKey || event.metaKey) && event.key === ",") {
         event.preventDefault();
@@ -208,13 +214,7 @@ function AppShell() {
         return;
       }
 
-      if (
-        event.key === "Escape"
-        && !event.altKey
-        && !event.ctrlKey
-        && !event.metaKey
-        && !event.shiftKey
-      ) {
+      if (event.key === "Escape" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
         window.dispatchEvent(new CustomEvent("cchub-shortcut-escape"));
       }
     };
@@ -245,7 +245,8 @@ function AppShell() {
     try {
       const conflicts = await invoke<EnvironmentConflict[]>("get_environment_conflicts");
       setEnvConflicts(conflicts);
-    } catch {
+    } catch (error) {
+      console.warn("Failed to load environment conflicts", error);
       setEnvConflicts([]);
     }
   }
@@ -265,7 +266,8 @@ function AppShell() {
       setInstalledToolCount(tools.filter((tool) => tool.installed).length);
       setProfileCount(profiles.length);
       setWelcomeOpen(true);
-    } catch {
+    } catch (error) {
+      console.warn("Failed to load welcome state", error);
       setWelcomeOpen(false);
     }
   }
@@ -282,12 +284,12 @@ function AppShell() {
 
   const handleWelcomeFinish = useCallback(async () => {
     try {
-      await invoke("set_welcome_completed", { completed: true });
+      await setWelcomeCompletedMutation.mutateAsync({ completed: true });
       setWelcomeOpen(false);
     } catch (error) {
       console.error(error);
     }
-  }, []);
+  }, [setWelcomeCompletedMutation]);
 
   const highlightVariables = Array.from(new Set(envConflicts.flatMap((item) => item.variables))).slice(0, 4);
   const showConflictBanner = envConflicts.length > 0 && !bannerDismissed && location.pathname !== "/settings";
@@ -310,6 +312,7 @@ function AppShell() {
         open={commandPaletteOpen}
         onOpenChange={setCommandPaletteOpen}
         navigate={navigate}
+        currentPath={location.pathname}
       />
       <div className="app-layout">
         <Sidebar />
@@ -328,7 +331,16 @@ function AppShell() {
                       `${envConflicts.length} 件の環境変数上書き警告を検出しました`,
                     )}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-secondary)",
+                      marginTop: 2,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
                     {uiText(
                       `这些变量可能覆盖 CCHub 的配置切换: ${highlightVariables.join(", ")}`,
                       `These variables may override CCHub-managed settings: ${highlightVariables.join(", ")}`,
@@ -342,7 +354,11 @@ function AppShell() {
                   <Settings2 size={12} />
                   {uiText("查看设置", "Open Settings", "設定を開く")}
                 </button>
-                <button className="btn btn-ghost btn-icon-sm" onClick={() => setBannerDismissed(true)} title={uiText("关闭", "Dismiss", "閉じる")}>
+                <button
+                  className="btn btn-ghost btn-icon-sm"
+                  onClick={() => setBannerDismissed(true)}
+                  title={uiText("关闭", "Dismiss", "閉じる")}
+                >
                   <X size={14} />
                 </button>
               </div>

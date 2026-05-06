@@ -1,4 +1,3 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -136,7 +135,7 @@ pub struct CopilotAuthManager {
     default_account_id: RwLock<Option<String>>,
     copilot_tokens: RwLock<HashMap<String, CopilotToken>>,
     refresh_locks: RwLock<HashMap<String, Arc<Mutex<()>>>>,
-    http_client: Client,
+    http_client: reqwest::Client,
     storage_path: PathBuf,
 }
 
@@ -160,7 +159,19 @@ impl CopilotAuthManager {
             default_account_id: RwLock::new(None),
             copilot_tokens: RwLock::new(HashMap::new()),
             refresh_locks: RwLock::new(HashMap::new()),
-            http_client: Client::new(),
+            http_client: crate::shared::http_client::build_http_client(
+                None,
+                Some(COPILOT_USER_AGENT),
+                std::time::Duration::from_secs(30),
+            )
+            .unwrap_or_else(|error| {
+                crate::utils::append_runtime_log(
+                    "warn",
+                    "copilot_auth",
+                    &format!("Failed to build configured HTTP client: {error}"),
+                );
+                crate::shared::http_client::default_http_client()
+            }),
             storage_path,
         };
         if let Err(error) = manager.load_from_disk_sync() {

@@ -51,7 +51,10 @@ const KNOWN_API_KEY_ENV_KEYS: &[&str] = &[
 ];
 
 pub fn preset_for_provider(provider: &str) -> Option<HermesProviderPreset> {
-    PRESETS.iter().copied().find(|preset| preset.provider == provider)
+    PRESETS
+        .iter()
+        .copied()
+        .find(|preset| preset.provider == provider)
 }
 
 pub fn default_env_key_for_provider(provider: &str) -> Option<&'static str> {

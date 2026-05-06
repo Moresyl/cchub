@@ -76,6 +76,17 @@ jobs:
           releaseDraft: false
           prerelease: false
 
+      - name: Report bundle sizes
+        shell: pwsh
+        run: |
+          "## Windows bundle sizes" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem -Path src-tauri/target/release/bundle -Recurse -File |
+            Sort-Object Length -Descending |
+            ForEach-Object {
+              $sizeMb = [math]::Round($_.Length / 1MB, 2)
+              "- $($_.Name): $sizeMb MB" >> $env:GITHUB_STEP_SUMMARY
+            }
+
   build-macos:
     runs-on: macos-latest
     strategy:
@@ -116,6 +127,13 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
+      - name: Report bundle sizes
+        run: |
+          echo "## macOS bundle sizes (${{ matrix.target }})" >> "$GITHUB_STEP_SUMMARY"
+          find src-tauri/target -path "*/bundle/*" -type f -print0 |
+            xargs -0 ls -lh |
+            awk '{print "- " $9 ": " $5}' >> "$GITHUB_STEP_SUMMARY"
+
   build-linux:
     runs-on: ubuntu-22.04
     steps:
@@ -154,3 +172,10 @@ jobs:
           releaseName: 'CCHub ${{ github.ref_name }}'
           releaseDraft: false
           prerelease: false
+
+      - name: Report bundle sizes
+        run: |
+          echo "## Linux bundle sizes" >> "$GITHUB_STEP_SUMMARY"
+          find src-tauri/target/release/bundle -type f -print0 |
+            xargs -0 ls -lh |
+            awk '{print "- " $9 ": " $5}' >> "$GITHUB_STEP_SUMMARY"

@@ -1,13 +1,15 @@
 use crate::copilot_auth::{self, CopilotAuthState};
 use crate::db::DbState;
 use crate::hermes;
+use crate::shared::{github_release, github_urls, http_client};
 use crate::utils::configure_background_command;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 
 fn log_command_timing(command: &str, started_at: std::time::Instant) {
@@ -1014,10 +1016,16 @@ struct SessionTokenTotals {
 }
 
 impl SessionTokenTotals {
-    fn record(&mut self, input_tokens: Option<u64>, output_tokens: Option<u64>, total_tokens: Option<u64>) {
+    fn record(
+        &mut self,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        total_tokens: Option<u64>,
+    ) {
         let resolved_input = input_tokens.unwrap_or(0);
         let resolved_output = output_tokens.unwrap_or(0);
-        let resolved_total = total_tokens.unwrap_or_else(|| resolved_input.saturating_add(resolved_output));
+        let resolved_total =
+            total_tokens.unwrap_or_else(|| resolved_input.saturating_add(resolved_output));
 
         if resolved_input == 0 && resolved_output == 0 && resolved_total == 0 {
             return;
@@ -1050,7 +1058,9 @@ fn read_token_u64(value: &serde_json::Value) -> Option<u64> {
     }
 }
 
-fn object_usage_totals(map: &serde_json::Map<String, serde_json::Value>) -> Option<(Option<u64>, Option<u64>, Option<u64>)> {
+fn object_usage_totals(
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(Option<u64>, Option<u64>, Option<u64>)> {
     let input_tokens = [
         "input_tokens",
         "prompt_tokens",
@@ -1068,19 +1078,22 @@ fn object_usage_totals(map: &serde_json::Map<String, serde_json::Value>) -> Opti
     ]
     .iter()
     .find_map(|key| map.get(*key).and_then(read_token_u64));
-    let total_tokens = [
-        "total_tokens",
-        "totalTokenCount",
-        "totalTokens",
-    ]
-    .iter()
-    .find_map(|key| map.get(*key).and_then(read_token_u64));
+    let total_tokens = ["total_tokens", "totalTokenCount", "totalTokens"]
+        .iter()
+        .find_map(|key| map.get(*key).and_then(read_token_u64));
 
-    (input_tokens.is_some() || output_tokens.is_some() || total_tokens.is_some())
-        .then_some((input_tokens, output_tokens, total_tokens))
+    (input_tokens.is_some() || output_tokens.is_some() || total_tokens.is_some()).then_some((
+        input_tokens,
+        output_tokens,
+        total_tokens,
+    ))
 }
 
-fn accumulate_token_usage_from_value(value: &serde_json::Value, totals: &mut SessionTokenTotals, depth: usize) {
+fn accumulate_token_usage_from_value(
+    value: &serde_json::Value,
+    totals: &mut SessionTokenTotals,
+    depth: usize,
+) {
     if depth > 8 {
         return;
     }
@@ -1453,7 +1466,7 @@ fn resolve_openclaw_session_key(
         let same_file = entry
             .get("sessionFile")
             .and_then(|value| value.as_str())
-            .map(|value| PathBuf::from(value) == source)
+            .map(|value| Path::new(value) == source)
             .unwrap_or(false);
         if same_id || same_file {
             return Ok(session_key.clone());
@@ -1791,7 +1804,9 @@ fn get_text_app_setting(conn: &rusqlite::Connection, key: &str) -> Result<Option
         .ok())
 }
 
-const MANAGED_APP_IDS: [&str; 6] = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
+const MANAGED_APP_IDS: [&str; 6] = [
+    "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+];
 const VISIBLE_APPS_SETTING_KEY: &str = "visible_apps";
 const WINDOW_PREFERENCES_SETTING_KEY: &str = "window_preferences";
 const COMMON_CONFIG_SNIPPETS_SETTING_KEY: &str = "common_config_snippets";
@@ -2239,7 +2254,7 @@ fn macos_app_exists(name: &str) -> bool {
 fn terminal_options_for_current_platform() -> Vec<TerminalOption> {
     #[cfg(target_os = "windows")]
     {
-        return vec![
+        vec![
             TerminalOption {
                 id: "windows-terminal".to_string(),
                 label: "Windows Terminal".to_string(),
@@ -2258,7 +2273,7 @@ fn terminal_options_for_current_platform() -> Vec<TerminalOption> {
                 command: "cmd".to_string(),
                 installed: cli_exists_in_path("cmd"),
             },
-        ];
+        ]
     }
 
     #[cfg(target_os = "macos")]
@@ -3389,6 +3404,7 @@ fn normalize_external_profile_snapshot(tool_id: &str, settings_config: &str) -> 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upsert_synced_profile(
     conn: &rusqlite::Connection,
     id: &str,
@@ -3525,7 +3541,9 @@ fn sync_live_profiles(
     imported_counts: &HashMap<String, usize>,
     now: &str,
 ) -> Result<(), String> {
-    for tool_id in ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"] {
+    for tool_id in [
+        "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+    ] {
         let id = format!("live-{}", tool_id);
 
         if imported_counts.get(tool_id).copied().unwrap_or(0) > 0 {
@@ -3742,7 +3760,11 @@ fn overlay_codex_user_fields_into_snapshot(
     let Some(obj) = parsed.as_object_mut() else {
         return snapshot_json.to_string();
     };
-    let Some(config_text) = obj.get("config").and_then(|v| v.as_str()).map(str::to_string) else {
+    let Some(config_text) = obj
+        .get("config")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
         return snapshot_json.to_string();
     };
     let Ok(mut snapshot_doc) = config_text.parse::<toml_edit::DocumentMut>() else {
@@ -3750,7 +3772,7 @@ fn overlay_codex_user_fields_into_snapshot(
     };
 
     for key in CODEX_USER_MANAGED_KEYS {
-        if let Some(existing_value) = existing_doc.get(*key) {
+        if let Some(existing_value) = existing_doc.get(key) {
             snapshot_doc[*key] = existing_value.clone();
         }
     }
@@ -3768,11 +3790,8 @@ fn apply_tool_snapshot_with_options(
     snapshot: &str,
     preserve_user_edits: bool,
 ) -> Result<(), String> {
-    let effective_snapshot = crate::provider_proxy::materialize_tool_snapshot_for_runtime(
-        conn,
-        tool_id,
-        snapshot,
-    )?;
+    let effective_snapshot =
+        crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool_id, snapshot)?;
 
     match tool_id {
         "codex" => {
@@ -3955,8 +3974,10 @@ fn apply_tool_snapshot_with_options(
                     }
                     existing.insert(k, v);
                 }
-                std::fs::create_dir_all(settings_json_path.parent().unwrap())
-                    .map_err(|e| e.to_string())?;
+                let settings_parent = settings_json_path
+                    .parent()
+                    .ok_or_else(|| "Cannot determine settings.json parent directory".to_string())?;
+                std::fs::create_dir_all(settings_parent).map_err(|e| e.to_string())?;
                 let text = serde_json::to_string_pretty(&serde_json::Value::Object(existing))
                     .map_err(|e| e.to_string())?;
                 crate::utils::atomic_write_string(&settings_json_path, &text)
@@ -4783,16 +4804,11 @@ struct StreamCheckRequestSpec {
 
 fn build_provider_probe_client(conn: &rusqlite::Connection) -> Result<reqwest::Client, String> {
     let proxy_url = get_text_app_setting(conn, "proxy_url")?.unwrap_or_default();
-    let mut builder = reqwest::Client::builder()
-        .user_agent("CCHub Provider Probe")
-        .timeout(std::time::Duration::from_secs(10));
-
-    if !proxy_url.trim().is_empty() {
-        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {e}"))?;
-        builder = builder.proxy(proxy);
-    }
-
-    builder.build().map_err(|e| e.to_string())
+    http_client::build_http_client(
+        Some(proxy_url.as_str()),
+        Some("CCHub Provider Probe"),
+        Duration::from_secs(10),
+    )
 }
 
 fn extract_profile_metadata(
@@ -4968,8 +4984,9 @@ async fn extract_probe_target(
             let base_url = if use_full_url {
                 explicit_base_url
             } else {
-                explicit_base_url
-                    .or_else(|| Some("https://generativelanguage.googleapis.com/v1beta".to_string()))
+                explicit_base_url.or_else(|| {
+                    Some("https://generativelanguage.googleapis.com/v1beta".to_string())
+                })
             };
             let mut headers = Vec::new();
             if let Some(token) = env
@@ -5035,8 +5052,9 @@ async fn extract_probe_target(
             let base_url = if use_full_url {
                 explicit_base_url
             } else {
-                explicit_base_url
-                    .or_else(|| hermes::providers::default_base_url_for_provider(provider).map(str::to_string))
+                explicit_base_url.or_else(|| {
+                    hermes::providers::default_base_url_for_provider(provider).map(str::to_string)
+                })
             };
             let env_key = parsed
                 .get("metadata")
@@ -5045,7 +5063,9 @@ async fn extract_probe_target(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
-                .or_else(|| hermes::providers::default_env_key_for_provider(provider).map(str::to_string));
+                .or_else(|| {
+                    hermes::providers::default_env_key_for_provider(provider).map(str::to_string)
+                });
             let mut headers = Vec::new();
             if let Some(token) = env_key
                 .as_deref()
@@ -5452,7 +5472,10 @@ async fn extract_stream_check_request(
                 explicit_base_url.ok_or_else(|| "No Hermes base_url configured".to_string())?
             } else {
                 explicit_base_url
-                    .or_else(|| hermes::providers::default_base_url_for_provider(provider).map(str::to_string))
+                    .or_else(|| {
+                        hermes::providers::default_base_url_for_provider(provider)
+                            .map(str::to_string)
+                    })
                     .ok_or_else(|| "No Hermes base_url configured".to_string())?
             };
             let model_id = model
@@ -5468,7 +5491,9 @@ async fn extract_stream_check_request(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
-                .or_else(|| hermes::providers::default_env_key_for_provider(provider).map(str::to_string))
+                .or_else(|| {
+                    hermes::providers::default_env_key_for_provider(provider).map(str::to_string)
+                })
                 .ok_or_else(|| "No Hermes API key env configured".to_string())?;
             let token = env
                 .get(&env_key)
@@ -6024,10 +6049,6 @@ pub fn set_proxy(proxy_url: String, db: State<'_, DbState>) -> Result<(), String
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
     if proxy_url.trim().is_empty() {
-        std::env::remove_var("HTTP_PROXY");
-        std::env::remove_var("HTTPS_PROXY");
-        std::env::remove_var("http_proxy");
-        std::env::remove_var("https_proxy");
         conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', '')",
             [],
@@ -6035,10 +6056,6 @@ pub fn set_proxy(proxy_url: String, db: State<'_, DbState>) -> Result<(), String
         .map_err(|e| e.to_string())?;
     } else {
         let url = proxy_url.trim().to_string();
-        std::env::set_var("HTTP_PROXY", &url);
-        std::env::set_var("HTTPS_PROXY", &url);
-        std::env::set_var("http_proxy", &url);
-        std::env::set_var("https_proxy", &url);
         conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', ?1)",
             rusqlite::params![url],
@@ -6051,7 +6068,7 @@ pub fn set_proxy(proxy_url: String, db: State<'_, DbState>) -> Result<(), String
 /// Get current proxy setting
 #[tauri::command]
 pub fn get_proxy(db: State<'_, DbState>) -> String {
-    // Read from database first (persisted), fallback to env
+    // Read from database. Network calls inject this per reqwest::Client.
     if let Ok(conn) = db.0.lock() {
         if let Ok(proxy) = conn.query_row(
             "SELECT value FROM app_settings WHERE key = 'proxy_url'",
@@ -6063,9 +6080,7 @@ pub fn get_proxy(db: State<'_, DbState>) -> String {
             }
         }
     }
-    std::env::var("HTTPS_PROXY")
-        .or_else(|_| std::env::var("https_proxy"))
-        .unwrap_or_default()
+    String::new()
 }
 
 #[tauri::command]
@@ -6095,10 +6110,7 @@ pub fn get_welcome_completed(db: State<'_, DbState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn set_welcome_completed(
-    completed: bool,
-    db: State<'_, DbState>,
-) -> Result<bool, String> {
+pub fn set_welcome_completed(completed: bool, db: State<'_, DbState>) -> Result<bool, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     set_json_app_setting(&conn, WELCOME_COMPLETED_SETTING_KEY, &completed)?;
     Ok(completed)
@@ -6921,7 +6933,9 @@ fn scan_sessions_from_conn(
         Some("opencode") => vec!["opencode"],
         Some("openclaw") => vec!["openclaw"],
         Some("hermes") => vec!["hermes"],
-        _ => vec!["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
+        _ => vec![
+            "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+        ],
     };
 
     let mut sessions = Vec::new();
@@ -7396,6 +7410,7 @@ pub fn get_sessions(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn get_session_detail(
     tool_id: String,
     session_id: String,
@@ -7617,9 +7632,9 @@ pub fn get_claude_permissions_level() -> Result<u32, String> {
     // NOTE: level 3 is already short-circuited above via `mode == "bypassPermissions"`.
     // The setter writes level 2 with Write(*) but NOT Bash(*), so checking both
     // here misses level 2 and falsely reports it as level 1. Use Write(*) alone.
-    if allow.iter().any(|s| *s == "Write(*)") {
+    if allow.contains(&"Write(*)") {
         Ok(2)
-    } else if allow.iter().any(|s| *s == "Read(*)") {
+    } else if allow.contains(&"Read(*)") {
         Ok(1)
     } else {
         Ok(0)
@@ -7745,17 +7760,12 @@ pub fn set_claude_auto_update(channel: String) -> Result<String, String> {
         if !settings.is_object() {
             settings = serde_json::json!({});
         }
-        let obj = settings.as_object_mut().unwrap();
+        let obj = ensure_json_object(&mut settings);
         obj.remove("autoUpdatesChannel");
         let env_entry = obj
             .entry("env".to_string())
             .or_insert_with(|| serde_json::json!({}));
-        if !env_entry.is_object() {
-            *env_entry = serde_json::json!({});
-        }
-        env_entry
-            .as_object_mut()
-            .unwrap()
+        ensure_json_object(env_entry)
             .insert("DISABLE_AUTOUPDATER".to_string(), serde_json::json!("1"));
     } else {
         // Re-enable: clear the env flag (if present) and write the channel.
@@ -8012,7 +8022,9 @@ try {
   if (stdinRaw.trim()) {
     stdinData = JSON.parse(stdinRaw);
   }
-} catch {}
+} catch {
+  stdinData = null;
+}
 
 await main({
   readStdin: async () => stdinData,
@@ -8030,7 +8042,9 @@ try {
   if (stdinRaw.trim()) {
     stdinData = JSON.parse(stdinRaw);
   }
-} catch {}
+} catch {
+  stdinData = null;
+}
 
 await main({
   readStdin: async () => stdinData,
@@ -8095,13 +8109,11 @@ plugin_dir=$(ls -d \"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\"/plugins/cache/claud
         )
     } else {
         // Fallback to node with env-entry.mjs
-        format!(
-            "bash -c 'export CLAUDE_HUD_STDIN=$(cat); \
+        "bash -c 'export CLAUDE_HUD_STDIN=$(cat); \
 plugin_dir=$(ls -d \"${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}\"/plugins/cache/claude-hud/claude-hud/*/ 2>/dev/null \
 | awk -F/ '\"'\"'{{ print $(NF-1) \"\\t\" $(0) }}'\"'\"' \
 | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | cut -f2-); \
-node \"${{plugin_dir}}env-entry.mjs\" 2>/dev/null | tr -d \"\\r\"'"
-        )
+node \"${{plugin_dir}}env-entry.mjs\" 2>/dev/null | tr -d \"\\r\"'".to_string()
     };
 
     Ok(cmd)
@@ -8165,25 +8177,13 @@ fn find_bun_path(home: &std::path::Path) -> Option<String> {
 async fn fetch_claude_hud_latest_release(
     client: &reqwest::Client,
 ) -> Result<(String, String), String> {
-    let urls = [
-        "https://api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
-        "https://ghgo.xyz/api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
-    ];
-    for url in &urls {
-        if let Ok(resp) = client.get(*url).send().await {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text().await {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(tag) = json.get("tag_name").and_then(|v| v.as_str()) {
-                            let version = tag.trim_start_matches('v').to_string();
-                            return Ok((version, tag.to_string()));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Err("Failed to fetch latest release from GitHub Releases API".to_string())
+    let release = github_release::fetch_latest_release(client, "jarrodwatts", "claude-hud").await?;
+    let version = release.tag_name.trim_start_matches('v').to_string();
+    Ok((version, release.tag_name))
+}
+
+fn build_cchub_http_client(proxy_url: &str) -> Result<reqwest::Client, String> {
+    http_client::build_http_client(Some(proxy_url), Some("CCHub"), Duration::from_secs(30))
 }
 
 /// Install claude-hud plugin from GitHub repository
@@ -8193,19 +8193,7 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
 
     // Build HTTP client with proxy support
     let proxy_url = get_proxy(db);
-    let client = if !proxy_url.is_empty() {
-        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
-        reqwest::Client::builder()
-            .proxy(proxy)
-            .user_agent("CCHub")
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    } else {
-        reqwest::Client::builder()
-            .user_agent("CCHub")
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    };
+    let client = build_cchub_http_client(&proxy_url)?;
 
     // Fetch latest published version from GitHub Releases (not plugin.json)
     let (version, tag_name) = fetch_claude_hud_latest_release(&client)
@@ -8231,16 +8219,8 @@ pub async fn install_claude_hud(db: State<'_, crate::db::DbState>) -> Result<(),
     std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
 
     // Download tarball for this specific tag from GitHub
-    let tarball_urls = [
-        format!(
-            "https://github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
-            tag_name
-        ),
-        format!(
-            "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
-            tag_name
-        ),
-    ];
+    let tarball_urls =
+        github_urls::archive_tag_tarball_urls("jarrodwatts", "claude-hud", &tag_name);
 
     let mut bytes = None;
     let mut last_err = String::new();
@@ -8379,46 +8359,9 @@ pub async fn check_claude_hud_update(
 
     // Check latest version from GitHub plugin.json
     let proxy_url = get_proxy(db);
-    let client = if !proxy_url.is_empty() {
-        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
-        reqwest::Client::builder()
-            .proxy(proxy)
-            .user_agent("CCHub")
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    } else {
-        reqwest::Client::builder()
-            .user_agent("CCHub")
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    };
+    let client = build_cchub_http_client(&proxy_url)?;
 
-    // Prefer GitHub Releases API as source of truth (plugin.json on main branch
-    // is dev version, can be ahead of actual published releases).
-    let release_api_urls = [
-        "https://api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
-        "https://ghgo.xyz/api.github.com/repos/jarrodwatts/claude-hud/releases/latest",
-    ];
-
-    let mut latest_version = String::new();
-    for url in &release_api_urls {
-        if let Ok(resp) = client.get(*url).send().await {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text().await {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(tag) = json.get("tag_name").and_then(|v| v.as_str()) {
-                            latest_version = tag.trim_start_matches('v').to_string();
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if latest_version.is_empty() {
-        return Err("Failed to check latest version from GitHub Releases".to_string());
-    }
+    let (latest_version, _) = fetch_claude_hud_latest_release(&client).await?;
 
     let normalize = |v: &str| v.trim_start_matches('v').to_string();
     let has_update = normalize(&latest_version) != normalize(&current_version);
@@ -8445,19 +8388,7 @@ pub async fn update_claude_hud(
 
     // Build HTTP client with proxy
     let proxy_url = get_proxy(db);
-    let client = if !proxy_url.is_empty() {
-        let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
-        reqwest::Client::builder()
-            .proxy(proxy)
-            .user_agent("CCHub")
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    } else {
-        reqwest::Client::builder()
-            .user_agent("CCHub")
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    };
+    let client = build_cchub_http_client(&proxy_url)?;
 
     // Get latest published version from GitHub Releases API
     let (version, tag_name) = fetch_claude_hud_latest_release(&client).await?;
@@ -8472,16 +8403,8 @@ pub async fn update_claude_hud(
     std::fs::create_dir_all(&dist_dir).map_err(|e| e.to_string())?;
 
     // Download tarball for this specific tag from GitHub
-    let tarball_urls = [
-        format!(
-            "https://github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
-            tag_name
-        ),
-        format!(
-            "https://ghgo.xyz/github.com/jarrodwatts/claude-hud/archive/refs/tags/{}.tar.gz",
-            tag_name
-        ),
-    ];
+    let tarball_urls =
+        github_urls::archive_tag_tarball_urls("jarrodwatts", "claude-hud", &tag_name);
 
     let mut bytes = None;
     let mut last_err = String::new();
@@ -8647,15 +8570,20 @@ pub fn set_claude_hud_config(config: serde_json::Value) -> Result<serde_json::Va
 }
 
 const HELLO2CC_PLUGIN_ID: &str = "hello2cc@hello2cc";
-const HELLO2CC_MANIFEST_URLS: [&str; 2] = [
-    "https://raw.githubusercontent.com/hellowind777/hello2cc/main/.claude-plugin/plugin.json",
-    "https://ghgo.xyz/raw.githubusercontent.com/hellowind777/hello2cc/main/.claude-plugin/plugin.json",
-];
-const HELLO2CC_TARBALL_URLS: [&str; 2] = [
-    "https://github.com/hellowind777/hello2cc/archive/refs/heads/main.tar.gz",
-    "https://ghgo.xyz/github.com/hellowind777/hello2cc/archive/refs/heads/main.tar.gz",
-];
 const HELLO2CC_ROOT_PREFIXES: [&str; 2] = ["hello2cc-main/", "hello2cc-master/"];
+
+fn hello2cc_manifest_urls() -> Vec<String> {
+    github_urls::raw_file_urls(
+        "hellowind777",
+        "hello2cc",
+        "main",
+        ".claude-plugin/plugin.json",
+    )
+}
+
+fn hello2cc_tarball_urls() -> Vec<String> {
+    github_urls::archive_branch_tarball_urls("hellowind777", "hello2cc", "main")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -8727,16 +8655,18 @@ fn hello2cc_required_paths(version_dir: &std::path::Path) -> [PathBuf; 4] {
         version_dir.join(".claude-plugin").join("plugin.json"),
         version_dir.join(".claude-plugin").join("marketplace.json"),
         version_dir.join("agents").join("native.md"),
-        version_dir
-            .join("output-styles")
-            .join("hello2cc-native.md"),
+        version_dir.join("output-styles").join("hello2cc-native.md"),
     ]
 }
 
 fn validate_hello2cc_install(version_dir: &std::path::Path, action: &str) -> Result<(), String> {
     for required_path in hello2cc_required_paths(version_dir) {
         if !required_path.exists() {
-            return Err(format!("{} failed: missing {}", action, required_path.display()));
+            return Err(format!(
+                "{} failed: missing {}",
+                action,
+                required_path.display()
+            ));
         }
     }
 
@@ -8749,7 +8679,10 @@ fn ensure_json_object(
     if !value.is_object() {
         *value = serde_json::json!({});
     }
-    value.as_object_mut().expect("value should be an object")
+    match value {
+        serde_json::Value::Object(map) => map,
+        _ => unreachable!("value was normalized to an object"),
+    }
 }
 
 fn ensure_child_object<'a>(
@@ -8763,7 +8696,10 @@ fn ensure_child_object<'a>(
     if !entry.is_object() {
         *entry = serde_json::json!({});
     }
-    entry.as_object_mut().expect("value should be an object")
+    match entry {
+        serde_json::Value::Object(map) => map,
+        _ => unreachable!("value was normalized to an object"),
+    }
 }
 
 fn read_json_value_or_default(path: &std::path::Path) -> Result<serde_json::Value, String> {
@@ -8965,23 +8901,15 @@ fn find_latest_installed_plugin_version(
 }
 
 fn build_plugin_http_client(proxy_url: &str) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder().user_agent("CCHub");
-    if !proxy_url.trim().is_empty() {
-        let proxy =
-            reqwest::Proxy::all(proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
-        builder = builder.proxy(proxy);
-    }
-    builder
-        .build()
-        .map_err(|e| format!("Client build failed: {}", e))
+    http_client::build_http_client(Some(proxy_url), Some("CCHub"), Duration::from_secs(30))
 }
 
 async fn fetch_plugin_version_from_manifest(
     client: &reqwest::Client,
-    urls: &[&str],
+    urls: &[String],
 ) -> Result<String, String> {
     for url in urls {
-        let response = match client.get(*url).send().await {
+        let response = match client.get(url).send().await {
             Ok(response) if response.status().is_success() => response,
             _ => continue,
         };
@@ -9000,11 +8928,11 @@ async fn fetch_plugin_version_from_manifest(
 
 async fn download_first_available(
     client: &reqwest::Client,
-    urls: &[&str],
+    urls: &[String],
 ) -> Result<bytes::Bytes, String> {
     let mut last_err = String::new();
     for url in urls {
-        match client.get(*url).send().await {
+        match client.get(url).send().await {
             Ok(response) if response.status().is_success() => match response.bytes().await {
                 Ok(bytes) => return Ok(bytes),
                 Err(error) => last_err = format!("Read failed: {}", error),
@@ -9170,7 +9098,7 @@ pub fn uninstall_hello2cc() -> Result<Hello2ccStatus, String> {
 pub async fn install_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello2ccStatus, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let client = build_plugin_http_client(&get_proxy(db))?;
-    let version = fetch_plugin_version_from_manifest(&client, &HELLO2CC_MANIFEST_URLS).await?;
+    let version = fetch_plugin_version_from_manifest(&client, &hello2cc_manifest_urls()).await?;
     let cache_dir = hello2cc_cache_dir(&home);
     let version_dir = cache_dir.join(&version);
     let manifest_path = version_dir.join(".claude-plugin").join("plugin.json");
@@ -9185,7 +9113,7 @@ pub async fn install_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello
     }
     std::fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
 
-    let bytes = download_first_available(&client, &HELLO2CC_TARBALL_URLS).await?;
+    let bytes = download_first_available(&client, &hello2cc_tarball_urls()).await?;
     extract_repo_tarball(&bytes, &version_dir, &HELLO2CC_ROOT_PREFIXES)?;
     validate_hello2cc_install(&version_dir, "Installation")?;
 
@@ -9203,7 +9131,8 @@ pub async fn check_hello2cc_update(
     }
 
     let client = build_plugin_http_client(&get_proxy(db))?;
-    let latest_version = fetch_plugin_version_from_manifest(&client, &HELLO2CC_MANIFEST_URLS).await?;
+    let latest_version =
+        fetch_plugin_version_from_manifest(&client, &hello2cc_manifest_urls()).await?;
 
     Ok(Hello2ccUpdateInfo {
         current_version: status.version.clone(),
@@ -9221,7 +9150,7 @@ pub async fn update_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello2
     }
 
     let client = build_plugin_http_client(&get_proxy(db))?;
-    let version = fetch_plugin_version_from_manifest(&client, &HELLO2CC_MANIFEST_URLS).await?;
+    let version = fetch_plugin_version_from_manifest(&client, &hello2cc_manifest_urls()).await?;
     let cache_dir = hello2cc_cache_dir(&home);
     let version_dir = cache_dir.join(&version);
     let manifest_path = version_dir.join(".claude-plugin").join("plugin.json");
@@ -9231,7 +9160,7 @@ pub async fn update_hello2cc(db: State<'_, crate::db::DbState>) -> Result<Hello2
             std::fs::remove_dir_all(&version_dir).map_err(|e| e.to_string())?;
         }
         std::fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
-        let bytes = download_first_available(&client, &HELLO2CC_TARBALL_URLS).await?;
+        let bytes = download_first_available(&client, &hello2cc_tarball_urls()).await?;
         extract_repo_tarball(&bytes, &version_dir, &HELLO2CC_ROOT_PREFIXES)?;
     }
     validate_hello2cc_install(&version_dir, "Update")?;
@@ -9375,11 +9304,10 @@ fn is_openclaw_daily_memory_candidate(path: &std::path::Path, base_dir: &std::pa
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.to_ascii_lowercase());
-    let extension_allowed = match extension.as_deref() {
-        None => true,
-        Some("md" | "txt" | "json" | "jsonl" | "yaml" | "yml" | "log") => true,
-        _ => false,
-    };
+    let extension_allowed = matches!(
+        extension.as_deref(),
+        None | Some("md" | "txt" | "json" | "jsonl" | "yaml" | "yml" | "log")
+    );
     if !extension_allowed {
         return false;
     }
@@ -10116,29 +10044,6 @@ fn configure_database_connection(
     crate::db::schema::run_migrations(conn).map_err(|e| e.to_string())
 }
 
-fn restore_proxy_env_from_conn(conn: &rusqlite::Connection) {
-    let proxy = conn
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = 'proxy_url'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .ok()
-        .unwrap_or_default();
-
-    if proxy.trim().is_empty() {
-        for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
-            std::env::remove_var(key);
-        }
-        return;
-    }
-
-    std::env::set_var("HTTP_PROXY", &proxy);
-    std::env::set_var("HTTPS_PROXY", &proxy);
-    std::env::set_var("http_proxy", &proxy);
-    std::env::set_var("https_proxy", &proxy);
-}
-
 fn get_main_db_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
     let mut stmt = conn
         .prepare("PRAGMA database_list")
@@ -10400,7 +10305,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
     // Schema (CREATE TABLE IF NOT EXISTS)
     sql.push_str("-- ── Schema ──\n\n");
     sql.push_str(&crate::db::schema::get_schema_sql());
-    sql.push_str("\n");
+    sql.push('\n');
 
     // Backup metadata table
     sql.push_str("CREATE TABLE IF NOT EXISTS _backup_meta (key TEXT PRIMARY KEY, value TEXT);\n");
@@ -10491,7 +10396,9 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
 
     // Tool config files
     sql.push_str("-- ── Tool Configs ──\n\n");
-    let tool_ids = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
+    let tool_ids = [
+        "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+    ];
     for tool_id in tool_ids {
         if let Ok(content) = read_tool_snapshot(conn, tool_id) {
             let config_path = match tool_id {
@@ -10599,7 +10506,14 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
         "GEMINI.md.bak",
         ".claude.json",
     ];
-    let project_relative_dirs = [".claude", ".codex", ".gemini", ".opencode", ".openclaw", ".hermes"];
+    let project_relative_dirs = [
+        ".claude",
+        ".codex",
+        ".gemini",
+        ".opencode",
+        ".openclaw",
+        ".hermes",
+    ];
 
     for project_root in discover_project_roots(conn) {
         let root_key = format!("project:{}", project_root.to_string_lossy());
@@ -10827,7 +10741,6 @@ pub(crate) fn import_backup_from_path_impl(
             let now = chrono::Utc::now().to_rfc3339();
             let imported_counts = sync_profiles_from_compatible_databases(&reopened, &now)?;
             sync_live_profiles(&reopened, &imported_counts, &now)?;
-            restore_proxy_env_from_conn(&reopened);
 
             Ok((
                 reopened,
@@ -10892,7 +10805,6 @@ pub(crate) fn import_backup_from_path_impl(
                 .or_else(|_| rusqlite::Connection::open_in_memory())
                 .map_err(|e| e.to_string())?;
             let _ = configure_database_connection(&fallback, true);
-            restore_proxy_env_from_conn(&fallback);
             *conn = fallback;
 
             Err(err)
@@ -10912,7 +10824,7 @@ pub async fn save_backup_to_file(db: State<'_, DbState>) -> Result<String, Strin
 
     let file = rfd::AsyncFileDialog::new()
         .set_title("导出备份")
-        .set_file_name(&format!(
+        .set_file_name(format!(
             "cchub-backup-{}.sql",
             chrono::Local::now().format("%Y%m%d-%H%M%S")
         ))

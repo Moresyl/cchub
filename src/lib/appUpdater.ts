@@ -52,8 +52,12 @@ function normalizeVersion(version: string | null | undefined): string {
 }
 
 function compareVersions(left: string, right: string): number {
-  const a = normalizeVersion(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const b = normalizeVersion(right).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const a = normalizeVersion(left)
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+  const b = normalizeVersion(right)
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
   const max = Math.max(a.length, b.length);
 
   for (let i = 0; i < max; i += 1) {
@@ -71,16 +75,19 @@ function isUpdaterNotConfigured(message: string): boolean {
 }
 
 function isRemoteReleaseManifestError(message: string): boolean {
-  return message.includes("Could not fetch a valid release JSON from the remote")
-    || message.includes("release JSON")
-    || message.includes("latest.json")
-    || message.includes("404");
+  return (
+    message.includes("Could not fetch a valid release JSON from the remote") ||
+    message.includes("release JSON") ||
+    message.includes("latest.json") ||
+    message.includes("404")
+  );
 }
 
 async function getCurrentAppVersion(): Promise<string> {
   try {
     return await getVersion();
-  } catch {
+  } catch (error) {
+    console.warn("Failed to read current app version", error);
     return "";
   }
 }
@@ -88,7 +95,8 @@ async function getCurrentAppVersion(): Promise<string> {
 export async function getUpdaterEnvironmentState(): Promise<UpdaterEnvironmentState> {
   try {
     return await invoke<UpdaterEnvironmentState>("get_updater_environment_state");
-  } catch {
+  } catch (error) {
+    console.warn("Failed to read updater environment state", error);
     return {
       disabled_by_env: false,
       env_var_value: null,
@@ -110,7 +118,7 @@ async function checkGitHubRelease(currentVersion: string): Promise<{
     throw new Error(`GitHub release request failed: ${response.status} ${response.statusText}`);
   }
 
-  const release = await response.json() as {
+  const release = (await response.json()) as {
     tag_name?: string;
     name?: string;
     body?: string;
@@ -128,7 +136,7 @@ async function checkGitHubRelease(currentVersion: string): Promise<{
       update_available: hasUpdate,
       latest_version: hasUpdate ? latestVersion : null,
       current_version: currentVersion || null,
-      body: hasUpdate ? release.body ?? null : null,
+      body: hasUpdate ? (release.body ?? null) : null,
       not_configured: false,
       can_install: false,
       release_url: release.html_url ?? null,
@@ -204,7 +212,8 @@ export async function checkAppUpdate(): Promise<{
 
     try {
       return await checkGitHubRelease(currentVersion);
-    } catch {
+    } catch (fallbackError) {
+      console.warn("GitHub release fallback failed", fallbackError);
       throw error;
     }
   }

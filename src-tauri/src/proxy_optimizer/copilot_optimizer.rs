@@ -48,12 +48,11 @@ pub fn classify_request(
     }
 
     let is_user_initiated = match last_msg.get("content") {
-        Some(content) if content.is_array() => {
-            let blocks = content.as_array().unwrap();
+        Some(content) if content.is_array() => content.as_array().is_some_and(|blocks| {
             !blocks
                 .iter()
                 .any(|block| block.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
-        }
+        }),
         Some(content) if content.is_string() => true,
         _ => false,
     };
@@ -76,12 +75,17 @@ fn is_warmup_request(body: &Value, has_anthropic_beta: bool, is_compact: bool) -
     if !has_anthropic_beta || is_compact {
         return false;
     }
-    !matches!(body.get("tools"), Some(tools) if tools.is_array() && !tools.as_array().unwrap().is_empty())
+    !matches!(
+        body.get("tools").and_then(|tools| tools.as_array()),
+        Some(tools) if !tools.is_empty()
+    )
 }
 
 fn is_compact_request(body: &Value) -> bool {
     let system_text = extract_system_text(body);
-    if system_text.starts_with("You are a helpful AI assistant tasked with summarizing conversations") {
+    if system_text
+        .starts_with("You are a helpful AI assistant tasked with summarizing conversations")
+    {
         return true;
     }
 
@@ -147,7 +151,7 @@ pub fn merge_tool_results(mut body: Value) -> Value {
         msg["content"] = Value::Array(merged);
     }
 
-    let messages = body["messages"].as_array().unwrap().clone();
+    let messages = messages.clone();
     if messages.len() <= 1 {
         return body;
     }
@@ -265,7 +269,9 @@ pub fn sanitize_orphan_tool_results(mut body: Value) -> Value {
                         blocks
                             .iter()
                             .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
-                            .filter_map(|b| b.get("id").and_then(|id| id.as_str()).map(String::from))
+                            .filter_map(|b| {
+                                b.get("id").and_then(|id| id.as_str()).map(String::from)
+                            })
                             .collect()
                     })
                     .unwrap_or_default()
@@ -273,7 +279,10 @@ pub fn sanitize_orphan_tool_results(mut body: Value) -> Value {
                 HashSet::new()
             };
 
-        let content = match messages[i].get_mut("content").and_then(|c| c.as_array_mut()) {
+        let content = match messages[i]
+            .get_mut("content")
+            .and_then(|c| c.as_array_mut())
+        {
             Some(blocks) => blocks,
             None => continue,
         };
@@ -291,11 +300,14 @@ pub fn sanitize_orphan_tool_results(mut body: Value) -> Value {
                     Some(c) if c.is_string() => c.as_str().unwrap_or("").to_string(),
                     Some(c) if c.is_array() => c
                         .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
+                        .map(|blocks| {
+                            blocks
+                                .iter()
+                                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .unwrap_or_default(),
                     _ => String::new(),
                 };
                 *block = serde_json::json!({
@@ -339,11 +351,14 @@ fn extract_system_text(body: &Value) -> String {
         Some(s) if s.is_string() => s.as_str().unwrap_or("").to_string(),
         Some(arr) if arr.is_array() => arr
             .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-            .collect::<Vec<_>>()
-            .join(" "),
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -391,11 +406,9 @@ fn merge_blocks_into_tool_results(
         for (tr, tb) in tool_results.iter_mut().zip(text_blocks.iter()) {
             append_text_to_tool_result(tr, tb);
         }
-    } else {
-        if let Some(last_tr) = tool_results.last_mut() {
-            for tb in &text_blocks {
-                append_text_to_tool_result(last_tr, tb);
-            }
+    } else if let Some(last_tr) = tool_results.last_mut() {
+        for tb in &text_blocks {
+            append_text_to_tool_result(last_tr, tb);
         }
     }
     tool_results
@@ -416,8 +429,9 @@ fn append_text_to_tool_result(tool_result: &mut Value, text_block: &Value) {
             tool_result["content"] = Value::String(format!("{existing}\n{text}"));
         }
         Some(c) if c.is_array() => {
-            let arr = tool_result["content"].as_array_mut().unwrap();
-            arr.push(serde_json::json!({"type": "text", "text": text}));
+            if let Some(arr) = tool_result["content"].as_array_mut() {
+                arr.push(serde_json::json!({"type": "text", "text": text}));
+            }
         }
         _ => {
             tool_result["content"] = Value::String(text.to_string());
@@ -428,20 +442,22 @@ fn append_text_to_tool_result(tool_result: &mut Value, text_block: &Value) {
 fn extract_text_from_message(msg: &Value) -> String {
     match msg.get("content") {
         Some(content) if content.is_string() => content.as_str().unwrap_or("").to_string(),
-        Some(content) if content.is_array() => {
-            let blocks = content.as_array().unwrap();
-            blocks
-                .iter()
-                .filter_map(|block| {
-                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        block.get("text").and_then(|t| t.as_str())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        }
+        Some(content) if content.is_array() => content
+            .as_array()
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|block| {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            block.get("text").and_then(|t| t.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -475,7 +491,9 @@ pub fn normalize_copilot_model_id(model: &str) -> Option<String> {
 
     // strip 8-digit date suffix
     let parts: Vec<&str> = s.split('-').collect();
-    let has_date = parts.last().is_some_and(|p| p.len() == 8 && p.chars().all(|c| c.is_ascii_digit()));
+    let has_date = parts
+        .last()
+        .is_some_and(|p| p.len() == 8 && p.chars().all(|c| c.is_ascii_digit()));
     if has_date {
         s = parts[..parts.len() - 1].join("-");
     }
@@ -508,7 +526,11 @@ pub fn normalize_copilot_model_id(model: &str) -> Option<String> {
 }
 
 pub fn apply_copilot_model_normalization(body: &mut Value) {
-    if let Some(model) = body.get("model").and_then(|m| m.as_str()).map(|s| s.to_string()) {
+    if let Some(model) = body
+        .get("model")
+        .and_then(|m| m.as_str())
+        .map(|s| s.to_string())
+    {
         if let Some(normalized) = normalize_copilot_model_id(&model) {
             body["model"] = Value::String(normalized);
         }
@@ -630,7 +652,10 @@ mod tests {
         let content = result["messages"][0]["content"].as_array().unwrap();
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"], "tool_result");
-        assert!(content[0]["content"].as_str().unwrap().contains("skill output"));
+        assert!(content[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("skill output"));
     }
 
     #[test]

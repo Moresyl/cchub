@@ -8,15 +8,11 @@ async fn check_npm_version_with_proxy(
     package_name: &str,
     proxy_url: &str,
 ) -> Result<String, String> {
-    let client = if !proxy_url.is_empty() {
-        let proxy = reqwest::Proxy::all(proxy_url).map_err(|e| format!("Invalid proxy: {}", e))?;
-        reqwest::Client::builder()
-            .proxy(proxy)
-            .build()
-            .map_err(|e| format!("Client build failed: {}", e))?
-    } else {
-        reqwest::Client::new()
-    };
+    let client = crate::shared::http_client::build_http_client(
+        Some(proxy_url),
+        None,
+        std::time::Duration::from_secs(30),
+    )?;
 
     let registries = [
         format!("https://registry.npmjs.org/{}/latest", package_name),

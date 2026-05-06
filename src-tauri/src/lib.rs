@@ -7,22 +7,23 @@ mod error;
 mod gemini_transform;
 mod hermes;
 mod hooks;
+mod lightweight;
 mod mcp;
 mod omo;
 mod openclaw_config;
-mod lightweight;
 mod provider_proxy;
 mod provider_proxy_transform;
 mod proxy_optimizer;
 mod security;
+mod shared;
 mod skills;
 mod updater;
 mod utils;
 mod webdav_sync;
 mod workflows;
 
-use commands::claude_md_commands;
 use commands::autopilot_commands;
+use commands::claude_md_commands;
 use commands::config_files_commands;
 use commands::copilot_commands;
 use commands::deeplink_commands;
@@ -267,12 +268,7 @@ pub(crate) fn refresh_tray_menu(app_handle: &AppHandle) -> Result<(), tauri::Err
         menu_builder = menu_builder.separator();
 
         let tool_order = [
-            "claude",
-            "codex",
-            "gemini",
-            "opencode",
-            "openclaw",
-            "hermes",
+            "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
         ];
 
         for tool_id in tool_order {
@@ -296,9 +292,8 @@ pub(crate) fn refresh_tray_menu(app_handle: &AppHandle) -> Result<(), tauri::Err
                 } else {
                     profile.name.clone()
                 };
-                let menu_item =
-                    MenuItemBuilder::with_id(format!("profile:{}", profile.id), label)
-                        .build(app_handle)?;
+                let menu_item = MenuItemBuilder::with_id(format!("profile:{}", profile.id), label)
+                    .build(app_handle)?;
                 submenu = submenu.item(&menu_item);
             }
 
@@ -353,7 +348,14 @@ pub fn run() {
             db::init_db(&app_handle)?;
             if let Ok(conn) = app_handle.state::<db::DbState>().0.lock() {
                 extra_commands::ensure_official_config_profiles_seeded(&conn)
-                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+                    .map_err(std::io::Error::other)?;
+                if let Err(error) = webdav_sync::migrate_webdav_password_to_keyring(&conn) {
+                    utils::append_runtime_log(
+                        "warn",
+                        "webdav",
+                        &format!("Failed to migrate WebDAV password to keyring: {error}"),
+                    );
+                }
             }
             copilot_auth::init_copilot_auth_state(&app_handle);
             provider_proxy::init_local_provider_proxy_runtime(&app_handle);
@@ -362,7 +364,7 @@ pub fn run() {
                 extra_commands::apply_log_preferences(&log_preferences);
             }
             provider_proxy::initialize_local_provider_proxy(&app_handle)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+                .map_err(std::io::Error::other)?;
             utils::append_runtime_log("info", "app", "CCHub initialized");
             let initial_window_preferences = load_window_preferences(&app_handle);
 
@@ -425,8 +427,9 @@ pub fn run() {
                     id if id.starts_with("profile:") => {
                         let profile_id = id.trim_start_matches("profile:");
                         if let Ok(conn) = handle.state::<db::DbState>().0.lock() {
-                            let _ =
-                                extra_commands::apply_config_profile_from_conn(&conn, profile_id, false);
+                            let _ = extra_commands::apply_config_profile_from_conn(
+                                &conn, profile_id, false,
+                            );
                         }
                         let _ = refresh_tray_menu(&handle);
                     }

@@ -1,3 +1,6 @@
+import { getPreferenceLocale, setPreferenceLocale } from "../stores/preferences";
+import type { Locale } from "../types/preferences";
+
 const zh = {
   app: {
     name: "CCHub",
@@ -63,7 +66,7 @@ const zh = {
     disable: "禁用",
     save: "保存",
     cancel: "取消",
-    confirmRemove: "确定要删除 MCP 服务 \"{name}\" 吗？",
+    confirmRemove: '确定要删除 MCP 服务 "{name}" 吗？',
     addServer: "添加服务",
     refresh: "刷新",
     detail: "服务详情",
@@ -269,7 +272,7 @@ const zh = {
     addProvider: "添加供应商",
     editProvider: "编辑供应商",
     deleteProvider: "删除供应商",
-    confirmDelete: "确定删除供应商 \"{name}\" 吗？",
+    confirmDelete: '确定删除供应商 "{name}" 吗？',
     name: "名称",
     namePlaceholder: "openrouter",
     baseUrl: "Base URL",
@@ -437,10 +440,12 @@ const zh = {
     pendingImportsAutoMatch: "自动匹配工作区",
     pendingImportsAutoMatching: "匹配中...",
     pendingImportsAutoMatchDesc: "按项目目录名匹配到当前机器已存在的工作区或项目路径。",
-    pendingImportsAutoMatchSuccess: "已自动匹配 {roots} 个项目，恢复 {files} 个文件，跳过 {skipped} 个项目。当前剩余 {pending} 个待迁移项目，{issues} 个环境异常",
+    pendingImportsAutoMatchSuccess:
+      "已自动匹配 {roots} 个项目，恢复 {files} 个文件，跳过 {skipped} 个项目。当前剩余 {pending} 个待迁移项目，{issues} 个环境异常",
     pendingImportsRepairAll: "一键修复全部",
     pendingImportsRepairingAll: "修复中...",
-    pendingImportsRepairAllSuccess: "已迁移 {roots} 个项目，恢复 {files} 个项目文件，补齐 {tools} 个工具环境。当前剩余 {pending} 个待迁移项目，{issues} 个环境异常，{auth} 个认证缺口",
+    pendingImportsRepairAllSuccess:
+      "已迁移 {roots} 个项目，恢复 {files} 个项目文件，补齐 {tools} 个工具环境。当前剩余 {pending} 个待迁移项目，{issues} 个环境异常，{auth} 个认证缺口",
     migrationHealth: "迁移环境检查",
     migrationHealthDesc: "区分工具未安装、CLI 不可用、配置目录缺失、配置文件缺失等问题。",
     migrationHealthRefresh: "刷新检查",
@@ -633,7 +638,7 @@ const en: typeof zh = {
     title: "Workflows",
     loading: "Scanning workflows...",
     noWorkflows: "No workflows found",
-    noWorkflowsTip: "Click \"Install Template\" to add popular workflows",
+    noWorkflowsTip: 'Click "Install Template" to add popular workflows',
     installTemplate: "Install Template",
     selectTool: "Select Tool",
     selectTemplate: "Select Template",
@@ -675,7 +680,7 @@ const en: typeof zh = {
     title: "Hooks Management",
     hookCount: "{count} hooks",
     noHooks: "No hooks configured",
-    noHooksTip: "Click \"New\" to add hooks and automate workflows",
+    noHooksTip: 'Click "New" to add hooks and automate workflows',
     loading: "Loading hooks...",
     event: "Event",
     matcher: "Matcher",
@@ -713,7 +718,7 @@ const en: typeof zh = {
     createIn: "Project Directory",
     selectTemplate: "Select Template",
     delete: "Delete",
-    deleteConfirm: "Delete \"{name}\"? This cannot be undone.",
+    deleteConfirm: 'Delete "{name}"? This cannot be undone.',
     disable: "Disable",
     enable: "Enable",
     disabled: "Disabled",
@@ -778,7 +783,7 @@ const en: typeof zh = {
     addProvider: "Add Provider",
     editProvider: "Edit Provider",
     deleteProvider: "Delete Provider",
-    confirmDelete: "Are you sure you want to delete provider \"{name}\"?",
+    confirmDelete: 'Are you sure you want to delete provider "{name}"?',
     name: "Name",
     namePlaceholder: "openrouter",
     baseUrl: "Base URL",
@@ -847,7 +852,8 @@ const en: typeof zh = {
     toModel: "To model",
     addRule: "Add Rule",
     copilotOptimizer: "Copilot Optimizer",
-    copilotOptimizerDesc: "Reduce GitHub Copilot premium interaction usage by classifying requests and injecting correct x-initiator headers",
+    copilotOptimizerDesc:
+      "Reduce GitHub Copilot premium interaction usage by classifying requests and injecting correct x-initiator headers",
     copilotMerge: "Merge Tool Results",
     copilotMergeDesc: "Absorb text blocks into tool_result to avoid counting as premium interactions",
     copilotSanitize: "Sanitize Orphan Tool Results",
@@ -924,17 +930,21 @@ const en: typeof zh = {
     skillSyncDesc: "Choose file sync strategy for skills",
     skillSyncSymlink: "Symlink",
     skillSyncCopy: "File Copy",
-    skillSyncSymlinkHint: "Symlinks save disk space and stay in sync. Note: Windows may require admin privileges or Developer Mode enabled",
+    skillSyncSymlinkHint:
+      "Symlinks save disk space and stay in sync. Note: Windows may require admin privileges or Developer Mode enabled",
     migrationCenter: "Migration Center",
-    migrationCenterDesc: "Use a single SQL backup for migration. After import, review results, repair paths, bootstrap environments, and finish auth here.",
-    migrationCenterReady: "Migration is ready. No pending project restores, environment issues, or auth gaps were detected.",
+    migrationCenterDesc:
+      "Use a single SQL backup for migration. After import, review results, repair paths, bootstrap environments, and finish auth here.",
+    migrationCenterReady:
+      "Migration is ready. No pending project restores, environment issues, or auth gaps were detected.",
     migrationCenterLastRescanEmpty: "No full rescan has been run yet",
     migrationExport: "Export SQL Backup",
     migrationExporting: "Exporting...",
     migrationImport: "Import SQL Backup",
     migrationImporting: "Importing...",
     pendingImports: "Pending Project Migration",
-    pendingImportsDesc: "After importing a backup, restore project-scoped files here if the old machine paths do not exist on this machine.",
+    pendingImportsDesc:
+      "After importing a backup, restore project-scoped files here if the old machine paths do not exist on this machine.",
     pendingImportsEmpty: "No pending project paths",
     pendingImportsOldPath: "Old Project Path",
     pendingImportsNewPath: "New Project Path",
@@ -945,13 +955,17 @@ const en: typeof zh = {
     pendingImportsSuccess: "Restored {count} project files to: {target}",
     pendingImportsAutoMatch: "Auto Match",
     pendingImportsAutoMatching: "Matching...",
-    pendingImportsAutoMatchDesc: "Match by project folder name against existing workspace or project paths on this machine.",
-    pendingImportsAutoMatchSuccess: "Auto-matched {roots} projects, restored {files} files, skipped {skipped} projects. Remaining: {pending} pending migrations and {issues} environment issues",
+    pendingImportsAutoMatchDesc:
+      "Match by project folder name against existing workspace or project paths on this machine.",
+    pendingImportsAutoMatchSuccess:
+      "Auto-matched {roots} projects, restored {files} files, skipped {skipped} projects. Remaining: {pending} pending migrations and {issues} environment issues",
     pendingImportsRepairAll: "Repair All",
     pendingImportsRepairingAll: "Repairing...",
-    pendingImportsRepairAllSuccess: "Migrated {roots} projects, restored {files} project files, bootstrapped {tools} tool environments. Remaining: {pending} pending migrations, {issues} environment issues, and {auth} auth gaps",
+    pendingImportsRepairAllSuccess:
+      "Migrated {roots} projects, restored {files} project files, bootstrapped {tools} tool environments. Remaining: {pending} pending migrations, {issues} environment issues, and {auth} auth gaps",
     migrationHealth: "Migration Health",
-    migrationHealthDesc: "Separate missing tool installs from missing CLI, config directories, config files, and skills folders.",
+    migrationHealthDesc:
+      "Separate missing tool installs from missing CLI, config directories, config files, and skills folders.",
     migrationHealthRefresh: "Refresh Check",
     migrationHealthRefreshing: "Checking...",
     migrationHealthRefreshSuccess: "Migration health refreshed. {count} issue(s) detected",
@@ -1278,7 +1292,8 @@ const ja: typeof zh = {
     toModel: "先モデル",
     addRule: "ルール追加",
     copilotOptimizer: "Copilot オプティマイザー",
-    copilotOptimizerDesc: "GitHub Copilot プレミアムインタラクションの消費を削減し、リクエストを自動分類して正しい x-initiator ヘッダーを注入",
+    copilotOptimizerDesc:
+      "GitHub Copilot プレミアムインタラクションの消費を削減し、リクエストを自動分類して正しい x-initiator ヘッダーを注入",
     copilotMerge: "Tool Results マージ",
     copilotMergeDesc: "text ブロックを tool_result に吸収し、プレミアムインタラクションとして計上されるのを回避",
     copilotSanitize: "孤立 Tool Results クリーンアップ",
@@ -1364,24 +1379,17 @@ const ja: typeof zh = {
   },
 };
 
-export type Locale = "zh" | "en" | "ja";
+export type { Locale };
 export type I18n = typeof zh;
 
 const locales: Record<Locale, I18n> = { zh, en, ja };
 
-let currentLocale: Locale = "zh";
-
 export function setLocale(locale: Locale) {
-  currentLocale = locale;
-  localStorage.setItem("cchub-locale", locale);
+  setPreferenceLocale(locale);
 }
 
 export function getLocale(): Locale {
-  const saved = localStorage.getItem("cchub-locale") as Locale | null;
-  if (saved && (saved === "zh" || saved === "en" || saved === "ja")) {
-    currentLocale = saved;
-  }
-  return currentLocale;
+  return getPreferenceLocale();
 }
 
 export function t(): I18n {

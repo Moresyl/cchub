@@ -1,7 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type Dispatch, type SetStateAction, type SyntheticEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type SetStateAction,
+  type SyntheticEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../components/Toast";
 import type { Locale } from "../lib/i18n";
+import {
+  useDeleteManagedBackupMutation,
+  useSaveBackupToFileMutation,
+  useSetBackupPreferencesMutation,
+} from "./mutations";
 import {
   hasToolHealthIssue,
   type AutoRemapImportedProjectRootsResult,
@@ -38,6 +53,9 @@ export function useSettingsMigrationState({
   setCustomPaths,
   openInSystemWithLabel,
 }: UseSettingsMigrationStateOptions) {
+  const saveBackupToFileMutation = useSaveBackupToFileMutation();
+  const setBackupPreferencesMutation = useSetBackupPreferencesMutation();
+  const deleteManagedBackupMutation = useDeleteManagedBackupMutation();
   const [pendingProjectRoots, setPendingProjectRoots] = useState<PendingImportedProjectRoot[]>([]);
   const [toolReports, setToolReports] = useState<ToolEnvironmentReport[]>([]);
   const [lastImportSummary, setLastImportSummary] = useState<LastImportSummary | null>(null);
@@ -73,12 +91,15 @@ export function useSettingsMigrationState({
   const migrationPendingPanelRef = useRef<HTMLDetailsElement | null>(null);
   const migrationHealthPanelRef = useRef<HTMLDetailsElement | null>(null);
   const migrationAuthPanelRef = useRef<HTMLDetailsElement | null>(null);
-  const migrationPanelRefs = useMemo<MigrationPanelRefs>(() => ({
-    summary: migrationSummaryPanelRef,
-    pending: migrationPendingPanelRef,
-    health: migrationHealthPanelRef,
-    auth: migrationAuthPanelRef,
-  }), []);
+  const migrationPanelRefs = useMemo<MigrationPanelRefs>(
+    () => ({
+      summary: migrationSummaryPanelRef,
+      pending: migrationPendingPanelRef,
+      health: migrationHealthPanelRef,
+      auth: migrationAuthPanelRef,
+    }),
+    [],
+  );
 
   const applyPendingProjectRoots = useCallback((roots: PendingImportedProjectRoot[]) => {
     setPendingProjectRoots(roots);
@@ -95,14 +116,18 @@ export function useSettingsMigrationState({
     try {
       const roots = await invoke<PendingImportedProjectRoot[]>("get_pending_imported_project_roots");
       applyPendingProjectRoots(roots);
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.warn("Failed to load pending imported project roots", error);
+    }
   }, [applyPendingProjectRoots]);
 
   const loadLastImportSummary = useCallback(async () => {
     try {
       const summary = await invoke<LastImportSummary | null>("get_last_import_summary");
       setLastImportSummary(summary);
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.warn("Failed to load last import summary", error);
+    }
   }, []);
 
   const loadManagedBackups = useCallback(async () => {
@@ -110,7 +135,8 @@ export function useSettingsMigrationState({
     try {
       const backups = await invoke<ManagedBackupFile[]>("list_managed_backups");
       setManagedBackups(backups);
-    } catch {
+    } catch (error) {
+      console.warn("Failed to load managed backups", error);
       setManagedBackups([]);
     } finally {
       setLoadingManagedBackups(false);
@@ -121,7 +147,8 @@ export function useSettingsMigrationState({
     try {
       const reports = await invoke<ToolEnvironmentReport[]>("get_tool_environment_report");
       setToolReports(reports);
-    } catch {
+    } catch (error) {
+      console.warn("Failed to load tool environment reports", error);
       setToolReports([]);
     }
   }, []);
@@ -130,7 +157,9 @@ export function useSettingsMigrationState({
     try {
       const preferences = await invoke<BackupPreferences>("get_backup_preferences");
       setBackupPreferencesState(preferences);
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.warn("Failed to load backup preferences", error);
+    }
   }, []);
 
   const runScheduledBackupCheck = useCallback(async () => {
@@ -139,7 +168,9 @@ export function useSettingsMigrationState({
       if (createdPath) {
         await loadManagedBackups();
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.warn("Scheduled backup check failed", error);
+    }
   }, [loadManagedBackups]);
 
   const refreshMigrationState = useCallback(async () => {
@@ -167,38 +198,41 @@ export function useSettingsMigrationState({
     };
   }, [applyPendingProjectRoots]);
 
-  const runBootstrapForTool = useCallback(async (toolId: string, toolName: string) => {
-    setBootstrappingToolId(toolId);
-    try {
-      const result = await invoke<BootstrapToolEnvironmentResult>("bootstrap_tool_environment", {
-        toolId,
-      });
-      await refreshMigrationState();
-      const message = [
-        settingsText.migrationHealthBootstrapSuccess
-          .replace("{dirs}", String(result.created_dirs))
-          .replace("{files}", String(result.created_files)),
-        ...result.notes,
-      ].join("；");
-      showToast("success", message || `${toolName} updated`);
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setBootstrappingToolId((current) => current === toolId ? null : current);
-    }
-  }, [refreshMigrationState, settingsText]);
+  const runBootstrapForTool = useCallback(
+    async (toolId: string, toolName: string) => {
+      setBootstrappingToolId(toolId);
+      try {
+        const result = await invoke<BootstrapToolEnvironmentResult>("bootstrap_tool_environment", {
+          toolId,
+        });
+        await refreshMigrationState();
+        const message = [
+          settingsText.migrationHealthBootstrapSuccess
+            .replace("{dirs}", String(result.created_dirs))
+            .replace("{files}", String(result.created_files)),
+          ...result.notes,
+        ].join("；");
+        showToast("success", message || `${toolName} updated`);
+      } catch (error) {
+        showToast("error", String(error));
+      } finally {
+        setBootstrappingToolId((current) => (current === toolId ? null : current));
+      }
+    },
+    [refreshMigrationState, settingsText],
+  );
 
   const handleExportBackup = useCallback(async () => {
     setExportingBackup(true);
     try {
-      const path = await invoke<string>("save_backup_to_file");
+      const path = await saveBackupToFileMutation.mutateAsync();
       showToast("success", locale === "zh" ? `备份已保存到: ${path}` : `Backup saved to: ${path}`);
     } catch (error) {
       if (String(error) !== "Cancelled") showToast("error", String(error));
     } finally {
       setExportingBackup(false);
     }
-  }, [locale]);
+  }, [locale, saveBackupToFileMutation]);
 
   const handleImportBackup = useCallback(async () => {
     setImportingBackup(true);
@@ -226,67 +260,85 @@ export function useSettingsMigrationState({
     }
   }, [loadManagedBackups, locale]);
 
-  const handleSaveBackupPreferences = useCallback(async (next: BackupPreferences) => {
-    setSavingBackupPreferences(true);
-    try {
-      const saved = await invoke<BackupPreferences>("set_backup_preferences", { preferences: next });
-      setBackupPreferencesState(saved);
-      showToast("success", locale === "zh" ? "备份策略已保存" : "Backup preferences saved");
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setSavingBackupPreferences(false);
-    }
-  }, [locale]);
+  const handleSaveBackupPreferences = useCallback(
+    async (next: BackupPreferences) => {
+      setSavingBackupPreferences(true);
+      try {
+        const saved = await setBackupPreferencesMutation.mutateAsync({ preferences: next });
+        setBackupPreferencesState(saved);
+        showToast("success", locale === "zh" ? "备份策略已保存" : "Backup preferences saved");
+      } catch (error) {
+        showToast("error", String(error));
+      } finally {
+        setSavingBackupPreferences(false);
+      }
+    },
+    [locale, setBackupPreferencesMutation],
+  );
 
-  const handleRenameManagedBackup = useCallback(async (backup: ManagedBackupFile) => {
-    const nextName = window.prompt(
-      locale === "zh" ? "输入新的备份名称" : "Enter a new backup name",
-      backup.name.replace(/\.sql$/i, ""),
-    );
-    if (!nextName || nextName.trim() === "" || nextName.trim() === backup.name.replace(/\.sql$/i, "")) {
-      return;
-    }
-    try {
-      await invoke("rename_managed_backup", { path: backup.path, newName: nextName.trim() });
-      await loadManagedBackups();
-      showToast("success", locale === "zh" ? "备份已重命名" : "Backup renamed");
-    } catch (error) {
-      showToast("error", String(error));
-    }
-  }, [loadManagedBackups, locale]);
+  const handleRenameManagedBackup = useCallback(
+    async (backup: ManagedBackupFile) => {
+      const nextName = window.prompt(
+        locale === "zh" ? "输入新的备份名称" : "Enter a new backup name",
+        backup.name.replace(/\.sql$/i, ""),
+      );
+      if (!nextName || nextName.trim() === "" || nextName.trim() === backup.name.replace(/\.sql$/i, "")) {
+        return;
+      }
+      try {
+        await invoke("rename_managed_backup", { path: backup.path, newName: nextName.trim() });
+        await loadManagedBackups();
+        showToast("success", locale === "zh" ? "备份已重命名" : "Backup renamed");
+      } catch (error) {
+        showToast("error", String(error));
+      }
+    },
+    [loadManagedBackups, locale],
+  );
 
-  const handleDeleteManagedBackup = useCallback(async (backup: ManagedBackupFile) => {
-    if (!window.confirm(locale === "zh" ? `删除备份「${backup.name}」？` : `Delete backup "${backup.name}"?`)) {
-      return;
-    }
-    setDeletingBackupPath(backup.path);
-    try {
-      await invoke("delete_managed_backup", { path: backup.path });
-      await loadManagedBackups();
-      showToast("success", locale === "zh" ? "备份已删除" : "Backup deleted");
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setDeletingBackupPath((current) => current === backup.path ? null : current);
-    }
-  }, [loadManagedBackups, locale]);
+  const handleDeleteManagedBackup = useCallback(
+    async (backup: ManagedBackupFile) => {
+      if (!window.confirm(locale === "zh" ? `删除备份「${backup.name}」？` : `Delete backup "${backup.name}"?`)) {
+        return;
+      }
+      setDeletingBackupPath(backup.path);
+      try {
+        await deleteManagedBackupMutation.mutateAsync({ path: backup.path });
+        await loadManagedBackups();
+        showToast("success", locale === "zh" ? "备份已删除" : "Backup deleted");
+      } catch (error) {
+        showToast("error", String(error));
+      } finally {
+        setDeletingBackupPath((current) => (current === backup.path ? null : current));
+      }
+    },
+    [deleteManagedBackupMutation, loadManagedBackups, locale],
+  );
 
-  const handleRestoreManagedBackup = useCallback(async (backup: ManagedBackupFile) => {
-    if (!window.confirm(locale === "zh" ? `恢复备份「${backup.name}」？这会覆盖当前数据库。` : `Restore backup "${backup.name}"? This replaces the current database.`)) {
-      return;
-    }
-    setRestoringBackupPath(backup.path);
-    try {
-      const message = await invoke<string>("restore_managed_backup", { path: backup.path });
-      await refreshMigrationState();
-      showToast("success", message);
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setRestoringBackupPath((current) => current === backup.path ? null : current);
-    }
-  }, [locale, refreshMigrationState]);
+  const handleRestoreManagedBackup = useCallback(
+    async (backup: ManagedBackupFile) => {
+      if (
+        !window.confirm(
+          locale === "zh"
+            ? `恢复备份「${backup.name}」？这会覆盖当前数据库。`
+            : `Restore backup "${backup.name}"? This replaces the current database.`,
+        )
+      ) {
+        return;
+      }
+      setRestoringBackupPath(backup.path);
+      try {
+        const message = await invoke<string>("restore_managed_backup", { path: backup.path });
+        await refreshMigrationState();
+        showToast("success", message);
+      } catch (error) {
+        showToast("error", String(error));
+      } finally {
+        setRestoringBackupPath((current) => (current === backup.path ? null : current));
+      }
+    },
+    [locale, refreshMigrationState],
+  );
 
   const handleToggleAutoBackup = useCallback(() => {
     void handleSaveBackupPreferences({
@@ -415,32 +467,50 @@ export function useSettingsMigrationState({
     setMigrationPanelsOpen((current) => ({ ...current, [panel]: open }));
   }, []);
 
-  const focusMigrationPanel = useCallback((panel: keyof MigrationPanelState) => {
-    setMigrationPanelsOpen((current) => ({ ...current, [panel]: true }));
-    window.setTimeout(() => {
-      migrationPanelRefs[panel].current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 0);
-  }, [migrationPanelRefs]);
+  const focusMigrationPanel = useCallback(
+    (panel: keyof MigrationPanelState) => {
+      setMigrationPanelsOpen((current) => ({ ...current, [panel]: true }));
+      window.setTimeout(() => {
+        migrationPanelRefs[panel].current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    },
+    [migrationPanelRefs],
+  );
 
-  const handleFocusMigrationPanel = useCallback((panel: string) => {
-    focusMigrationPanel(panel as keyof MigrationPanelState);
-  }, [focusMigrationPanel]);
+  const handleFocusMigrationPanel = useCallback(
+    (panel: string) => {
+      focusMigrationPanel(panel as keyof MigrationPanelState);
+    },
+    [focusMigrationPanel],
+  );
 
-  const handleSummaryPanelToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
-    toggleMigrationPanel("summary", event.currentTarget.open);
-  }, [toggleMigrationPanel]);
+  const handleSummaryPanelToggle = useCallback(
+    (event: SyntheticEvent<HTMLDetailsElement>) => {
+      toggleMigrationPanel("summary", event.currentTarget.open);
+    },
+    [toggleMigrationPanel],
+  );
 
-  const handlePendingPanelToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
-    toggleMigrationPanel("pending", event.currentTarget.open);
-  }, [toggleMigrationPanel]);
+  const handlePendingPanelToggle = useCallback(
+    (event: SyntheticEvent<HTMLDetailsElement>) => {
+      toggleMigrationPanel("pending", event.currentTarget.open);
+    },
+    [toggleMigrationPanel],
+  );
 
-  const handleHealthPanelToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
-    toggleMigrationPanel("health", event.currentTarget.open);
-  }, [toggleMigrationPanel]);
+  const handleHealthPanelToggle = useCallback(
+    (event: SyntheticEvent<HTMLDetailsElement>) => {
+      toggleMigrationPanel("health", event.currentTarget.open);
+    },
+    [toggleMigrationPanel],
+  );
 
-  const handleAuthPanelToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
-    toggleMigrationPanel("auth", event.currentTarget.open);
-  }, [toggleMigrationPanel]);
+  const handleAuthPanelToggle = useCallback(
+    (event: SyntheticEvent<HTMLDetailsElement>) => {
+      toggleMigrationPanel("auth", event.currentTarget.open);
+    },
+    [toggleMigrationPanel],
+  );
 
   const handlePendingTargetChange = useCallback((sourcePath: string, nextValue: string) => {
     setRemapTargets((current) => ({ ...current, [sourcePath]: nextValue }));
@@ -457,28 +527,29 @@ export function useSettingsMigrationState({
     }
   }, []);
 
-  const handleApplyPendingTarget = useCallback(async (sourcePath: string, rawTargetPath: string) => {
-    const targetPath = rawTargetPath.trim();
-    if (!targetPath) return;
-    setRemappingRoot(sourcePath);
-    try {
-      const restored = await invoke<number>("remap_imported_project_root", {
-        sourcePath,
-        targetPath,
-      });
-      await refreshMigrationState();
-      showToast(
-        "success",
-        settingsText.pendingImportsSuccess
-          .replace("{count}", String(restored))
-          .replace("{target}", targetPath),
-      );
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setRemappingRoot((current) => current === sourcePath ? null : current);
-    }
-  }, [refreshMigrationState, settingsText.pendingImportsSuccess]);
+  const handleApplyPendingTarget = useCallback(
+    async (sourcePath: string, rawTargetPath: string) => {
+      const targetPath = rawTargetPath.trim();
+      if (!targetPath) return;
+      setRemappingRoot(sourcePath);
+      try {
+        const restored = await invoke<number>("remap_imported_project_root", {
+          sourcePath,
+          targetPath,
+        });
+        await refreshMigrationState();
+        showToast(
+          "success",
+          settingsText.pendingImportsSuccess.replace("{count}", String(restored)).replace("{target}", targetPath),
+        );
+      } catch (error) {
+        showToast("error", String(error));
+      } finally {
+        setRemappingRoot((current) => (current === sourcePath ? null : current));
+      }
+    },
+    [refreshMigrationState, settingsText.pendingImportsSuccess],
+  );
 
   const toolHealthIssues = toolReports.filter(hasToolHealthIssue);
   const manualSetupReports = toolReports.filter((report) => !!report.manual_setup_kind);
@@ -490,7 +561,14 @@ export function useSettingsMigrationState({
     void loadManagedBackups();
     void loadBackupPreferences();
     void runScheduledBackupCheck();
-  }, [loadBackupPreferences, loadLastImportSummary, loadManagedBackups, loadPendingProjectRoots, loadToolReports, runScheduledBackupCheck]);
+  }, [
+    loadBackupPreferences,
+    loadLastImportSummary,
+    loadManagedBackups,
+    loadPendingProjectRoots,
+    loadToolReports,
+    runScheduledBackupCheck,
+  ]);
 
   useEffect(() => {
     if (migrationPanelsInitialized.current) return;
@@ -502,7 +580,14 @@ export function useSettingsMigrationState({
       auth: manualSetupReports.length > 0,
     });
     migrationPanelsInitialized.current = true;
-  }, [lastImportSummary, manualSetupReports.length, pendingProjectRoots.length, toolHealthIssues.length, toolReports.length, toolsLength]);
+  }, [
+    lastImportSummary,
+    manualSetupReports.length,
+    pendingProjectRoots.length,
+    toolHealthIssues.length,
+    toolReports.length,
+    toolsLength,
+  ]);
 
   return {
     pendingProjectRoots,

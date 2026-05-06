@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { EditorView, basicSetup } from "codemirror";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { EditorState } from "@codemirror/state";
 import { json } from "@codemirror/lang-json";
 import { javascript } from "@codemirror/lang-javascript";
@@ -26,7 +27,12 @@ const jsonLinter = linter((view) => {
   } catch (e: any) {
     const match = e.message?.match(/position (\d+)/);
     const pos = match ? Math.min(parseInt(match[1]), text.length) : 0;
-    diagnostics.push({ from: pos, to: Math.min(pos + 1, text.length), severity: "error", message: e.message || "Invalid JSON" });
+    diagnostics.push({
+      from: pos,
+      to: Math.min(pos + 1, text.length),
+      severity: "error",
+      message: e.message || "Invalid JSON",
+    });
   }
   return diagnostics;
 });
@@ -78,7 +84,8 @@ const cmTheme = EditorView.theme({
 
 function getLangExtension(language: string) {
   switch (language) {
-    case "json": return [json(), jsonLinter];
+    case "json":
+      return [json(), jsonLinter];
     case "yaml":
     case "toml":
     case "markdown":
@@ -104,13 +111,7 @@ function CodeEditorComponent({
   onChangeRef.current = onChange;
 
   const extensions = useMemo(() => {
-    const nextExtensions = [
-      basicSetup,
-      ...getLangExtension(language),
-      oneDark,
-      cmTheme,
-      EditorView.lineWrapping,
-    ];
+    const nextExtensions = [basicSetup, ...getLangExtension(language), oneDark, cmTheme, EditorView.lineWrapping];
 
     if (readOnly) {
       nextExtensions.push(EditorState.readOnly.of(true));
@@ -134,7 +135,9 @@ function CodeEditorComponent({
     const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
 
-    return () => { view.destroy(); };
+    return () => {
+      view.destroy();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensions]);
 

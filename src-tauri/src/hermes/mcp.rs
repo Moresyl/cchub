@@ -36,7 +36,9 @@ fn extract_string_map(value: Option<&Value>) -> HashMap<String, String> {
         .map(|mapping| {
             mapping
                 .iter()
-                .filter_map(|(key, value)| Some((key.as_str()?.to_string(), value.as_str()?.to_string())))
+                .filter_map(|(key, value)| {
+                    Some((key.as_str()?.to_string(), value.as_str()?.to_string()))
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -48,7 +50,10 @@ pub fn scan_servers(conn: &Connection) -> Result<Vec<ScannedMcpServer>, String> 
     let Some(root) = config_value.as_mapping() else {
         return Ok(Vec::new());
     };
-    let Some(servers) = root.get(yaml_key("mcp_servers")).and_then(Value::as_mapping) else {
+    let Some(servers) = root
+        .get(yaml_key("mcp_servers"))
+        .and_then(Value::as_mapping)
+    else {
         return Ok(Vec::new());
     };
 
@@ -115,7 +120,10 @@ pub fn write_server(conn: &Connection, name: &str, server: &McpServerConfig) -> 
             }
             entry.insert(yaml_key("headers"), Value::Mapping(headers));
         }
-        entry.insert(yaml_key("timeout"), Value::Number(serde_yaml::Number::from(60)));
+        entry.insert(
+            yaml_key("timeout"),
+            Value::Number(serde_yaml::Number::from(60)),
+        );
     } else {
         entry.insert(yaml_key("command"), Value::String(server.command.clone()));
         if !server.args.is_empty() {
@@ -137,7 +145,10 @@ pub fn write_server(conn: &Connection, name: &str, server: &McpServerConfig) -> 
             }
             entry.insert(yaml_key("env"), Value::Mapping(env));
         }
-        entry.insert(yaml_key("timeout"), Value::Number(serde_yaml::Number::from(60)));
+        entry.insert(
+            yaml_key("timeout"),
+            Value::Number(serde_yaml::Number::from(60)),
+        );
     }
 
     servers.insert(yaml_key(name), Value::Mapping(entry));

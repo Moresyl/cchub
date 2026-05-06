@@ -1,10 +1,33 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/rules-of-hooks */
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  RefreshCw, Save, X, ArrowRightLeft,
-  Search, Terminal, Code, Monitor, Sparkles, Globe,
-  Plus, Eye, EyeOff, Cat,
+  RefreshCw,
+  Save,
+  X,
+  ArrowRightLeft,
+  Search,
+  Terminal,
+  Code,
+  Monitor,
+  Sparkles,
+  Globe,
+  Plus,
+  Eye,
+  EyeOff,
+  Cat,
 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import {
@@ -27,7 +50,17 @@ import {
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CopilotAuthSection from "../components/CopilotAuthSection";
-import { useApplyConfigProfileMutation } from "../hooks/mutations";
+import {
+  useApplyConfigProfileMutation,
+  useDeleteConfigProfileGroupAndRefreshMutation,
+  useDeleteConfigProfileAndRefreshMutation,
+  useDeleteProviderConfigFragmentMutation,
+  useReorderConfigProfilesMutation,
+  useSaveConfigProfileAndRefreshMutation,
+  useSaveProviderConfigFragmentMutation,
+  useSaveSharedConfigProfilesAndRefreshMutation,
+  useUpdateConfigProfileAndRefreshMutation,
+} from "../hooks/mutations";
 import ProfileCard from "../components/ProfileCard";
 import ProfileEditor from "../components/ProfileEditor";
 import ProfileFragmentCard from "../components/ProfileFragmentCard";
@@ -35,6 +68,9 @@ import ProfilePresetButton from "../components/ProfilePresetButton";
 import ProfileTargetToolToggle from "../components/ProfileTargetToolToggle";
 import ProfileToolFilterTab from "../components/ProfileToolFilterTab";
 import ModelSelector, { type ModelInfo } from "../components/ModelSelector";
+import LoadingState from "../components/states/LoadingState";
+import ErrorState from "../components/states/ErrorState";
+import EmptyState from "../components/states/EmptyState";
 import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
 const HermesProvidersPanel = lazy(() => import("./HermesProviders"));
@@ -217,7 +253,9 @@ function extractConfigSummary(toolId: string, content: string): { baseUrl?: stri
         iconUrl: metadata.iconUrl,
       };
     }
-  } catch { /* ignore */ }
+  } catch (error) {
+    console.debug("Failed to extract config profile summary", error);
+  }
   return {};
 }
 
@@ -287,51 +325,52 @@ const CodexRawConfigEditor = memo(function CodexRawConfigEditor({
     return <CodeEditor value={value} onChange={onChange} language="json" minHeight={240} />;
   }
 
-  const rebuild = useCallback((nextAuth: string, nextToml: string) => {
-    try {
-      const auth = JSON.parse(nextAuth);
-      onChange(JSON.stringify({ ...JSON.parse(value), auth, config: nextToml }, null, 2));
-    } catch { /* ignore invalid JSON */ }
-  }, [onChange, value]);
+  const rebuild = useCallback(
+    (nextAuth: string, nextToml: string) => {
+      try {
+        const auth = JSON.parse(nextAuth);
+        onChange(JSON.stringify({ ...JSON.parse(value), auth, config: nextToml }, null, 2));
+      } catch (error) {
+        console.debug("Skipping Codex config rebuild because auth JSON is invalid", error);
+      }
+    },
+    [onChange, value],
+  );
 
-  const handleAuthChange = useCallback((nextAuth: string) => {
-    rebuild(nextAuth, configToml);
-  }, [configToml, rebuild]);
+  const handleAuthChange = useCallback(
+    (nextAuth: string) => {
+      rebuild(nextAuth, configToml);
+    },
+    [configToml, rebuild],
+  );
 
-  const handleTomlChange = useCallback((nextToml: string) => {
-    rebuild(authJson, nextToml);
-  }, [authJson, rebuild]);
+  const handleTomlChange = useCallback(
+    (nextToml: string) => {
+      rebuild(authJson, nextToml);
+    },
+    [authJson, rebuild],
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
-        <label className="field-label" style={{ marginBottom: 6 }}>auth.json</label>
-        <CodeEditor
-          value={authJson}
-          onChange={handleAuthChange}
-          language="json"
-          minHeight={80}
-        />
+        <label className="field-label" style={{ marginBottom: 6 }}>
+          auth.json
+        </label>
+        <CodeEditor value={authJson} onChange={handleAuthChange} language="json" minHeight={80} />
       </div>
       <div>
-        <label className="field-label" style={{ marginBottom: 6 }}>config.toml</label>
-        <CodeEditor
-          value={configToml}
-          onChange={handleTomlChange}
-          language="toml"
-          minHeight={200}
-        />
+        <label className="field-label" style={{ marginBottom: 6 }}>
+          config.toml
+        </label>
+        <CodeEditor value={configToml} onChange={handleTomlChange} language="toml" minHeight={200} />
       </div>
     </div>
   );
 });
 
 const SectionTitle = memo(function SectionTitle({ children }: { children: ReactNode }) {
-  return (
-    <h3 style={SECTION_TITLE_STYLE}>
-      {children}
-    </h3>
-  );
+  return <h3 style={SECTION_TITLE_STYLE}>{children}</h3>;
 });
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -347,7 +386,6 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input className="input" style={{ ...SMALL_INPUT_STYLE, ...(props.style || {}) }} {...props} />;
 }
 
-
 const SelectField = memo(function SelectField({
   value,
   onChange,
@@ -360,7 +398,9 @@ const SelectField = memo(function SelectField({
   return (
     <select className="input" value={value} onChange={(e) => onChange(e.target.value)} style={SMALL_INPUT_STYLE}>
       {options.map((option) => (
-        <option key={option} value={option}>{option}</option>
+        <option key={option} value={option}>
+          {option}
+        </option>
       ))}
     </select>
   );
@@ -437,7 +477,9 @@ const ProfileBasicInfoSection = memo(function ProfileBasicInfoSection({
             style={SMALL_INPUT_STYLE}
           >
             {tools.map((tool) => (
-              <option key={tool.id} value={tool.id}>{tool.name}</option>
+              <option key={tool.id} value={tool.id}>
+                {tool.name}
+              </option>
             ))}
           </select>
         </Field>
@@ -471,15 +513,15 @@ const ProfileBasicInfoSection = memo(function ProfileBasicInfoSection({
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
               {draftTargetTools.length > 1
                 ? localeText(
-                  "保存后会把同名 Provider 作为共享组同步到所选 App，编辑任一成员时会联动更新整组。",
-                  "Saving will sync this provider as a shared group across the selected apps. Editing any member updates the whole group.",
-                  "保存すると、選択した App に共有グループとして同期されます。任意のメンバーを編集するとグループ全体が更新されます。",
-                )
+                    "保存后会把同名 Provider 作为共享组同步到所选 App，编辑任一成员时会联动更新整组。",
+                    "Saving will sync this provider as a shared group across the selected apps. Editing any member updates the whole group.",
+                    "保存すると、選択した App に共有グループとして同期されます。任意のメンバーを編集するとグループ全体が更新されます。",
+                  )
                 : localeText(
-                  "当前仅保存到单个 App。选择多个 App 后会启用共享 Provider 同步。",
-                  "This will save to a single app. Select multiple apps to enable shared provider syncing.",
-                  "現在は単一 App にのみ保存されます。複数 App を選ぶと共有 Provider 同期が有効になります。",
-                )}
+                    "当前仅保存到单个 App。选择多个 App 后会启用共享 Provider 同步。",
+                    "This will save to a single app. Select multiple apps to enable shared provider syncing.",
+                    "現在は単一 App にのみ保存されます。複数 App を選ぶと共有 Provider 同期が有効になります。",
+                  )}
             </div>
           </Field>
         </div>
@@ -551,7 +593,11 @@ const ProfilePresetSection = memo(function ProfilePresetSection({
               <TextInput
                 value={draftFragmentName}
                 onChange={onFragmentNameChange}
-                placeholder={localeText("例如：OpenAI 兼容基础参数", "e.g. OpenAI-compatible defaults", "例: OpenAI 互換の基本設定")}
+                placeholder={localeText(
+                  "例如：OpenAI 兼容基础参数",
+                  "e.g. OpenAI-compatible defaults",
+                  "例: OpenAI 互換の基本設定",
+                )}
               />
             </Field>
             <button
@@ -589,7 +635,11 @@ const ProfilePresetSection = memo(function ProfilePresetSection({
                 targetTools={fragment.targetTools}
                 toolNameMap={toolNameMap}
                 currentToolCompatible={fragment.targetTools.includes(draftTool)}
-                compatibilityReadyLabel={localeText("含当前工具字段", "Includes current tool fields", "現在のツール向け字段あり")}
+                compatibilityReadyLabel={localeText(
+                  "含当前工具字段",
+                  "Includes current tool fields",
+                  "現在のツール向け字段あり",
+                )}
                 compatibilityCommonOnlyLabel={localeText("仅应用通用字段", "Common fields only", "共通フィールドのみ")}
                 updatedLabel={localeText("最近更新", "Updated", "更新日時")}
                 updatedAt={formatTime(fragment.updatedAt)}
@@ -650,15 +700,15 @@ const ProfileConnectionSection = memo(function ProfileConnectionSection({
           <div className="card" style={{ padding: 12, fontSize: 12, color: "var(--text-muted)" }}>
             {draftProviderType === "github_copilot"
               ? localeText(
-                "当前预设使用 GitHub Copilot OAuth。无需填写 API Key；请先登录 GitHub 账号，并在需要时绑定指定账号。实际使用时建议在 Settings 中启用 Claude 的本地代理。",
-                "This preset uses GitHub Copilot OAuth. No API key is required; sign in with GitHub and optionally bind a specific account. Enable the Claude local proxy in Settings when using the provider.",
-                "このプリセットは GitHub Copilot OAuth を使用します。API Key は不要です。GitHub にログインし、必要なら特定アカウントを紐付けてください。利用時は Settings で Claude のローカルプロキシを有効にすることを推奨します。",
-              )
+                  "当前预设使用 GitHub Copilot OAuth。无需填写 API Key；请先登录 GitHub 账号，并在需要时绑定指定账号。实际使用时建议在 Settings 中启用 Claude 的本地代理。",
+                  "This preset uses GitHub Copilot OAuth. No API key is required; sign in with GitHub and optionally bind a specific account. Enable the Claude local proxy in Settings when using the provider.",
+                  "このプリセットは GitHub Copilot OAuth を使用します。API Key は不要です。GitHub にログインし、必要なら特定アカウントを紐付けてください。利用時は Settings で Claude のローカルプロキシを有効にすることを推奨します。",
+                )
               : localeText(
-                "当前预设使用 OAuth 模式，无需填写 API Key。",
-                "This preset uses OAuth mode and does not require an API key.",
-                "このプリセットは OAuth モードのため API Key は不要です。",
-              )}
+                  "当前预设使用 OAuth 模式，无需填写 API Key。",
+                  "This preset uses OAuth mode and does not require an API key.",
+                  "このプリセットは OAuth モードのため API Key は不要です。",
+                )}
           </div>
         )}
         {!draftRequiresOAuth && (
@@ -722,21 +772,25 @@ const ProfileConnectionSection = memo(function ProfileConnectionSection({
             onChange={(event) => onDraftChange(draftTool, { useFullUrl: event.target.checked })}
           />
           <span>
-            {localeText("将接口地址作为完整端点使用", "Use base URL as the full endpoint", "Base URL を完全なエンドポイントとして扱う")}
+            {localeText(
+              "将接口地址作为完整端点使用",
+              "Use base URL as the full endpoint",
+              "Base URL を完全なエンドポイントとして扱う",
+            )}
           </span>
         </label>
         <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -8 }}>
           {draftUseFullUrl
             ? localeText(
-              "已启用完整端点模式，后端不会再自动补 `/v1/messages`、`/chat/completions` 等路径。",
-              "Full endpoint mode is enabled. The backend will stop appending paths such as `/v1/messages` or `/chat/completions`.",
-              "完全なエンドポイントモードが有効です。バックエンドは `/v1/messages` や `/chat/completions` などのパスを自動付与しません。",
-            )
+                "已启用完整端点模式，后端不会再自动补 `/v1/messages`、`/chat/completions` 等路径。",
+                "Full endpoint mode is enabled. The backend will stop appending paths such as `/v1/messages` or `/chat/completions`.",
+                "完全なエンドポイントモードが有効です。バックエンドは `/v1/messages` や `/chat/completions` などのパスを自動付与しません。",
+              )
             : localeText(
-              "默认会按供应商协议自动补全标准路径。",
-              "Standard provider paths will be appended automatically by default.",
-              "デフォルトではプロバイダー規約に従って標準パスが自動補完されます。",
-            )}
+                "默认会按供应商协议自动补全标准路径。",
+                "Standard provider paths will be appended automatically by default.",
+                "デフォルトではプロバイダー規約に従って標準パスが自動補完されます。",
+              )}
         </div>
 
         <Field label={localeText("候选端点", "Endpoint Candidates", "候補エンドポイント")}>
@@ -842,13 +896,19 @@ const ProfileConnectionSection = memo(function ProfileConnectionSection({
               <select
                 className="input"
                 value={draftOpenCodeThinkingLevel}
-                onChange={(event) => onDraftChange(draftTool, {
-                  openCodeThinkingLevel: event.target.value as OpenCodeThinkingLevel | "",
-                })}
+                onChange={(event) =>
+                  onDraftChange(draftTool, {
+                    openCodeThinkingLevel: event.target.value as OpenCodeThinkingLevel | "",
+                  })
+                }
                 style={SMALL_INPUT_STYLE}
               >
                 <option value="">{locale === "zh" ? "无" : "None"}</option>
-                {THINKING_LEVEL_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                {THINKING_LEVEL_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>
@@ -904,16 +964,36 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
   const canFetchModels = supportsModelFetch(draftTool);
   const hasDetails = fetchedModelDetails.length > 0;
 
-  const ModelInput = useCallback(({ value, onChange: onValueChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) => {
-    if (hasDetails) {
-      return <ModelSelector value={value} models={fetchedModelDetails} onChange={onValueChange} placeholder={placeholder} />;
-    }
-    return <TextInput value={value} onChange={(e) => onValueChange(e.target.value)} placeholder={placeholder} />;
-  }, [hasDetails, fetchedModelDetails]);
+  const ModelInput = useCallback(
+    ({
+      value,
+      onChange: onValueChange,
+      placeholder,
+    }: {
+      value: string;
+      onChange: (v: string) => void;
+      placeholder?: string;
+    }) => {
+      if (hasDetails) {
+        return (
+          <ModelSelector
+            value={value}
+            models={fetchedModelDetails}
+            onChange={onValueChange}
+            placeholder={placeholder}
+          />
+        );
+      }
+      return <TextInput value={value} onChange={(e) => onValueChange(e.target.value)} placeholder={placeholder} />;
+    },
+    [hasDetails, fetchedModelDetails],
+  );
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+      <div
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}
+      >
         <SectionTitle>{locale === "zh" ? "模型配置" : "Models"}</SectionTitle>
         {canFetchModels && (
           <button
@@ -930,25 +1010,50 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
       </div>
       {(modelFetchError || fetchedModels.length > 0) && (
         <div style={{ fontSize: 12, color: modelFetchError ? "var(--danger)" : "var(--text-muted)", marginBottom: 12 }}>
-          {modelFetchError || localeText(`已发现 ${fetchedModels.length} 个模型`, `Discovered ${fetchedModels.length} models`, `${fetchedModels.length} 個のモデルを検出しました`)}
+          {modelFetchError ||
+            localeText(
+              `已发现 ${fetchedModels.length} 个模型`,
+              `Discovered ${fetchedModels.length} models`,
+              `${fetchedModels.length} 個のモデルを検出しました`,
+            )}
         </div>
       )}
       {draftTool === "claude" ? (
         <div style={TWO_COLUMN_GRID_STYLE}>
           <Field label={locale === "zh" ? "主模型" : "Main Model"}>
-            <ModelInput value={draftModel} onChange={(v) => onDraftChange(draftTool, { model: v })} placeholder="claude-sonnet-4-5" />
+            <ModelInput
+              value={draftModel}
+              onChange={(v) => onDraftChange(draftTool, { model: v })}
+              placeholder="claude-sonnet-4-5"
+            />
           </Field>
           <Field label={locale === "zh" ? "推理模型" : "Reasoning Model"}>
-            <ModelInput value={draftReasoningModel} onChange={(v) => onDraftChange(draftTool, { reasoningModel: v })} placeholder="claude-sonnet-4-5" />
+            <ModelInput
+              value={draftReasoningModel}
+              onChange={(v) => onDraftChange(draftTool, { reasoningModel: v })}
+              placeholder="claude-sonnet-4-5"
+            />
           </Field>
           <Field label={locale === "zh" ? "Haiku 默认模型" : "Default Haiku"}>
-            <ModelInput value={draftHaikuModel} onChange={(v) => onDraftChange(draftTool, { haikuModel: v })} placeholder="claude-haiku-3-5" />
+            <ModelInput
+              value={draftHaikuModel}
+              onChange={(v) => onDraftChange(draftTool, { haikuModel: v })}
+              placeholder="claude-haiku-3-5"
+            />
           </Field>
           <Field label={locale === "zh" ? "Sonnet 默认模型" : "Default Sonnet"}>
-            <ModelInput value={draftSonnetModel} onChange={(v) => onDraftChange(draftTool, { sonnetModel: v })} placeholder="claude-sonnet-4-5" />
+            <ModelInput
+              value={draftSonnetModel}
+              onChange={(v) => onDraftChange(draftTool, { sonnetModel: v })}
+              placeholder="claude-sonnet-4-5"
+            />
           </Field>
           <Field label={locale === "zh" ? "Opus 默认模型" : "Default Opus"}>
-            <ModelInput value={draftOpusModel} onChange={(v) => onDraftChange(draftTool, { opusModel: v })} placeholder="claude-opus-4-5" />
+            <ModelInput
+              value={draftOpusModel}
+              onChange={(v) => onDraftChange(draftTool, { opusModel: v })}
+              placeholder="claude-opus-4-5"
+            />
           </Field>
         </div>
       ) : (
@@ -970,16 +1075,32 @@ const ProfileModelsSection = memo(function ProfileModelsSection({
           {draftTool === "opencode" && (
             <>
               <Field label={locale === "zh" ? "Context Limit" : "Context Limit"}>
-                <TextInput value={draftOpenCodeContextLimit} onChange={(event) => onDraftChange(draftTool, { openCodeContextLimit: event.target.value })} placeholder="400000" />
+                <TextInput
+                  value={draftOpenCodeContextLimit}
+                  onChange={(event) => onDraftChange(draftTool, { openCodeContextLimit: event.target.value })}
+                  placeholder="400000"
+                />
               </Field>
               <Field label={locale === "zh" ? "Output Limit" : "Output Limit"}>
-                <TextInput value={draftOpenCodeOutputLimit} onChange={(event) => onDraftChange(draftTool, { openCodeOutputLimit: event.target.value })} placeholder="128000" />
+                <TextInput
+                  value={draftOpenCodeOutputLimit}
+                  onChange={(event) => onDraftChange(draftTool, { openCodeOutputLimit: event.target.value })}
+                  placeholder="128000"
+                />
               </Field>
               <Field label={locale === "zh" ? "输入模态" : "Input Modalities"}>
-                <TextInput value={draftOpenCodeInputModalities} onChange={(event) => onDraftChange(draftTool, { openCodeInputModalities: event.target.value })} placeholder="text,image,pdf" />
+                <TextInput
+                  value={draftOpenCodeInputModalities}
+                  onChange={(event) => onDraftChange(draftTool, { openCodeInputModalities: event.target.value })}
+                  placeholder="text,image,pdf"
+                />
               </Field>
               <Field label={locale === "zh" ? "输出模态" : "Output Modalities"}>
-                <TextInput value={draftOpenCodeOutputModalities} onChange={(event) => onDraftChange(draftTool, { openCodeOutputModalities: event.target.value })} placeholder="text" />
+                <TextInput
+                  value={draftOpenCodeOutputModalities}
+                  onChange={(event) => onDraftChange(draftTool, { openCodeOutputModalities: event.target.value })}
+                  placeholder="text"
+                />
               </Field>
             </>
           )}
@@ -1024,26 +1145,45 @@ const ProfileRawConfigSection = memo(function ProfileRawConfigSection({
       {draftTool === "claude" && (
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            <input type="checkbox" checked={draftHideAttribution} onChange={(event) => onDraftChange(draftTool, { hideAttribution: event.target.checked })} />
+            <input
+              type="checkbox"
+              checked={draftHideAttribution}
+              onChange={(event) => onDraftChange(draftTool, { hideAttribution: event.target.checked })}
+            />
             {locale === "zh" ? "隐藏 AI 署名" : "Hide AI Attribution"}
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            <input type="checkbox" checked={draftEffortHigh} onChange={(event) => onDraftChange(draftTool, { effortHigh: event.target.checked })} />
+            <input
+              type="checkbox"
+              checked={draftEffortHigh}
+              onChange={(event) => onDraftChange(draftTool, { effortHigh: event.target.checked })}
+            />
             {locale === "zh" ? "高强度思考" : "High Effort Thinking"}
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            <input type="checkbox" checked={draftEnableTeammates} onChange={(event) => onDraftChange(draftTool, { enableTeammates: event.target.checked })} />
+            <input
+              type="checkbox"
+              checked={draftEnableTeammates}
+              onChange={(event) => onDraftChange(draftTool, { enableTeammates: event.target.checked })}
+            />
             {locale === "zh" ? "Teammates 模式" : "Teammates Mode"}
           </label>
         </div>
       )}
       <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-        {locale === "zh" ? "上方表单字段会自动同步到此处，你也可以直接编辑原始配置。" : "Form fields above are synced here. You can also edit the raw config directly."}
+        {locale === "zh"
+          ? "上方表单字段会自动同步到此处，你也可以直接编辑原始配置。"
+          : "Form fields above are synced here. You can also edit the raw config directly."}
       </div>
       {draftTool === "codex" ? (
         <CodexRawConfigEditor value={draftContent} onChange={onContentChange} />
       ) : (
-        <CodeEditor value={draftContent} onChange={onContentChange} language={getConfigLanguage(draftTool, draftContent)} minHeight={240} />
+        <CodeEditor
+          value={draftContent}
+          onChange={onContentChange}
+          language={getConfigLanguage(draftTool, draftContent)}
+          minHeight={240}
+        />
       )}
     </div>
   );
@@ -1063,9 +1203,7 @@ const ProfilePlainConfigSection = memo(function ProfilePlainConfigSection({
         {locale === "zh" ? "直接编辑完整配置内容。" : "Edit the full configuration directly."}
       </div>
       {draftLoading ? (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200 }}>
-          <div className="spinner" />
-        </div>
+        <LoadingState />
       ) : (
         <CodeEditor
           value={draftContent}
@@ -1151,17 +1289,18 @@ function mergeDraftFields(
   next: Partial<StructuredDraftFields> = {},
 ): StructuredDraftFields {
   const merged = { ...current } as StructuredDraftFields;
-  for (const [key, value] of Object.entries(next) as [keyof StructuredDraftFields, StructuredDraftFields[keyof StructuredDraftFields] | undefined][]) {
+  for (const [key, value] of Object.entries(next) as [
+    keyof StructuredDraftFields,
+    StructuredDraftFields[keyof StructuredDraftFields] | undefined,
+  ][]) {
     if (value !== undefined) {
-      ((merged as unknown) as Record<string, unknown>)[key] = value;
+      (merged as unknown as Record<string, unknown>)[key] = value;
     }
   }
   return merged;
 }
 
-type DraftFieldsStateUpdate =
-  | StructuredDraftFields
-  | ((current: StructuredDraftFields) => StructuredDraftFields);
+type DraftFieldsStateUpdate = StructuredDraftFields | ((current: StructuredDraftFields) => StructuredDraftFields);
 
 export default function Profiles() {
   const queryClient = useQueryClient();
@@ -1172,10 +1311,11 @@ export default function Profiles() {
   const [tools, setTools] = useState<DetectedTool[]>(cachedProfilesPageData?.tools ?? []);
   const [activeIds, setActiveIds] = useState<string[]>(cachedProfilesPageData?.activeIds ?? []);
   const [loading, setLoading] = useState(!cachedProfilesPageData);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [newTool, setNewTool] = useState(
-    cachedProfilesPageData?.tools.find((tool) => tool.installed)?.id
-      ?? cachedProfilesPageData?.tools[0]?.id
-      ?? "claude",
+    cachedProfilesPageData?.tools.find((tool) => tool.installed)?.id ??
+      cachedProfilesPageData?.tools[0]?.id ??
+      "claude",
   );
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState<string | null>(null);
@@ -1186,7 +1326,9 @@ export default function Profiles() {
   const [draftTargetTools, setDraftTargetTools] = useState<string[]>(["claude"]);
   const [draftContent, setDraftContent] = useState("");
   const [draftLoading, setDraftLoading] = useState(false);
-  const [draftFields, setDraftFieldsState] = useState<StructuredDraftFields>(() => createDefaultStructuredFields("claude"));
+  const [draftFields, setDraftFieldsState] = useState<StructuredDraftFields>(() =>
+    createDefaultStructuredFields("claude"),
+  );
   const [providerFragments, setProviderFragments] = useState<ProviderConfigFragment[]>(
     cachedProfilesPageData?.providerFragments ?? [],
   );
@@ -1258,71 +1400,92 @@ export default function Profiles() {
     create: async () => {},
   });
   const applyConfigProfileMutation = useApplyConfigProfileMutation();
-  const localeText = useCallback((zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  ), [locale]);
+  const saveConfigProfileMutation = useSaveConfigProfileAndRefreshMutation();
+  const updateConfigProfileMutation = useUpdateConfigProfileAndRefreshMutation();
+  const saveSharedConfigProfilesMutation = useSaveSharedConfigProfilesAndRefreshMutation();
+  const deleteConfigProfileMutation = useDeleteConfigProfileAndRefreshMutation();
+  const deleteConfigProfileGroupMutation = useDeleteConfigProfileGroupAndRefreshMutation();
+  const reorderConfigProfilesMutation = useReorderConfigProfilesMutation();
+  const saveProviderConfigFragmentMutation = useSaveProviderConfigFragmentMutation<ProviderConfigFragment>();
+  const deleteProviderConfigFragmentMutation = useDeleteProviderConfigFragmentMutation();
+  const localeText = useCallback(
+    (zhText: string, enText: string, jaText?: string) =>
+      locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+    [locale],
+  );
   const installedTools = useMemo(() => tools.filter((tool) => tool.installed), [tools]);
 
   useEffect(() => {
     draftFieldsRef.current = draftFields;
   }, [draftFields]);
 
-  const load = useCallback(async (options: { force?: boolean } = {}) => {
-    const { force = false } = options;
-    if (!queryClient.getQueryData(queryKeys.profilesPage)) {
-      setLoading(true);
-    }
-    try {
-      const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.profilesPage,
-        queryFn: fetchProfilesPageData,
-        staleTime: force ? 0 : 30_000,
-      });
-      setProfiles(data.profiles);
-      setTools(data.tools);
-      setActiveIds(data.activeIds);
-      setProviderFragments(data.providerFragments);
-      setNewTool((prev) => {
-        const installed = data.tools.filter((tool) => tool.installed);
-        if (installed.some((tool) => tool.id === prev)) return prev;
-        return installed[0]?.id || data.tools[0]?.id || "claude";
-      });
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `加载失败: ${e}` : `Load failed: ${e}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [locale, queryClient]);
+  const applyProfilesPageData = useCallback((data: Awaited<ReturnType<typeof fetchProfilesPageData>>) => {
+    setProfiles(data.profiles);
+    setTools(data.tools);
+    setActiveIds(data.activeIds);
+    setProviderFragments(data.providerFragments);
+    setNewTool((prev) => {
+      const installed = data.tools.filter((tool) => tool.installed);
+      if (installed.some((tool) => tool.id === prev)) return prev;
+      return installed[0]?.id || data.tools[0]?.id || "claude";
+    });
+  }, []);
+
+  const load = useCallback(
+    async (options: { force?: boolean } = {}) => {
+      const { force = false } = options;
+      if (!queryClient.getQueryData(queryKeys.profilesPage)) {
+        setLoading(true);
+      }
+      setLoadError(null);
+      try {
+        const data = await queryClient.fetchQuery({
+          queryKey: queryKeys.profilesPage,
+          queryFn: fetchProfilesPageData,
+          staleTime: force ? 0 : 30_000,
+        });
+        applyProfilesPageData(data);
+      } catch (e) {
+        console.error(e);
+        setLoadError(String(e));
+        showToast("error", locale === "zh" ? `加载失败: ${e}` : `Load failed: ${e}`);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyProfilesPageData, locale, queryClient],
+  );
 
   const updateDraftFieldsState = useCallback((next: DraftFieldsStateUpdate) => {
     setDraftFieldsState((current) => {
-      const resolved = typeof next === "function"
-        ? next(current)
-        : next;
+      const resolved = typeof next === "function" ? next(current) : next;
       draftFieldsRef.current = resolved;
       return resolved;
     });
   }, []);
 
-  const setDraftFields = useCallback((fields: StructuredDraftFields) => {
-    updateDraftFieldsState(fields);
-  }, [updateDraftFieldsState]);
+  const setDraftFields = useCallback(
+    (fields: StructuredDraftFields) => {
+      updateDraftFieldsState(fields);
+    },
+    [updateDraftFieldsState],
+  );
 
   const buildCurrentFields = useCallback((next: Partial<StructuredDraftFields> = {}): StructuredDraftFields => {
     return mergeDraftFields(draftFieldsRef.current, next);
   }, []);
 
-  const updateStructuredDraft = useCallback((toolId: string, next: Partial<StructuredDraftFields>) => {
-    const fields = buildCurrentFields(next);
-    setDraftFields(fields);
-    setDraftContent(buildStructuredConfig(toolId, fields));
-  }, [buildCurrentFields]);
+  const updateStructuredDraft = useCallback(
+    (toolId: string, next: Partial<StructuredDraftFields>) => {
+      const fields = buildCurrentFields(next);
+      setDraftFields(fields);
+      setDraftContent(buildStructuredConfig(toolId, fields));
+    },
+    [buildCurrentFields],
+  );
 
   function sortProviderFragments(fragments: ProviderConfigFragment[]) {
-    return [...fragments].sort((a, b) =>
-      b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name),
-    );
+    return [...fragments].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name));
   }
 
   function normalizeFragmentFields(fragment: ProviderConfigFragment): StructuredDraftFields {
@@ -1332,88 +1495,100 @@ export default function Profiles() {
     };
   }
 
-  const resetStructuredDraft = useCallback((toolId: string) => {
-    const defaults = createDefaultStructuredFields(toolId);
-    setDraftFields(defaults);
-    setDraftContent(buildStructuredConfig(toolId, defaults));
-    setDraftLoading(false);
-  }, [setDraftFields]);
-
-  const openCreateModal = useCallback(async (toolId?: string) => {
-    const selectedTool = toolId || newTool;
-    if (!installedTools.length) {
-      showToast("error", locale === "zh" ? "没有可用工具配置" : "No available tool configuration");
-      return;
-    }
-    setEditingProfile(null);
-    setDraftName("");
-    setDraftTool(selectedTool);
-    setDraftTargetTools([selectedTool]);
-    setDraftContent("");
-    setShowCreateModal(true);
-    setSaving(false);
-    setNewTool(selectedTool);
-    setShowApiKey(false);
-    setFetchingModels(false);
-    setFetchedModels([]); setFetchedModelDetails([]);
-    setModelFetchError(null);
-    updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
-    if (supportsStructuredConfig(selectedTool)) {
-      resetStructuredDraft(selectedTool);
-      return;
-    }
-    setDraftContent("");
-    setDraftLoading(true);
-    try {
-      const configContent = await invoke<string>("read_tool_config", { toolId: selectedTool });
-      setDraftContent(prettyJson(configContent));
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `读取配置失败: ${e}` : `Failed to read configuration: ${e}`);
-    } finally {
+  const resetStructuredDraft = useCallback(
+    (toolId: string) => {
+      const defaults = createDefaultStructuredFields(toolId);
+      setDraftFields(defaults);
+      setDraftContent(buildStructuredConfig(toolId, defaults));
       setDraftLoading(false);
-    }
-  }, [installedTools.length, locale, newTool, resetStructuredDraft, updateDraftFieldsState]);
+    },
+    [setDraftFields],
+  );
 
-  const openEditModal = useCallback((profile: ConfigProfile) => {
-    const sharedProfiles = profile.source_type === "shared" && profile.source_key
-      ? profiles.filter((item) => item.source_type === "shared" && item.source_key === profile.source_key)
-      : [profile];
-    const otherProfiles = sharedProfiles.filter((item) => item.id !== profile.id);
-    setEditingProfile(profile);
-    setShowCreateModal(false);
-    setDraftName(profile.name);
-    setDraftTool(profile.tool_id);
-    setDraftTargetTools(sharedProfiles.map((item) => item.tool_id));
-    setDraftContent(prettyJson(profile.config_snapshot));
-    setShowApiKey(false);
-    setFetchingModels(false);
-    setFetchedModels([]); setFetchedModelDetails([]);
-    setModelFetchError(null);
-    if (supportsStructuredConfig(profile.tool_id)) {
-      let merged = createDefaultStructuredFields(profile.tool_id);
-      for (const item of otherProfiles) {
-        if (!supportsStructuredConfig(item.tool_id)) continue;
+  const openCreateModal = useCallback(
+    async (toolId?: string) => {
+      const selectedTool = toolId || newTool;
+      if (!installedTools.length) {
+        showToast("error", locale === "zh" ? "没有可用工具配置" : "No available tool configuration");
+        return;
+      }
+      setEditingProfile(null);
+      setDraftName("");
+      setDraftTool(selectedTool);
+      setDraftTargetTools([selectedTool]);
+      setDraftContent("");
+      setShowCreateModal(true);
+      setSaving(false);
+      setNewTool(selectedTool);
+      setShowApiKey(false);
+      setFetchingModels(false);
+      setFetchedModels([]);
+      setFetchedModelDetails([]);
+      setModelFetchError(null);
+      updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
+      if (supportsStructuredConfig(selectedTool)) {
+        resetStructuredDraft(selectedTool);
+        return;
+      }
+      setDraftContent("");
+      setDraftLoading(true);
+      try {
+        const configContent = await invoke<string>("read_tool_config", { toolId: selectedTool });
+        setDraftContent(prettyJson(configContent));
+      } catch (e) {
+        console.error(e);
+        showToast("error", locale === "zh" ? `读取配置失败: ${e}` : `Failed to read configuration: ${e}`);
+      } finally {
+        setDraftLoading(false);
+      }
+    },
+    [installedTools.length, locale, newTool, resetStructuredDraft, updateDraftFieldsState],
+  );
+
+  const openEditModal = useCallback(
+    (profile: ConfigProfile) => {
+      const sharedProfiles =
+        profile.source_type === "shared" && profile.source_key
+          ? profiles.filter((item) => item.source_type === "shared" && item.source_key === profile.source_key)
+          : [profile];
+      const otherProfiles = sharedProfiles.filter((item) => item.id !== profile.id);
+      setEditingProfile(profile);
+      setShowCreateModal(false);
+      setDraftName(profile.name);
+      setDraftTool(profile.tool_id);
+      setDraftTargetTools(sharedProfiles.map((item) => item.tool_id));
+      setDraftContent(prettyJson(profile.config_snapshot));
+      setShowApiKey(false);
+      setFetchingModels(false);
+      setFetchedModels([]);
+      setFetchedModelDetails([]);
+      setModelFetchError(null);
+      if (supportsStructuredConfig(profile.tool_id)) {
+        let merged = createDefaultStructuredFields(profile.tool_id);
+        for (const item of otherProfiles) {
+          if (!supportsStructuredConfig(item.tool_id)) continue;
+          merged = mergeSharedDraftFields(
+            merged,
+            item.tool_id,
+            parseStructuredConfig(item.tool_id, item.config_snapshot),
+            false,
+          );
+        }
         merged = mergeSharedDraftFields(
           merged,
-          item.tool_id,
-          parseStructuredConfig(item.tool_id, item.config_snapshot),
-          false,
+          profile.tool_id,
+          parseStructuredConfig(profile.tool_id, profile.config_snapshot),
+          true,
         );
+        setDraftFields(merged);
+        setDraftContent(buildStructuredConfig(profile.tool_id, merged));
+      } else {
+        resetStructuredDraft("claude");
       }
-      merged = mergeSharedDraftFields(
-        merged,
-        profile.tool_id,
-        parseStructuredConfig(profile.tool_id, profile.config_snapshot),
-        true,
-      );
-      setDraftFields(merged);
-      setDraftContent(buildStructuredConfig(profile.tool_id, merged));
-    } else {
-      resetStructuredDraft("claude");
-    }
-    setDraftLoading(false);
-  }, [profiles, resetStructuredDraft, setDraftFields]);
+      setDraftLoading(false);
+    },
+    [profiles, resetStructuredDraft, setDraftFields],
+  );
 
   const closeModal = useCallback(() => {
     setShowCreateModal(false);
@@ -1427,64 +1602,73 @@ export default function Profiles() {
     setSaving(false);
     setShowApiKey(false);
     setFetchingModels(false);
-    setFetchedModels([]); setFetchedModelDetails([]);
+    setFetchedModels([]);
+    setFetchedModelDetails([]);
     setModelFetchError(null);
   }, [setDraftFields]);
 
-  const doDeleteFragment = useCallback(async (fragment: ProviderConfigFragment) => {
-    setDeletingFragmentId(fragment.id);
-    try {
-      await invoke("delete_provider_config_fragment", { id: fragment.id });
-      setProviderFragments((current) => current.filter((item) => item.id !== fragment.id));
-      showToast(
-        "success",
-        localeText("配置片段已删除", "Provider fragment deleted", "Provider フラグメントを削除しました"),
-      );
-    } catch (e) {
-      console.error(e);
-      showToast(
-        "error",
-        localeText(`删除片段失败: ${e}`, `Failed to delete fragment: ${e}`, `フラグメントの削除に失敗しました: ${e}`),
-      );
-    } finally {
-      setDeletingFragmentId((current) => current === fragment.id ? null : current);
-    }
-  }, [localeText]);
+  const doDeleteFragment = useCallback(
+    async (fragment: ProviderConfigFragment) => {
+      setDeletingFragmentId(fragment.id);
+      try {
+        await deleteProviderConfigFragmentMutation.mutateAsync({ id: fragment.id });
+        setProviderFragments((current) => current.filter((item) => item.id !== fragment.id));
+        showToast(
+          "success",
+          localeText("配置片段已删除", "Provider fragment deleted", "Provider フラグメントを削除しました"),
+        );
+      } catch (e) {
+        console.error(e);
+        showToast(
+          "error",
+          localeText(`删除片段失败: ${e}`, `Failed to delete fragment: ${e}`, `フラグメントの削除に失敗しました: ${e}`),
+        );
+      } finally {
+        setDeletingFragmentId((current) => (current === fragment.id ? null : current));
+      }
+    },
+    [deleteProviderConfigFragmentMutation, localeText],
+  );
 
   const handleSaveModal = useCallback(async () => {
     if (!draftName.trim() || saving) return;
     setSaving(true);
     try {
-      if (supportsStructuredConfig(draftTool) && (draftTargetTools.length > 1 || editingProfile?.source_type === "shared")) {
+      if (
+        supportsStructuredConfig(draftTool) &&
+        (draftTargetTools.length > 1 || editingProfile?.source_type === "shared")
+      ) {
         const targetTools = draftTargetTools.filter((toolId) => supportsStructuredConfig(toolId));
         const profilesPayload = targetTools.map((toolId) => ({
           toolId,
           configSnapshot: buildStructuredConfig(toolId, buildCurrentFields()),
         }));
-        await invoke<string>("save_shared_config_profiles", {
+        const { data } = await saveSharedConfigProfilesMutation.mutateAsync({
           name: draftName.trim(),
           profiles: profilesPayload,
-          groupKey: editingProfile?.source_type === "shared" ? editingProfile.source_key : null,
+          groupKey: editingProfile?.source_type === "shared" ? (editingProfile.source_key ?? null) : null,
           replaceProfileId: editingProfile && editingProfile.source_type !== "shared" ? editingProfile.id : null,
         });
+        applyProfilesPageData(data);
         showToast("success", localeText("共享配置已保存", "Shared provider saved", "共有 Provider を保存しました"));
       } else if (editingProfile) {
-        await invoke("update_config_profile", {
+        const data = await updateConfigProfileMutation.mutateAsync({
           id: editingProfile.id,
           name: draftName.trim(),
           configSnapshot: draftContent,
         });
+        applyProfilesPageData(data);
         showToast("success", locale === "zh" ? "配置已更新" : "Configuration updated");
       } else {
-        await invoke("save_config_profile", {
+        const { data } = await saveConfigProfileMutation.mutateAsync({
           name: draftName.trim(),
           toolId: draftTool,
           configSnapshot: draftContent,
         });
+        applyProfilesPageData(data);
         showToast("success", locale === "zh" ? "配置已保存" : "Configuration saved");
       }
       closeModal();
-      await load({ force: true });
     } catch (e) {
       console.error(e);
       showToast("error", locale === "zh" ? `保存失败: ${e}` : `Save failed: ${e}`);
@@ -1493,16 +1677,19 @@ export default function Profiles() {
     }
   }, [
     buildCurrentFields,
+    applyProfilesPageData,
     closeModal,
     draftContent,
     draftName,
     draftTargetTools,
     draftTool,
     editingProfile,
-    load,
     locale,
     localeText,
     saving,
+    saveConfigProfileMutation,
+    saveSharedConfigProfilesMutation,
+    updateConfigProfileMutation,
   ]);
 
   useEffect(() => {
@@ -1545,177 +1732,197 @@ export default function Profiles() {
     };
   }, []);
 
-  const doApply = useCallback(async (profile: ConfigProfile) => {
-    setApplying(profile.id);
-    try {
-      const result = await applyConfigProfileMutation.mutateAsync(profile.id);
-      setActiveIds(result.activeProfileIds);
-      setProfiles((current) =>
-        current.map((item) =>
-          item.id === profile.id
-            ? { ...item, updated_at: result.appliedAt }
-            : item,
-        ),
-      );
-      showToast("success", locale === "zh" ? "配置已切换" : "Configuration switched");
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `切换失败: ${e}` : `Switch failed: ${e}`);
-    } finally {
-      setApplying(null);
-    }
-  }, [applyConfigProfileMutation, locale]);
-
+  const doApply = useCallback(
+    async (profile: ConfigProfile) => {
+      setApplying(profile.id);
+      try {
+        const result = await applyConfigProfileMutation.mutateAsync(profile.id);
+        setActiveIds(result.activeProfileIds);
+        setProfiles((current) =>
+          current.map((item) => (item.id === profile.id ? { ...item, updated_at: result.appliedAt } : item)),
+        );
+        showToast("success", locale === "zh" ? "配置已切换" : "Configuration switched");
+      } catch (e) {
+        console.error(e);
+        showToast("error", locale === "zh" ? `切换失败: ${e}` : `Switch failed: ${e}`);
+      } finally {
+        setApplying(null);
+      }
+    },
+    [applyConfigProfileMutation, locale],
+  );
 
   const handleDelete = useCallback(async (profile: ConfigProfile) => {
     setConfirmAction({ type: "delete", profile });
   }, []);
 
-  const doDelete = useCallback(async (profile: ConfigProfile) => {
-    try {
-      if (profile.source_type === "shared" && profile.source_key) {
-        const removedCount = await invoke<number>("delete_config_profile_group", {
-          sourceKey: profile.source_key,
+  const doDelete = useCallback(
+    async (profile: ConfigProfile) => {
+      try {
+        if (profile.source_type === "shared" && profile.source_key) {
+          const { removedCount, data } = await deleteConfigProfileGroupMutation.mutateAsync({
+            sourceKey: profile.source_key,
+          });
+          applyProfilesPageData(data);
+          showToast(
+            "success",
+            localeText(
+              `共享配置组已删除（${removedCount} 个 App）`,
+              `Shared provider group deleted (${removedCount} apps)`,
+              `共有 Provider グループを削除しました（${removedCount} 件の App）`,
+            ),
+          );
+          return;
+        }
+        if (profile.source_type !== "manual") {
+          showToast(
+            "error",
+            locale === "zh" ? "当前配置/同步配置不支持删除" : "Live or synced profiles cannot be deleted",
+          );
+          return;
+        }
+        const data = await deleteConfigProfileMutation.mutateAsync({ id: profile.id });
+        applyProfilesPageData(data);
+        showToast("success", locale === "zh" ? "配置已删除" : "Configuration deleted");
+      } catch (e) {
+        console.error(e);
+        showToast("error", locale === "zh" ? `删除失败: ${e}` : `Delete failed: ${e}`);
+      }
+    },
+    [applyProfilesPageData, deleteConfigProfileGroupMutation, deleteConfigProfileMutation, locale, localeText],
+  );
+
+  const handleDuplicate = useCallback(
+    async (profile: ConfigProfile) => {
+      try {
+        const name = profile.name + (locale === "zh" ? " (副本)" : " (Copy)");
+        const { data } = await saveConfigProfileMutation.mutateAsync({
+          name,
+          toolId: profile.tool_id,
+          configSnapshot: profile.config_snapshot,
         });
+        applyProfilesPageData(data);
+        showToast("success", locale === "zh" ? "配置已复制" : "Configuration duplicated");
+      } catch (e) {
+        console.error(e);
+        showToast("error", locale === "zh" ? `复制失败: ${e}` : `Duplicate failed: ${e}`);
+      }
+    },
+    [applyProfilesPageData, locale, saveConfigProfileMutation],
+  );
+
+  const handlePing = useCallback(
+    async (profile: ConfigProfile) => {
+      setPingingId(profile.id);
+      try {
+        const result = await invoke<ProviderPingResult>("ping_provider_endpoint", { id: profile.id });
+        setPingResults((current) => ({ ...current, [profile.id]: result }));
+        if (result.status !== "error") {
+          showToast(
+            "success",
+            locale === "zh"
+              ? `已测速 ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`
+              : `Pinged ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`,
+          );
+        } else {
+          showToast("error", result.message);
+        }
+      } catch (e) {
+        console.error(e);
+        showToast("error", locale === "zh" ? `测速失败: ${e}` : `Ping failed: ${e}`);
+      } finally {
+        setPingingId((current) => (current === profile.id ? null : current));
+      }
+    },
+    [locale],
+  );
+
+  const runStreamCheck = useCallback(
+    async (profile: ConfigProfile) => {
+      setStreamCheckingId(profile.id);
+      try {
+        const result = await invoke<ProviderStreamCheckResult>("stream_check_config_profile", { id: profile.id });
+        setStreamCheckResults((current) => ({ ...current, [profile.id]: result }));
+        if (result.status === "healthy" || result.status === "reachable") {
+          showToast(
+            "success",
+            locale === "zh"
+              ? `流式检查完成：${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`
+              : `Stream check finished: ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`,
+          );
+        } else {
+          showToast("error", result.message);
+        }
+      } catch (e) {
+        console.error(e);
+        showToast("error", locale === "zh" ? `流式检查失败: ${e}` : `Stream check failed: ${e}`);
+      } finally {
+        setStreamCheckingId((current) => (current === profile.id ? null : current));
+      }
+    },
+    [locale],
+  );
+
+  const handleStreamCheck = useCallback(
+    (profile: ConfigProfile) => {
+      if (localStorage.getItem("cchub-stream-check-confirmed") === "1") {
+        void runStreamCheck(profile);
+        return;
+      }
+      setStreamCheckConfirmProfile(profile);
+    },
+    [runStreamCheck],
+  );
+
+  const reorderProfiles = useCallback(
+    async (sourceId: string, targetId: string) => {
+      if (!filterTool || sourceId === targetId || search.trim()) return;
+      const orderedProfiles = [...profiles]
+        .filter((profile) => profile.tool_id === filterTool)
+        .sort((a, b) => {
+          const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+          if (orderDiff !== 0) return orderDiff;
+          const aTime = a.updated_at || a.created_at || "";
+          const bTime = b.updated_at || b.created_at || "";
+          return bTime.localeCompare(aTime);
+        });
+      const fromIndex = orderedProfiles.findIndex((profile) => profile.id === sourceId);
+      const toIndex = orderedProfiles.findIndex((profile) => profile.id === targetId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+
+      const nextOrdered = [...orderedProfiles];
+      const [moved] = nextOrdered.splice(fromIndex, 1);
+      nextOrdered.splice(toIndex, 0, moved);
+      const nextOrderMap = new Map(nextOrdered.map((profile, index) => [profile.id, index]));
+
+      setProfiles((current) =>
+        current.map((profile) =>
+          profile.tool_id === filterTool && nextOrderMap.has(profile.id)
+            ? { ...profile, sort_order: nextOrderMap.get(profile.id) ?? profile.sort_order }
+            : profile,
+        ),
+      );
+
+      try {
+        await reorderConfigProfilesMutation.mutateAsync({
+          toolId: filterTool,
+          orderedIds: nextOrdered.map((profile) => profile.id),
+        });
+      } catch (e) {
+        console.error(e);
+        showToast("error", locale === "zh" ? `排序失败: ${e}` : `Reorder failed: ${e}`);
         await load({ force: true });
-        showToast(
-          "success",
-          localeText(
-            `共享配置组已删除（${removedCount} 个 App）`,
-            `Shared provider group deleted (${removedCount} apps)`,
-            `共有 Provider グループを削除しました（${removedCount} 件の App）`,
-          ),
-        );
-        return;
+      } finally {
+        setDraggingProfileId(null);
+        setDragOverProfileId(null);
       }
-      if (profile.source_type !== "manual") {
-        showToast("error", locale === "zh" ? "当前配置/同步配置不支持删除" : "Live or synced profiles cannot be deleted");
-        return;
-      }
-      await invoke("delete_config_profile", { id: profile.id });
-      await load({ force: true });
-      showToast("success", locale === "zh" ? "配置已删除" : "Configuration deleted");
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `删除失败: ${e}` : `Delete failed: ${e}`);
-    }
-  }, [load, locale, localeText]);
+    },
+    [filterTool, load, locale, profiles, reorderConfigProfilesMutation, search],
+  );
 
-  const handleDuplicate = useCallback(async (profile: ConfigProfile) => {
-    try {
-      const name = profile.name + (locale === "zh" ? " (副本)" : " (Copy)");
-      await invoke("save_config_profile", {
-        name,
-        toolId: profile.tool_id,
-        configSnapshot: profile.config_snapshot,
-      });
-      await load({ force: true });
-      showToast("success", locale === "zh" ? "配置已复制" : "Configuration duplicated");
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `复制失败: ${e}` : `Duplicate failed: ${e}`);
-    }
-  }, [locale]);
-
-  const handlePing = useCallback(async (profile: ConfigProfile) => {
-    setPingingId(profile.id);
-    try {
-      const result = await invoke<ProviderPingResult>("ping_provider_endpoint", { id: profile.id });
-      setPingResults((current) => ({ ...current, [profile.id]: result }));
-      if (result.status !== "error") {
-        showToast(
-          "success",
-          locale === "zh"
-            ? `已测速 ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`
-            : `Pinged ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`,
-        );
-      } else {
-        showToast("error", result.message);
-      }
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `测速失败: ${e}` : `Ping failed: ${e}`);
-    } finally {
-      setPingingId((current) => current === profile.id ? null : current);
-    }
-  }, [locale]);
-
-  const runStreamCheck = useCallback(async (profile: ConfigProfile) => {
-    setStreamCheckingId(profile.id);
-    try {
-      const result = await invoke<ProviderStreamCheckResult>("stream_check_config_profile", { id: profile.id });
-      setStreamCheckResults((current) => ({ ...current, [profile.id]: result }));
-      if (result.status === "healthy" || result.status === "reachable") {
-        showToast(
-          "success",
-          locale === "zh"
-            ? `流式检查完成：${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`
-            : `Stream check finished: ${profile.name}${result.latency_ms != null ? ` · ${result.latency_ms}ms` : ""}`,
-        );
-      } else {
-        showToast("error", result.message);
-      }
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `流式检查失败: ${e}` : `Stream check failed: ${e}`);
-    } finally {
-      setStreamCheckingId((current) => current === profile.id ? null : current);
-    }
-  }, [locale]);
-
-  const handleStreamCheck = useCallback((profile: ConfigProfile) => {
-    if (localStorage.getItem("cchub-stream-check-confirmed") === "1") {
-      void runStreamCheck(profile);
-      return;
-    }
-    setStreamCheckConfirmProfile(profile);
-  }, [runStreamCheck]);
-
-  const reorderProfiles = useCallback(async (sourceId: string, targetId: string) => {
-    if (!filterTool || sourceId === targetId || search.trim()) return;
-    const orderedProfiles = [...profiles]
-      .filter((profile) => profile.tool_id === filterTool)
-      .sort((a, b) => {
-        const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
-        if (orderDiff !== 0) return orderDiff;
-        const aTime = a.updated_at || a.created_at || "";
-        const bTime = b.updated_at || b.created_at || "";
-        return bTime.localeCompare(aTime);
-      });
-    const fromIndex = orderedProfiles.findIndex((profile) => profile.id === sourceId);
-    const toIndex = orderedProfiles.findIndex((profile) => profile.id === targetId);
-    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
-
-    const nextOrdered = [...orderedProfiles];
-    const [moved] = nextOrdered.splice(fromIndex, 1);
-    nextOrdered.splice(toIndex, 0, moved);
-    const nextOrderMap = new Map(nextOrdered.map((profile, index) => [profile.id, index]));
-
-    setProfiles((current) =>
-      current.map((profile) =>
-        profile.tool_id === filterTool && nextOrderMap.has(profile.id)
-          ? { ...profile, sort_order: nextOrderMap.get(profile.id) ?? profile.sort_order }
-          : profile,
-      ),
-    );
-
-    try {
-      await invoke("reorder_config_profiles", {
-        toolId: filterTool,
-        orderedIds: nextOrdered.map((profile) => profile.id),
-      });
-      await invoke("refresh_tray_provider_menu").catch(() => undefined);
-    } catch (e) {
-      console.error(e);
-      showToast("error", locale === "zh" ? `排序失败: ${e}` : `Reorder failed: ${e}`);
-      await load({ force: true });
-    } finally {
-      setDraggingProfileId(null);
-      setDragOverProfileId(null);
-    }
-  }, [filterTool, load, locale, profiles, search]);
-
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const activeIdSet = useMemo(() => new Set(activeIds), [activeIds]);
   const presetCategories = useMemo(() => getPresetCategories(draftTool), [draftTool]);
@@ -1724,46 +1931,45 @@ export default function Profiles() {
     () => tools.filter((tool) => tool.installed && supportsStructuredConfig(tool.id)),
     [tools],
   );
-  const toolNameMap = useMemo(
-    () => Object.fromEntries(tools.map((tool) => [tool.id, tool.name])),
-    [tools],
+  const toolNameMap = useMemo(() => Object.fromEntries(tools.map((tool) => [tool.id, tool.name])), [tools]);
+  const handleToggleDraftTargetTool = useCallback(
+    (toolId: string) => {
+      if (!supportsStructuredConfig(toolId)) return;
+      const alreadySelected = draftTargetTools.includes(toolId);
+      if (alreadySelected && draftTargetTools.length === 1) {
+        return;
+      }
+
+      const structuredToolIds = structuredInstalledTools.map((tool) => tool.id);
+      const nextTargets = structuredToolIds.filter((id) => {
+        if (id === toolId) return !alreadySelected;
+        return draftTargetTools.includes(id);
+      });
+
+      if (nextTargets.length === 0) {
+        return;
+      }
+
+      setDraftTargetTools(nextTargets);
+      if (!nextTargets.includes(draftTool)) {
+        setDraftTool(nextTargets[0]);
+        setDraftContent(buildStructuredConfig(nextTargets[0], buildCurrentFields()));
+      }
+    },
+    [buildCurrentFields, draftTargetTools, draftTool, structuredInstalledTools],
   );
-  const handleToggleDraftTargetTool = useCallback((toolId: string) => {
-    if (!supportsStructuredConfig(toolId)) return;
-    const alreadySelected = draftTargetTools.includes(toolId);
-    if (alreadySelected && draftTargetTools.length === 1) {
-      return;
-    }
-
-    const structuredToolIds = structuredInstalledTools.map((tool) => tool.id);
-    const nextTargets = structuredToolIds.filter((id) => {
-      if (id === toolId) return !alreadySelected;
-      return draftTargetTools.includes(id);
-    });
-
-    if (nextTargets.length === 0) {
-      return;
-    }
-
-    setDraftTargetTools(nextTargets);
-    if (!nextTargets.includes(draftTool)) {
-      setDraftTool(nextTargets[0]);
-      setDraftContent(buildStructuredConfig(nextTargets[0], buildCurrentFields()));
-    }
-  }, [buildCurrentFields, draftTargetTools, draftTool, structuredInstalledTools]);
   const handleSaveFragment = useCallback(async () => {
     if (!supportsStructuredConfig(draftTool) || savingFragment || !draftFragmentName.trim()) return;
     setSavingFragment(true);
     try {
-      const saved = await invoke<ProviderConfigFragment>("save_provider_config_fragment", {
+      const saved = await saveProviderConfigFragmentMutation.mutateAsync({
         name: draftFragmentName.trim(),
         targetTools: draftTargetTools.filter((toolId) => supportsStructuredConfig(toolId)),
         fields: buildCurrentFields(),
       });
-      setProviderFragments((current) => sortProviderFragments([
-        saved,
-        ...current.filter((fragment) => fragment.id !== saved.id),
-      ]));
+      setProviderFragments((current) =>
+        sortProviderFragments([saved, ...current.filter((fragment) => fragment.id !== saved.id)]),
+      );
       setDraftFragmentName("");
       showToast(
         "success",
@@ -1784,35 +1990,45 @@ export default function Profiles() {
     draftTargetTools,
     draftTool,
     localeText,
+    saveProviderConfigFragmentMutation,
     savingFragment,
   ]);
-  const handleApplyFragmentById = useCallback((fragmentId: string) => {
-    const fragment = providerFragments.find((item) => item.id === fragmentId);
-    if (!fragment) return;
-    const includeToolSpecific = fragment.targetTools.includes(draftTool);
-    const merged = mergeSharedDraftFields(
-      buildCurrentFields(),
-      draftTool,
-      normalizeFragmentFields(fragment),
-      true,
-      includeToolSpecific,
-    );
-    setDraftFields(merged);
-    setDraftContent(buildStructuredConfig(draftTool, merged));
-    showToast(
-      "success",
-      localeText("已应用配置片段", "Provider fragment applied", "Provider フラグメントを適用しました"),
-    );
-  }, [buildCurrentFields, draftTool, localeText, providerFragments]);
-  const handleApplyPreset = useCallback((presetId: string) => {
-    const preset = presetCategories.flatMap((group) => group.presets).find((item) => item.id === presetId);
-    if (!preset) return;
-    const next = applyPresetToFields(draftTool, preset.id, buildCurrentFields());
-    updateStructuredDraft(draftTool, next);
-  }, [buildCurrentFields, draftTool, presetCategories, updateStructuredDraft]);
-  const handleSelectDraftOauthAccount = useCallback((accountId: string | null) => {
-    updateStructuredDraft(draftTool, { oauthAccountId: accountId || "" });
-  }, [draftTool, updateStructuredDraft]);
+  const handleApplyFragmentById = useCallback(
+    (fragmentId: string) => {
+      const fragment = providerFragments.find((item) => item.id === fragmentId);
+      if (!fragment) return;
+      const includeToolSpecific = fragment.targetTools.includes(draftTool);
+      const merged = mergeSharedDraftFields(
+        buildCurrentFields(),
+        draftTool,
+        normalizeFragmentFields(fragment),
+        true,
+        includeToolSpecific,
+      );
+      setDraftFields(merged);
+      setDraftContent(buildStructuredConfig(draftTool, merged));
+      showToast(
+        "success",
+        localeText("已应用配置片段", "Provider fragment applied", "Provider フラグメントを適用しました"),
+      );
+    },
+    [buildCurrentFields, draftTool, localeText, providerFragments],
+  );
+  const handleApplyPreset = useCallback(
+    (presetId: string) => {
+      const preset = presetCategories.flatMap((group) => group.presets).find((item) => item.id === presetId);
+      if (!preset) return;
+      const next = applyPresetToFields(draftTool, preset.id, buildCurrentFields());
+      updateStructuredDraft(draftTool, next);
+    },
+    [buildCurrentFields, draftTool, presetCategories, updateStructuredDraft],
+  );
+  const handleSelectDraftOauthAccount = useCallback(
+    (accountId: string | null) => {
+      updateStructuredDraft(draftTool, { oauthAccountId: accountId || "" });
+    },
+    [draftTool, updateStructuredDraft],
+  );
   const handleFetchModels = useCallback(async () => {
     if (fetchingModels || !supportsModelFetch(draftTool)) {
       return;
@@ -1873,26 +2089,23 @@ export default function Profiles() {
       }
     } catch (error) {
       const message = formatModelFetchError(error, localeText);
-      setFetchedModels([]); setFetchedModelDetails([]);
+      setFetchedModels([]);
+      setFetchedModelDetails([]);
       setFetchedModelDetails([]);
       setModelFetchError(message);
       showToast("error", message);
     } finally {
       setFetchingModels(false);
     }
-  }, [
-    draftApiKey,
-    draftBaseUrl,
-    draftTool,
-    draftUseFullUrl,
-    fetchingModels,
-    localeText,
-  ]);
-  const handleRequestFragmentDelete = useCallback((fragmentId: string) => {
-    const fragment = providerFragments.find((item) => item.id === fragmentId);
-    if (!fragment) return;
-    setConfirmFragmentDelete(fragment);
-  }, [providerFragments]);
+  }, [draftApiKey, draftBaseUrl, draftTool, draftUseFullUrl, fetchingModels, localeText]);
+  const handleRequestFragmentDelete = useCallback(
+    (fragmentId: string) => {
+      const fragment = providerFragments.find((item) => item.id === fragmentId);
+      if (!fragment) return;
+      setConfirmFragmentDelete(fragment);
+    },
+    [providerFragments],
+  );
   const handleRefreshProfiles = useCallback(() => {
     void load({ force: true });
   }, [load]);
@@ -1915,63 +2128,71 @@ export default function Profiles() {
     setShowApiKey((current) => !current);
   }, []);
   const handleToggleFilterTool = useCallback((toolId: string) => {
-    setFilterTool((prev) => prev === toolId ? "" : toolId);
+    setFilterTool((prev) => (prev === toolId ? "" : toolId));
   }, []);
   const handleSaveFragmentClick = useCallback(() => {
     void handleSaveFragment();
   }, [handleSaveFragment]);
-  const handleDraftToolChange = useCallback(async (event: ChangeEvent<HTMLSelectElement>) => {
-    const toolId = event.target.value;
-    setDraftTool(toolId);
-    setNewTool(toolId);
-    setFetchingModels(false);
-    setFetchedModels([]); setFetchedModelDetails([]);
-    setModelFetchError(null);
-    updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
-    if (supportsStructuredConfig(toolId)) {
-      if (draftTargetTools.length > 1 || editingProfile?.source_type === "shared") {
-        if (!draftTargetTools.includes(toolId)) {
-          setDraftTargetTools((current) => [...current, toolId]);
+  const handleDraftToolChange = useCallback(
+    async (event: ChangeEvent<HTMLSelectElement>) => {
+      const toolId = event.target.value;
+      setDraftTool(toolId);
+      setNewTool(toolId);
+      setFetchingModels(false);
+      setFetchedModels([]);
+      setFetchedModelDetails([]);
+      setModelFetchError(null);
+      updateDraftFieldsState((current) => ({ ...current, apiFormat: "anthropic" }));
+      if (supportsStructuredConfig(toolId)) {
+        if (draftTargetTools.length > 1 || editingProfile?.source_type === "shared") {
+          if (!draftTargetTools.includes(toolId)) {
+            setDraftTargetTools((current) => [...current, toolId]);
+          }
+          setDraftContent(buildStructuredConfig(toolId, buildCurrentFields()));
+        } else {
+          resetStructuredDraft(toolId);
+          setDraftTargetTools([toolId]);
         }
-        setDraftContent(buildStructuredConfig(toolId, buildCurrentFields()));
       } else {
-        resetStructuredDraft(toolId);
-        setDraftTargetTools([toolId]);
+        setDraftContent("");
+        setDraftLoading(true);
+        try {
+          const configContent = await invoke<string>("read_tool_config", { toolId });
+          setDraftContent(prettyJson(configContent));
+        } catch (error) {
+          console.error(error);
+        } finally {
+          setDraftLoading(false);
+        }
       }
-    } else {
-      setDraftContent("");
-      setDraftLoading(true);
-      try {
-        const configContent = await invoke<string>("read_tool_config", { toolId });
-        setDraftContent(prettyJson(configContent));
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setDraftLoading(false);
-      }
-    }
-  }, [buildCurrentFields, draftTargetTools, editingProfile?.source_type, resetStructuredDraft, updateDraftFieldsState]);
-  const profileCardText = useMemo(() => ({
-    activeTag: locale === "zh" ? "当前生效" : "Active",
-    pingFast: locale === "zh" ? "快速" : "Fast",
-    pingMedium: locale === "zh" ? "一般" : "Medium",
-    pingSlow: locale === "zh" ? "较慢" : "Slow",
-    pingError: locale === "zh" ? "异常" : "Error",
-    streamHealthy: locale === "zh" ? "流检通过" : "Stream OK",
-    streamReachable: locale === "zh" ? "流检可达" : "Stream Reachable",
-    streamUnsupported: locale === "zh" ? "流检暂不支持" : "Stream Unsupported",
-    streamUnconfigured: locale === "zh" ? "流检未配置" : "Stream Unconfigured",
-    streamError: locale === "zh" ? "流检异常" : "Stream Error",
-    dragEnabledTitle: locale === "zh" ? "拖拽调整顺序" : "Drag to reorder",
-    dragDisabledTitle: locale === "zh" ? "先选择单个工具并清空搜索后再排序" : "Filter to one tool and clear search to reorder",
-    pingTitle: locale === "zh" ? "端点测速" : "Ping endpoint",
-    streamTitle: locale === "zh" ? "流式健康检查" : "Stream health check",
-    duplicateTitle: locale === "zh" ? "复制" : "Duplicate",
-    editTitle: locale === "zh" ? "编辑" : "Edit",
-    deleteTitle: locale === "zh" ? "删除" : "Delete",
-    activeButton: locale === "zh" ? "已生效" : "Active",
-    applyButton: locale === "zh" ? "切换" : "Apply",
-  }), [locale]);
+    },
+    [buildCurrentFields, draftTargetTools, editingProfile?.source_type, resetStructuredDraft, updateDraftFieldsState],
+  );
+  const profileCardText = useMemo(
+    () => ({
+      activeTag: locale === "zh" ? "当前生效" : "Active",
+      pingFast: locale === "zh" ? "快速" : "Fast",
+      pingMedium: locale === "zh" ? "一般" : "Medium",
+      pingSlow: locale === "zh" ? "较慢" : "Slow",
+      pingError: locale === "zh" ? "异常" : "Error",
+      streamHealthy: locale === "zh" ? "流检通过" : "Stream OK",
+      streamReachable: locale === "zh" ? "流检可达" : "Stream Reachable",
+      streamUnsupported: locale === "zh" ? "流检暂不支持" : "Stream Unsupported",
+      streamUnconfigured: locale === "zh" ? "流检未配置" : "Stream Unconfigured",
+      streamError: locale === "zh" ? "流检异常" : "Stream Error",
+      dragEnabledTitle: locale === "zh" ? "拖拽调整顺序" : "Drag to reorder",
+      dragDisabledTitle:
+        locale === "zh" ? "先选择单个工具并清空搜索后再排序" : "Filter to one tool and clear search to reorder",
+      pingTitle: locale === "zh" ? "端点测速" : "Ping endpoint",
+      streamTitle: locale === "zh" ? "流式健康检查" : "Stream health check",
+      duplicateTitle: locale === "zh" ? "复制" : "Duplicate",
+      editTitle: locale === "zh" ? "编辑" : "Edit",
+      deleteTitle: locale === "zh" ? "删除" : "Delete",
+      activeButton: locale === "zh" ? "已生效" : "Active",
+      applyButton: locale === "zh" ? "切换" : "Apply",
+    }),
+    [locale],
+  );
 
   const toolCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -2039,13 +2260,19 @@ export default function Profiles() {
   }
 
   if (loading) {
+    return <LoadingState label={localeText("加载中...", "Loading...", "読み込み中...")} />;
+  }
+
+  if (loadError) {
     return (
-      <div className="loading-center">
-        <div className="spinner" />
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          {locale === "zh" ? "加载中..." : "Loading..."}
-        </span>
-      </div>
+      <ErrorState
+        title={localeText("配置加载失败", "Failed to load profiles", "設定の読み込みに失敗しました")}
+        message={loadError}
+        retryLabel={localeText("刷新", "Refresh", "再読み込み")}
+        onRetry={() => {
+          void load({ force: true });
+        }}
+      />
     );
   }
 
@@ -2055,121 +2282,139 @@ export default function Profiles() {
   if (isEditing) {
     return (
       <ProfileEditor
-        title={editingProfile ? (locale === "zh" ? "编辑配置" : "Edit Configuration") : (locale === "zh" ? "新增配置" : "New Configuration")}
-        subtitle={editingProfile ? (locale === "zh" ? "修改配置名称和参数" : "Update configuration name and parameters") : (locale === "zh" ? "创建一个新的工具配置" : "Create a new tool configuration")}
+        title={
+          editingProfile
+            ? locale === "zh"
+              ? "编辑配置"
+              : "Edit Configuration"
+            : locale === "zh"
+              ? "新增配置"
+              : "New Configuration"
+        }
+        subtitle={
+          editingProfile
+            ? locale === "zh"
+              ? "修改配置名称和参数"
+              : "Update configuration name and parameters"
+            : locale === "zh"
+              ? "创建一个新的工具配置"
+              : "Create a new tool configuration"
+        }
         onClose={closeModal}
         onSave={() => void handleSaveModal()}
         saveDisabled={!draftName.trim() || saving}
         saving={saving}
       >
-          <ProfileBasicInfoSection
-            locale={locale}
-            localeText={localeText}
-            tools={tools}
-            draftTool={draftTool}
-            draftName={draftName}
-            isStructured={isStructured}
-            syncTargetsLocked={!!editingProfile && !(draftTargetTools.length > 1 || editingProfile.source_type === "shared")}
-            draftTargetTools={draftTargetTools}
-            structuredInstalledTools={structuredInstalledTools}
-            onToolChange={handleDraftToolChange}
-            onNameChange={handleDraftNameChange}
-            onToggleDraftTargetTool={handleToggleDraftTargetTool}
-          />
+        <ProfileBasicInfoSection
+          locale={locale}
+          localeText={localeText}
+          tools={tools}
+          draftTool={draftTool}
+          draftName={draftName}
+          isStructured={isStructured}
+          syncTargetsLocked={
+            !!editingProfile && !(draftTargetTools.length > 1 || editingProfile.source_type === "shared")
+          }
+          draftTargetTools={draftTargetTools}
+          structuredInstalledTools={structuredInstalledTools}
+          onToolChange={handleDraftToolChange}
+          onNameChange={handleDraftNameChange}
+          onToggleDraftTargetTool={handleToggleDraftTargetTool}
+        />
 
-          {isStructured && (
-            <>
-              <ProfilePresetSection
-                locale={locale}
-                localeText={localeText}
-                draftTool={draftTool}
-                draftPresetId={draftPresetId}
-                presetCategories={presetCategories}
-                draftFragmentName={draftFragmentName}
-                savingFragment={savingFragment}
-                providerFragments={providerFragments}
-                toolNameMap={toolNameMap}
-                deletingFragmentId={deletingFragmentId}
-                onPresetApply={handleApplyPreset}
-                onFragmentNameChange={handleDraftFragmentNameChange}
-                onSaveFragment={handleSaveFragmentClick}
-                onApplyFragment={handleApplyFragmentById}
-                onDeleteFragment={handleRequestFragmentDelete}
-              />
+        {isStructured && (
+          <>
+            <ProfilePresetSection
+              locale={locale}
+              localeText={localeText}
+              draftTool={draftTool}
+              draftPresetId={draftPresetId}
+              presetCategories={presetCategories}
+              draftFragmentName={draftFragmentName}
+              savingFragment={savingFragment}
+              providerFragments={providerFragments}
+              toolNameMap={toolNameMap}
+              deletingFragmentId={deletingFragmentId}
+              onPresetApply={handleApplyPreset}
+              onFragmentNameChange={handleDraftFragmentNameChange}
+              onSaveFragment={handleSaveFragmentClick}
+              onApplyFragment={handleApplyFragmentById}
+              onDeleteFragment={handleRequestFragmentDelete}
+            />
 
-              <ProfileConnectionSection
-                locale={locale}
-                localeText={localeText}
-                draftTool={draftTool}
-                draftProviderType={draftProviderType}
-                draftRequiresOAuth={draftRequiresOAuth}
-                draftOauthAccountId={draftOauthAccountId}
-                showApiKey={showApiKey}
-                draftApiKey={draftApiKey}
-                draftBaseUrl={draftBaseUrl}
-                draftUseFullUrl={draftUseFullUrl}
-                draftIconUrl={draftIconUrl}
-                draftCostMultiplier={draftCostMultiplier}
-                draftEndpointCandidates={draftEndpointCandidates}
-                draftAuthField={draftAuthField}
-                draftApiFormat={draftApiFormat}
-                draftCodexReasoningEffort={draftCodexReasoningEffort}
-                draftCodexWireApi={draftCodexWireApi}
-                draftApiProtocol={draftApiProtocol}
-                draftModelCatalogAlias={draftModelCatalogAlias}
-                draftNpm={draftNpm}
-                draftOpenCodeThinkingLevel={draftOpenCodeThinkingLevel}
-                draftHermesProvider={draftHermesProvider}
-                draftHermesApiKeyEnv={draftHermesApiKeyEnv}
-                onDraftChange={updateStructuredDraft}
-                onAccountSelect={handleSelectDraftOauthAccount}
-                onToggleApiKeyVisibility={handleToggleShowApiKey}
-              />
+            <ProfileConnectionSection
+              locale={locale}
+              localeText={localeText}
+              draftTool={draftTool}
+              draftProviderType={draftProviderType}
+              draftRequiresOAuth={draftRequiresOAuth}
+              draftOauthAccountId={draftOauthAccountId}
+              showApiKey={showApiKey}
+              draftApiKey={draftApiKey}
+              draftBaseUrl={draftBaseUrl}
+              draftUseFullUrl={draftUseFullUrl}
+              draftIconUrl={draftIconUrl}
+              draftCostMultiplier={draftCostMultiplier}
+              draftEndpointCandidates={draftEndpointCandidates}
+              draftAuthField={draftAuthField}
+              draftApiFormat={draftApiFormat}
+              draftCodexReasoningEffort={draftCodexReasoningEffort}
+              draftCodexWireApi={draftCodexWireApi}
+              draftApiProtocol={draftApiProtocol}
+              draftModelCatalogAlias={draftModelCatalogAlias}
+              draftNpm={draftNpm}
+              draftOpenCodeThinkingLevel={draftOpenCodeThinkingLevel}
+              draftHermesProvider={draftHermesProvider}
+              draftHermesApiKeyEnv={draftHermesApiKeyEnv}
+              onDraftChange={updateStructuredDraft}
+              onAccountSelect={handleSelectDraftOauthAccount}
+              onToggleApiKeyVisibility={handleToggleShowApiKey}
+            />
 
-              <ProfileModelsSection
-                locale={locale}
-                localeText={localeText}
-                draftTool={draftTool}
-                draftModel={draftModel}
-                draftReasoningModel={draftReasoningModel}
-                draftHaikuModel={draftHaikuModel}
-                draftSonnetModel={draftSonnetModel}
-                draftOpusModel={draftOpusModel}
-                draftModelName={draftModelName}
-                draftOpenCodeContextLimit={draftOpenCodeContextLimit}
-                draftOpenCodeOutputLimit={draftOpenCodeOutputLimit}
-                draftOpenCodeInputModalities={draftOpenCodeInputModalities}
-                draftOpenCodeOutputModalities={draftOpenCodeOutputModalities}
-                fetchedModels={fetchedModels}
-                fetchedModelDetails={fetchedModelDetails}
-                fetchingModels={fetchingModels}
-                modelFetchError={modelFetchError}
-                onFetchModels={handleFetchModels}
-                onDraftChange={updateStructuredDraft}
-              />
+            <ProfileModelsSection
+              locale={locale}
+              localeText={localeText}
+              draftTool={draftTool}
+              draftModel={draftModel}
+              draftReasoningModel={draftReasoningModel}
+              draftHaikuModel={draftHaikuModel}
+              draftSonnetModel={draftSonnetModel}
+              draftOpusModel={draftOpusModel}
+              draftModelName={draftModelName}
+              draftOpenCodeContextLimit={draftOpenCodeContextLimit}
+              draftOpenCodeOutputLimit={draftOpenCodeOutputLimit}
+              draftOpenCodeInputModalities={draftOpenCodeInputModalities}
+              draftOpenCodeOutputModalities={draftOpenCodeOutputModalities}
+              fetchedModels={fetchedModels}
+              fetchedModelDetails={fetchedModelDetails}
+              fetchingModels={fetchingModels}
+              modelFetchError={modelFetchError}
+              onFetchModels={handleFetchModels}
+              onDraftChange={updateStructuredDraft}
+            />
 
-              <ProfileRawConfigSection
-                locale={locale}
-                draftTool={draftTool}
-                draftContent={draftContent}
-                draftHideAttribution={draftHideAttribution}
-                draftEffortHigh={draftEffortHigh}
-                draftEnableTeammates={draftEnableTeammates}
-                onDraftChange={updateStructuredDraft}
-                onContentChange={setDraftContent}
-              />
-            </>
-          )}
-
-          {!isStructured && (
-            <ProfilePlainConfigSection
+            <ProfileRawConfigSection
               locale={locale}
               draftTool={draftTool}
               draftContent={draftContent}
-              draftLoading={draftLoading}
+              draftHideAttribution={draftHideAttribution}
+              draftEffortHigh={draftEffortHigh}
+              draftEnableTeammates={draftEnableTeammates}
+              onDraftChange={updateStructuredDraft}
               onContentChange={setDraftContent}
             />
-          )}
+          </>
+        )}
+
+        {!isStructured && (
+          <ProfilePlainConfigSection
+            locale={locale}
+            draftTool={draftTool}
+            draftContent={draftContent}
+            draftLoading={draftLoading}
+            onContentChange={setDraftContent}
+          />
+        )}
       </ProfileEditor>
     );
   }
@@ -2180,7 +2425,9 @@ export default function Profiles() {
         <div>
           <h2 className="page-title">{locale === "zh" ? "配置切换" : "Config Profiles"}</h2>
           <p className="page-subtitle">
-            {locale === "zh" ? `共 ${profiles.length} 个配置，当前生效 ${activeIds.length} 个` : `${profiles.length} profiles, ${activeIds.length} active`}
+            {locale === "zh"
+              ? `共 ${profiles.length} 个配置，当前生效 ${activeIds.length} 个`
+              : `${profiles.length} profiles, ${activeIds.length} active`}
           </p>
         </div>
         {filterTool !== "hermes" && (
@@ -2189,7 +2436,12 @@ export default function Profiles() {
               <RefreshCw size={14} />
               {locale === "zh" ? "刷新" : "Refresh"}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={handleOpenCreateProfile} disabled={installedTools.length === 0} style={{ gap: 6 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleOpenCreateProfile}
+              disabled={installedTools.length === 0}
+              style={{ gap: 6 }}
+            >
               <Plus size={14} />
               {locale === "zh" ? "新增" : "New"}
             </button>
@@ -2199,10 +2451,30 @@ export default function Profiles() {
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 360 }}>
-          <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
-          <input ref={searchInputRef} className="input" style={{ paddingLeft: 36 }} placeholder={localeText("搜索配置...", "Search...", "設定を検索...")} value={search} onChange={handleSearchChange} />
+          <Search
+            size={14}
+            style={{
+              position: "absolute",
+              left: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--text-muted)",
+            }}
+          />
+          <input
+            ref={searchInputRef}
+            className="input"
+            style={{ paddingLeft: 36 }}
+            placeholder={localeText("搜索配置...", "Search...", "設定を検索...")}
+            value={search}
+            onChange={handleSearchChange}
+          />
           {search && (
-            <button className="btn btn-ghost btn-icon-sm" style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }} onClick={handleClearSearch}>
+            <button
+              className="btn btn-ghost btn-icon-sm"
+              style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
+              onClick={handleClearSearch}
+            >
               <X size={14} />
             </button>
           )}
@@ -2224,21 +2496,32 @@ export default function Profiles() {
 
       {filterTool === "hermes" && (
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-          <Suspense fallback={<div className="loading-center"><div className="spinner" /></div>}>
+          <Suspense fallback={<LoadingState />}>
             <HermesProvidersPanel embedded />
           </Suspense>
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: filterTool === "hermes" ? "none" : "flex", flexDirection: "column", gap: 10 }}>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          display: filterTool === "hermes" ? "none" : "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
         {filteredProfiles.length === 0 ? (
-          <div className="card empty-state" style={{ flex: 1 }}>
-            <div className="empty-icon"><ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} /></div>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>{locale === "zh" ? "没有可显示的配置" : "No configurations to display"}</p>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>
-              {locale === "zh" ? "点击右上角「新增」保存一份当前配置，之后就可以在这里一键切换。" : "Click \"New\" to save a configuration, then switch here."}
-            </p>
-          </div>
+          <EmptyState
+            icon={<ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} />}
+            title={locale === "zh" ? "没有可显示的配置" : "No configurations to display"}
+            description={
+              locale === "zh"
+                ? "点击右上角「新增」保存一份当前配置，之后就可以在这里一键切换。"
+                : 'Click "New" to save a configuration, then switch here.'
+            }
+          />
         ) : (
           filteredProfiles.map((profile) => {
             const Icon = TOOL_ICONS[profile.tool_id] || Monitor;
@@ -2246,27 +2529,28 @@ export default function Profiles() {
             const summary = extractConfigSummary(profile.tool_id, profile.config_snapshot);
             const ping = pingResults[profile.id];
             const streamCheck = streamCheckResults[profile.id];
-            const sharedCount = profile.source_type === "shared" && profile.source_key
-              ? sharedGroupCounts[profile.source_key] || 1
-              : 0;
-            const pingTone = ping?.status === "fast"
-              ? "badge-success"
-              : ping?.status === "medium"
-                ? "badge-warning"
-                : ping?.status === "slow"
-                  ? "badge-danger"
-                  : ping?.status === "error"
-                  ? "badge-danger"
-                  : "badge-muted";
-            const streamTone = streamCheck?.status === "healthy"
-              ? "badge-success"
-              : streamCheck?.status === "reachable"
-                ? "badge-warning"
-                : streamCheck?.status === "unsupported"
-                  ? "badge-muted"
-                  : streamCheck?.status === "unconfigured"
-                                    ? "badge-muted"
-                                    : "badge-danger";
+            const sharedCount =
+              profile.source_type === "shared" && profile.source_key ? sharedGroupCounts[profile.source_key] || 1 : 0;
+            const pingTone =
+              ping?.status === "fast"
+                ? "badge-success"
+                : ping?.status === "medium"
+                  ? "badge-warning"
+                  : ping?.status === "slow"
+                    ? "badge-danger"
+                    : ping?.status === "error"
+                      ? "badge-danger"
+                      : "badge-muted";
+            const streamTone =
+              streamCheck?.status === "healthy"
+                ? "badge-success"
+                : streamCheck?.status === "reachable"
+                  ? "badge-warning"
+                  : streamCheck?.status === "unsupported"
+                    ? "badge-muted"
+                    : streamCheck?.status === "unconfigured"
+                      ? "badge-muted"
+                      : "badge-danger";
             return (
               <ProfileCard
                 key={profile.id}
@@ -2275,7 +2559,11 @@ export default function Profiles() {
                 isActive={isActive}
                 toolTag={profile.tool_id}
                 iconUrl={summary.iconUrl}
-                sharedTag={localeText(`共享 ${sharedCount} App`, `Shared ${sharedCount} apps`, `${sharedCount} App 共有`)}
+                sharedTag={localeText(
+                  `共享 ${sharedCount} App`,
+                  `Shared ${sharedCount} apps`,
+                  `${sharedCount} App 共有`,
+                )}
                 baseUrl={summary.baseUrl}
                 model={summary.model}
                 sharedCount={sharedCount}
@@ -2308,16 +2596,24 @@ export default function Profiles() {
 
       <ConfirmDialog
         isOpen={!!confirmAction}
-        title={confirmAction?.profile.source_type === "shared"
-          ? localeText("删除共享配置", "Delete Shared Provider", "共有 Provider を削除")
-          : (locale === "zh" ? "删除配置" : "Delete Configuration")}
-        message={confirmAction?.profile.source_type === "shared" && confirmAction.profile.source_key
-          ? localeText(
-            `确定删除共享配置「${confirmAction.profile.name}」？这会同时删除 ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 个 App 上的联动配置。`,
-            `Delete shared provider "${confirmAction.profile.name}"? This also removes the linked profiles across ${sharedGroupCounts[confirmAction.profile.source_key] || 1} apps.`,
-            `共有 Provider「${confirmAction.profile.name}」を削除しますか？ ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 個の App にある連動プロファイルも同時に削除されます。`,
-          )
-          : (locale === "zh" ? `确定删除配置「${confirmAction?.profile.name}」？此操作不可撤销。` : `Delete "${confirmAction?.profile.name}"? This cannot be undone.`)}
+        title={
+          confirmAction?.profile.source_type === "shared"
+            ? localeText("删除共享配置", "Delete Shared Provider", "共有 Provider を削除")
+            : locale === "zh"
+              ? "删除配置"
+              : "Delete Configuration"
+        }
+        message={
+          confirmAction?.profile.source_type === "shared" && confirmAction.profile.source_key
+            ? localeText(
+                `确定删除共享配置「${confirmAction.profile.name}」？这会同时删除 ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 个 App 上的联动配置。`,
+                `Delete shared provider "${confirmAction.profile.name}"? This also removes the linked profiles across ${sharedGroupCounts[confirmAction.profile.source_key] || 1} apps.`,
+                `共有 Provider「${confirmAction.profile.name}」を削除しますか？ ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 個の App にある連動プロファイルも同時に削除されます。`,
+              )
+            : locale === "zh"
+              ? `确定删除配置「${confirmAction?.profile.name}」？此操作不可撤销。`
+              : `Delete "${confirmAction?.profile.name}"? This cannot be undone.`
+        }
         confirmText={localeText("删除", "Delete", "削除")}
         variant="destructive"
         onConfirm={() => {
@@ -2329,13 +2625,15 @@ export default function Profiles() {
       <ConfirmDialog
         isOpen={!!confirmFragmentDelete}
         title={localeText("删除配置片段", "Delete Provider Fragment", "Provider フラグメントを削除")}
-        message={confirmFragmentDelete
-          ? localeText(
-            `确定删除配置片段「${confirmFragmentDelete.name}」？删除后将无法继续复用这组字段。`,
-            `Delete provider fragment "${confirmFragmentDelete.name}"? You will no longer be able to reuse this field set.`,
-            `Provider フラグメント「${confirmFragmentDelete.name}」を削除しますか？ このフィールドセットは再利用できなくなります。`,
-          )
-          : ""}
+        message={
+          confirmFragmentDelete
+            ? localeText(
+                `确定删除配置片段「${confirmFragmentDelete.name}」？删除后将无法继续复用这组字段。`,
+                `Delete provider fragment "${confirmFragmentDelete.name}"? You will no longer be able to reuse this field set.`,
+                `Provider フラグメント「${confirmFragmentDelete.name}」を削除しますか？ このフィールドセットは再利用できなくなります。`,
+              )
+            : ""
+        }
         confirmText={localeText("删除", "Delete", "削除")}
         variant="destructive"
         onConfirm={() => {
@@ -2349,13 +2647,11 @@ export default function Profiles() {
       <ConfirmDialog
         isOpen={!!streamCheckConfirmProfile}
         title={localeText("流式健康检查", "Stream Health Check", "ストリームヘルスチェック")}
-        message={
-          localeText(
-            "将向 Provider 发送一条最小化的流式请求，用于验证端点是否能成功返回首个流式分片。\n\n首次确认后，后续将直接执行。",
-            "CCHub will send a minimal streaming request to verify that this provider endpoint can return the first stream chunk successfully.\n\nAfter you confirm once, future checks will run immediately.",
-            "Provider に最小限のストリーミングリクエストを送り、最初のストリームチャンクを正しく返せるか確認します。\n\n一度確認すると、以後はすぐに実行されます。",
-          )
-        }
+        message={localeText(
+          "将向 Provider 发送一条最小化的流式请求，用于验证端点是否能成功返回首个流式分片。\n\n首次确认后，后续将直接执行。",
+          "CCHub will send a minimal streaming request to verify that this provider endpoint can return the first stream chunk successfully.\n\nAfter you confirm once, future checks will run immediately.",
+          "Provider に最小限のストリーミングリクエストを送り、最初のストリームチャンクを正しく返せるか確認します。\n\n一度確認すると、以後はすぐに実行されます。",
+        )}
         confirmText={localeText("继续检查", "Run Check", "チェックを実行")}
         cancelText={localeText("取消", "Cancel", "キャンセル")}
         variant="info"

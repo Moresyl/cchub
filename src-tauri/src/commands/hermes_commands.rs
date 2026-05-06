@@ -47,10 +47,7 @@ pub fn get_hermes_memory_limits(db: State<'_, DbState>) -> Result<HermesMemoryLi
 }
 
 #[tauri::command]
-pub fn get_hermes_memory_content(
-    db: State<'_, DbState>,
-    kind: String,
-) -> Result<String, String> {
+pub fn get_hermes_memory_content(db: State<'_, DbState>, kind: String) -> Result<String, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let root = hermes::hermes_root(&conn)?;
     let filename = match kind.as_str() {
@@ -151,7 +148,11 @@ fn parse_provider_from_mapping(entry: &Mapping) -> Option<HermesProvider> {
         base_url: yaml_str(entry, "base_url"),
         api_mode: {
             let mode = yaml_str(entry, "api_mode");
-            if mode.is_empty() { "chat_completions".to_string() } else { mode }
+            if mode.is_empty() {
+                "chat_completions".to_string()
+            } else {
+                mode
+            }
         },
         model: yaml_str(entry, "model"),
         api_key_env: yaml_str(entry, "api_key_env"),
@@ -174,11 +175,20 @@ fn get_custom_providers_seq(config: &Value) -> Vec<HermesProvider> {
 fn provider_to_yaml(provider: &HermesProvider) -> Value {
     let mut entry = Mapping::new();
     entry.insert(yaml_key("name"), Value::String(provider.name.clone()));
-    entry.insert(yaml_key("base_url"), Value::String(provider.base_url.clone()));
-    entry.insert(yaml_key("api_mode"), Value::String(provider.api_mode.clone()));
+    entry.insert(
+        yaml_key("base_url"),
+        Value::String(provider.base_url.clone()),
+    );
+    entry.insert(
+        yaml_key("api_mode"),
+        Value::String(provider.api_mode.clone()),
+    );
     entry.insert(yaml_key("model"), Value::String(provider.model.clone()));
     if !provider.api_key_env.is_empty() {
-        entry.insert(yaml_key("api_key_env"), Value::String(provider.api_key_env.clone()));
+        entry.insert(
+            yaml_key("api_key_env"),
+            Value::String(provider.api_key_env.clone()),
+        );
     }
     Value::Mapping(entry)
 }
@@ -191,10 +201,7 @@ pub fn list_hermes_providers(db: State<'_, DbState>) -> Result<Vec<HermesProvide
 }
 
 #[tauri::command]
-pub fn get_hermes_provider(
-    db: State<'_, DbState>,
-    name: String,
-) -> Result<HermesProvider, String> {
+pub fn get_hermes_provider(db: State<'_, DbState>, name: String) -> Result<HermesProvider, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let config = hermes::config::read_value(&conn)?;
     get_custom_providers_seq(&config)
@@ -255,10 +262,7 @@ pub fn save_hermes_provider(
 }
 
 #[tauri::command]
-pub fn delete_hermes_provider(
-    db: State<'_, DbState>,
-    name: String,
-) -> Result<(), String> {
+pub fn delete_hermes_provider(db: State<'_, DbState>, name: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut config = hermes::config::read_value(&conn)?;
     let top = hermes::config::top_level_mapping_mut(&mut config);
@@ -278,10 +282,7 @@ pub fn delete_hermes_provider(
 }
 
 #[tauri::command]
-pub fn set_hermes_active_provider(
-    db: State<'_, DbState>,
-    name: String,
-) -> Result<(), String> {
+pub fn set_hermes_active_provider(db: State<'_, DbState>, name: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut config = hermes::config::read_value(&conn)?;
     let providers = get_custom_providers_seq(&config);
@@ -307,7 +308,10 @@ pub fn set_hermes_active_provider(
 
     model.insert(yaml_key("provider"), Value::String(provider.name.clone()));
     if !provider.base_url.is_empty() {
-        model.insert(yaml_key("base_url"), Value::String(provider.base_url.clone()));
+        model.insert(
+            yaml_key("base_url"),
+            Value::String(provider.base_url.clone()),
+        );
     }
     if !provider.model.is_empty() {
         model.insert(yaml_key("default"), Value::String(provider.model.clone()));

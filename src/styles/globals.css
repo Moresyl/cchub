@@ -708,6 +708,29 @@ textarea.input {
   border: 1px solid var(--border-default);
 }
 
+.state-panel {
+  gap: 12px;
+}
+
+.state-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.state-copy {
+  max-width: 460px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.state-icon-danger {
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
 /* ═══ Page Header ═══ */
 
 .page-header {

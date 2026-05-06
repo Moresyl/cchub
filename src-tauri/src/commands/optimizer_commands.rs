@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::db::DbState;
 use crate::proxy_optimizer::config::{
@@ -23,6 +23,7 @@ pub fn get_optimizer_config(db: State<'_, DbState>) -> Result<OptimizerConfig, S
 
 #[tauri::command]
 pub fn set_optimizer_config(
+    app_handle: AppHandle,
     db: State<'_, DbState>,
     config: OptimizerConfig,
 ) -> Result<(), String> {
@@ -33,6 +34,7 @@ pub fn set_optimizer_config(
         rusqlite::params![OPTIMIZER_CONFIG_SETTINGS_KEY, payload],
     )
     .map_err(|e| e.to_string())?;
+    crate::provider_proxy::update_optimizer_config_cache(&app_handle, config);
     Ok(())
 }
 
@@ -54,6 +56,7 @@ pub fn get_rectifier_config(db: State<'_, DbState>) -> Result<RectifierConfig, S
 
 #[tauri::command]
 pub fn set_rectifier_config(
+    app_handle: AppHandle,
     db: State<'_, DbState>,
     config: RectifierConfig,
 ) -> Result<(), String> {
@@ -64,5 +67,6 @@ pub fn set_rectifier_config(
         rusqlite::params![RECTIFIER_CONFIG_SETTINGS_KEY, payload],
     )
     .map_err(|e| e.to_string())?;
+    crate::provider_proxy::update_rectifier_config_cache(&app_handle, config);
     Ok(())
 }

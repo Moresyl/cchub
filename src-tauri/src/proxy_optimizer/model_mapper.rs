@@ -108,7 +108,6 @@ pub fn apply_model_mapping(
     if let Some(ref original) = original_model {
         let mapped = mapping.map_model(original);
         if mapped != *original {
-
             body["model"] = serde_json::json!(mapped);
             return (body, Some(original.clone()), Some(mapped));
         }

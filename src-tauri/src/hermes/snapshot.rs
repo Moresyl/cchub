@@ -103,7 +103,12 @@ pub fn apply_snapshot(conn: &Connection, snapshot: &str) -> Result<Option<PathBu
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| providers::infer_api_key_env_key(provider.as_deref(), &incoming_env))
-        .or_else(|| provider.as_deref().and_then(providers::default_env_key_for_provider).map(str::to_string));
+        .or_else(|| {
+            provider
+                .as_deref()
+                .and_then(providers::default_env_key_for_provider)
+                .map(str::to_string)
+        });
 
     if let Some(target_key) = target_env_key.as_deref() {
         for known_key in providers::known_api_key_env_keys() {

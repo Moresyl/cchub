@@ -3,11 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { FolderSearch } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 import { queryKeys } from "../hooks/queries";
+import { useSetHermesRootOverrideMutation } from "../hooks/mutations";
 import { showToast } from "./Toast";
 
 function DashboardHermesRootOverrideComponent() {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
+  const setHermesRootOverrideMutation = useSetHermesRootOverrideMutation();
 
   const handleClick = useCallback(async () => {
     setSaving(true);
@@ -18,7 +20,7 @@ function DashboardHermesRootOverrideComponent() {
         current || "",
       );
       if (next === null) return;
-      await invoke("set_hermes_root_override", {
+      await setHermesRootOverrideMutation.mutateAsync({
         value: next.trim() ? next.trim() : null,
       });
       await queryClient.invalidateQueries({ queryKey: queryKeys.detectTools });
@@ -28,7 +30,7 @@ function DashboardHermesRootOverrideComponent() {
     } finally {
       setSaving(false);
     }
-  }, [queryClient]);
+  }, [queryClient, setHermesRootOverrideMutation]);
 
   return (
     <button

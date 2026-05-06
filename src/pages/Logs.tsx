@@ -1,13 +1,16 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useQueryClient } from "@tanstack/react-query";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Activity, DollarSign, RefreshCw, Save, X } from "lucide-react";
 import ActivityLogRow from "../components/ActivityLogRow";
 import ModelPricingListItem, { type ModelPricingListItemRow } from "../components/ModelPricingListItem";
 import ProxyRequestRow from "../components/ProxyRequestRow";
 import { showToast } from "../components/Toast";
+import ErrorState from "../components/states/ErrorState";
+import LoadingState from "../components/states/LoadingState";
 import { getLocale } from "../lib/i18n";
 import { fetchLogsPageData, queryKeys } from "../hooks/queries";
+import { useDeleteModelPricingMutation, useSaveModelPricingMutation } from "../hooks/mutations";
 
 interface ActivityItem {
   id: number;
@@ -103,9 +106,7 @@ export default function Logs() {
     queryKeys.logsPage(initialDate),
   );
   const [activities, setActivities] = useState<ActivityItem[]>(cachedLogsPageData?.activities ?? []);
-  const [proxySummary, setProxySummary] = useState<ProxyUsageSummary | null>(
-    cachedLogsPageData?.proxySummary ?? null,
-  );
+  const [proxySummary, setProxySummary] = useState<ProxyUsageSummary | null>(cachedLogsPageData?.proxySummary ?? null);
   const [recentProxyLogs, setRecentProxyLogs] = useState<ProxyRequestLogRow[]>(
     cachedLogsPageData?.recentProxyLogs ?? [],
   );
@@ -113,6 +114,7 @@ export default function Logs() {
     cachedLogsPageData?.modelPricingRows ?? [],
   );
   const [loading, setLoading] = useState(!cachedLogsPageData);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [proxyFilters, setProxyFilters] = useState(DEFAULT_PROXY_FILTERS);
   const [pricingDraft, setPricingDraft] = useState<ModelPricingDraft>(EMPTY_PRICING_DRAFT);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
@@ -127,9 +129,13 @@ export default function Logs() {
   const deferredProviderQuery = useDeferredValue(proxyFilters.providerQuery);
   const deferredModelQuery = useDeferredValue(proxyFilters.modelQuery);
   const locale = getLocale();
-  const uiText = useCallback((zhText: string, enText: string, jaText?: string) =>
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
-  [locale]);
+  const saveModelPricingMutation = useSaveModelPricingMutation();
+  const deleteModelPricingMutation = useDeleteModelPricingMutation();
+  const uiText = useCallback(
+    (zhText: string, enText: string, jaText?: string) =>
+      locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+    [locale],
+  );
   const effectiveProxyFilters = useMemo(
     () => ({
       toolId: proxyFilters.toolId,
@@ -138,77 +144,76 @@ export default function Logs() {
       providerQuery: deferredProviderQuery,
       modelQuery: deferredModelQuery,
     }),
-    [
-      deferredModelQuery,
-      deferredProviderQuery,
-      proxyFilters.status,
-      proxyFilters.streamMode,
-      proxyFilters.toolId,
-    ],
+    [deferredModelQuery, deferredProviderQuery, proxyFilters.status, proxyFilters.streamMode, proxyFilters.toolId],
   );
   const proxyLogs = useMemo(
     () => filterProxyLogs(recentProxyLogs, effectiveProxyFilters),
     [effectiveProxyFilters, recentProxyLogs],
   );
 
-  const load = useCallback(async (options: { silent?: boolean; mergeProxyRows?: boolean; preserveProxyScroll?: boolean; force?: boolean } = {}) => {
-    const {
-      silent = false,
-      mergeProxyRows = false,
-      preserveProxyScroll = false,
-      force = false,
-    } = options;
-    const requestId = loadRequestIdRef.current + 1;
-    loadRequestIdRef.current = requestId;
-    const previousScrollTop = preserveProxyScroll ? proxyListRef.current?.scrollTop || 0 : 0;
-    const previousScrollHeight = preserveProxyScroll ? proxyListRef.current?.scrollHeight || 0 : 0;
-    if (!silent) {
-      if (!queryClient.getQueryData(queryKeys.logsPage(selectedDate))) {
-        setLoading(true);
+  const load = useCallback(
+    async (
+      options: { silent?: boolean; mergeProxyRows?: boolean; preserveProxyScroll?: boolean; force?: boolean } = {},
+    ) => {
+      const { silent = false, mergeProxyRows = false, preserveProxyScroll = false, force = false } = options;
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+      const previousScrollTop = preserveProxyScroll ? proxyListRef.current?.scrollTop || 0 : 0;
+      const previousScrollHeight = preserveProxyScroll ? proxyListRef.current?.scrollHeight || 0 : 0;
+      if (!silent) {
+        setLoadError(null);
+        if (!queryClient.getQueryData(queryKeys.logsPage(selectedDate))) {
+          setLoading(true);
+        }
+      } else {
+        setRefreshing(true);
       }
-    } else {
-      setRefreshing(true);
-    }
-    try {
-      const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.logsPage(selectedDate),
-        queryFn: () => fetchLogsPageData(selectedDate),
-        staleTime: force || silent ? 0 : 30_000,
-      });
-      if (requestId !== loadRequestIdRef.current) {
-        return;
-      }
-      startTransition(() => {
-        setActivities(data.activities);
-        setProxySummary(data.proxySummary);
-        setModelPricingRows(data.modelPricingRows);
-        setRecentProxyLogs((current) => (
-          mergeProxyRows ? mergeProxyLogs(current, data.recentProxyLogs) : data.recentProxyLogs
-        ));
-      });
-      if (preserveProxyScroll && previousScrollTop > 0) {
-        requestAnimationFrame(() => {
-          const element = proxyListRef.current;
-          if (!element) return;
-          const delta = element.scrollHeight - previousScrollHeight;
-          element.scrollTop = previousScrollTop + delta;
+      try {
+        const data = await queryClient.fetchQuery({
+          queryKey: queryKeys.logsPage(selectedDate),
+          queryFn: () => fetchLogsPageData(selectedDate),
+          staleTime: force || silent ? 0 : 30_000,
         });
-      }
-    } catch (error) {
-      if (requestId !== loadRequestIdRef.current) {
-        return;
-      }
-      console.error(error);
-    } finally {
-      if (requestId === loadRequestIdRef.current) {
+        if (requestId !== loadRequestIdRef.current) {
+          return;
+        }
+        startTransition(() => {
+          setActivities(data.activities);
+          setProxySummary(data.proxySummary);
+          setModelPricingRows(data.modelPricingRows);
+          setRecentProxyLogs((current) =>
+            mergeProxyRows ? mergeProxyLogs(current, data.recentProxyLogs) : data.recentProxyLogs,
+          );
+        });
+        if (preserveProxyScroll && previousScrollTop > 0) {
+          requestAnimationFrame(() => {
+            const element = proxyListRef.current;
+            if (!element) return;
+            const delta = element.scrollHeight - previousScrollHeight;
+            element.scrollTop = previousScrollTop + delta;
+          });
+        }
+      } catch (error) {
+        if (requestId !== loadRequestIdRef.current) {
+          return;
+        }
         if (!silent) {
-          setLoading(false);
+          setLoadError(String(error));
         } else {
-          setRefreshing(false);
+          console.error(error);
+        }
+      } finally {
+        if (requestId === loadRequestIdRef.current) {
+          if (!silent) {
+            setLoading(false);
+          } else {
+            setRefreshing(false);
+          }
         }
       }
-    }
-  }, [selectedDate]);
+    },
+    [selectedDate],
+  );
 
   useEffect(() => {
     void load();
@@ -264,42 +269,53 @@ export default function Logs() {
     if (savingPricing) return;
     setSavingPricing(true);
     try {
-      await invoke<ModelPricingRow>("save_model_pricing", { entry: pricingDraft });
+      const savedRow = await saveModelPricingMutation.mutateAsync({ entry: pricingDraft });
+      setModelPricingRows((current) => [savedRow, ...current.filter((row) => row.model_id !== savedRow.model_id)]);
       showToast("success", uiText("模型定价已保存", "Model pricing saved", "モデル単価を保存しました"));
       setPricingDraft(EMPTY_PRICING_DRAFT);
       setEditingModelId(null);
-      await load({ force: true });
     } catch (error) {
       console.error(error);
       showToast(
         "error",
-        uiText(`保存模型定价失败: ${error}`, `Failed to save model pricing: ${error}`, `モデル単価の保存に失敗しました: ${error}`),
+        uiText(
+          `保存模型定价失败: ${error}`,
+          `Failed to save model pricing: ${error}`,
+          `モデル単価の保存に失敗しました: ${error}`,
+        ),
       );
     } finally {
       setSavingPricing(false);
     }
-  }, [load, pricingDraft, savingPricing, uiText]);
+  }, [pricingDraft, saveModelPricingMutation, savingPricing, uiText]);
 
-  const handleDeletePricing = useCallback(async (modelId: string) => {
-    setDeletingPricingId(modelId);
-    try {
-      await invoke("delete_model_pricing", { modelId });
-      if (editingModelId === modelId) {
-        setPricingDraft(EMPTY_PRICING_DRAFT);
-        setEditingModelId(null);
+  const handleDeletePricing = useCallback(
+    async (modelId: string) => {
+      setDeletingPricingId(modelId);
+      try {
+        await deleteModelPricingMutation.mutateAsync({ modelId });
+        if (editingModelId === modelId) {
+          setPricingDraft(EMPTY_PRICING_DRAFT);
+          setEditingModelId(null);
+        }
+        setModelPricingRows((current) => current.filter((row) => row.model_id !== modelId));
+        showToast("success", uiText("模型定价已删除", "Model pricing deleted", "モデル単価を削除しました"));
+      } catch (error) {
+        console.error(error);
+        showToast(
+          "error",
+          uiText(
+            `删除模型定价失败: ${error}`,
+            `Failed to delete model pricing: ${error}`,
+            `モデル単価の削除に失敗しました: ${error}`,
+          ),
+        );
+      } finally {
+        setDeletingPricingId((current) => (current === modelId ? null : current));
       }
-      showToast("success", uiText("模型定价已删除", "Model pricing deleted", "モデル単価を削除しました"));
-      await load({ force: true });
-    } catch (error) {
-      console.error(error);
-      showToast(
-        "error",
-        uiText(`删除模型定价失败: ${error}`, `Failed to delete model pricing: ${error}`, `モデル単価の削除に失敗しました: ${error}`),
-      );
-    } finally {
-      setDeletingPricingId((current) => (current === modelId ? null : current));
-    }
-  }, [editingModelId, load, uiText]);
+    },
+    [deleteModelPricingMutation, editingModelId, uiText],
+  );
 
   const startEditingPricing = useCallback((row: ModelPricingRow) => {
     setEditingModelId(row.model_id);
@@ -326,13 +342,19 @@ export default function Logs() {
   }, []);
 
   if (loading) {
+    return <LoadingState label={uiText("加载中...", "Loading...", "読み込み中...")} />;
+  }
+
+  if (loadError) {
     return (
-      <div className="loading-center">
-        <div className="spinner" />
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          {uiText("加载中...", "Loading...", "読み込み中...")}
-        </span>
-      </div>
+      <ErrorState
+        title={uiText("加载日志失败", "Failed to load logs", "ログの読み込みに失敗しました")}
+        message={loadError}
+        retryLabel={uiText("重试", "Retry", "再試行")}
+        onRetry={() => {
+          void load({ force: true });
+        }}
+      />
     );
   }
 
@@ -356,7 +378,9 @@ export default function Logs() {
       </div>
 
       <div className="section-card" style={{ display: "flex", flexDirection: "column", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+        <div
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <DollarSign size={14} style={{ color: "var(--text-secondary)" }} />
             <span
@@ -382,7 +406,14 @@ export default function Logs() {
           )}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 12 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
           <input
             className="input"
             value={pricingDraft.model_id}
@@ -392,30 +423,47 @@ export default function Logs() {
           <input
             className="input"
             value={pricingDraft.input_cost_per_million}
-            onChange={(event) => setPricingDraft((current) => ({ ...current, input_cost_per_million: event.target.value }))}
+            onChange={(event) =>
+              setPricingDraft((current) => ({ ...current, input_cost_per_million: event.target.value }))
+            }
             placeholder={uiText("输入 / 百万 tokens", "Input / million tokens", "入力 / 100万 tokens")}
           />
           <input
             className="input"
             value={pricingDraft.output_cost_per_million}
-            onChange={(event) => setPricingDraft((current) => ({ ...current, output_cost_per_million: event.target.value }))}
+            onChange={(event) =>
+              setPricingDraft((current) => ({ ...current, output_cost_per_million: event.target.value }))
+            }
             placeholder={uiText("输出 / 百万 tokens", "Output / million tokens", "出力 / 100万 tokens")}
           />
           <input
             className="input"
             value={pricingDraft.cache_read_cost_per_million}
-            onChange={(event) => setPricingDraft((current) => ({ ...current, cache_read_cost_per_million: event.target.value }))}
+            onChange={(event) =>
+              setPricingDraft((current) => ({ ...current, cache_read_cost_per_million: event.target.value }))
+            }
             placeholder={uiText("缓存读 / 百万", "Cache read / million", "キャッシュ読込 / 100万")}
           />
           <input
             className="input"
             value={pricingDraft.cache_write_cost_per_million}
-            onChange={(event) => setPricingDraft((current) => ({ ...current, cache_write_cost_per_million: event.target.value }))}
+            onChange={(event) =>
+              setPricingDraft((current) => ({ ...current, cache_write_cost_per_million: event.target.value }))
+            }
             placeholder={uiText("缓存写 / 百万", "Cache write / million", "キャッシュ作成 / 100万")}
           />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {uiText(
               "费用会按响应模型优先、请求模型兜底进行匹配；支持 `models/` 前缀、供应商前缀和 `@low` 这类后缀的归一化匹配。",
@@ -423,15 +471,26 @@ export default function Logs() {
               "費用はレスポンスモデル優先・リクエストモデル補完で照合します。`models/` 接頭辞、Provider 接頭辞、`@low` のような接尾辞も正規化して一致させます。",
             )}
           </span>
-          <button className="btn btn-primary btn-sm" onClick={() => void handleSavePricing()} disabled={savingPricing} style={{ gap: 6 }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => void handleSavePricing()}
+            disabled={savingPricing}
+            style={{ gap: 6 }}
+          >
             {savingPricing ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Save size={14} />}
-            {editingModelId ? uiText("更新定价", "Update Pricing", "単価を更新") : uiText("新增定价", "Add Pricing", "単価を追加")}
+            {editingModelId
+              ? uiText("更新定价", "Update Pricing", "単価を更新")
+              : uiText("新增定价", "Add Pricing", "単価を追加")}
           </button>
         </div>
 
         {modelPricingRows.length === 0 ? (
           <div style={{ padding: "12px 0", color: "var(--text-muted)", fontSize: 13, textAlign: "center" }}>
-            {uiText("还没有模型定价。添加后代理日志会开始计算成本。", "No model pricing yet. Add entries to start calculating proxy cost.", "モデル単価はまだありません。追加するとプロキシのコスト計算が有効になります。")}
+            {uiText(
+              "还没有模型定价。添加后代理日志会开始计算成本。",
+              "No model pricing yet. Add entries to start calculating proxy cost.",
+              "モデル単価はまだありません。追加するとプロキシのコスト計算が有効になります。",
+            )}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 220, overflowY: "auto" }}>
@@ -451,7 +510,16 @@ export default function Logs() {
       </div>
 
       <div className="section-card" style={{ display: "flex", flexDirection: "column", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Activity size={14} style={{ color: "var(--text-secondary)" }} />
             <span
@@ -479,7 +547,9 @@ export default function Logs() {
             </span>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)" }}
+            >
               <input
                 type="checkbox"
                 checked={autoRefreshEnabled}
@@ -490,7 +560,9 @@ export default function Logs() {
             <select
               className="input"
               value={String(autoRefreshInterval)}
-              onChange={(event) => setAutoRefreshInterval(Number(event.target.value) as (typeof AUTO_REFRESH_INTERVALS)[number])}
+              onChange={(event) =>
+                setAutoRefreshInterval(Number(event.target.value) as (typeof AUTO_REFRESH_INTERVALS)[number])
+              }
               disabled={!autoRefreshEnabled}
               style={{ width: 96, fontSize: 12 }}
             >
@@ -504,13 +576,24 @@ export default function Logs() {
               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                 {refreshing
                   ? uiText("正在拉取增量日志…", "Fetching incremental logs...", "増分ログを取得中...")
-                  : uiText("仅增量追加新请求，不重置滚动位置", "Appends new requests without resetting scroll", "スクロール位置を保ったまま新規リクエストだけを追加")}
+                  : uiText(
+                      "仅增量追加新请求，不重置滚动位置",
+                      "Appends new requests without resetting scroll",
+                      "スクロール位置を保ったまま新規リクエストだけを追加",
+                    )}
               </span>
             )}
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
           <select
             className="input"
             value={proxyFilters.toolId}
@@ -555,10 +638,16 @@ export default function Logs() {
           />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
+        <div
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}
+        >
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
             {hasActiveProxyFilters
-              ? uiText(`筛选后 ${proxyLogs.length} 条`, `${proxyLogs.length} filtered rows`, `${proxyLogs.length} 件に絞り込み`)
+              ? uiText(
+                  `筛选后 ${proxyLogs.length} 条`,
+                  `${proxyLogs.length} filtered rows`,
+                  `${proxyLogs.length} 件に絞り込み`,
+                )
               : uiText(`最近 ${proxyLogs.length} 条`, `${proxyLogs.length} recent rows`, `最近 ${proxyLogs.length} 件`)}
           </span>
           {hasActiveProxyFilters && (
@@ -574,15 +663,40 @@ export default function Logs() {
           </div>
         ) : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
-              <UsageMetric label={uiText("累计成本", "Total Cost", "累計コスト")} value={formatUsd(proxySummary.total_cost_usd)} />
-              <UsageMetric label={uiText("输入 Tokens", "Input Tokens", "入力 Tokens")} value={formatCount(proxySummary.total_input_tokens)} />
-              <UsageMetric label={uiText("输出 Tokens", "Output Tokens", "出力 Tokens")} value={formatCount(proxySummary.total_output_tokens)} />
-              <UsageMetric label={uiText("缓存读取", "Cache Read", "キャッシュ読込")} value={formatCount(proxySummary.total_cache_read_tokens)} />
-              <UsageMetric label={uiText("缓存创建", "Cache Create", "キャッシュ作成")} value={formatCount(proxySummary.total_cache_creation_tokens)} />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                gap: 10,
+                marginBottom: 14,
+              }}
+            >
+              <UsageMetric
+                label={uiText("累计成本", "Total Cost", "累計コスト")}
+                value={formatUsd(proxySummary.total_cost_usd)}
+              />
+              <UsageMetric
+                label={uiText("输入 Tokens", "Input Tokens", "入力 Tokens")}
+                value={formatCount(proxySummary.total_input_tokens)}
+              />
+              <UsageMetric
+                label={uiText("输出 Tokens", "Output Tokens", "出力 Tokens")}
+                value={formatCount(proxySummary.total_output_tokens)}
+              />
+              <UsageMetric
+                label={uiText("缓存读取", "Cache Read", "キャッシュ読込")}
+                value={formatCount(proxySummary.total_cache_read_tokens)}
+              />
+              <UsageMetric
+                label={uiText("缓存创建", "Cache Create", "キャッシュ作成")}
+                value={formatCount(proxySummary.total_cache_creation_tokens)}
+              />
             </div>
 
-            <div ref={proxyListRef} style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 360, overflowY: "auto" }}>
+            <div
+              ref={proxyListRef}
+              style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 360, overflowY: "auto" }}
+            >
               {proxyLogs.map((item) => {
                 const totalTokens = item.input_tokens + item.output_tokens;
                 return (
@@ -593,7 +707,13 @@ export default function Logs() {
                     toolLabel={TOOL_LABELS[item.tool_id] || item.tool_id}
                     modelLabel={item.response_model || item.request_model || "--"}
                     costLabel={formatUsd(item.total_cost_usd)}
-                    tokenLabel={totalTokens > 0 ? `${formatCount(totalTokens)} tok` : item.is_streaming ? uiText("流式", "stream", "ストリーム") : "--"}
+                    tokenLabel={
+                      totalTokens > 0
+                        ? `${formatCount(totalTokens)} tok`
+                        : item.is_streaming
+                          ? uiText("流式", "stream", "ストリーム")
+                          : "--"
+                    }
                     latencyLabel={`${item.latency_ms}ms`}
                     createdAtLabel={formatDateTime(item.created_at)}
                   />
@@ -627,7 +747,16 @@ export default function Logs() {
 
         <div style={{ flex: 1, overflowY: "auto" }}>
           {activities.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: 13 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100%",
+                color: "var(--text-muted)",
+                fontSize: 13,
+              }}
+            >
               {uiText("当日无活动记录", "No activity on this date", "この日の活動記録はありません")}
             </div>
           ) : (
@@ -675,9 +804,9 @@ function filterProxyLogs(
     }
 
     if (
-      modelQuery
-      && !(item.request_model || "").toLowerCase().includes(modelQuery)
-      && !(item.response_model || "").toLowerCase().includes(modelQuery)
+      modelQuery &&
+      !(item.request_model || "").toLowerCase().includes(modelQuery) &&
+      !(item.response_model || "").toLowerCase().includes(modelQuery)
     ) {
       return false;
     }

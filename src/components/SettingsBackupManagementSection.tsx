@@ -2,6 +2,8 @@ import { memo, type ChangeEventHandler } from "react";
 import { Archive, RefreshCw } from "lucide-react";
 import type { Locale } from "../lib/i18n";
 import SettingsManagedBackupRow, { type SettingsManagedBackupRowBackup } from "./SettingsManagedBackupRow";
+import EmptyState from "./states/EmptyState";
+import LoadingState from "./states/LoadingState";
 
 interface SettingsBackupManagementSectionProps {
   locale: Locale;
@@ -63,7 +65,14 @@ function SettingsBackupManagementSectionComponent({
         )}
       </p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
         <div style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-input)" }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
             {uiText(locale, "每小时自动备份", "Hourly Auto Backup", "毎時自動バックアップ")}
@@ -72,11 +81,11 @@ function SettingsBackupManagementSectionComponent({
             <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
               {autoBackupEnabled
                 ? uiText(
-                  locale,
-                  "已启用，启动时会补齐缺失的小时备份",
-                  "Enabled. Missing hourly backups are created on startup.",
-                  "有効です。不足している毎時バックアップは起動時に作成されます。",
-                )
+                    locale,
+                    "已启用，启动时会补齐缺失的小时备份",
+                    "Enabled. Missing hourly backups are created on startup.",
+                    "有効です。不足している毎時バックアップは起動時に作成されます。",
+                  )
                 : uiText(locale, "未启用", "Disabled", "無効")}
             </div>
             <button
@@ -103,11 +112,7 @@ function SettingsBackupManagementSectionComponent({
               onChange={onRetentionChange}
               style={{ maxWidth: 110 }}
             />
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={onSavePreferences}
-              disabled={savingBackupPreferences}
-            >
+            <button className="btn btn-secondary btn-sm" onClick={onSavePreferences} disabled={savingBackupPreferences}>
               {savingBackupPreferences
                 ? uiText(locale, "保存中...", "Saving...", "保存中...")
                 : uiText(locale, "保存策略", "Save", "保存")}
@@ -146,19 +151,20 @@ function SettingsBackupManagementSectionComponent({
       </div>
 
       {loadingManagedBackups ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
-          <RefreshCw size={14} className="spin" />
-          {uiText(locale, "正在读取备份列表...", "Loading backup list...", "バックアップ一覧を読み込み中...")}
-        </div>
+        <LoadingState
+          label={uiText(locale, "正在读取备份列表...", "Loading backup list...", "バックアップ一覧を読み込み中...")}
+        />
       ) : managedBackups.length === 0 ? (
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          {uiText(
+        <EmptyState
+          title={uiText(locale, "暂无托管备份", "No managed backups yet", "管理対象バックアップはまだありません")}
+          description={uiText(
             locale,
-            "还没有托管备份。点击“立即备份”创建第一份 SQL 备份。",
-            "No managed backups yet. Create your first SQL backup from here.",
-            "まだ管理対象バックアップはありません。ここから最初の SQL バックアップを作成できます。",
+            "点击“立即备份”创建第一份 SQL 备份。",
+            "Create your first SQL backup from here.",
+            "ここから最初の SQL バックアップを作成できます。",
           )}
-        </div>
+          icon={<Archive size={26} style={{ color: "var(--text-muted)" }} />}
+        />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {managedBackups.map((backup) => (

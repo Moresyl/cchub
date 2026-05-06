@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import {
   memo,
   startTransition,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { getLocale, t } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { useSetWebDavSyncSettingsMutation } from "../hooks/mutations";
 
 interface WebDavSyncSettings {
   enabled: boolean;
@@ -60,14 +62,7 @@ interface WebDavSyncEvent {
   error: string | null;
 }
 
-type ActionState =
-  | "idle"
-  | "loading"
-  | "saving"
-  | "testing"
-  | "refreshing"
-  | "uploading"
-  | "downloading";
+type ActionState = "idle" | "loading" | "saving" | "testing" | "refreshing" | "uploading" | "downloading";
 
 interface WebDavPreset {
   id: string;
@@ -77,12 +72,7 @@ interface WebDavPreset {
   matchPattern?: string;
 }
 
-type WebDavTextFieldKey =
-  | "base_url"
-  | "username"
-  | "password"
-  | "remote_root"
-  | "profile";
+type WebDavTextFieldKey = "base_url" | "username" | "password" | "remote_root" | "profile";
 
 interface WebDavToggleCardProps {
   title: string;
@@ -177,13 +167,7 @@ const WEBDAV_PRESETS: WebDavPreset[] = [
   },
 ];
 
-function WebDavToggleCardComponent({
-  title,
-  description,
-  enabled,
-  disabled,
-  onToggle,
-}: WebDavToggleCardProps) {
+function WebDavToggleCardComponent({ title, description, enabled, disabled, onToggle }: WebDavToggleCardProps) {
   return (
     <div
       style={{
@@ -192,9 +176,7 @@ function WebDavToggleCardComponent({
         background: "var(--bg-input)",
       }}
     >
-      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
-        {title}
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>{title}</div>
       <div
         style={{
           display: "flex",
@@ -204,11 +186,7 @@ function WebDavToggleCardComponent({
         }}
       >
         <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{description}</div>
-        <button
-          className={`toggle ${enabled ? "on" : "off"}`}
-          onClick={onToggle}
-          disabled={disabled}
-        >
+        <button className={`toggle ${enabled ? "on" : "off"}`} onClick={onToggle} disabled={disabled}>
           <div className="toggle-knob" />
         </button>
       </div>
@@ -227,9 +205,12 @@ function WebDavTextFieldComponent({
   placeholder,
   type = "text",
 }: WebDavTextFieldProps) {
-  const handleChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    onValueChange(fieldKey, event.target.value);
-  }, [fieldKey, onValueChange]);
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      onValueChange(fieldKey, event.target.value);
+    },
+    [fieldKey, onValueChange],
+  );
 
   return (
     <div>
@@ -257,12 +238,7 @@ function WebDavActionButtonComponent({
   onClick,
 }: WebDavActionButtonProps) {
   return (
-    <button
-      className={`btn ${variant} btn-sm`}
-      onClick={onClick}
-      disabled={disabled}
-      style={{ gap: 6 }}
-    >
+    <button className={`btn ${variant} btn-sm`} onClick={onClick} disabled={disabled} style={{ gap: 6 }}>
       <Icon size={14} className={loading ? "spin" : ""} />
       {label}
     </button>
@@ -288,9 +264,7 @@ function WebDavInfoCardComponent({
         background: "var(--bg-input)",
       }}
     >
-      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
-        {title}
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>{title}</div>
       <div
         style={{
           display: "flex",
@@ -305,9 +279,7 @@ function WebDavInfoCardComponent({
         {Icon ? <Icon size={15} style={{ color: iconColor }} /> : null}
         <span>{value}</span>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
-        {detail}
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>{detail}</div>
     </div>
   );
 }
@@ -347,11 +319,7 @@ function WebDavSnapshotDetailsComponent({
       >
         <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
         {canCopy ? (
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            onClick={onCopy}
-            title={copyTitle}
-          >
+          <button className="btn btn-ghost btn-icon-sm" onClick={onCopy} title={copyTitle}>
             <Copy size={12} />
           </button>
         ) : null}
@@ -412,9 +380,12 @@ function formatDateTime(value: string | null) {
 function WebDavSyncSectionComponent() {
   const loc = getLocale();
   const i = t();
-  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
-    loc === "zh" ? zhText : loc === "ja" ? (jaText ?? enText) : enText
-  ), [loc]);
+  const setWebDavSyncSettingsMutation = useSetWebDavSyncSettingsMutation<WebDavSyncSettings>();
+  const uiText = useCallback(
+    (zhText: string, enText: string, jaText?: string) =>
+      loc === "zh" ? zhText : loc === "ja" ? (jaText ?? enText) : enText,
+    [loc],
+  );
 
   const [settings, setSettings] = useState<WebDavSyncSettings>(EMPTY_SETTINGS);
   const [remoteInfo, setRemoteInfo] = useState<WebDavRemoteInfo | null>(null);
@@ -422,10 +393,7 @@ function WebDavSyncSectionComponent() {
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [actionState, setActionState] = useState<ActionState>("loading");
 
-  const applyLoadedState = useCallback((
-    nextSettings: WebDavSyncSettings,
-    nextRemoteInfo: WebDavRemoteInfo | null,
-  ) => {
+  const applyLoadedState = useCallback((nextSettings: WebDavSyncSettings, nextRemoteInfo: WebDavRemoteInfo | null) => {
     startTransition(() => {
       setSettings({ ...EMPTY_SETTINGS, ...nextSettings, password: "" });
       setRemoteInfo(nextRemoteInfo);
@@ -434,39 +402,36 @@ function WebDavSyncSectionComponent() {
     });
   }, []);
 
-  const loadState = useCallback(async (silent = false) => {
-    if (!silent) {
-      setActionState("loading");
-    }
-    try {
-      const [nextSettings, nextRemoteInfo] = await Promise.all([
-        invoke<WebDavSyncSettings>("get_webdav_sync_settings"),
-        invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info").catch(
-          () => null,
-        ),
-      ]);
-      applyLoadedState(nextSettings, nextRemoteInfo);
-    } catch (error) {
+  const loadState = useCallback(
+    async (silent = false) => {
       if (!silent) {
-        showToast("error", String(error));
+        setActionState("loading");
       }
-    } finally {
-      if (!silent) {
-        setActionState("idle");
+      try {
+        const [nextSettings, nextRemoteInfo] = await Promise.all([
+          invoke<WebDavSyncSettings>("get_webdav_sync_settings"),
+          invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info").catch(() => null),
+        ]);
+        applyLoadedState(nextSettings, nextRemoteInfo);
+      } catch (error) {
+        if (!silent) {
+          showToast("error", String(error));
+        }
+      } finally {
+        if (!silent) {
+          setActionState("idle");
+        }
       }
-    }
-  }, [applyLoadedState]);
+    },
+    [applyLoadedState],
+  );
 
   const handleSyncEvent = useEffectEvent((payload: WebDavSyncEvent) => {
     void loadState(true);
     if (payload.status === "success") {
       showToast(
         "success",
-        uiText(
-          "WebDAV 自动同步已完成",
-          "Automatic WebDAV sync completed",
-          "WebDAV 自動同期が完了しました",
-        ),
+        uiText("WebDAV 自动同步已完成", "Automatic WebDAV sync completed", "WebDAV 自動同期が完了しました"),
       );
       return;
     }
@@ -484,25 +449,16 @@ function WebDavSyncSectionComponent() {
 
   useEffect(() => {
     void loadState();
-    const unlisten = listen<WebDavSyncEvent>(
-      "webdav-sync-status-updated",
-      (event) => handleSyncEvent(event.payload),
-    );
+    const unlisten = listen<WebDavSyncEvent>("webdav-sync-status-updated", (event) => handleSyncEvent(event.payload));
     return () => {
       unlisten.then((dispose) => dispose());
     };
   }, [handleSyncEvent]);
 
   const busy = actionState !== "idle";
-  const activePreset = useMemo(
-    () => WEBDAV_PRESETS.find((preset) => preset.id === presetId),
-    [presetId],
-  );
+  const activePreset = useMemo(() => WEBDAV_PRESETS.find((preset) => preset.id === presetId), [presetId]);
 
-  const updateSettings = useCallback(<K extends keyof WebDavSyncSettings,>(
-    key: K,
-    value: WebDavSyncSettings[K],
-  ) => {
+  const updateSettings = useCallback(<K extends keyof WebDavSyncSettings>(key: K, value: WebDavSyncSettings[K]) => {
     startTransition(() => {
       setSettings((current) => ({ ...current, [key]: value }));
       if (key === "password") {
@@ -514,31 +470,32 @@ function WebDavSyncSectionComponent() {
     });
   }, []);
 
-  const handleCopy = useCallback(async (value: string, label: string) => {
-    if (!value) return;
-    try {
-      await navigator.clipboard.writeText(value);
-      showToast("success", i.settings.copied.replace("{label}", label));
-    } catch (error) {
-      showToast("error", String(error));
-    }
-  }, [i.settings.copied]);
+  const handleCopy = useCallback(
+    async (value: string, label: string) => {
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        showToast("success", i.settings.copied.replace("{label}", label));
+      } catch (error) {
+        showToast("error", String(error));
+      }
+    },
+    [i.settings.copied],
+  );
 
   const handleSave = useCallback(async () => {
     setActionState("saving");
     try {
-      const saved = await invoke<WebDavSyncSettings>("set_webdav_sync_settings", {
+      const saved = await setWebDavSyncSettingsMutation.mutateAsync({
         settings,
         passwordTouched,
       });
       applyLoadedState(saved, remoteInfo);
-      showToast(
-        "success",
-        uiText("WebDAV 设置已保存", "WebDAV settings saved", "WebDAV 設定を保存しました"),
-      );
-      const nextRemoteInfo = await invoke<WebDavRemoteInfo>(
-        "webdav_sync_fetch_remote_info",
-      ).catch(() => null);
+      showToast("success", uiText("WebDAV 设置已保存", "WebDAV settings saved", "WebDAV 設定を保存しました"));
+      const nextRemoteInfo = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info").catch((error) => {
+        console.warn("Failed to refresh WebDAV remote info after saving settings", error);
+        return null;
+      });
       startTransition(() => {
         setRemoteInfo(nextRemoteInfo);
       });
@@ -547,7 +504,7 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, [applyLoadedState, passwordTouched, remoteInfo, settings, uiText]);
+  }, [applyLoadedState, passwordTouched, remoteInfo, setWebDavSyncSettingsMutation, settings, uiText]);
 
   const handleTest = useCallback(async () => {
     setActionState("testing");
@@ -556,10 +513,7 @@ function WebDavSyncSectionComponent() {
         settings,
         preserveEmptyPassword: !passwordTouched,
       });
-      showToast(
-        "success",
-        uiText("WebDAV 连接成功", "WebDAV connection succeeded", "WebDAV 接続に成功しました"),
-      );
+      showToast("success", uiText("WebDAV 连接成功", "WebDAV connection succeeded", "WebDAV 接続に成功しました"));
     } catch (error) {
       showToast("error", String(error));
     } finally {
@@ -570,9 +524,7 @@ function WebDavSyncSectionComponent() {
   const refreshRemoteInfo = useCallback(async () => {
     setActionState("refreshing");
     try {
-      const nextRemoteInfo = await invoke<WebDavRemoteInfo>(
-        "webdav_sync_fetch_remote_info",
-      );
+      const nextRemoteInfo = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info");
       startTransition(() => {
         setRemoteInfo(nextRemoteInfo);
       });
@@ -660,18 +612,24 @@ function WebDavSyncSectionComponent() {
     updateSettings("auto_sync", !settings.auto_sync);
   }, [settings.auto_sync, updateSettings]);
 
-  const handleValueChange = useCallback((fieldKey: WebDavTextFieldKey, value: string) => {
-    updateSettings(fieldKey, value);
-  }, [updateSettings]);
+  const handleValueChange = useCallback(
+    (fieldKey: WebDavTextFieldKey, value: string) => {
+      updateSettings(fieldKey, value);
+    },
+    [updateSettings],
+  );
 
-  const handlePresetChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
-    const nextPresetId = event.target.value;
-    const preset = WEBDAV_PRESETS.find((item) => item.id === nextPresetId);
-    setPresetId(nextPresetId);
-    if (preset && preset.id !== "custom") {
-      updateSettings("base_url", preset.baseUrl);
-    }
-  }, [updateSettings]);
+  const handlePresetChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const nextPresetId = event.target.value;
+      const preset = WEBDAV_PRESETS.find((item) => item.id === nextPresetId);
+      setPresetId(nextPresetId);
+      if (preset && preset.id !== "custom") {
+        updateSettings("base_url", preset.baseUrl);
+      }
+    },
+    [updateSettings],
+  );
 
   const handleSaveClick = useCallback(() => {
     void handleSave();
@@ -703,91 +661,103 @@ function WebDavSyncSectionComponent() {
     void handleCopy(remoteInfo.remote_url, "WebDAV URL");
   }, [handleCopy, remoteInfo?.remote_url]);
 
-  const remoteLayoutLabel = useMemo(() => (
-    remoteInfo?.layout
-      ? uiText(
-          `远端布局：${remoteInfo.layout}`,
-          `Remote layout: ${remoteInfo.layout}`,
-          `リモート構成: ${remoteInfo.layout}`,
-        )
-      : uiText("尚未获取远端信息", "Remote info not loaded yet", "リモート情報は未取得です")
-  ), [remoteInfo?.layout, uiText]);
+  const remoteLayoutLabel = useMemo(
+    () =>
+      remoteInfo?.layout
+        ? uiText(
+            `远端布局：${remoteInfo.layout}`,
+            `Remote layout: ${remoteInfo.layout}`,
+            `リモート構成: ${remoteInfo.layout}`,
+          )
+        : uiText("尚未获取远端信息", "Remote info not loaded yet", "リモート情報は未取得です"),
+    [remoteInfo?.layout, uiText],
+  );
 
-  const passwordPlaceholder = useMemo(() => (
-    settings.has_password && !passwordTouched
-      ? uiText(
-          "已保存，留空则保持不变",
-          "Saved already. Leave blank to keep it.",
-          "保存済みです。空欄なら保持します。",
-        )
-      : ""
-  ), [passwordTouched, settings.has_password, uiText]);
+  const passwordPlaceholder = useMemo(
+    () =>
+      settings.has_password && !passwordTouched
+        ? uiText(
+            "已保存，留空则保持不变",
+            "Saved already. Leave blank to keep it.",
+            "保存済みです。空欄なら保持します。",
+          )
+        : "",
+    [passwordTouched, settings.has_password, uiText],
+  );
 
-  const presetHint = useMemo(() => (
-    activePreset ? uiText(activePreset.hint, activePreset.hint, activePreset.hint) : ""
-  ), [activePreset, uiText]);
+  const presetHint = useMemo(
+    () => (activePreset ? uiText(activePreset.hint, activePreset.hint, activePreset.hint) : ""),
+    [activePreset, uiText],
+  );
 
-  const settingsFields = useMemo<WebDavTextFieldProps[]>(() => [
-    {
-      fieldKey: "base_url",
-      label: "WebDAV URL",
-      value: settings.base_url,
-      placeholder: "https://dav.example.com/...",
-      disabled: busy,
-      onValueChange: handleValueChange,
-    },
-    {
-      fieldKey: "username",
-      label: uiText("用户名", "Username", "ユーザー名"),
-      value: settings.username,
-      disabled: busy,
-      onValueChange: handleValueChange,
-    },
-    {
-      fieldKey: "password",
-      label: uiText("密码 / 应用密码", "Password / App Password", "パスワード / アプリパスワード"),
-      value: settings.password,
-      placeholder: passwordPlaceholder,
-      type: "password",
-      disabled: busy,
-      onValueChange: handleValueChange,
-    },
-    {
-      fieldKey: "remote_root",
-      label: uiText("远端根目录", "Remote Root", "リモートルート"),
-      value: settings.remote_root,
-      disabled: busy,
-      onValueChange: handleValueChange,
-    },
-    {
-      fieldKey: "profile",
-      label: uiText("Profile 名称", "Profile Name", "Profile 名"),
-      value: settings.profile,
-      disabled: busy,
-      onValueChange: handleValueChange,
-    },
-  ], [
-    busy,
-    handleValueChange,
-    passwordPlaceholder,
-    settings.base_url,
-    settings.password,
-    settings.profile,
-    settings.remote_root,
-    settings.username,
-    uiText,
-  ]);
+  const settingsFields = useMemo<WebDavTextFieldProps[]>(
+    () => [
+      {
+        fieldKey: "base_url",
+        label: "WebDAV URL",
+        value: settings.base_url,
+        placeholder: "https://dav.example.com/...",
+        disabled: busy,
+        onValueChange: handleValueChange,
+      },
+      {
+        fieldKey: "username",
+        label: uiText("用户名", "Username", "ユーザー名"),
+        value: settings.username,
+        disabled: busy,
+        onValueChange: handleValueChange,
+      },
+      {
+        fieldKey: "password",
+        label: uiText("密码 / 应用密码", "Password / App Password", "パスワード / アプリパスワード"),
+        value: settings.password,
+        placeholder: passwordPlaceholder,
+        type: "password",
+        disabled: busy,
+        onValueChange: handleValueChange,
+      },
+      {
+        fieldKey: "remote_root",
+        label: uiText("远端根目录", "Remote Root", "リモートルート"),
+        value: settings.remote_root,
+        disabled: busy,
+        onValueChange: handleValueChange,
+      },
+      {
+        fieldKey: "profile",
+        label: uiText("Profile 名称", "Profile Name", "Profile 名"),
+        value: settings.profile,
+        disabled: busy,
+        onValueChange: handleValueChange,
+      },
+    ],
+    [
+      busy,
+      handleValueChange,
+      passwordPlaceholder,
+      settings.base_url,
+      settings.password,
+      settings.profile,
+      settings.remote_root,
+      settings.username,
+      uiText,
+    ],
+  );
 
-  const remoteStatusIcon = remoteInfo?.exists
-    ? (remoteInfo.compatible ? CheckCircle : AlertCircle)
-    : Link2;
+  const remoteStatusIcon = remoteInfo?.exists ? (remoteInfo.compatible ? CheckCircle : AlertCircle) : Link2;
   const remoteStatusColor = remoteInfo?.exists
-    ? (remoteInfo.compatible ? "var(--success)" : "var(--warning)")
+    ? remoteInfo.compatible
+      ? "var(--success)"
+      : "var(--warning)"
     : "var(--text-secondary)";
   const remoteStatusValue = remoteInfo?.exists
     ? remoteInfo.compatible
       ? uiText("已发现可兼容快照", "Compatible snapshot found", "互換スナップショットを検出")
-      : uiText("发现远端快照，但版本不兼容", "Remote snapshot found but incompatible", "リモートスナップショットを検出しましたが互換性がありません")
+      : uiText(
+          "发现远端快照，但版本不兼容",
+          "Remote snapshot found but incompatible",
+          "リモートスナップショットを検出しましたが互換性がありません",
+        )
     : uiText("远端暂无快照", "No remote snapshot yet", "リモートにスナップショットはありません");
   const remoteStatusDetail = remoteInfo?.updated_at
     ? formatDateTime(remoteInfo.updated_at)
@@ -795,9 +765,10 @@ function WebDavSyncSectionComponent() {
   const remoteSizeDetail = remoteInfo?.app_version
     ? `CCHub ${remoteInfo.app_version}`
     : uiText("尚未获取版本信息", "Version info unavailable", "バージョン情報は未取得です");
-  const remotePathDetail = remoteInfo?.protocol_version || remoteInfo?.db_compat_version
-    ? `v${remoteInfo.protocol_version ?? "?"} / db-v${remoteInfo.db_compat_version ?? "?"}`
-    : uiText("未读取到版本层级", "Versioned path not loaded", "バージョン階層は未取得です");
+  const remotePathDetail =
+    remoteInfo?.protocol_version || remoteInfo?.db_compat_version
+      ? `v${remoteInfo.protocol_version ?? "?"} / db-v${remoteInfo.db_compat_version ?? "?"}`
+      : uiText("未读取到版本层级", "Versioned path not loaded", "バージョン階層は未取得です");
 
   return (
     <div className="section-card">
@@ -824,9 +795,7 @@ function WebDavSyncSectionComponent() {
       >
         <WebDavToggleCard
           title={uiText("同步总开关", "Sync Enabled", "同期の有効化")}
-          description={settings.enabled
-            ? uiText("已启用", "Enabled", "有効")
-            : uiText("未启用", "Disabled", "無効")}
+          description={settings.enabled ? uiText("已启用", "Enabled", "有効") : uiText("未启用", "Disabled", "無効")}
           enabled={settings.enabled}
           disabled={busy}
           onToggle={handleToggleEnabled}
@@ -834,9 +803,11 @@ function WebDavSyncSectionComponent() {
 
         <WebDavToggleCard
           title={uiText("定时自动同步", "Automatic Sync", "自動同期")}
-          description={settings.auto_sync
-            ? uiText("每 15 分钟尝试上传一次", "Attempt upload every 15 minutes", "15 分ごとにアップロードを試行")
-            : uiText("仅手动同步", "Manual sync only", "手動同期のみ")}
+          description={
+            settings.auto_sync
+              ? uiText("每 15 分钟尝试上传一次", "Attempt upload every 15 minutes", "15 分ごとにアップロードを試行")
+              : uiText("仅手动同步", "Manual sync only", "手動同期のみ")
+          }
           enabled={settings.auto_sync}
           disabled={busy}
           onToggle={handleToggleAutoSync}
@@ -861,21 +832,14 @@ function WebDavSyncSectionComponent() {
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 6 }}>
             {uiText("服务预设", "Service Preset", "サービスプリセット")}
           </div>
-          <select
-            className="input"
-            value={presetId}
-            disabled={busy}
-            onChange={handlePresetChange}
-          >
+          <select className="input" value={presetId} disabled={busy} onChange={handlePresetChange}>
             {WEBDAV_PRESETS.map((preset) => (
               <option key={preset.id} value={preset.id}>
                 {preset.label}
               </option>
             ))}
           </select>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-            {presetHint}
-          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>{presetHint}</div>
         </div>
 
         {settingsFields.map((field) => (
@@ -894,9 +858,11 @@ function WebDavSyncSectionComponent() {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         <WebDavActionButton
-          label={actionState === "saving"
-            ? uiText("保存中...", "Saving...", "保存中...")
-            : uiText("保存设置", "Save Settings", "設定を保存")}
+          label={
+            actionState === "saving"
+              ? uiText("保存中...", "Saving...", "保存中...")
+              : uiText("保存设置", "Save Settings", "設定を保存")
+          }
           loading={actionState === "saving"}
           disabled={busy}
           icon={Save}
@@ -904,36 +870,44 @@ function WebDavSyncSectionComponent() {
           onClick={handleSaveClick}
         />
         <WebDavActionButton
-          label={actionState === "testing"
-            ? uiText("测试中...", "Testing...", "テスト中...")
-            : uiText("测试连接", "Test Connection", "接続テスト")}
+          label={
+            actionState === "testing"
+              ? uiText("测试中...", "Testing...", "テスト中...")
+              : uiText("测试连接", "Test Connection", "接続テスト")
+          }
           loading={actionState === "testing"}
           disabled={busy}
           icon={Wifi}
           onClick={handleTestClick}
         />
         <WebDavActionButton
-          label={actionState === "refreshing"
-            ? uiText("刷新中...", "Refreshing...", "更新中...")
-            : uiText("刷新远端", "Refresh Remote", "リモートを更新")}
+          label={
+            actionState === "refreshing"
+              ? uiText("刷新中...", "Refreshing...", "更新中...")
+              : uiText("刷新远端", "Refresh Remote", "リモートを更新")
+          }
           loading={actionState === "refreshing"}
           disabled={busy}
           icon={RefreshCw}
           onClick={handleRefreshRemoteClick}
         />
         <WebDavActionButton
-          label={actionState === "uploading"
-            ? uiText("上传中...", "Uploading...", "アップロード中...")
-            : uiText("上传当前快照", "Upload Snapshot", "現在のスナップショットをアップロード")}
+          label={
+            actionState === "uploading"
+              ? uiText("上传中...", "Uploading...", "アップロード中...")
+              : uiText("上传当前快照", "Upload Snapshot", "現在のスナップショットをアップロード")
+          }
           loading={actionState === "uploading"}
           disabled={busy}
           icon={Upload}
           onClick={handleUploadClick}
         />
         <WebDavActionButton
-          label={actionState === "downloading"
-            ? uiText("恢复中...", "Restoring...", "復元中...")
-            : uiText("从远端恢复", "Restore From Remote", "リモートから復元")}
+          label={
+            actionState === "downloading"
+              ? uiText("恢复中...", "Restoring...", "復元中...")
+              : uiText("从远端恢复", "Restore From Remote", "リモートから復元")
+          }
           loading={actionState === "downloading"}
           disabled={busy || !remoteInfo?.exists}
           icon={Download}

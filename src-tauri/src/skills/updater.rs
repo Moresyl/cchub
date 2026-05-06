@@ -46,11 +46,11 @@ fn reqwest_client() -> Result<reqwest::Client, String> {
         ACCEPT,
         HeaderValue::from_static("application/vnd.github+json"),
     );
-    reqwest::Client::builder()
-        .default_headers(headers)
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())
+    crate::shared::http_client::build_http_client_with_headers(
+        None,
+        headers,
+        std::time::Duration::from_secs(20),
+    )
 }
 
 pub fn sha256_hex(content: &str) -> String {
@@ -64,7 +64,9 @@ pub fn file_sha256(path: &Path) -> Result<String, String> {
     Ok(sha256_hex(&content))
 }
 
-pub fn load_skill_metadata_map(conn: &Connection) -> Result<HashMap<String, SkillSourceMetadata>, String> {
+pub fn load_skill_metadata_map(
+    conn: &Connection,
+) -> Result<HashMap<String, SkillSourceMetadata>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT COALESCE(file_path, id), source_url, baseline_sha256, latest_sha256, last_checked_at
@@ -156,7 +158,11 @@ pub fn persist_marketplace_skill_install(
     )
 }
 
-pub fn rename_skill_metadata(conn: &Connection, old_path: &str, new_path: &str) -> Result<(), String> {
+pub fn rename_skill_metadata(
+    conn: &Connection,
+    old_path: &str,
+    new_path: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE skills SET id = ?1, file_path = ?1 WHERE id = ?2 OR file_path = ?2",
         rusqlite::params![new_path, old_path],
@@ -231,21 +237,28 @@ async fn fetch_github_tree_content(
     branch: &str,
     path: &str,
 ) -> Result<String, String> {
-    let api_url = if path.is_empty() {
-        format!("https://api.github.com/repos/{owner}/{repo}/contents?ref={branch}")
-    } else {
-        format!("https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}")
-    };
-    let payload = client
-        .get(&api_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json::<GitHubContentResponse>()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut last_error = String::new();
+    let mut payload = None;
+    for api_url in crate::shared::github_urls::contents_api_urls(owner, repo, branch, path) {
+        match client.get(&api_url).send().await {
+            Ok(response) if response.status().is_success() => {
+                payload = Some(
+                    response
+                        .json::<GitHubContentResponse>()
+                        .await
+                        .map_err(|e| e.to_string())?,
+                );
+                break;
+            }
+            Ok(response) => {
+                last_error = format!("HTTP {} from {}", response.status(), api_url);
+            }
+            Err(error) => {
+                last_error = format!("Request failed for {}: {}", api_url, error);
+            }
+        }
+    }
+    let payload = payload.ok_or_else(|| format!("Failed to fetch GitHub content: {last_error}"))?;
 
     match payload {
         GitHubContentResponse::File(entry) => {
@@ -279,7 +292,9 @@ async fn fetch_github_tree_content(
             });
 
             if markdown_entries.is_empty() {
-                return Err("No markdown files were found in the GitHub skill directory".to_string());
+                return Err(
+                    "No markdown files were found in the GitHub skill directory".to_string()
+                );
             }
 
             let mut merged = String::new();

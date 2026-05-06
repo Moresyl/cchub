@@ -102,9 +102,12 @@ pub struct OpenClawHealthWarning {
 pub fn get_env_config() -> Result<OpenClawEnvConfig, String> {
     let config = read_config()?;
     match config.get("env") {
-        Some(env_val) => serde_json::from_value(env_val.clone())
-            .map_err(|e| format!("解析 env 配置失败: {e}")),
-        None => Ok(OpenClawEnvConfig { vars: HashMap::new() }),
+        Some(env_val) => {
+            serde_json::from_value(env_val.clone()).map_err(|e| format!("解析 env 配置失败: {e}"))
+        }
+        None => Ok(OpenClawEnvConfig {
+            vars: HashMap::new(),
+        }),
     }
 }
 
@@ -197,7 +200,11 @@ pub fn scan_health() -> Result<Vec<OpenClawHealthWarning>, String> {
 
     let mut warnings = Vec::new();
 
-    if let Some(providers) = config.get("models").and_then(|m| m.get("providers")).and_then(|p| p.as_object()) {
+    if let Some(providers) = config
+        .get("models")
+        .and_then(|m| m.get("providers"))
+        .and_then(|p| p.as_object())
+    {
         for (name, provider) in providers {
             if provider.get("baseUrl").and_then(|v| v.as_str()).is_none()
                 && provider.get("base_url").and_then(|v| v.as_str()).is_none()

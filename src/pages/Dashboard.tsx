@@ -1,23 +1,24 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { memo, startTransition, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Plug, Zap, Package, Monitor, Terminal, Code, Wind, Activity, ArrowRight, Shield, Layers } from "lucide-react";
 import { t, getLocale } from "../lib/i18n";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  fetchMcpServersPageData,
-  fetchSkillsPageData,
-  useDetectTools,
-  queryKeys,
-} from "../hooks/queries";
+import { fetchMcpServersPageData, fetchSkillsPageData, useDetectTools, queryKeys } from "../hooks/queries";
 import DashboardToolChip from "../components/DashboardToolChip";
 import DashboardHermesRootOverride from "../components/DashboardHermesRootOverride";
 import DashboardServerRow, { type DashboardServerRowServer } from "../components/DashboardServerRow";
 import DashboardSkillRow, { type DashboardSkillRowSkill } from "../components/DashboardSkillRow";
+import LoadingState from "../components/states/LoadingState";
 
 type McpServer = DashboardServerRowServer;
 type Skill = DashboardSkillRowSkill;
-interface Plugin { id: string; name: string; description: string | null; }
+interface Plugin {
+  id: string;
+  name: string;
+  description: string | null;
+}
 const TOOL_ICONS: Record<string, typeof Monitor> = { claude: Terminal, cursor: Code, windsurf: Wind, codex: Monitor };
 
 export default function Dashboard() {
@@ -31,9 +32,8 @@ export default function Dashboard() {
   const { data: tools = [], refetch: refetchTools } = useDetectTools();
   const i = t();
   const locale = getLocale();
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  const uiText = (zhText: string, enText: string, jaText?: string) =>
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +118,7 @@ export default function Dashboard() {
   const openSecurity = useCallback(() => navigate("/security"), [navigate]);
 
   if (loading) {
-    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.dashboard.scanning}</span></div>;
+    return <LoadingState label={i.dashboard.scanning} />;
   }
 
   const installedTools = tools.filter((t) => t.installed);
@@ -139,7 +139,7 @@ export default function Dashboard() {
         <StatCard
           label={i.dashboard.skills}
           value={skills.length}
-          sub={`${skills.filter(s => s.plugin_id).length} ${uiText("来自插件", "from plugins", "プラグイン由来")}`}
+          sub={`${skills.filter((s) => s.plugin_id).length} ${uiText("来自插件", "from plugins", "プラグイン由来")}`}
           icon={Zap}
           color="var(--text-secondary)"
           onClick={openSkills}
@@ -165,7 +165,15 @@ export default function Dashboard() {
       {installedTools.length > 0 && (
         <div className="section-card" style={{ marginBottom: 24, padding: 18 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+              }}
+            >
               {i.skills.detectedTools}
             </span>
           </div>
@@ -197,7 +205,8 @@ export default function Dashboard() {
               {i.dashboard.recentMcp}
             </div>
             <button className="btn btn-ghost btn-xs" onClick={openMcpServers} style={{ gap: 4 }}>
-              {uiText("查看全部", "View all", "すべて表示")}<ArrowRight size={12} />
+              {uiText("查看全部", "View all", "すべて表示")}
+              <ArrowRight size={12} />
             </button>
           </div>
           {servers.length === 0 ? (
@@ -230,7 +239,8 @@ export default function Dashboard() {
               {i.dashboard.recentSkills}
             </div>
             <button className="btn btn-ghost btn-xs" onClick={openSkills} style={{ gap: 4 }}>
-              {uiText("查看全部", "View all", "すべて表示")}<ArrowRight size={12} />
+              {uiText("查看全部", "View all", "すべて表示")}
+              <ArrowRight size={12} />
             </button>
           </div>
           {skills.length === 0 ? (
@@ -238,10 +248,7 @@ export default function Dashboard() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {skills.slice(0, 3).map((s) => (
-                <DashboardSkillRow
-                  key={s.id}
-                  skill={s}
-                />
+                <DashboardSkillRow key={s.id} skill={s} />
               ))}
               {skills.length > 3 && (
                 <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "8px 0" }}>
@@ -284,8 +291,20 @@ export default function Dashboard() {
   );
 }
 
-const StatCard = memo(function StatCard({ label, value, sub, icon: Icon, color, onClick }: {
-  label: string; value: number; sub?: string; icon: typeof Plug; color: string; onClick?: () => void;
+const StatCard = memo(function StatCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  color,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  sub?: string;
+  icon: typeof Plug;
+  color: string;
+  onClick?: () => void;
 }) {
   return (
     <div className="stat-card" onClick={onClick} style={{ cursor: onClick ? "pointer" : undefined }}>
@@ -301,8 +320,16 @@ const StatCard = memo(function StatCard({ label, value, sub, icon: Icon, color, 
   );
 });
 
-const QuickAction = memo(function QuickAction({ icon: Icon, label, desc, onClick }: {
-  icon: typeof Plug; label: string; desc: string; onClick: () => void;
+const QuickAction = memo(function QuickAction({
+  icon: Icon,
+  label,
+  desc,
+  onClick,
+}: {
+  icon: typeof Plug;
+  label: string;
+  desc: string;
+  onClick: () => void;
 }) {
   return (
     <div className="card card-interactive" style={{ padding: "18px 20px", cursor: "pointer" }} onClick={onClick}>

@@ -21,7 +21,6 @@ fn filter_recursive(value: Value, whitelist: &HashSet<&str>) -> Value {
                 .into_iter()
                 .filter_map(|(key, val)| {
                     if key.starts_with('_') && !whitelist.contains(key.as_str()) {
-
                         None
                     } else {
                         Some((key, filter_recursive(val, whitelist)))
@@ -30,9 +29,11 @@ fn filter_recursive(value: Value, whitelist: &HashSet<&str>) -> Value {
                 .collect();
             Value::Object(filtered)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.into_iter().map(|v| filter_recursive(v, whitelist)).collect())
-        }
+        Value::Array(arr) => Value::Array(
+            arr.into_iter()
+                .map(|v| filter_recursive(v, whitelist))
+                .collect(),
+        ),
         other => other,
     }
 }

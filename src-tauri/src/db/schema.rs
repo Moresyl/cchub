@@ -212,3 +212,45 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table_exists(conn: &Connection, table_name: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [table_name],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    }
+
+    fn column_exists(conn: &Connection, table_name: &str, column_name: &str) -> bool {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table_name})"))
+            .unwrap();
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        columns.iter().any(|column| column == column_name)
+    }
+
+    #[test]
+    fn run_migrations_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+
+        assert!(table_exists(&conn, "app_settings"));
+        assert!(table_exists(&conn, "config_profiles"));
+        assert!(table_exists(&conn, "proxy_request_logs"));
+        assert!(column_exists(&conn, "mcp_servers", "config_path"));
+        assert!(column_exists(&conn, "config_profiles", "source_type"));
+        assert!(column_exists(&conn, "skills", "last_checked_at"));
+    }
+}

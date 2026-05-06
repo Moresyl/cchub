@@ -1,19 +1,14 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  AlertTriangle,
-  Bot,
-  Loader2,
-  Plus,
-  Save,
-  Settings2,
-  Shield,
-  Trash2,
-  Wrench,
-  X,
-} from "lucide-react";
+import { AlertTriangle, Bot, Loader2, Plus, Save, Settings2, Shield, Trash2, Wrench, X } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
+import LoadingState from "../components/states/LoadingState";
+import {
+  useSetOpenClawAgentsDefaultsMutation,
+  useSetOpenClawEnvMutation,
+  useSetOpenClawToolsMutation,
+} from "../hooks/mutations";
 
 type Tab = "env" | "tools" | "agents";
 
@@ -72,23 +67,23 @@ function OpenClaw() {
   }
 
   if (loading) {
-    return (
-      <div className="loading-center">
-        <div className="spinner" />
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          {i.openClaw.loading}
-        </span>
-      </div>
-    );
+    return <LoadingState label={i.openClaw.loading} />;
   }
 
   if (!status?.installed) {
     return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+        }}
+      >
         <Bot size={40} style={{ color: "var(--text-muted)" }} />
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-          {i.openClaw.notInstalled}
-        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{i.openClaw.notInstalled}</div>
         <div style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: 400, textAlign: "center" }}>
           {i.openClaw.notInstalledDesc}
         </div>
@@ -110,7 +105,20 @@ function OpenClaw() {
       {warnings.length > 0 && (
         <div style={{ padding: "0 20px 12px" }}>
           {warnings.map((w, idx) => (
-            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 6, background: "var(--warning-bg, rgba(234, 179, 8, 0.08))", border: "1px solid var(--warning, #eab308)", marginBottom: 6, fontSize: 12 }}>
+            <div
+              key={idx}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "6px 10px",
+                borderRadius: 6,
+                background: "var(--warning-bg, rgba(234, 179, 8, 0.08))",
+                border: "1px solid var(--warning, #eab308)",
+                marginBottom: 6,
+                fontSize: 12,
+              }}
+            >
               <AlertTriangle size={13} style={{ color: "var(--warning)", flexShrink: 0 }} />
               <span style={{ color: "var(--text-secondary)" }}>{w.message}</span>
               {w.path && <code style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: "auto" }}>{w.path}</code>}
@@ -121,11 +129,11 @@ function OpenClaw() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, padding: "0 20px 12px", borderBottom: "1px solid var(--border-default)" }}>
-        {([
+        {[
           { key: "env" as Tab, icon: Settings2, label: i.openClaw.envTab },
           { key: "tools" as Tab, icon: Wrench, label: i.openClaw.toolsTab },
           { key: "agents" as Tab, icon: Shield, label: i.openClaw.agentsTab },
-        ]).map(({ key, icon: Icon, label }) => (
+        ].map(({ key, icon: Icon, label }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -155,6 +163,7 @@ function EnvPanel() {
   const [vars, setVars] = useState<Array<{ key: string; value: string }>>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const setOpenClawEnvMutation = useSetOpenClawEnvMutation();
 
   useEffect(() => {
     void loadEnv();
@@ -182,7 +191,7 @@ function EnvPanel() {
       for (const { key, value } of vars) {
         if (key.trim()) envObj[key.trim()] = value;
       }
-      await invoke("set_openclaw_env", { env: envObj });
+      await setOpenClawEnvMutation.mutateAsync({ env: envObj });
       showToast("success", i.openClaw.saveSuccess);
     } catch (e) {
       showToast("error", `${i.openClaw.saveFailed}: ${e}`);
@@ -200,16 +209,14 @@ function EnvPanel() {
   }
 
   function updateVar(idx: number, field: "key" | "value", val: string) {
-    setVars(vars.map((v, i) => i === idx ? { ...v, [field]: val } : v));
+    setVars(vars.map((v, i) => (i === idx ? { ...v, [field]: val } : v)));
   }
 
   if (!loaded) return <LoadingSpinner />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>
-        {i.openClaw.envDesc}
-      </div>
+      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>{i.openClaw.envDesc}</div>
 
       {vars.map((v, idx) => (
         <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -234,7 +241,11 @@ function EnvPanel() {
       ))}
 
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="btn btn-secondary btn-sm" onClick={addVar} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={addVar}
+          style={{ display: "flex", alignItems: "center", gap: 5 }}
+        >
           <Plus size={13} />
           {i.openClaw.addVar}
         </button>
@@ -261,6 +272,7 @@ function ToolsPanel() {
   const [saving, setSaving] = useState(false);
   const [newAllow, setNewAllow] = useState("");
   const [newDeny, setNewDeny] = useState("");
+  const setOpenClawToolsMutation = useSetOpenClawToolsMutation();
 
   useEffect(() => {
     void loadTools();
@@ -286,7 +298,7 @@ function ToolsPanel() {
   async function handleSave() {
     setSaving(true);
     try {
-      await invoke("set_openclaw_tools", { tools: config });
+      await setOpenClawToolsMutation.mutateAsync({ tools: config });
       showToast("success", i.openClaw.saveSuccess);
     } catch (e) {
       showToast("error", `${i.openClaw.saveFailed}: ${e}`);
@@ -301,7 +313,9 @@ function ToolsPanel() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Profile select */}
       <div>
-        <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>
+        <label
+          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
+        >
           {i.openClaw.toolProfile}
         </label>
         <select
@@ -312,21 +326,46 @@ function ToolsPanel() {
         >
           <option value="">{i.openClaw.noProfile}</option>
           {TOOL_PROFILES.map((p) => (
-            <option key={p} value={p}>{p}</option>
+            <option key={p} value={p}>
+              {p}
+            </option>
           ))}
         </select>
       </div>
 
       {/* Allow list */}
       <div>
-        <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>
+        <label
+          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
+        >
           {i.openClaw.allowList}
         </label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
           {config.allow.map((item, idx) => (
-            <span key={idx} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 12, background: "var(--bg-app)", border: "1px solid var(--border-default)", fontSize: 11 }}>
+            <span
+              key={idx}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "2px 8px",
+                borderRadius: 12,
+                background: "var(--bg-app)",
+                border: "1px solid var(--border-default)",
+                fontSize: 11,
+              }}
+            >
               {item}
-              <button style={{ border: "none", background: "none", cursor: "pointer", padding: 0, color: "var(--text-muted)" }} onClick={() => setConfig({ ...config, allow: config.allow.filter((_, i) => i !== idx) })}>
+              <button
+                style={{
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  color: "var(--text-muted)",
+                }}
+                onClick={() => setConfig({ ...config, allow: config.allow.filter((_, i) => i !== idx) })}
+              >
                 <X size={10} />
               </button>
             </span>
@@ -346,12 +385,15 @@ function ToolsPanel() {
               }
             }}
           />
-          <button className="btn btn-secondary btn-sm" onClick={() => {
-            if (newAllow.trim()) {
-              setConfig({ ...config, allow: [...config.allow, newAllow.trim()] });
-              setNewAllow("");
-            }
-          }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              if (newAllow.trim()) {
+                setConfig({ ...config, allow: [...config.allow, newAllow.trim()] });
+                setNewAllow("");
+              }
+            }}
+          >
             <Plus size={13} />
           </button>
         </div>
@@ -359,14 +401,37 @@ function ToolsPanel() {
 
       {/* Deny list */}
       <div>
-        <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>
+        <label
+          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
+        >
           {i.openClaw.denyList}
         </label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
           {config.deny.map((item, idx) => (
-            <span key={idx} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 12, background: "var(--bg-app)", border: "1px solid var(--error, #ef4444)", fontSize: 11 }}>
+            <span
+              key={idx}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "2px 8px",
+                borderRadius: 12,
+                background: "var(--bg-app)",
+                border: "1px solid var(--error, #ef4444)",
+                fontSize: 11,
+              }}
+            >
               {item}
-              <button style={{ border: "none", background: "none", cursor: "pointer", padding: 0, color: "var(--text-muted)" }} onClick={() => setConfig({ ...config, deny: config.deny.filter((_, i) => i !== idx) })}>
+              <button
+                style={{
+                  border: "none",
+                  background: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  color: "var(--text-muted)",
+                }}
+                onClick={() => setConfig({ ...config, deny: config.deny.filter((_, i) => i !== idx) })}
+              >
                 <X size={10} />
               </button>
             </span>
@@ -386,12 +451,15 @@ function ToolsPanel() {
               }
             }}
           />
-          <button className="btn btn-secondary btn-sm" onClick={() => {
-            if (newDeny.trim()) {
-              setConfig({ ...config, deny: [...config.deny, newDeny.trim()] });
-              setNewDeny("");
-            }
-          }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              if (newDeny.trim()) {
+                setConfig({ ...config, deny: [...config.deny, newDeny.trim()] });
+                setNewDeny("");
+              }
+            }}
+          >
             <Plus size={13} />
           </button>
         </div>
@@ -419,6 +487,7 @@ function AgentsPanel() {
   const [defaults, setDefaults] = useState<AgentsDefaults>({ model: null, models: null });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const setOpenClawAgentsDefaultsMutation = useSetOpenClawAgentsDefaultsMutation();
 
   useEffect(() => {
     void loadAgents();
@@ -430,9 +499,7 @@ function AgentsPanel() {
       // Normalize: model.fallbacks may be undefined due to backend's
       // skip_serializing_if = "Vec::is_empty"; ensure it's at least [].
       setDefaults({
-        model: data?.model
-          ? { primary: data.model.primary ?? "", fallbacks: data.model.fallbacks ?? [] }
-          : null,
+        model: data?.model ? { primary: data.model.primary ?? "", fallbacks: data.model.fallbacks ?? [] } : null,
         models: data?.models ?? null,
       });
     } catch {
@@ -445,7 +512,7 @@ function AgentsPanel() {
   async function handleSave() {
     setSaving(true);
     try {
-      await invoke("set_openclaw_agents_defaults", { defaults });
+      await setOpenClawAgentsDefaultsMutation.mutateAsync({ defaults });
       showToast("success", i.openClaw.saveSuccess);
     } catch (e) {
       showToast("error", `${i.openClaw.saveFailed}: ${e}`);
@@ -462,7 +529,9 @@ function AgentsPanel() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Primary model */}
       <div>
-        <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>
+        <label
+          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
+        >
           {i.openClaw.primaryModel}
         </label>
         <input
@@ -476,7 +545,9 @@ function AgentsPanel() {
 
       {/* Fallbacks */}
       <div>
-        <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>
+        <label
+          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
+        >
           {i.openClaw.fallbackModels}
         </label>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -492,10 +563,13 @@ function AgentsPanel() {
                   setDefaults({ ...defaults, model: { ...model, fallbacks: newFallbacks } });
                 }}
               />
-              <button className="btn btn-ghost btn-icon-sm" onClick={() => {
-                const newFallbacks = model.fallbacks.filter((_, i) => i !== idx);
-                setDefaults({ ...defaults, model: { ...model, fallbacks: newFallbacks } });
-              }}>
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                onClick={() => {
+                  const newFallbacks = model.fallbacks.filter((_, i) => i !== idx);
+                  setDefaults({ ...defaults, model: { ...model, fallbacks: newFallbacks } });
+                }}
+              >
                 <Trash2 size={13} />
               </button>
             </div>
@@ -527,11 +601,7 @@ function AgentsPanel() {
 }
 
 function LoadingSpinner() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 120 }}>
-      <div className="spinner" />
-    </div>
-  );
+  return <LoadingState />;
 }
 
 export default OpenClaw;

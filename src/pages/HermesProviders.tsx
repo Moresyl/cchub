@@ -1,16 +1,16 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  Loader2,
-  Plus,
-  Save,
-  Trash2,
-  X,
-  Zap,
-} from "lucide-react";
+import { Loader2, Plus, Save, Trash2, X, Zap } from "lucide-react";
 import { t, tReplace } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { queryKeys } from "../hooks/queries";
+import {
+  useDeleteHermesProviderMutation,
+  useSaveHermesProviderMutation,
+  useSetHermesActiveProviderMutation,
+} from "../hooks/mutations";
 
 interface HermesProvider {
   name: string;
@@ -30,11 +30,22 @@ const API_MODES = [
 const KNOWN_PRESETS: Record<string, Partial<HermesProvider>> = {
   openrouter: { baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY", apiMode: "chat_completions" },
   anthropic: { baseUrl: "https://api.anthropic.com", apiKeyEnv: "ANTHROPIC_API_KEY", apiMode: "anthropic_messages" },
-  gemini: { baseUrl: "https://generativelanguage.googleapis.com/v1beta", apiKeyEnv: "GEMINI_API_KEY", apiMode: "chat_completions" },
+  gemini: {
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    apiMode: "chat_completions",
+  },
   nous: { baseUrl: "https://portal.nousresearch.com/v1", apiKeyEnv: "", apiMode: "chat_completions" },
   zai: { baseUrl: "https://api.z.ai/v1", apiKeyEnv: "GLM_API_KEY", apiMode: "chat_completions" },
   "kimi-coding": { baseUrl: "https://api.moonshot.ai/v1", apiKeyEnv: "KIMI_API_KEY", apiMode: "chat_completions" },
 };
+
+function upsertProvider(providers: HermesProvider[], provider: HermesProvider) {
+  const next = providers.some((item) => item.name === provider.name)
+    ? providers.map((item) => (item.name === provider.name ? provider : item))
+    : [...providers, provider];
+  return next;
+}
 
 function emptyProvider(): HermesProvider {
   return { name: "", baseUrl: "", apiMode: "chat_completions", model: "", apiKeyEnv: "" };
@@ -45,6 +56,7 @@ interface HermesProvidersProps {
 }
 
 export default function HermesProviders({ embedded = false }: HermesProvidersProps = {}) {
+  const queryClient = useQueryClient();
   const i = t();
   const [providers, setProviders] = useState<HermesProvider[]>([]);
   const [activeProvider, setActiveProvider] = useState("");
@@ -54,14 +66,22 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
   const [isNew, setIsNew] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<HermesProvider | null>(null);
+  const saveHermesProviderMutation = useSaveHermesProviderMutation();
+  const deleteHermesProviderMutation = useDeleteHermesProviderMutation();
+  const setHermesActiveProviderMutation = useSetHermesActiveProviderMutation();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [list, active] = await Promise.all([
-        invoke<HermesProvider[]>("list_hermes_providers"),
-        invoke<string>("get_hermes_active_provider"),
-      ]);
+      const [list, active] = await queryClient.fetchQuery({
+        queryKey: queryKeys.hermesProviders,
+        queryFn: () =>
+          Promise.all([
+            invoke<HermesProvider[]>("list_hermes_providers"),
+            invoke<string>("get_hermes_active_provider"),
+          ]),
+        staleTime: 30_000,
+      });
       setProviders(list);
       setActiveProvider(active);
       setNotInstalled(false);
@@ -75,9 +95,11 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [queryClient]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const handleAdd = useCallback(() => {
     setEditing(emptyProvider());
@@ -93,50 +115,60 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
     if (!editing || !editing.name.trim()) return;
     setSaving(true);
     try {
-      await invoke("save_hermes_provider", { provider: editing });
+      await saveHermesProviderMutation.mutateAsync({ provider: editing });
       showToast("success", i.hermesProviders.saveSuccess);
+      setProviders((current) => upsertProvider(current, editing));
       setEditing(null);
-      await load();
     } catch (e) {
       showToast("error", `${i.hermesProviders.saveFailed}: ${e}`);
     } finally {
       setSaving(false);
     }
-  }, [editing, i.hermesProviders, load]);
+  }, [editing, i.hermesProviders, saveHermesProviderMutation]);
 
-  const doDelete = useCallback(async (p: HermesProvider) => {
-    try {
-      await invoke("delete_hermes_provider", { name: p.name });
-      showToast("success", i.hermesProviders.deleteSuccess);
-      if (editing?.name === p.name) setEditing(null);
-      await load();
-    } catch (e) {
-      showToast("error", `${i.hermesProviders.deleteFailed}: ${e}`);
-    }
-  }, [editing, i.hermesProviders, load]);
+  const doDelete = useCallback(
+    async (p: HermesProvider) => {
+      try {
+        await deleteHermesProviderMutation.mutateAsync({ name: p.name });
+        showToast("success", i.hermesProviders.deleteSuccess);
+        if (editing?.name === p.name) setEditing(null);
+        setProviders((current) => current.filter((provider) => provider.name !== p.name));
+        setActiveProvider((current) => (current === p.name ? "" : current));
+      } catch (e) {
+        showToast("error", `${i.hermesProviders.deleteFailed}: ${e}`);
+      }
+    },
+    [deleteHermesProviderMutation, editing, i.hermesProviders],
+  );
 
-  const handleSetActive = useCallback(async (name: string) => {
-    try {
-      await invoke("set_hermes_active_provider", { name });
-      showToast("success", i.hermesProviders.setActiveSuccess);
-      setActiveProvider(name);
-    } catch (e) {
-      showToast("error", `${i.hermesProviders.setActiveFailed}: ${e}`);
-    }
-  }, [i.hermesProviders]);
+  const handleSetActive = useCallback(
+    async (name: string) => {
+      try {
+        await setHermesActiveProviderMutation.mutateAsync({ name });
+        showToast("success", i.hermesProviders.setActiveSuccess);
+        setActiveProvider(name);
+      } catch (e) {
+        showToast("error", `${i.hermesProviders.setActiveFailed}: ${e}`);
+      }
+    },
+    [i.hermesProviders, setHermesActiveProviderMutation],
+  );
 
-  const applyPreset = useCallback((presetName: string) => {
-    const preset = KNOWN_PRESETS[presetName];
-    if (preset && editing) {
-      setEditing({
-        ...editing,
-        name: editing.name || presetName,
-        baseUrl: preset.baseUrl || editing.baseUrl,
-        apiMode: preset.apiMode || editing.apiMode,
-        apiKeyEnv: preset.apiKeyEnv ?? editing.apiKeyEnv,
-      });
-    }
-  }, [editing]);
+  const applyPreset = useCallback(
+    (presetName: string) => {
+      const preset = KNOWN_PRESETS[presetName];
+      if (preset && editing) {
+        setEditing({
+          ...editing,
+          name: editing.name || presetName,
+          baseUrl: preset.baseUrl || editing.baseUrl,
+          apiMode: preset.apiMode || editing.apiMode,
+          apiKeyEnv: preset.apiKeyEnv ?? editing.apiKeyEnv,
+        });
+      }
+    },
+    [editing],
+  );
 
   if (loading) {
     return (
@@ -175,7 +207,11 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
             <h2 className="page-title">{i.hermesProviders.title}</h2>
             <p className="page-subtitle">{i.hermesProviders.subtitle}</p>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={handleAdd} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleAdd}
+            style={{ display: "flex", alignItems: "center", gap: 5 }}
+          >
             <Plus size={14} />
             {i.hermesProviders.addProvider}
           </button>
@@ -183,7 +219,11 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
       )}
       {embedded && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-          <button className="btn btn-primary btn-sm" onClick={handleAdd} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleAdd}
+            style={{ display: "flex", alignItems: "center", gap: 5 }}
+          >
             <Plus size={14} />
             {i.hermesProviders.addProvider}
           </button>
@@ -216,14 +256,16 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</span>
                     {activeProvider === p.name && (
-                      <span style={{
-                        fontSize: 10,
-                        padding: "1px 6px",
-                        borderRadius: 8,
-                        background: "var(--accent)",
-                        color: "#fff",
-                        fontWeight: 500,
-                      }}>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          padding: "1px 6px",
+                          borderRadius: 8,
+                          background: "var(--accent)",
+                          color: "#fff",
+                          fontWeight: 500,
+                        }}
+                      >
                         {i.hermesProviders.activeProvider}
                       </span>
                     )}
@@ -273,11 +315,7 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6 }}>Presets</div>
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                   {Object.keys(KNOWN_PRESETS).map((key) => (
-                    <button
-                      key={key}
-                      className="btn btn-secondary btn-xs"
-                      onClick={() => applyPreset(key)}
-                    >
+                    <button key={key} className="btn btn-secondary btn-xs" onClick={() => applyPreset(key)}>
                       {key}
                     </button>
                   ))}
@@ -304,7 +342,9 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
                   onChange={(e) => setEditing({ ...editing, apiMode: e.target.value })}
                 >
                   {API_MODES.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -361,7 +401,10 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
         message={pendingDelete ? tReplace(i.hermesProviders.confirmDelete, { name: pendingDelete.name }) : ""}
         confirmText={i.hermesProviders.deleteProvider}
         variant="destructive"
-        onConfirm={() => { if (pendingDelete) void doDelete(pendingDelete); setPendingDelete(null); }}
+        onConfirm={() => {
+          if (pendingDelete) void doDelete(pendingDelete);
+          setPendingDelete(null);
+        }}
         onCancel={() => setPendingDelete(null)}
       />
     </div>

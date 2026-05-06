@@ -1,12 +1,14 @@
-export type Theme = "dark" | "light";
+import { getPreferenceTheme, setPreferenceTheme } from "../stores/preferences";
+import type { Theme } from "../types/preferences";
+
+export type { Theme };
 
 export function getTheme(): Theme {
-  const saved = localStorage.getItem("cchub-theme") as Theme | null;
-  return saved === "light" ? "light" : "dark";
+  return getPreferenceTheme();
 }
 
 export function setTheme(theme: Theme) {
-  localStorage.setItem("cchub-theme", theme);
+  setPreferenceTheme(theme);
   applyTheme(theme);
 }
 

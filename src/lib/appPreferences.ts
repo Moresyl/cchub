@@ -97,7 +97,8 @@ export async function fetchVisibleApps(): Promise<ManagedAppId[]> {
   try {
     const visibleApps = await invoke<string[]>("get_visible_apps");
     return normalizeVisibleApps(visibleApps);
-  } catch {
+  } catch (error) {
+    console.warn("Failed to fetch visible apps", error);
     return [...DEFAULT_VISIBLE_APPS];
   }
 }

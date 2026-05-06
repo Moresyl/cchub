@@ -1,13 +1,7 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useCallback, useEffect, useMemo, useState, lazy, Suspense, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  Eye,
-  EyeOff,
-  FileText,
-  RefreshCw,
-  RotateCcw,
-  Save,
-} from "lucide-react";
+import { Eye, EyeOff, FileText, RefreshCw, RotateCcw, Save } from "lucide-react";
 import ConfigFilesRootTabs from "../components/ConfigFilesRootTabs";
 import ConfigFilesTreePanel from "../components/ConfigFilesTreePanel";
 import { getLocale, t } from "../lib/i18n";
@@ -61,10 +55,7 @@ interface CodexStructuredBackendConfig {
 }
 
 type EditorLanguage = "json" | "markdown" | "yaml" | "toml" | "text";
-type PendingAction =
-  | { type: "openFile"; path: string }
-  | { type: "switchRoot"; rootId: string }
-  | null;
+type PendingAction = { type: "openFile"; path: string } | { type: "switchRoot"; rootId: string } | null;
 
 function detectLanguage(path: string): EditorLanguage {
   const lower = path.toLowerCase();
@@ -89,20 +80,35 @@ export default function ConfigFiles() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
-  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw", "hermes"]);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>([
+    "claude",
+    "codex",
+    "gemini",
+    "opencode",
+    "openclaw",
+    "hermes",
+  ]);
   const [codexApiKey, setCodexApiKey] = useState("");
   const [showCodexApiKey, setShowCodexApiKey] = useState(false);
   const [claudeToggles, setClaudeToggles] = useState<ClaudeConfigToggles | null>(null);
   const [loadingClaudeToggles, setLoadingClaudeToggles] = useState(false);
   const [writingClaudeToggleKey, setWritingClaudeToggleKey] = useState<string | null>(null);
-  const { data: tree, isLoading: loadingTree, error: treeError, refetch: refetchTree } = useConfigFiles(activeRoot, Boolean(activeRoot));
+  const {
+    data: tree,
+    isLoading: loadingTree,
+    error: treeError,
+    refetch: refetchTree,
+  } = useConfigFiles(activeRoot, Boolean(activeRoot));
 
   const hasChanges = content !== originalContent;
   const visibleRoots = useMemo(
     () => roots.filter((root) => visibleApps.includes(root.id as ManagedAppId)),
     [roots, visibleApps],
   );
-  const activeRootMeta = useMemo(() => visibleRoots.find((root) => root.id === activeRoot) || null, [visibleRoots, activeRoot]);
+  const activeRootMeta = useMemo(
+    () => visibleRoots.find((root) => root.id === activeRoot) || null,
+    [visibleRoots, activeRoot],
+  );
   const activeLanguage = activeFile ? detectLanguage(activeFile) : "text";
   const structuredCodexFile = useMemo(() => isCodexConfigToml(activeRoot, activeFile), [activeRoot, activeFile]);
   const claudeQuickToggleFile = useMemo(
@@ -118,61 +124,68 @@ export default function ConfigFiles() {
     [codexStructuredConfig],
   );
 
-  const openFile = useCallback(async (path: string) => {
-    setLoadingFile(true);
-    setActiveFile(path);
-    try {
-      const nextStructuredCodex = isCodexConfigToml(activeRoot, path);
-      const nextClaudeQuickToggleFile = activeRoot === "claude" && /[\\/]settings\.local\.json$/i.test(path);
-      setLoadingClaudeToggles(nextClaudeQuickToggleFile);
-      const [nextContent, nextCodexStructured, nextClaudeToggles] = await Promise.all([
-        invoke<string>("read_config_file_content", { path }),
-        nextStructuredCodex
-          ? invoke<CodexStructuredBackendConfig>("read_codex_toml_structured", { path })
-          : Promise.resolve(null),
-        nextClaudeQuickToggleFile
-          ? invoke<ClaudeConfigToggles>("read_claude_config_toggles")
-          : Promise.resolve(null),
-      ]);
-      startTransition(() => {
-        setContent(nextContent);
-        setOriginalContent(nextContent);
-        setCodexApiKey(nextCodexStructured?.apiKey || "");
-        setShowCodexApiKey(false);
-        setClaudeToggles(nextClaudeToggles);
-      });
-    } catch (error) {
-      console.error(error);
-      showToast("error", String(error));
-      setContent("");
-      setOriginalContent("");
-      setCodexApiKey("");
-      setClaudeToggles(null);
-    } finally {
-      setLoadingFile(false);
-      setLoadingClaudeToggles(false);
-    }
-  }, [activeRoot]);
+  const openFile = useCallback(
+    async (path: string) => {
+      setLoadingFile(true);
+      setActiveFile(path);
+      try {
+        const nextStructuredCodex = isCodexConfigToml(activeRoot, path);
+        const nextClaudeQuickToggleFile = activeRoot === "claude" && /[\\/]settings\.local\.json$/i.test(path);
+        setLoadingClaudeToggles(nextClaudeQuickToggleFile);
+        const [nextContent, nextCodexStructured, nextClaudeToggles] = await Promise.all([
+          invoke<string>("read_config_file_content", { path }),
+          nextStructuredCodex
+            ? invoke<CodexStructuredBackendConfig>("read_codex_toml_structured", { path })
+            : Promise.resolve(null),
+          nextClaudeQuickToggleFile ? invoke<ClaudeConfigToggles>("read_claude_config_toggles") : Promise.resolve(null),
+        ]);
+        startTransition(() => {
+          setContent(nextContent);
+          setOriginalContent(nextContent);
+          setCodexApiKey(nextCodexStructured?.apiKey || "");
+          setShowCodexApiKey(false);
+          setClaudeToggles(nextClaudeToggles);
+        });
+      } catch (error) {
+        console.error(error);
+        showToast("error", String(error));
+        setContent("");
+        setOriginalContent("");
+        setCodexApiKey("");
+        setClaudeToggles(null);
+      } finally {
+        setLoadingFile(false);
+        setLoadingClaudeToggles(false);
+      }
+    },
+    [activeRoot],
+  );
 
   const toggleExpand = useCallback((path: string) => {
     setExpanded((current) => ({ ...current, [path]: !current[path] }));
   }, []);
 
-  const requestOpenFile = useCallback((path: string) => {
-    if (hasChanges) {
-      setPendingAction({ type: "openFile", path });
-      return;
-    }
-    void openFile(path);
-  }, [hasChanges, openFile]);
+  const requestOpenFile = useCallback(
+    (path: string) => {
+      if (hasChanges) {
+        setPendingAction({ type: "openFile", path });
+        return;
+      }
+      void openFile(path);
+    },
+    [hasChanges, openFile],
+  );
 
-  const requestSwitchRoot = useCallback((rootId: string) => {
-    if (hasChanges) {
-      setPendingAction({ type: "switchRoot", rootId });
-      return;
-    }
-    setActiveRoot(rootId);
-  }, [hasChanges]);
+  const requestSwitchRoot = useCallback(
+    (rootId: string) => {
+      if (hasChanges) {
+        setPendingAction({ type: "switchRoot", rootId });
+        return;
+      }
+      setActiveRoot(rootId);
+    },
+    [hasChanges],
+  );
 
   useEffect(() => {
     loadRoots();
@@ -223,7 +236,9 @@ export default function ConfigFiles() {
       ]);
       setRoots(result);
       setVisibleApps(nextVisibleApps);
-      const currentRoot = result.find((root) => root.id === activeRoot && root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
+      const currentRoot = result.find(
+        (root) => root.id === activeRoot && root.exists && nextVisibleApps.includes(root.id as ManagedAppId),
+      );
       const firstExisting = result.find((root) => root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
       setActiveRoot(currentRoot?.id || firstExisting?.id || "");
     } catch (error) {
@@ -339,7 +354,13 @@ export default function ConfigFiles() {
           <p className="page-subtitle">{i.configFiles.subtitle}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => { void loadRoots(); void refetchTree(); }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              void loadRoots();
+              void refetchTree();
+            }}
+          >
             <RefreshCw size={14} />
             {i.common.refresh}
           </button>
@@ -350,11 +371,7 @@ export default function ConfigFiles() {
         </div>
       </div>
 
-      <ConfigFilesRootTabs
-        roots={visibleRoots}
-        activeRoot={activeRoot}
-        onSelectRoot={requestSwitchRoot}
-      />
+      <ConfigFilesRootTabs roots={visibleRoots} activeRoot={activeRoot} onSelectRoot={requestSwitchRoot} />
 
       {activeRoot === "opencode" && <OmoConfigSection />}
       {activeRoot === "openclaw" && <OpenClawConfigSection />}
@@ -375,20 +392,50 @@ export default function ConfigFiles() {
         />
 
         <div className="card" style={{ minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border-default)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              padding: "14px 16px",
+              borderBottom: "1px solid var(--border-default)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
             <div style={{ minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
                   {activeFile ? activeFile.split(/[/\\]/).pop() : i.configFiles.selectFile}
                 </span>
                 {hasChanges && <span className="badge badge-warning">{i.configFiles.unsaved}</span>}
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  marginTop: 4,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {activeFile || i.configFiles.selectTip}
               </div>
             </div>
             {activeFile && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setContent(originalContent)} disabled={!hasChanges}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setContent(originalContent)}
+                disabled={!hasChanges}
+              >
                 <RotateCcw size={14} />
                 {i.configFiles.revert}
               </button>
@@ -401,8 +448,12 @@ export default function ConfigFiles() {
                 <div className="empty-icon">
                   <FileText size={28} style={{ color: "var(--text-muted)" }} />
                 </div>
-                <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>{i.configFiles.selectFile}</p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, maxWidth: 260 }}>{i.configFiles.selectTip}</p>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>
+                  {i.configFiles.selectFile}
+                </p>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, maxWidth: 260 }}>
+                  {i.configFiles.selectTip}
+                </p>
               </div>
             ) : loadingFile ? (
               <div className="loading-center" style={{ height: "100%" }}>
@@ -411,7 +462,16 @@ export default function ConfigFiles() {
             ) : structuredCodexFile && codexStructuredConfig ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <div className="section-card" style={{ padding: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      marginBottom: 14,
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700 }}>
                         {zh ? "Codex 结构化编辑" : "Codex Structured Editor"}
@@ -431,19 +491,39 @@ export default function ConfigFiles() {
                   {codexValidation && (codexValidation.errors.length > 0 || codexValidation.warnings.length > 0) && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
                       {codexValidation.errors.map((message) => (
-                        <div key={`error:${message}`} className="card" style={{ padding: "10px 12px", borderColor: "var(--danger)", background: "color-mix(in srgb, var(--danger) 8%, var(--bg-card))", fontSize: 12 }}>
+                        <div
+                          key={`error:${message}`}
+                          className="card"
+                          style={{
+                            padding: "10px 12px",
+                            borderColor: "var(--danger)",
+                            background: "color-mix(in srgb, var(--danger) 8%, var(--bg-card))",
+                            fontSize: 12,
+                          }}
+                        >
                           {zh ? `错误：${message}` : `Error: ${message}`}
                         </div>
                       ))}
                       {codexValidation.warnings.map((message) => (
-                        <div key={`warning:${message}`} className="card" style={{ padding: "10px 12px", borderColor: "var(--warning)", background: "color-mix(in srgb, var(--warning) 10%, var(--bg-card))", fontSize: 12 }}>
+                        <div
+                          key={`warning:${message}`}
+                          className="card"
+                          style={{
+                            padding: "10px 12px",
+                            borderColor: "var(--warning)",
+                            background: "color-mix(in srgb, var(--warning) 10%, var(--bg-card))",
+                            fontSize: 12,
+                          }}
+                        >
                           {zh ? `提示：${message}` : `Warning: ${message}`}
                         </div>
                       ))}
                     </div>
                   )}
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+                  <div
+                    style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}
+                  >
                     <div>
                       <label className="field-label">{zh ? "模型 Provider" : "Model Provider"}</label>
                       <input
@@ -509,7 +589,9 @@ export default function ConfigFiles() {
                         onChange={(event) => updateCodexConfig({ reasoningEffort: event.target.value })}
                       >
                         {["low", "medium", "high", "xhigh"].map((option) => (
-                          <option key={option} value={option}>{option}</option>
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
                         ))}
                       </select>
                     </div>
@@ -521,7 +603,9 @@ export default function ConfigFiles() {
                         onChange={(event) => updateCodexConfig({ wireApi: event.target.value })}
                       >
                         {["responses", "chat"].map((option) => (
-                          <option key={option} value={option}>{option}</option>
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
                         ))}
                       </select>
                     </div>
@@ -533,7 +617,9 @@ export default function ConfigFiles() {
                         onChange={(event) => updateCodexConfig({ personality: event.target.value })}
                       >
                         {["pragmatic", "full-auto", "auto-edit", "explain"].map((option) => (
-                          <option key={option} value={option}>{option}</option>
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
                         ))}
                       </select>
                     </div>
@@ -542,7 +628,9 @@ export default function ConfigFiles() {
                       <input
                         className="input"
                         value={codexStructuredConfig.modelContextWindow}
-                        onChange={(event) => updateCodexConfig({ modelContextWindow: event.target.value.replace(/[,_\s]/g, "") })}
+                        onChange={(event) =>
+                          updateCodexConfig({ modelContextWindow: event.target.value.replace(/[,_\s]/g, "") })
+                        }
                         placeholder="1000000"
                       />
                     </div>
@@ -551,7 +639,9 @@ export default function ConfigFiles() {
                       <input
                         className="input"
                         value={codexStructuredConfig.modelAutoCompactTokenLimit}
-                        onChange={(event) => updateCodexConfig({ modelAutoCompactTokenLimit: event.target.value.replace(/[,_\s]/g, "") })}
+                        onChange={(event) =>
+                          updateCodexConfig({ modelAutoCompactTokenLimit: event.target.value.replace(/[,_\s]/g, "") })
+                        }
                         placeholder="900000"
                       />
                     </div>
@@ -576,10 +666,12 @@ export default function ConfigFiles() {
                     </label>
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       {codexStructuredConfig.mcpServers.length > 0
-                        ? (zh
+                        ? zh
                           ? `已检测到 ${codexStructuredConfig.mcpServers.length} 个 MCP Server: ${codexStructuredConfig.mcpServers.join(", ")}`
-                          : `${codexStructuredConfig.mcpServers.length} MCP server(s): ${codexStructuredConfig.mcpServers.join(", ")}`)
-                        : (zh ? "当前未配置 MCP Server 表项。" : "No MCP server sections detected yet.")}
+                          : `${codexStructuredConfig.mcpServers.length} MCP server(s): ${codexStructuredConfig.mcpServers.join(", ")}`
+                        : zh
+                          ? "当前未配置 MCP Server 表项。"
+                          : "No MCP server sections detected yet."}
                     </div>
                   </div>
                 </div>
@@ -589,7 +681,16 @@ export default function ConfigFiles() {
             ) : claudeQuickToggleFile ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <div className="section-card" style={{ padding: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      marginBottom: 14,
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 700 }}>
                         {zh ? "Claude Quick Toggles" : "Claude Quick Toggles"}
@@ -609,8 +710,16 @@ export default function ConfigFiles() {
 
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {[
-                      { key: "hideAttribution", label: zh ? "Hide Attribution" : "Hide Attribution", checked: claudeToggles?.hideAttribution ?? false },
-                      { key: "enableTeammates", label: zh ? "Enable Teammates" : "Enable Teammates", checked: claudeToggles?.enableTeammates ?? false },
+                      {
+                        key: "hideAttribution",
+                        label: zh ? "Hide Attribution" : "Hide Attribution",
+                        checked: claudeToggles?.hideAttribution ?? false,
+                      },
+                      {
+                        key: "enableTeammates",
+                        label: zh ? "Enable Teammates" : "Enable Teammates",
+                        checked: claudeToggles?.enableTeammates ?? false,
+                      },
                       {
                         key: "maxThinkingTokens",
                         label: zh
@@ -618,7 +727,11 @@ export default function ConfigFiles() {
                           : `Max Thinking Tokens (${claudeToggles?.maxThinkingTokensValue || "32000"})`,
                         checked: claudeToggles?.maxThinkingTokens ?? false,
                       },
-                      { key: "enableToolSearch", label: zh ? "Enable Tool Search" : "Enable Tool Search", checked: claudeToggles?.enableToolSearch ?? false },
+                      {
+                        key: "enableToolSearch",
+                        label: zh ? "Enable Tool Search" : "Enable Tool Search",
+                        checked: claudeToggles?.enableToolSearch ?? false,
+                      },
                     ].map((toggle) => (
                       <label
                         key={toggle.key}
@@ -640,7 +753,9 @@ export default function ConfigFiles() {
                           onChange={(event) => void handleClaudeQuickToggle(toggle.key, event.target.checked)}
                         />
                         <span style={{ fontSize: 13 }}>{toggle.label}</span>
-                        {writingClaudeToggleKey === toggle.key && <div className="spinner" style={{ width: 12, height: 12, marginLeft: "auto" }} />}
+                        {writingClaudeToggleKey === toggle.key && (
+                          <div className="spinner" style={{ width: 12, height: 12, marginLeft: "auto" }} />
+                        )}
                       </label>
                     ))}
                   </div>
@@ -649,7 +764,13 @@ export default function ConfigFiles() {
                 <CodeEditor value={content} onChange={setContent} language={activeLanguage} minHeight={520} />
               </div>
             ) : activeLanguage === "markdown" ? (
-              <Suspense fallback={<div className="loading-center" style={{ height: "100%" }}><div className="spinner" /></div>}>
+              <Suspense
+                fallback={
+                  <div className="loading-center" style={{ height: "100%" }}>
+                    <div className="spinner" />
+                  </div>
+                }
+              >
                 <MarkdownEditor value={content} onChange={setContent} minHeight={520} />
               </Suspense>
             ) : (
@@ -662,7 +783,11 @@ export default function ConfigFiles() {
       <ConfirmDialog
         isOpen={!!pendingAction}
         title={zh ? "未保存的修改" : "Unsaved Changes"}
-        message={zh ? "当前文件有未保存修改，继续操作会丢失这些更改。" : "The current file has unsaved changes. Continuing will discard them."}
+        message={
+          zh
+            ? "当前文件有未保存修改，继续操作会丢失这些更改。"
+            : "The current file has unsaved changes. Continuing will discard them."
+        }
         confirmText={zh ? "继续" : "Continue"}
         cancelText={i.common.cancel}
         variant="info"

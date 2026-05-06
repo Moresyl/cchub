@@ -83,12 +83,15 @@ pub fn anthropic_to_gemini(body: Value) -> Result<(Value, String), String> {
     if let Some(stop) = body.get("stop_sequences").and_then(|s| s.as_array()) {
         gen_config["stopSequences"] = Value::Array(stop.clone());
     }
-    if gen_config.as_object().map_or(false, |o| !o.is_empty()) {
+    if gen_config.as_object().is_some_and(|o| !o.is_empty()) {
         gemini_body["generationConfig"] = gen_config;
     }
 
     // streaming check
-    let stream = body.get("stream").and_then(|s| s.as_bool()).unwrap_or(false);
+    let stream = body
+        .get("stream")
+        .and_then(|s| s.as_bool())
+        .unwrap_or(false);
     if stream {
         gemini_body["_stream"] = json!(true);
     }
@@ -147,7 +150,11 @@ pub fn gemini_to_anthropic(gemini_response: Value, model: &str) -> Result<Value,
     let has_tool_use = content
         .iter()
         .any(|c| c.get("type").and_then(|t| t.as_str()) == Some("tool_use"));
-    let actual_stop_reason = if has_tool_use { "tool_use" } else { stop_reason };
+    let actual_stop_reason = if has_tool_use {
+        "tool_use"
+    } else {
+        stop_reason
+    };
 
     let usage = gemini_response
         .get("usageMetadata")
@@ -200,11 +207,14 @@ fn extract_system_text(system: &Value) -> String {
         s if s.is_string() => s.as_str().unwrap_or("").to_string(),
         arr if arr.is_array() => arr
             .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-            .collect::<Vec<_>>()
-            .join("\n"),
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -234,7 +244,10 @@ fn convert_content_to_parts(content: Option<&Value>, role: &str) -> Vec<Value> {
                 }
             }
             "tool_use" if role == "assistant" => {
-                let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                let name = block
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("unknown");
                 let input = block.get("input").cloned().unwrap_or(json!({}));
                 parts.push(json!({
                     "functionCall": {
@@ -252,11 +265,14 @@ fn convert_content_to_parts(content: Option<&Value>, role: &str) -> Vec<Value> {
                     Some(c) if c.is_string() => c.as_str().unwrap_or("").to_string(),
                     Some(c) if c.is_array() => c
                         .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
+                        .map(|blocks| {
+                            blocks
+                                .iter()
+                                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .unwrap_or_default(),
                     _ => String::new(),
                 };
                 parts.push(json!({
@@ -455,8 +471,17 @@ mod tests {
 
     #[test]
     fn test_normalize_gemini_model() {
-        assert_eq!(normalize_gemini_model("gemini-2.5-flash"), "gemini-2.5-flash");
-        assert_eq!(normalize_gemini_model("models/gemini-2.5-pro"), "gemini-2.5-pro");
-        assert_eq!(normalize_gemini_model("/models/gemini-2.5-pro"), "gemini-2.5-pro");
+        assert_eq!(
+            normalize_gemini_model("gemini-2.5-flash"),
+            "gemini-2.5-flash"
+        );
+        assert_eq!(
+            normalize_gemini_model("models/gemini-2.5-pro"),
+            "gemini-2.5-pro"
+        );
+        assert_eq!(
+            normalize_gemini_model("/models/gemini-2.5-pro"),
+            "gemini-2.5-pro"
+        );
     }
 }

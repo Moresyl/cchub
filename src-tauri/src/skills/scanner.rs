@@ -4,7 +4,7 @@ use crate::db::models::{Plugin, Skill};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FolderNode {
@@ -339,7 +339,7 @@ fn parse_frontmatter(
     (name, description, trigger)
 }
 
-fn read_plugin_metadata(path: &PathBuf) -> (Option<String>, Option<String>, Option<String>) {
+fn read_plugin_metadata(path: &Path) -> (Option<String>, Option<String>, Option<String>) {
     let pkg_json = path.join("package.json");
     if pkg_json.exists() {
         if let Ok(content) = std::fs::read_to_string(&pkg_json) {

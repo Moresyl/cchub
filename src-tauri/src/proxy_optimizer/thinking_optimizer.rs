@@ -12,19 +12,15 @@ pub fn optimize(body: &mut Value, config: &OptimizerConfig) {
     };
 
     if model.contains("haiku") {
-
         return;
     }
 
     if model.contains("opus-4-7") || model.contains("opus-4-6") || model.contains("sonnet-4-6") {
-
         body["thinking"] = json!({"type": "adaptive"});
         body["output_config"] = json!({"effort": "max"});
         append_beta(body, "context-1m-2025-08-07");
         return;
     }
-
-
 
     let max_tokens = body
         .get("max_tokens")
@@ -70,10 +66,9 @@ fn append_beta(body: &mut Value, beta: &str) {
             if arr.iter().any(|v| v.as_str() == Some(beta)) {
                 return;
             }
-            body["anthropic_beta"]
-                .as_array_mut()
-                .unwrap()
-                .push(json!(beta));
+            if let Some(arr) = body["anthropic_beta"].as_array_mut() {
+                arr.push(json!(beta));
+            }
         }
         Some(Value::Null) | None => {
             body["anthropic_beta"] = json!([beta]);

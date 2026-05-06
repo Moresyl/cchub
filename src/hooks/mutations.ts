@@ -1,47 +1,203 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
-import type { Hello2ccConfigQueryResult, Hello2ccStatusQueryResult, HudStatusQueryResult } from "./queries";
-import { queryKeys } from "./queries";
-
-export interface ApplyConfigProfileMutationResult {
-  toolId: string;
-  profileId: string;
-  activeProfileIds: string[];
-  appliedAt: string;
-}
-
-export function useSetClaudeHudConfigMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (config: unknown) =>
-      invoke<HudStatusQueryResult>("set_claude_hud_config", { config }),
-    onSuccess: (status) => {
-      queryClient.setQueryData(queryKeys.hudStatus, status);
-    },
-  });
-}
-
-export function useSetHello2ccConfigMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (config: Hello2ccConfigQueryResult) =>
-      invoke<Hello2ccStatusQueryResult>("set_hello2cc_config", { config }),
-    onSuccess: (status) => {
-      queryClient.setQueryData(queryKeys.hello2ccStatus, status);
-    },
-  });
-}
-
-export function useApplyConfigProfileMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) =>
-      invoke<ApplyConfigProfileMutationResult>("apply_config_profile", { id }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.profiles });
-    },
-  });
-}
+export {
+  useApplyConfigProfileMutation,
+  useDeleteConfigProfileGroupMutation,
+  useDeleteConfigProfileGroupAndRefreshMutation,
+  useDeleteConfigProfileMutation,
+  useDeleteConfigProfileAndRefreshMutation,
+  useDeleteProviderConfigFragmentMutation,
+  useReorderConfigProfilesMutation,
+  useSaveConfigProfileMutation,
+  useSaveConfigProfileAndRefreshMutation,
+  useSaveProviderConfigFragmentMutation,
+  useSaveSharedConfigProfilesMutation,
+  useSaveSharedConfigProfilesAndRefreshMutation,
+  useUpdateConfigProfileMutation,
+  useUpdateConfigProfileAndRefreshMutation,
+  type ApplyConfigProfileMutationResult,
+  type DeleteConfigProfileGroupInput,
+  type DeleteConfigProfileInput,
+  type DeleteProviderConfigFragmentInput,
+  type ReorderConfigProfilesInput,
+  type SaveConfigProfileInput,
+  type SaveProviderConfigFragmentInput,
+  type SaveSharedConfigProfilesInput,
+  type UpdateConfigProfileInput,
+} from "./mutations/profile";
+export {
+  useDeleteSessionMutation,
+  useDeleteSessionsMutation,
+  type DeleteSessionMutationInput,
+  type DeleteSessionsMutationInput,
+} from "./mutations/sessions";
+export {
+  useInstallMcpServerMutation,
+  useToggleMcpServerMutation,
+  useUninstallMcpServerMutation,
+  useUpdateMcpServerConfigMutation,
+  type InstallMcpServerInput,
+  type ToggleMcpServerInput,
+  type UninstallMcpServerInput,
+  type UpdateMcpServerConfigInput,
+} from "./mutations/mcp";
+export {
+  useBatchUpdateSkillsMutation,
+  useCopySkillBetweenToolsMutation,
+  useDeletePluginMutation,
+  useDeleteSkillBackupMutation,
+  useImportSkillFileMutation,
+  useRemoveSyncedSkillMutation,
+  useRestoreSkillBackupMutation,
+  useToggleSkillFileMutation,
+  useUninstallSkillFileMutation,
+  useWriteSkillContentMutation,
+  type BatchUpdateSkillsInput,
+  type CopySkillBetweenToolsInput,
+  type DeletePluginInput,
+  type DeleteSkillBackupInput,
+  type ImportSkillFileInput,
+  type RemoveSyncedSkillInput,
+  type RestoreSkillBackupInput,
+  type ToggleSkillFileInput,
+  type UninstallSkillFileInput,
+  type WriteSkillContentInput,
+} from "./mutations/skills";
+export {
+  useDeleteHookFromSettingsMutation,
+  useSaveHookToSettingsMutation,
+  useUpdateHookInSettingsMutation,
+  type DeleteHookFromSettingsInput,
+  type RemapImportedProjectRootInput,
+  type SaveHookToSettingsInput,
+  type UpdateHookInput,
+} from "./mutations/hooks";
+export {
+  useSaveCustomPathMutation,
+  useSetLocalProviderProxySettingsMutation,
+  useSetLogPreferencesMutation,
+  useSetPreferredTerminalMutation,
+  useSetProxyMutation,
+  useSetSkillSyncMethodMutation,
+  useSetVisibleAppsMutation,
+  useSetWindowPreferencesMutation,
+  type SaveCustomPathInput,
+  type SetLocalProviderProxySettingsInput,
+  type SetLogPreferencesInput,
+  type SetPreferredTerminalInput,
+  type SetProxyInput,
+  type SetSkillSyncMethodInput,
+  type SetVisibleAppsInput,
+  type SetWindowPreferencesInput,
+} from "./mutations/settings";
+export {
+  useDeleteModelPricingMutation,
+  useSaveModelPricingMutation,
+  type DeleteModelPricingInput,
+  type ModelPricingDraftInput,
+  type SaveModelPricingInput,
+} from "./mutations/logs";
+export {
+  useCreateWorkspaceMutation,
+  useDeleteWorkspaceMutation,
+  useSwitchWorkspaceMutation,
+  useUpdateWorkspaceMutation,
+  type CreateWorkspaceInput,
+  type DeleteWorkspaceInput,
+  type SwitchWorkspaceInput,
+  type UpdateWorkspaceInput,
+} from "./mutations/workspaces";
+export {
+  useDeleteWorkflowMutation,
+  useImportWorkflowFileMutation,
+  useInstallWorkflowMutation,
+  useToggleWorkflowMutation,
+  useWriteWorkflowContentMutation,
+  type DeleteWorkflowInput,
+  type ImportWorkflowFileInput,
+  type InstallWorkflowInput,
+  type ToggleWorkflowInput,
+  type WriteWorkflowContentInput,
+} from "./mutations/workflows";
+export {
+  useCreateMcpClientMutation,
+  useDeleteMcpClientMutation,
+  useUpdateMcpClientAccessMutation,
+  type CreateMcpClientInput,
+  type DeleteMcpClientInput,
+  type UpdateMcpClientAccessInput,
+} from "./mutations/mcpClients";
+export {
+  useDeleteHermesProviderMutation,
+  useSaveHermesProviderMutation,
+  useSetHermesActiveProviderMutation,
+  type DeleteHermesProviderInput,
+  type HermesProviderInput,
+  type SaveHermesProviderInput,
+  type SetHermesActiveProviderInput,
+} from "./mutations/hermesProviders";
+export {
+  useSaveHermesMemoryContentMutation,
+  useToggleHermesMemoryEnabledMutation,
+  type HermesMemoryKind,
+  type SaveHermesMemoryContentInput,
+  type ToggleHermesMemoryEnabledInput,
+} from "./mutations/hermesMemory";
+export {
+  useActivatePromptPresetMutation,
+  useCreateInstructionDocFileMutation,
+  useDeleteClaudeMdFileMutation,
+  useDeletePromptPresetMutation,
+  useDisableClaudeMdFileMutation,
+  useEnableClaudeMdFileMutation,
+  useSavePromptPresetMutation,
+  useSavePromptPresetAndRefreshMutation,
+  useWriteClaudeMdContentMutation,
+  type ActivatePromptPresetInput,
+  type CreateInstructionDocFileInput,
+  type DeleteClaudeMdFileInput,
+  type DeletePromptPresetInput,
+  type SavePromptPresetInput,
+  type ToggleClaudeMdFileInput,
+  type WriteClaudeMdContentInput,
+} from "./mutations/claudeMd";
+export {
+  useClearAutopilotLogsMutation,
+  useDeleteAutopilotLogMutation,
+  type ClearAutopilotLogsResult,
+  type DeleteAutopilotLogInput,
+} from "./mutations/autopilot";
+export { useSaveProxyAdvancedConfigMutation, type SaveProxyAdvancedConfigInput } from "./mutations/proxyAdvanced";
+export {
+  useSetOpenClawAgentsDefaultsMutation,
+  useSetOpenClawEnvMutation,
+  useSetOpenClawToolsMutation,
+  type SetOpenClawAgentsDefaultsInput,
+  type SetOpenClawEnvInput,
+  type SetOpenClawToolsInput,
+} from "./mutations/openClaw";
+export {
+  useSetClaudeHudConfigMutation,
+  useSetClaudeSettingMutation,
+  useSetClaudeStatuslineMutation,
+  useSetCodexSettingMutation,
+  useSetHello2ccConfigMutation,
+  useSetHello2ccEnabledMutation,
+  useUpdateClaudeHudMutation,
+  useUpdateHello2ccMutation,
+  type SetClaudeHudConfigInput,
+  type SetClaudeSettingInput,
+  type SetClaudeStatuslineInput,
+  type SetCodexSettingInput,
+  type SetHello2ccConfigInput,
+  type SetHello2ccEnabledInput,
+  type UpdateClaudeHudResult,
+} from "./mutations/tools";
+export { useSetWebDavSyncSettingsMutation, type SetWebDavSyncSettingsInput } from "./mutations/webdav";
+export {
+  useDeleteManagedBackupMutation,
+  useSaveBackupToFileMutation,
+  useSetBackupPreferencesMutation,
+  type DeleteManagedBackupInput,
+  type SetBackupPreferencesInput,
+} from "./mutations/backups";
+export { useSetWelcomeCompletedMutation, type SetWelcomeCompletedInput } from "./mutations/app";
+export { useSetHermesRootOverrideMutation, type SetHermesRootOverrideInput } from "./mutations/hermesRoot";

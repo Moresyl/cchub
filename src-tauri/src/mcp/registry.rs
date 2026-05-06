@@ -1,35 +1,11 @@
 use crate::mcp::config;
+use crate::shared::{github_urls, http_client};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-/// Build an HTTP client that respects proxy settings (env vars + system proxy)
-fn build_http_client() -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .user_agent("CCHub")
-        .timeout(std::time::Duration::from_secs(30));
-
-    // Check for proxy from env vars (set by our set_proxy command)
-    let proxy_url = std::env::var("HTTPS_PROXY")
-        .or_else(|_| std::env::var("https_proxy"))
-        .or_else(|_| std::env::var("HTTP_PROXY"))
-        .or_else(|_| std::env::var("http_proxy"))
-        .ok();
-
-    if let Some(ref url) = proxy_url {
-        if !url.trim().is_empty() {
-            match reqwest::Proxy::all(url) {
-                Ok(proxy) => {
-                    builder = builder.proxy(proxy);
-                }
-                Err(e) => {
-                    eprintln!("Invalid proxy URL '{}': {}", url, e);
-                }
-            }
-        }
-    }
-
-    builder
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))
+/// Build an HTTP client with the app-managed proxy applied per client.
+fn build_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
+    http_client::build_http_client(proxy_url, Some("CCHub"), Duration::from_secs(30))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -68,8 +44,9 @@ pub async fn fetch_skillhub_catalog(
     page: u32,
     limit: u32,
     category: &str,
+    proxy_url: Option<&str>,
 ) -> Result<(Vec<SkillRegistryEntry>, usize), String> {
-    let client = build_http_client()?;
+    let client = build_http_client(proxy_url)?;
 
     let mut url = format!(
         "https://www.skillhub.club/api/v1/desktop/catalog?page={}&limit={}",
@@ -165,8 +142,12 @@ pub async fn fetch_skillhub_catalog(
 }
 
 /// Search skills via SkillHub API
-pub async fn search_skillhub(query: &str, limit: u32) -> Result<Vec<SkillRegistryEntry>, String> {
-    let client = build_http_client()?;
+pub async fn search_skillhub(
+    query: &str,
+    limit: u32,
+    proxy_url: Option<&str>,
+) -> Result<Vec<SkillRegistryEntry>, String> {
+    let client = build_http_client(proxy_url)?;
 
     let url = format!(
         "https://www.skillhub.club/api/v1/desktop/search?q={}&limit={}",
@@ -237,8 +218,11 @@ pub async fn search_skillhub(query: &str, limit: u32) -> Result<Vec<SkillRegistr
 }
 
 /// Get full skill content from SkillHub API
-pub async fn fetch_skillhub_skill_content(slug: &str) -> Result<String, String> {
-    let client = build_http_client()?;
+pub async fn fetch_skillhub_skill_content(
+    slug: &str,
+    proxy_url: Option<&str>,
+) -> Result<String, String> {
+    let client = build_http_client(proxy_url)?;
     let url = format!("https://www.skillhub.club/api/v1/desktop/skills/{}", slug);
     let resp = client
         .get(&url)
@@ -268,8 +252,11 @@ pub async fn fetch_skillhub_skill_content(slug: &str) -> Result<String, String> 
     Ok(skill_md)
 }
 
-pub async fn fetch_custom_source(url: &str) -> Result<Vec<SkillRegistryEntry>, String> {
-    let client = build_http_client()?;
+pub async fn fetch_custom_source(
+    url: &str,
+    proxy_url: Option<&str>,
+) -> Result<Vec<SkillRegistryEntry>, String> {
+    let client = build_http_client(proxy_url)?;
     let resp = client
         .get(url)
         .send()
@@ -289,8 +276,9 @@ pub async fn fetch_skills_from_github_repo(
     owner: &str,
     repo: &str,
     branch: &str,
+    proxy_url: Option<&str>,
 ) -> Result<Vec<SkillRegistryEntry>, String> {
-    let client = build_http_client()?;
+    let client = build_http_client(proxy_url)?;
     let mut all_skills = Vec::new();
 
     // Try branches in order: specified branch, main, master
@@ -310,17 +298,18 @@ pub async fn fetch_skills_from_github_repo(
     let mut download_ok = false;
     let mut resolved_branch = branch.to_string();
     for b in &branches {
-        let url = format!(
-            "https://github.com/{}/{}/archive/refs/heads/{}.zip",
-            owner, repo, b
-        );
-        match download_and_extract_zip(&client, &url, temp_dir.path()).await {
-            Ok(_) => {
-                download_ok = true;
-                resolved_branch = b.clone();
-                break;
+        for url in github_urls::archive_branch_zip_urls(owner, repo, b) {
+            match download_and_extract_zip(&client, &url, temp_dir.path()).await {
+                Ok(_) => {
+                    download_ok = true;
+                    resolved_branch = b.clone();
+                    break;
+                }
+                Err(_) => continue,
             }
-            Err(_) => continue,
+        }
+        if download_ok {
+            break;
         }
     }
 
@@ -442,14 +431,12 @@ fn scan_skills_recursive(
                 .to_string_lossy()
                 .to_string();
 
-            let (name, desc) = parse_skill_frontmatter(
-                &content,
-                &dir_name
-                    .replace('\\', "/")
-                    .split('/')
-                    .last()
-                    .unwrap_or(&dir_name),
-            );
+            let normalized_dir_name = dir_name.replace('\\', "/");
+            let fallback_name = normalized_dir_name
+                .split('/')
+                .next_back()
+                .unwrap_or(&dir_name);
+            let (name, desc) = parse_skill_frontmatter(&content, fallback_name);
 
             // Read all .md files in this skill directory as the content.
             // Order MUST match updater::fetch_github_tree_content (SKILL.md first,
@@ -600,13 +587,14 @@ fn scan_md_files_recursive(
 
 /// Parse skill name and description from markdown frontmatter or first heading
 fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, String) {
-    let mut name = fallback_name.replace('-', " ").replace('_', " ");
+    let fallback_display_name = fallback_name.replace(['-', '_'], " ");
+    let mut name = fallback_display_name.clone();
     let mut desc = String::new();
 
     // Try frontmatter (---\nname: xxx\ndescription: xxx\n---)
-    if content.starts_with("---") {
-        if let Some(end) = content[3..].find("---") {
-            let fm = &content[3..3 + end];
+    if let Some(stripped) = content.strip_prefix("---") {
+        if let Some(end) = stripped.find("---") {
+            let fm = &stripped[..end];
             for line in fm.lines() {
                 let line = line.trim();
                 if let Some(v) = line.strip_prefix("name:") {
@@ -619,7 +607,7 @@ fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, Strin
     }
 
     // Fallback: first # heading as name
-    if name == fallback_name.replace('-', " ").replace('_', " ") {
+    if name == fallback_display_name {
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(heading) = trimmed.strip_prefix("# ") {
@@ -631,8 +619,8 @@ fn parse_skill_frontmatter(content: &str, fallback_name: &str) -> (String, Strin
 
     // Fallback: first non-empty non-heading line as description
     if desc.is_empty() {
-        let skip_fm = if content.starts_with("---") {
-            content[3..].find("---").map(|i| 3 + i + 3).unwrap_or(0)
+        let skip_fm = if let Some(stripped) = content.strip_prefix("---") {
+            stripped.find("---").map(|i| 3 + i + 3).unwrap_or(0)
         } else {
             0
         };
@@ -676,8 +664,9 @@ pub async fn search_npm_registry(
     query: &str,
     page: u32,
     page_size: u32,
+    proxy_url: Option<&str>,
 ) -> Result<(Vec<RegistryEntry>, u32), String> {
-    let client = build_http_client()?;
+    let client = build_http_client(proxy_url)?;
     let from = page * page_size;
 
     let url = format!(

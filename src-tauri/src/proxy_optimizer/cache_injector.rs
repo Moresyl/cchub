@@ -11,7 +11,6 @@ pub fn inject(body: &mut Value, config: &OptimizerConfig) {
 
     let mut budget = 4_usize.saturating_sub(existing);
     if budget == 0 {
-
         return;
     }
 
@@ -37,8 +36,8 @@ pub fn inject(body: &mut Value, config: &OptimizerConfig) {
 
     // (b) system 末尾
     if budget > 0 {
-        if body.get("system").and_then(|s| s.as_str()).is_some() {
-            let text = body["system"].as_str().unwrap().to_string();
+        if let Some(text) = body.get("system").and_then(|s| s.as_str()) {
+            let text = text.to_string();
             body["system"] = json!([{"type": "text", "text": text}]);
         }
 
@@ -196,7 +195,9 @@ mod tests {
         assert!(body["tools"][1].get("cache_control").is_some());
         assert_eq!(body["tools"][1]["cache_control"]["ttl"], "1h");
         assert!(body["system"][0].get("cache_control").is_some());
-        assert!(body["messages"][1]["content"][0].get("cache_control").is_some());
+        assert!(body["messages"][1]["content"][0]
+            .get("cache_control")
+            .is_some());
     }
 
     #[test]
@@ -229,9 +230,15 @@ mod tests {
 
         inject(&mut body, &default_config());
 
-        assert!(body["messages"][0]["content"][1].get("cache_control").is_some());
-        assert!(body["messages"][0]["content"][0].get("cache_control").is_none());
-        assert!(body["messages"][0]["content"][2].get("cache_control").is_none());
+        assert!(body["messages"][0]["content"][1]
+            .get("cache_control")
+            .is_some());
+        assert!(body["messages"][0]["content"][0]
+            .get("cache_control")
+            .is_none());
+        assert!(body["messages"][0]["content"][2]
+            .get("cache_control")
+            .is_none());
     }
 
     #[test]
@@ -274,6 +281,9 @@ mod tests {
         assert_eq!(body["tools"][0]["cache_control"]["ttl"], "1h");
         assert_eq!(body["tools"][1]["cache_control"]["ttl"], "1h");
         assert_eq!(body["system"][0]["cache_control"]["ttl"], "1h");
-        assert_eq!(body["messages"][0]["content"][0]["cache_control"]["ttl"], "1h");
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"]["ttl"],
+            "1h"
+        );
     }
 }

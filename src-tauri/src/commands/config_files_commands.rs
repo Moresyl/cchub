@@ -51,7 +51,9 @@ const CONFIG_ROOTS: &[ConfigRootCandidate] = &[
     },
 ];
 
-fn config_root_paths(conn: &rusqlite::Connection) -> Result<Vec<(String, String, PathBuf)>, String> {
+fn config_root_paths(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<(String, String, PathBuf)>, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     Ok(CONFIG_ROOTS
         .iter()
@@ -61,11 +63,7 @@ fn config_root_paths(conn: &rusqlite::Connection) -> Result<Vec<(String, String,
             } else {
                 home.join(root.dir)
             };
-            (
-                root.id.to_string(),
-                root.name.to_string(),
-                path,
-            )
+            (root.id.to_string(), root.name.to_string(), path)
         })
         .collect())
 }

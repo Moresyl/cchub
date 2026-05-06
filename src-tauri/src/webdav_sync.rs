@@ -19,6 +19,8 @@ const WEBDAV_PROTOCOL_VERSION: u32 = 1;
 const WEBDAV_DB_COMPAT_VERSION: u32 = 1;
 const MAX_WEBDAV_SYNC_BYTES: usize = 15 * 1024 * 1024;
 const AUTO_SYNC_INTERVAL_SECS: u64 = 15 * 60;
+const WEBDAV_KEYRING_SERVICE: &str = "cchub";
+const WEBDAV_KEYRING_ACCOUNT: &str = "webdav_sync_password";
 
 static WEBDAV_SYNC_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
@@ -32,6 +34,7 @@ pub struct WebDavSyncSettings {
     pub enabled: bool,
     pub base_url: String,
     pub username: String,
+    #[serde(default, skip_serializing)]
     pub password: String,
     pub has_password: bool,
     pub remote_root: String,
@@ -64,7 +67,6 @@ impl WebDavSyncSettings {
         self.username = self.username.trim().to_string();
         self.remote_root = normalize_segment(&self.remote_root, "cchub-sync");
         self.profile = normalize_segment(&self.profile, "default");
-        self.has_password = !self.password.trim().is_empty();
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -83,9 +85,51 @@ impl WebDavSyncSettings {
 
     pub fn masked_for_frontend(&self) -> Self {
         let mut masked = self.clone();
-        masked.has_password = !masked.password.is_empty();
+        masked.has_password = masked.has_password || !masked.password.trim().is_empty();
         masked.password.clear();
         masked
+    }
+}
+
+trait WebDavCredentialStore {
+    fn get_password(&self) -> Result<Option<String>, String>;
+    fn set_password(&self, password: &str) -> Result<(), String>;
+    fn delete_password(&self) -> Result<(), String>;
+}
+
+struct KeyringWebDavCredentialStore;
+
+impl KeyringWebDavCredentialStore {
+    fn entry(&self) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(WEBDAV_KEYRING_SERVICE, WEBDAV_KEYRING_ACCOUNT)
+            .map_err(|error| format!("Failed to open WebDAV credential store: {error}"))
+    }
+}
+
+impl WebDavCredentialStore for KeyringWebDavCredentialStore {
+    fn get_password(&self) -> Result<Option<String>, String> {
+        match self.entry()?.get_password() {
+            Ok(password) => Ok(Some(password)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(format!(
+                "Failed to read WebDAV password from keyring: {error}"
+            )),
+        }
+    }
+
+    fn set_password(&self, password: &str) -> Result<(), String> {
+        self.entry()?
+            .set_password(password)
+            .map_err(|error| format!("Failed to save WebDAV password to keyring: {error}"))
+    }
+
+    fn delete_password(&self) -> Result<(), String> {
+        match self.entry()?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(format!(
+                "Failed to delete WebDAV password from keyring: {error}"
+            )),
+        }
     }
 }
 
@@ -142,24 +186,62 @@ impl WebDavRemoteLayout {
     }
 }
 
+pub fn migrate_webdav_password_to_keyring(conn: &rusqlite::Connection) -> Result<(), String> {
+    let _ = read_settings_with_store(conn, &KeyringWebDavCredentialStore)?;
+    Ok(())
+}
+
 pub fn read_settings(conn: &rusqlite::Connection) -> Result<WebDavSyncSettings, String> {
+    read_settings_with_store(conn, &KeyringWebDavCredentialStore)
+}
+
+fn read_settings_with_store(
+    conn: &rusqlite::Connection,
+    credential_store: &impl WebDavCredentialStore,
+) -> Result<WebDavSyncSettings, String> {
     let mut settings: WebDavSyncSettings =
         get_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY)?.unwrap_or_default();
+
+    let stored_password = settings.password.trim().to_string();
+    if !stored_password.is_empty() {
+        credential_store.set_password(&stored_password)?;
+        settings.password.clear();
+        settings.has_password = true;
+        set_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY, &settings)?;
+        settings.password = stored_password;
+    } else if settings.has_password {
+        settings.password = credential_store.get_password()?.unwrap_or_default();
+        settings.has_password = !settings.password.trim().is_empty();
+    }
+
     settings.normalize();
     Ok(settings)
 }
 
 pub fn write_settings(
     conn: &rusqlite::Connection,
-    mut incoming: WebDavSyncSettings,
+    incoming: WebDavSyncSettings,
     password_touched: bool,
 ) -> Result<WebDavSyncSettings, String> {
-    let existing = read_settings(conn).unwrap_or_default();
+    write_settings_with_store(
+        conn,
+        incoming,
+        password_touched,
+        &KeyringWebDavCredentialStore,
+    )
+}
+
+fn write_settings_with_store(
+    conn: &rusqlite::Connection,
+    mut incoming: WebDavSyncSettings,
+    password_touched: bool,
+    credential_store: &impl WebDavCredentialStore,
+) -> Result<WebDavSyncSettings, String> {
+    let existing = read_settings_with_store(conn, credential_store).unwrap_or_default();
     incoming.normalize();
     if !password_touched && incoming.password.is_empty() && !existing.password.is_empty() {
         incoming.password = existing.password;
     }
-    incoming.has_password = !incoming.password.trim().is_empty();
     if incoming.last_sync_at.is_none() {
         incoming.last_sync_at = existing.last_sync_at;
     }
@@ -167,6 +249,14 @@ pub fn write_settings(
         incoming.last_error = existing.last_error;
     }
     incoming.validate()?;
+    if incoming.password.trim().is_empty() {
+        credential_store.delete_password()?;
+        incoming.has_password = false;
+    } else {
+        credential_store.set_password(incoming.password.trim())?;
+        incoming.has_password = true;
+    }
+    incoming.password.clear();
     set_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY, &incoming)?;
     Ok(incoming.masked_for_frontend())
 }
@@ -179,7 +269,8 @@ pub fn update_sync_status(
     let mut settings = read_settings(conn)?;
     settings.last_sync_at = last_sync_at;
     settings.last_error = last_error;
-    settings.has_password = !settings.password.trim().is_empty();
+    settings.has_password = settings.has_password || !settings.password.trim().is_empty();
+    settings.password.clear();
     set_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY, &settings)?;
     Ok(settings.masked_for_frontend())
 }
@@ -608,11 +699,12 @@ fn manifest_url_for_layout(
 }
 
 fn build_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(format!("CCHub/{} WebDAV", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|error| format!("Failed to build WebDAV HTTP client: {error}"))
+    crate::shared::http_client::build_http_client(
+        None,
+        Some(&format!("CCHub/{} WebDAV", env!("CARGO_PKG_VERSION"))),
+        Duration::from_secs(30),
+    )
+    .map_err(|error| format!("Failed to build WebDAV HTTP client: {error}"))
 }
 
 fn auth_request(
@@ -775,4 +867,177 @@ fn device_name() -> String {
     }
 
     "cchub".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[derive(Default)]
+    struct MemoryCredentialStore {
+        password: RefCell<Option<String>>,
+    }
+
+    impl WebDavCredentialStore for MemoryCredentialStore {
+        fn get_password(&self) -> Result<Option<String>, String> {
+            Ok(self.password.borrow().clone())
+        }
+
+        fn set_password(&self, password: &str) -> Result<(), String> {
+            *self.password.borrow_mut() = Some(password.to_string());
+            Ok(())
+        }
+
+        fn delete_password(&self) -> Result<(), String> {
+            *self.password.borrow_mut() = None;
+            Ok(())
+        }
+    }
+
+    fn memory_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn stored_webdav_json(conn: &rusqlite::Connection) -> serde_json::Value {
+        let raw: String = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                rusqlite::params![WEBDAV_SYNC_SETTINGS_KEY],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    #[test]
+    fn webdav_password_save_read_delete_uses_credential_store() {
+        let conn = memory_conn();
+        let store = MemoryCredentialStore::default();
+        let settings = WebDavSyncSettings {
+            enabled: true,
+            base_url: "https://dav.example.com/".to_string(),
+            username: " alice ".to_string(),
+            password: "secret-token".to_string(),
+            has_password: false,
+            remote_root: " /configs/ ".to_string(),
+            profile: " main ".to_string(),
+            auto_sync: true,
+            last_sync_at: None,
+            last_error: None,
+        };
+
+        let frontend =
+            write_settings_with_store(&conn, settings, true, &store).expect("save settings");
+
+        assert!(frontend.password.is_empty());
+        assert!(frontend.has_password);
+        assert_eq!(
+            store.get_password().unwrap(),
+            Some("secret-token".to_string())
+        );
+        let raw = stored_webdav_json(&conn);
+        assert!(raw.get("password").is_none());
+        assert_eq!(raw["has_password"], true);
+
+        let loaded = read_settings_with_store(&conn, &store).expect("read settings");
+        assert_eq!(loaded.password, "secret-token");
+        assert!(loaded.has_password);
+
+        let cleared = WebDavSyncSettings {
+            enabled: false,
+            base_url: "https://dav.example.com".to_string(),
+            username: "alice".to_string(),
+            password: String::new(),
+            has_password: true,
+            remote_root: "configs".to_string(),
+            profile: "main".to_string(),
+            auto_sync: false,
+            last_sync_at: None,
+            last_error: None,
+        };
+
+        let frontend =
+            write_settings_with_store(&conn, cleared, true, &store).expect("delete password");
+
+        assert!(!frontend.has_password);
+        assert_eq!(store.get_password().unwrap(), None);
+        let raw = stored_webdav_json(&conn);
+        assert!(raw.get("password").is_none());
+        assert_eq!(raw["has_password"], false);
+    }
+
+    #[test]
+    fn read_settings_migrates_legacy_plaintext_password() {
+        let conn = memory_conn();
+        let store = MemoryCredentialStore::default();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![
+                WEBDAV_SYNC_SETTINGS_KEY,
+                r#"{
+                    "enabled": true,
+                    "base_url": "https://dav.example.com",
+                    "username": "alice",
+                    "password": "legacy-secret",
+                    "remote_root": "configs",
+                    "profile": "main",
+                    "auto_sync": false
+                }"#
+            ],
+        )
+        .unwrap();
+
+        let loaded = read_settings_with_store(&conn, &store).expect("migrate settings");
+
+        assert_eq!(loaded.password, "legacy-secret");
+        assert!(loaded.has_password);
+        assert_eq!(
+            store.get_password().unwrap(),
+            Some("legacy-secret".to_string())
+        );
+        let raw = stored_webdav_json(&conn);
+        assert!(raw.get("password").is_none());
+        assert_eq!(raw["has_password"], true);
+    }
+
+    #[test]
+    fn webdav_settings_deserialize_and_normalize_paths() {
+        let mut settings: WebDavSyncSettings = serde_json::from_str(
+            r#"{
+                "enabled": false,
+                "base_url": "https://dav.example.com/root///",
+                "username": " alice ",
+                "remote_root": " /configs// ",
+                "profile": " /main/ ",
+                "auto_sync": true
+            }"#,
+        )
+        .unwrap();
+
+        settings.normalize();
+
+        assert_eq!(settings.base_url, "https://dav.example.com/root");
+        assert_eq!(settings.username, "alice");
+        assert_eq!(settings.remote_root, "configs");
+        assert_eq!(settings.profile, "main");
+        assert_eq!(settings.password, "");
+        assert!(!settings.has_password);
+        assert_eq!(
+            remote_profile_path(&settings, WebDavRemoteLayout::Current),
+            "configs/v1/db-v1/main"
+        );
+        assert_eq!(
+            remote_file_url(&settings, WebDavRemoteLayout::Current, "/snapshots//db.sql").unwrap(),
+            "https://dav.example.com/root/configs/v1/db-v1/main/snapshots/db.sql"
+        );
+    }
 }

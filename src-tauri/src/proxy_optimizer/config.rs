@@ -81,12 +81,24 @@ impl Default for OptimizerConfig {
     }
 }
 
-fn default_circuit_failure_threshold() -> u32 { 3 }
-fn default_circuit_success_threshold() -> u32 { 2 }
-fn default_circuit_timeout_secs() -> u64 { 60 }
-fn default_max_profile_retries() -> u32 { 3 }
-fn default_streaming_first_byte_timeout() -> u64 { 60 }
-fn default_streaming_idle_timeout() -> u64 { 120 }
+fn default_circuit_failure_threshold() -> u32 {
+    3
+}
+fn default_circuit_success_threshold() -> u32 {
+    2
+}
+fn default_circuit_timeout_secs() -> u64 {
+    60
+}
+fn default_max_profile_retries() -> u32 {
+    3
+}
+fn default_streaming_first_byte_timeout() -> u64 {
+    60
+}
+fn default_streaming_idle_timeout() -> u64 {
+    120
+}
 
 pub const OPTIMIZER_CONFIG_SETTINGS_KEY: &str = "proxy_optimizer_config";
 

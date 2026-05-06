@@ -30,7 +30,10 @@ pub fn read_root_override(conn: &Connection) -> Result<Option<String>, String> {
     }))
 }
 
-pub fn write_root_override(conn: &Connection, value: Option<&str>) -> Result<Option<String>, String> {
+pub fn write_root_override(
+    conn: &Connection,
+    value: Option<&str>,
+) -> Result<Option<String>, String> {
     let normalized = value
         .map(str::trim)
         .filter(|raw| !raw.is_empty())

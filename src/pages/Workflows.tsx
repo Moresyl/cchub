@@ -1,10 +1,21 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useCallback, useState, useEffect, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, Save, RotateCcw, Plus, Trash2, ArrowLeft, Download, X, GitBranch, Upload } from "lucide-react";
-import { t } from "../lib/i18n";
+import { getLocale, t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 import WorkflowCard from "../components/WorkflowCard";
+import LoadingState from "../components/states/LoadingState";
+import ErrorState from "../components/states/ErrorState";
+import EmptyState from "../components/states/EmptyState";
+import {
+  useDeleteWorkflowMutation,
+  useImportWorkflowFileMutation,
+  useInstallWorkflowMutation,
+  useToggleWorkflowMutation,
+  useWriteWorkflowContentMutation,
+} from "../hooks/mutations";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
@@ -51,10 +62,56 @@ const TOOL_COLORS: Record<string, string> = {
   hermes: "#0f766e",
 };
 
+const TOOL_NAMES: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  gemini: "Gemini",
+  opencode: "OpenCode",
+  openclaw: "OpenClaw",
+  hermes: "Hermes",
+};
+
+function workflowFileName(path: string) {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+function workflowDisplayName(fileName: string) {
+  return fileName
+    .replace(/\.disabled$/, "")
+    .replace(/\.md$/, "")
+    .replace(/[-_]/g, " ");
+}
+
+function workflowPreview(content: string) {
+  return content.length > 200 ? `${content.slice(0, 200)}...` : content;
+}
+
+function sortWorkflowFiles(files: WorkflowFile[]) {
+  return [...files].sort(
+    (left, right) => left.tool_id.localeCompare(right.tool_id) || left.name.localeCompare(right.name),
+  );
+}
+
+function buildWorkflowFile(path: string, toolId: string, content: string): WorkflowFile {
+  const fileName = workflowFileName(path);
+  return {
+    path,
+    tool_id: toolId,
+    tool_name: TOOL_NAMES[toolId] ?? toolId,
+    name: workflowDisplayName(fileName),
+    file_name: fileName,
+    size_bytes: new Blob([content]).size,
+    modified_at: null,
+    content_preview: workflowPreview(content),
+    disabled: fileName.endsWith(".disabled"),
+  };
+}
+
 export default function Workflows() {
   const [files, setFiles] = useState<WorkflowFile[]>([]);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("all");
   const [editingFile, setEditingFile] = useState<WorkflowFile | null>(null);
   const [content, setContent] = useState("");
@@ -67,12 +124,26 @@ export default function Workflows() {
   const [installing, setInstalling] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WorkflowFile | null>(null);
   const [togglingPath, setTogglingPath] = useState<string | null>(null);
-  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(["claude", "codex", "gemini", "opencode", "openclaw", "hermes"]);
+  const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>([
+    "claude",
+    "codex",
+    "gemini",
+    "opencode",
+    "openclaw",
+    "hermes",
+  ]);
   const i = t();
-  const zh = (localStorage.getItem("cchub-locale") || "zh") === "zh";
+  const zh = getLocale() === "zh";
+  const writeWorkflowContentMutation = useWriteWorkflowContentMutation();
+  const deleteWorkflowMutation = useDeleteWorkflowMutation();
+  const toggleWorkflowMutation = useToggleWorkflowMutation();
+  const installWorkflowMutation = useInstallWorkflowMutation();
+  const importWorkflowFileMutation = useImportWorkflowFileMutation();
   const hasChanges = content !== originalContent;
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
   useEffect(() => {
     const handleEscape = () => {
       if (editingFile) {
@@ -107,6 +178,7 @@ export default function Workflows() {
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const [f, tmpl, nextVisibleApps] = await Promise.all([
         invoke<WorkflowFile[]>("scan_workflows"),
@@ -116,8 +188,12 @@ export default function Workflows() {
       setFiles(f);
       setTemplates(tmpl);
       setVisibleApps(nextVisibleApps);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error(e);
+      setLoadError(String(e));
+    } finally {
+      setLoading(false);
+    }
   }
 
   const openEditor = useCallback(async (file: WorkflowFile) => {
@@ -131,8 +207,9 @@ export default function Workflows() {
       console.error(e);
       setContent("Failed to load file");
       setOriginalContent("");
+    } finally {
+      setLoadingContent(false);
     }
-    finally { setLoadingContent(false); }
   }, []);
 
   const closeEditor = useCallback(() => {
@@ -145,43 +222,73 @@ export default function Workflows() {
     if (!editingFile) return;
     setSaving(true);
     try {
-      await invoke("write_workflow_content", { path: editingFile.path, content });
+      await writeWorkflowContentMutation.mutateAsync({ path: editingFile.path, content });
       setOriginalContent(content);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       showToast("success", zh ? "已保存" : "Saved");
-    } catch (e) { showToast("error", `${e}`); }
-    finally { setSaving(false); }
+    } catch (e) {
+      showToast("error", `${e}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
-  const handleDelete = useCallback(async (file: WorkflowFile) => {
-    try {
-      await invoke("delete_workflow", { path: file.path });
-      showToast("success", zh ? "已删除" : "Deleted");
-      if (editingFile?.path === file.path) closeEditor();
-      setConfirmDelete(null);
-      await load();
-    } catch (e) { showToast("error", `${e}`); }
-  }, [editingFile]);
+  const handleDelete = useCallback(
+    async (file: WorkflowFile) => {
+      try {
+        await deleteWorkflowMutation.mutateAsync({ path: file.path });
+        showToast("success", zh ? "已删除" : "Deleted");
+        if (editingFile?.path === file.path) closeEditor();
+        setFiles((current) => current.filter((item) => item.path !== file.path));
+        setConfirmDelete(null);
+      } catch (e) {
+        showToast("error", `${e}`);
+      }
+    },
+    [deleteWorkflowMutation, editingFile],
+  );
 
-  const handleToggle = useCallback(async (file: WorkflowFile) => {
-    setTogglingPath(file.path);
-    try {
-      await invoke<string>("toggle_workflow", { path: file.path, enabled: file.disabled });
-      showToast("success", zh ? "已更新" : "Updated");
-      await load();
-    } catch (e) { showToast("error", `${e}`); }
-    finally { setTogglingPath(null); }
-  }, [zh]);
+  const handleToggle = useCallback(
+    async (file: WorkflowFile) => {
+      setTogglingPath(file.path);
+      try {
+        const nextPath = await toggleWorkflowMutation.mutateAsync({ path: file.path, enabled: file.disabled });
+        const nextFileName = workflowFileName(nextPath);
+        const nextFile = {
+          ...file,
+          path: nextPath,
+          file_name: nextFileName,
+          disabled: nextFileName.endsWith(".disabled"),
+        };
+        setFiles((current) => current.map((item) => (item.path === file.path ? nextFile : item)));
+        if (editingFile?.path === file.path) {
+          setEditingFile(nextFile);
+        }
+        showToast("success", zh ? "已更新" : "Updated");
+      } catch (e) {
+        showToast("error", `${e}`);
+      } finally {
+        setTogglingPath(null);
+      }
+    },
+    [editingFile?.path, toggleWorkflowMutation, zh],
+  );
 
   async function handleInstall(templateId: string) {
     setInstalling(templateId);
     try {
-      await invoke<string>("install_workflow", { toolId: installTool, templateId });
+      const path = await installWorkflowMutation.mutateAsync({ toolId: installTool, templateId });
+      const template = templates.find((item) => item.id === templateId);
+      if (template) {
+        setFiles((current) => sortWorkflowFiles([...current, buildWorkflowFile(path, installTool, template.content)]));
+      }
       showToast("success", zh ? "安装成功" : "Installed");
-      await load();
-    } catch (e) { showToast("error", `${e}`); }
-    finally { setInstalling(null); }
+    } catch (e) {
+      showToast("error", `${e}`);
+    } finally {
+      setInstalling(null);
+    }
   }
 
   function formatSize(bytes: number): string {
@@ -189,13 +296,19 @@ export default function Workflows() {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
 
-  const handleOpenEditor = useCallback((file: WorkflowFile) => {
-    void openEditor(file);
-  }, [openEditor]);
+  const handleOpenEditor = useCallback(
+    (file: WorkflowFile) => {
+      void openEditor(file);
+    },
+    [openEditor],
+  );
 
-  const handleToggleWorkflow = useCallback((file: WorkflowFile) => {
-    void handleToggle(file);
-  }, [handleToggle]);
+  const handleToggleWorkflow = useCallback(
+    (file: WorkflowFile) => {
+      void handleToggle(file);
+    },
+    [handleToggle],
+  );
 
   const handleRequestDelete = useCallback((file: WorkflowFile) => {
     setConfirmDelete(file);
@@ -203,16 +316,20 @@ export default function Workflows() {
 
   const visibleToolTabs = TOOL_TABS.filter((tab) => tab.id === "all" || visibleApps.includes(tab.id as ManagedAppId));
   const workflowCapableApps = visibleApps.filter((appId): appId is WorkflowAppId => appId !== "hermes");
-  const visibleFiles = files.filter((file) => visibleApps.includes(file.tool_id as ManagedAppId) && file.tool_id !== "hermes");
-  const filteredFiles = activeTab === "all" ? visibleFiles : visibleFiles.filter(f => f.tool_id === activeTab);
+  const visibleFiles = files.filter(
+    (file) => visibleApps.includes(file.tool_id as ManagedAppId) && file.tool_id !== "hermes",
+  );
+  const filteredFiles = activeTab === "all" ? visibleFiles : visibleFiles.filter((f) => f.tool_id === activeTab);
   const hermesWorkflowUnsupported = activeTab === "hermes";
 
   async function handleImport() {
     try {
       const fallbackTool = workflowCapableApps[0] || "claude";
-      await invoke<string>("import_workflow_file", { toolId: activeTab === "all" ? fallbackTool : activeTab });
+      const toolId = activeTab === "all" ? fallbackTool : activeTab;
+      const path = await importWorkflowFileMutation.mutateAsync({ toolId });
+      const importedContent = await invoke<string>("read_workflow_content", { path });
+      setFiles((current) => sortWorkflowFiles([...current, buildWorkflowFile(path, toolId, importedContent)]));
       showToast("success", i.workflows.importSuccess);
-      await load();
     } catch (e) {
       const msg = String(e);
       if (msg !== "Cancelled") showToast("error", msg);
@@ -220,7 +337,9 @@ export default function Workflows() {
   }
 
   const installedIds = new Set(
-    visibleFiles.filter(f => f.tool_id === installTool).map(f => f.file_name.replace(".md", "").replace(".disabled", ""))
+    visibleFiles
+      .filter((f) => f.tool_id === installTool)
+      .map((f) => f.file_name.replace(".md", "").replace(".disabled", "")),
   );
 
   useEffect(() => {
@@ -234,11 +353,19 @@ export default function Workflows() {
   }, [activeTab, installTool, visibleApps, workflowCapableApps]);
 
   if (loading) {
+    return <LoadingState label={i.workflows.loading} />;
+  }
+
+  if (loadError) {
     return (
-      <div className="loading-center">
-        <div className="spinner" />
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.workflows.loading}</span>
-      </div>
+      <ErrorState
+        title={zh ? "工作流加载失败" : "Failed to load workflows"}
+        message={loadError}
+        retryLabel={i.common.refresh}
+        onRetry={() => {
+          void load();
+        }}
+      />
     );
   }
 
@@ -246,16 +373,24 @@ export default function Workflows() {
   if (editingFile) {
     return (
       <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-        <div className="page-header" style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 0 }}>
+        <div
+          className="page-header"
+          style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 0 }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button className="btn btn-ghost btn-icon-sm" onClick={closeEditor}><ArrowLeft size={16} /></button>
+            <button className="btn btn-ghost btn-icon-sm" onClick={closeEditor}>
+              <ArrowLeft size={16} />
+            </button>
             <div>
-              <h2 className="page-title" style={{ margin: 0 }}>{editingFile.name}</h2>
+              <h2 className="page-title" style={{ margin: 0 }}>
+                {editingFile.name}
+              </h2>
               <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0 }}>
                 <span style={{ color: TOOL_COLORS[editingFile.tool_id] || "var(--text-secondary)", fontWeight: 600 }}>
                   {editingFile.tool_name}
                 </span>
-                {" · "}{editingFile.file_name}
+                {" · "}
+                {editingFile.file_name}
               </p>
             </div>
           </div>
@@ -266,19 +401,27 @@ export default function Workflows() {
             {saved && (
               <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 500 }}>{i.workflows.saved}</span>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={() => setContent(originalContent)} disabled={!hasChanges}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setContent(originalContent)}
+              disabled={!hasChanges}
+            >
               <RotateCcw size={14} /> {i.workflows.revert}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => void handleSave()} disabled={!hasChanges || saving}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => void handleSave()}
+              disabled={!hasChanges || saving}
+            >
               <Save size={14} /> {saving ? "..." : i.workflows.save}
             </button>
           </div>
         </div>
         <div style={{ flex: 1, overflow: "auto", marginTop: 8 }}>
           {loadingContent ? (
-            <div className="loading-center"><div className="spinner" /></div>
+            <LoadingState />
           ) : (
-            <Suspense fallback={<div className="loading-center"><div className="spinner" /></div>}>
+            <Suspense fallback={<LoadingState />}>
               <MarkdownEditor value={content} onChange={setContent} />
             </Suspense>
           )}
@@ -293,14 +436,26 @@ export default function Workflows() {
       <div className="page-header">
         <div>
           <h2 className="page-title">{i.workflows.title}</h2>
-          <p className="page-subtitle">{zh ? `共 ${visibleFiles.length} 个工作流` : `${visibleFiles.length} workflows`}</p>
+          <p className="page-subtitle">
+            {zh ? `共 ${visibleFiles.length} 个工作流` : `${visibleFiles.length} workflows`}
+          </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={handleImport} disabled={hermesWorkflowUnsupported || workflowCapableApps.length === 0}>
-            <Upload size={14} />{i.workflows.importWorkflow}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleImport}
+            disabled={hermesWorkflowUnsupported || workflowCapableApps.length === 0}
+          >
+            <Upload size={14} />
+            {i.workflows.importWorkflow}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowInstall(!showInstall)} disabled={hermesWorkflowUnsupported || workflowCapableApps.length === 0}>
-            <Plus size={14} />{i.workflows.installTemplate}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowInstall(!showInstall)}
+            disabled={hermesWorkflowUnsupported || workflowCapableApps.length === 0}
+          >
+            <Plus size={14} />
+            {i.workflows.installTemplate}
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => void load()}>
             <RefreshCw size={14} />
@@ -327,27 +482,33 @@ export default function Workflows() {
           <div className="section-card" style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700 }}>{i.workflows.templateTitle}</h3>
-              <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowInstall(false)}><X size={16} /></button>
+              <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowInstall(false)}>
+                <X size={16} />
+              </button>
             </div>
             <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 14 }}>{i.workflows.templateTip}</p>
 
             {/* Tool Selector */}
             <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: "28px" }}>{i.workflows.selectTool}:</span>
-              {visibleToolTabs.filter(tab => tab.id !== "all" && tab.id !== "hermes").map(tab => (
-                <button
-                  key={tab.id}
-                  className={`btn btn-xs ${installTool === tab.id ? "btn-primary" : "btn-ghost"}`}
-                  onClick={() => setInstallTool(tab.id)}
-                >
-                  {zh ? tab.label_zh : tab.label_en}
-                </button>
-              ))}
+              <span style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: "28px" }}>
+                {i.workflows.selectTool}:
+              </span>
+              {visibleToolTabs
+                .filter((tab) => tab.id !== "all" && tab.id !== "hermes")
+                .map((tab) => (
+                  <button
+                    key={tab.id}
+                    className={`btn btn-xs ${installTool === tab.id ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setInstallTool(tab.id)}
+                  >
+                    {zh ? tab.label_zh : tab.label_en}
+                  </button>
+                ))}
             </div>
 
             {/* Template Grid */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
-              {templates.map(tmpl => {
+              {templates.map((tmpl) => {
                 const isInstalled = installedIds.has(tmpl.id);
                 const isInstalling = installing === tmpl.id;
                 return (
@@ -381,7 +542,7 @@ export default function Workflows() {
 
         {/* Tool Tabs */}
         <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
-          {visibleToolTabs.map(tab => (
+          {visibleToolTabs.map((tab) => (
             <button
               key={tab.id}
               className={`btn btn-xs ${activeTab === tab.id ? "btn-primary" : "btn-ghost"}`}
@@ -390,7 +551,7 @@ export default function Workflows() {
               {zh ? tab.label_zh : tab.label_en}
               {tab.id !== "all" && (
                 <span style={{ marginLeft: 4, opacity: 0.7 }}>
-                  ({visibleFiles.filter(f => f.tool_id === tab.id).length})
+                  ({visibleFiles.filter((f) => f.tool_id === tab.id).length})
                 </span>
               )}
             </button>
@@ -399,27 +560,30 @@ export default function Workflows() {
 
         {/* Workflow Cards */}
         {hermesWorkflowUnsupported ? (
-          <div className="card empty-state" style={{ flex: 1 }}>
-            <div className="empty-icon"><GitBranch size={28} style={{ color: "var(--text-muted)" }} /></div>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>
-              {zh ? "Hermes 暂无可管理 Workflow" : "Hermes workflows are unavailable"}
-            </p>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 360 }}>
-              {zh ? "当前版本只支持 Hermes 的 Provider、MCP、Skills 和 ConfigFiles 管理。" : "This release only supports Hermes provider, MCP, skills, and config-file management."}
-            </p>
-          </div>
+          <EmptyState
+            icon={<GitBranch size={28} style={{ color: "var(--text-muted)" }} />}
+            title={zh ? "Hermes 暂无可管理 Workflow" : "Hermes workflows are unavailable"}
+            description={
+              zh
+                ? "当前版本只支持 Hermes 的 Provider、MCP、Skills 和 ConfigFiles 管理。"
+                : "This release only supports Hermes provider, MCP, skills, and config-file management."
+            }
+          />
         ) : filteredFiles.length === 0 ? (
-          <div className="card empty-state" style={{ flex: 1 }}>
-            <div className="empty-icon"><GitBranch size={28} style={{ color: "var(--text-muted)" }} /></div>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>{i.workflows.noWorkflows}</p>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 8, maxWidth: 320 }}>{i.workflows.noWorkflowsTip}</p>
-            <button className="btn btn-primary btn-sm" style={{ marginTop: 16 }} onClick={() => setShowInstall(true)}>
-              <Plus size={14} />{i.workflows.installTemplate}
-            </button>
-          </div>
+          <EmptyState
+            icon={<GitBranch size={28} style={{ color: "var(--text-muted)" }} />}
+            title={i.workflows.noWorkflows}
+            description={i.workflows.noWorkflowsTip}
+            action={
+              <button className="btn btn-primary btn-sm" type="button" onClick={() => setShowInstall(true)}>
+                <Plus size={14} />
+                {i.workflows.installTemplate}
+              </button>
+            }
+          />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
-            {filteredFiles.map(file => (
+            {filteredFiles.map((file) => (
               <WorkflowCard
                 key={file.path}
                 file={file}
@@ -443,21 +607,28 @@ export default function Workflows() {
       {confirmDelete && (
         <div
           style={{
-            position: "fixed", inset: 0, background: "var(--bg-overlay)",
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+            position: "fixed",
+            inset: 0,
+            background: "var(--bg-overlay)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
           }}
           onClick={() => setConfirmDelete(null)}
         >
           <div
             className="card"
             style={{ padding: 24, maxWidth: 420, width: "90%" }}
-            onClick={e => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{i.workflows.confirmDelete}</h3>
             <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 8, lineHeight: 1.6 }}>
               {confirmDelete.tool_name} / {confirmDelete.name}
             </p>
-            <div className="code-block" style={{ fontSize: 11, marginBottom: 20 }}>{confirmDelete.path}</div>
+            <div className="code-block" style={{ fontSize: 11, marginBottom: 20 }}>
+              {confirmDelete.path}
+            </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDelete(null)}>
                 {i.workflows.close}
@@ -467,7 +638,8 @@ export default function Workflows() {
                 style={{ background: "var(--danger)", color: "#fff" }}
                 onClick={() => void handleDelete(confirmDelete)}
               >
-                <Trash2 size={14} />{i.workflows.delete}
+                <Trash2 size={14} />
+                {i.workflows.delete}
               </button>
             </div>
           </div>

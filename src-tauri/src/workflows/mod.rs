@@ -87,8 +87,7 @@ pub fn scan_workflow_files() -> Vec<WorkflowFile> {
             let display_name = fname
                 .trim_end_matches(".disabled")
                 .trim_end_matches(".md")
-                .replace('-', " ")
-                .replace('_', " ");
+                .replace(['-', '_'], " ");
 
             results.push(WorkflowFile {
                 path: path.to_string_lossy().to_string(),

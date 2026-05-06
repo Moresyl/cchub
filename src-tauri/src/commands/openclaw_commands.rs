@@ -26,7 +26,9 @@ pub fn get_openclaw_agents_defaults() -> Result<openclaw_config::OpenClawAgentsD
 }
 
 #[tauri::command]
-pub fn set_openclaw_agents_defaults(defaults: openclaw_config::OpenClawAgentsDefaults) -> Result<(), String> {
+pub fn set_openclaw_agents_defaults(
+    defaults: openclaw_config::OpenClawAgentsDefaults,
+) -> Result<(), String> {
     openclaw_config::set_agents_defaults(&defaults)
 }
 

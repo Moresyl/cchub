@@ -118,8 +118,6 @@ pub fn audit_server(
         "high"
     } else if findings.iter().any(|f| f.severity == "warning") {
         "medium"
-    } else if findings.is_empty() {
-        "low"
     } else {
         "low"
     };

@@ -84,22 +84,11 @@ fn build_provider_models_client(conn: &rusqlite::Connection) -> Result<reqwest::
         )
         .ok();
 
-    let mut builder = reqwest::Client::builder()
-        .user_agent("CCHub Provider Models Fetcher")
-        .timeout(std::time::Duration::from_secs(
-            PROVIDER_MODELS_TIMEOUT_SECS,
-        ));
-
-    if let Some(proxy_url) = proxy_url {
-        let trimmed = proxy_url.trim();
-        if !trimmed.is_empty() {
-            let proxy =
-                reqwest::Proxy::all(trimmed).map_err(|e| format!("Invalid proxy: {e}"))?;
-            builder = builder.proxy(proxy);
-        }
-    }
-
-    builder.build().map_err(|e| e.to_string())
+    crate::shared::http_client::build_http_client(
+        proxy_url.as_deref(),
+        Some("CCHub Provider Models Fetcher"),
+        std::time::Duration::from_secs(PROVIDER_MODELS_TIMEOUT_SECS),
+    )
 }
 
 fn trim_query_and_fragment(base_url: &str) -> &str {
@@ -113,7 +102,9 @@ fn trim_query_and_fragment(base_url: &str) -> &str {
 }
 
 fn derive_root_from_full_url(tool_id: &str, base_url: &str) -> Result<String, String> {
-    let trimmed = trim_query_and_fragment(base_url).trim().trim_end_matches('/');
+    let trimmed = trim_query_and_fragment(base_url)
+        .trim()
+        .trim_end_matches('/');
     if trimmed.is_empty() {
         return Err("Base URL is empty".to_string());
     }
@@ -121,7 +112,12 @@ fn derive_root_from_full_url(tool_id: &str, base_url: &str) -> Result<String, St
     let replacements = match tool_id {
         "claude" => vec!["/v1/messages", "/messages"],
         "codex" | "openclaw" | "opencode" => {
-            vec!["/v1/chat/completions", "/chat/completions", "/v1/responses", "/responses"]
+            vec![
+                "/v1/chat/completions",
+                "/chat/completions",
+                "/v1/responses",
+                "/responses",
+            ]
         }
         "gemini" => {
             if let Some(prefix) = trimmed.split(":streamGenerateContent").next() {
@@ -333,10 +329,8 @@ pub async fn fetch_provider_models(
                 return Err("API key is required to fetch Gemini models".to_string());
             }
 
-            let mut url =
-                Url::parse(&build_gemini_models_url(&base_url, use_full_url)?).map_err(|e| {
-                    format!("Invalid Gemini models URL: {e}")
-                })?;
+            let mut url = Url::parse(&build_gemini_models_url(&base_url, use_full_url)?)
+                .map_err(|e| format!("Invalid Gemini models URL: {e}"))?;
             url.query_pairs_mut().append_pair("key", api_key.trim());
 
             let response = client
@@ -432,14 +426,8 @@ pub async fn fetch_provider_models_cached(
         }
     }
 
-    let models = fetch_provider_models(
-        tool_id,
-        base_url,
-        api_key,
-        use_full_url,
-        db.clone(),
-    )
-    .await?;
+    let models =
+        fetch_provider_models(tool_id, base_url, api_key, use_full_url, db.clone()).await?;
 
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     write_model_cache(&conn, &cache_key, &models);
@@ -560,10 +548,8 @@ pub async fn fetch_provider_models_detailed(
             if api_key.trim().is_empty() {
                 return Err("API key is required".to_string());
             }
-            let mut url =
-                Url::parse(&build_gemini_models_url(&base_url, use_full_url)?).map_err(|e| {
-                    format!("Invalid URL: {e}")
-                })?;
+            let mut url = Url::parse(&build_gemini_models_url(&base_url, use_full_url)?)
+                .map_err(|e| format!("Invalid URL: {e}"))?;
             url.query_pairs_mut().append_pair("key", api_key.trim());
             let response = client
                 .get(url)
@@ -625,8 +611,7 @@ mod tests {
     #[test]
     fn full_openai_endpoint_derives_models_url() {
         assert_eq!(
-            build_openai_models_url("https://proxy.example.com/v1/chat/completions", true)
-                .unwrap(),
+            build_openai_models_url("https://proxy.example.com/v1/chat/completions", true).unwrap(),
             "https://proxy.example.com/v1/models"
         );
         assert_eq!(

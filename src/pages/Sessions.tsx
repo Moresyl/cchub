@@ -1,21 +1,16 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  Copy,
-  FolderOpen,
-  History,
-  RefreshCw,
-  Search,
-  SquareCheckBig,
-  Trash2,
-} from "lucide-react";
+import { Copy, FolderOpen, History, RefreshCw, Search, SquareCheckBig, Trash2 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { getAppLabel, type ManagedAppId } from "../lib/appPreferences";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import HighlightedText from "../components/HighlightedText";
 import SessionListItem from "../components/SessionListItem";
+import LoadingState from "../components/states/LoadingState";
+import { useDeleteSessionMutation, useDeleteSessionsMutation } from "../hooks/mutations";
 import { fetchSessionsPageData, fetchVisibleAppsQuery, queryKeys } from "../hooks/queries";
 
 interface SessionSummary {
@@ -65,7 +60,9 @@ function sessionSelectionKey(session: Pick<SessionSummary, "tool_id" | "id" | "s
   return `${session.tool_id}::${session.id}::${session.source_path}`;
 }
 
-function buildSessionDeleteTarget(session: Pick<SessionSummary, "tool_id" | "id" | "source_path" | "source_backend">): SessionDeleteTarget {
+function buildSessionDeleteTarget(
+  session: Pick<SessionSummary, "tool_id" | "id" | "source_path" | "source_backend">,
+): SessionDeleteTarget {
   return {
     tool_id: session.tool_id,
     session_id: session.id,
@@ -96,9 +93,9 @@ function matchesEntry(entry: SessionEntry, query: string) {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
   return (
-    entry.title.toLowerCase().includes(normalized)
-    || entry.kind.toLowerCase().includes(normalized)
-    || entry.content.toLowerCase().includes(normalized)
+    entry.title.toLowerCase().includes(normalized) ||
+    entry.kind.toLowerCase().includes(normalized) ||
+    entry.content.toLowerCase().includes(normalized)
   );
 }
 
@@ -144,9 +141,7 @@ export default function Sessions() {
   const [allSessions, setAllSessions] = useState<SessionSummary[]>(
     queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions(null)) ?? [],
   );
-  const [loading, setLoading] = useState(
-    !queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions(null)),
-  );
+  const [loading, setLoading] = useState(!queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions(null)));
   const [refreshing, setRefreshing] = useState(false);
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -163,16 +158,20 @@ export default function Sessions() {
   const detailRequestIdRef = useRef(0);
   const selectedSessionRef = useRef<SessionSummary | null>(null);
   const detailRef = useRef<SessionDetail | null>(null);
+  const deleteSessionMutation = useDeleteSessionMutation();
+  const deleteSessionsMutation = useDeleteSessionsMutation();
   const deferredQuery = useDeferredValue(query);
-  const uiText = (zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  );
+  const uiText = (zhText: string, enText: string, jaText?: string) =>
+    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 
   useEffect(() => {
-    void queryClient.fetchQuery({
-      queryKey: queryKeys.visibleApps,
-      queryFn: fetchVisibleAppsQuery,
-    }).then(setVisibleApps).catch(() => setVisibleApps(TOOL_ORDER));
+    void queryClient
+      .fetchQuery({
+        queryKey: queryKeys.visibleApps,
+        queryFn: fetchVisibleAppsQuery,
+      })
+      .then(setVisibleApps)
+      .catch(() => setVisibleApps(TOOL_ORDER));
     void loadSessions(true);
   }, [queryClient]);
 
@@ -250,16 +249,17 @@ export default function Sessions() {
 
       const currentSelected = selectedSessionRef.current;
       if (currentSelected) {
-        const nextSelected = nextSessions.find((item) => item.id === currentSelected.id && item.tool_id === currentSelected.tool_id) ?? null;
+        const nextSelected =
+          nextSessions.find((item) => item.id === currentSelected.id && item.tool_id === currentSelected.tool_id) ??
+          null;
         setSelectedSession(nextSelected);
         if (nextSelected) {
           const currentDetail = detailRef.current;
           const isSameDetail =
-            currentDetail?.session.id === nextSelected.id
-            && currentDetail.session.tool_id === nextSelected.tool_id;
+            currentDetail?.session.id === nextSelected.id && currentDetail.session.tool_id === nextSelected.tool_id;
 
           if (isSameDetail) {
-            setDetail((current) => (
+            setDetail((current) =>
               current
                 ? {
                     ...current,
@@ -268,8 +268,8 @@ export default function Sessions() {
                       ...nextSelected,
                     },
                   }
-                : current
-            ));
+                : current,
+            );
           } else {
             void openSession(nextSelected, false);
           }
@@ -338,31 +338,31 @@ export default function Sessions() {
     }
   }, []);
 
-  const deleteSingleSession = useCallback(async (session: SessionSummary) => {
-    setDeletingId(session.id);
-    try {
-      await invoke("delete_session", {
-        toolId: session.tool_id,
-        sessionId: session.id,
-        sourcePath: session.source_path,
-        sourceBackend: session.source_backend,
-      });
-      if (selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id) {
-        setSelectedSession(null);
-        setDetail(null);
+  const deleteSingleSession = useCallback(
+    async (session: SessionSummary) => {
+      setDeletingId(session.id);
+      try {
+        await deleteSessionMutation.mutateAsync({
+          toolId: session.tool_id,
+          sessionId: session.id,
+          sourcePath: session.source_path,
+          sourceBackend: session.source_backend,
+        });
+        if (selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id) {
+          setSelectedSession(null);
+          setDetail(null);
+        }
+        setCheckedSessionKeys((current) => current.filter((key) => key !== sessionSelectionKey(session)));
+        await loadSessions(false);
+        showToast("success", uiText("会话已删除", "Session deleted", "会話を削除しました"));
+      } catch (error) {
+        showToast("error", String(error));
+      } finally {
+        setDeletingId(null);
       }
-      setCheckedSessionKeys((current) => current.filter((key) => key !== sessionSelectionKey(session)));
-      await loadSessions(false);
-      showToast(
-        "success",
-        uiText("会话已删除", "Session deleted", "会話を削除しました"),
-      );
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setDeletingId(null);
-    }
-  }, [selectedSession]);
+    },
+    [deleteSessionMutation, selectedSession],
+  );
 
   const confirmDeleteSession = useCallback(async () => {
     if (!pendingDelete) return;
@@ -376,7 +376,7 @@ export default function Sessions() {
     setBulkDeleting(true);
     const deletingKeys = new Set(pendingBulkDelete.map(sessionSelectionKey));
     try {
-      await invoke<number>("delete_sessions", {
+      await deleteSessionsMutation.mutateAsync({
         sessions: pendingBulkDelete.map(buildSessionDeleteTarget),
       });
       if (selectedSession && deletingKeys.has(sessionSelectionKey(selectedSession))) {
@@ -386,26 +386,31 @@ export default function Sessions() {
       setCheckedSessionKeys((current) => current.filter((key) => !deletingKeys.has(key)));
       setPendingBulkDelete([]);
       await loadSessions(false);
-      showToast(
-        "success",
-        uiText("已删除选中的会话", "Selected sessions deleted", "選択した会話を削除しました"),
-      );
+      showToast("success", uiText("已删除选中的会话", "Selected sessions deleted", "選択した会話を削除しました"));
     } catch (error) {
       showToast("error", String(error));
     } finally {
       setBulkDeleting(false);
     }
-  }, [pendingBulkDelete, selectedSession]);
+  }, [deleteSessionsMutation, pendingBulkDelete, selectedSession]);
 
-  const handleOpenSession = useCallback((session: SessionSummary) => {
-    void openSession(session);
-  }, [openSession]);
+  const handleOpenSession = useCallback(
+    (session: SessionSummary) => {
+      void openSession(session);
+    },
+    [openSession],
+  );
 
-  const handleCopyResumeCommand = useCallback((command: string) => {
-    void navigator.clipboard.writeText(command).then(() =>
-      showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
-    );
-  }, [uiText]);
+  const handleCopyResumeCommand = useCallback(
+    (command: string) => {
+      void navigator.clipboard
+        .writeText(command)
+        .then(() =>
+          showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
+        );
+    },
+    [uiText],
+  );
 
   const handleRequestDelete = useCallback((session: SessionSummary) => {
     setPendingDelete(session);
@@ -457,11 +462,9 @@ export default function Sessions() {
 
   const handleToggleCheckedSession = useCallback((session: SessionSummary) => {
     const key = sessionSelectionKey(session);
-    setCheckedSessionKeys((current) => (
-      current.includes(key)
-        ? current.filter((item) => item !== key)
-        : [...current, key]
-    ));
+    setCheckedSessionKeys((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
   }, []);
 
   const handleToggleAllVisibleSessions = useCallback(() => {
@@ -484,14 +487,7 @@ export default function Sessions() {
   }, [checkedSessions]);
 
   if (loading) {
-    return (
-      <div className="loading-center">
-        <div className="spinner" />
-        <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          {uiText("加载会话中...", "Loading sessions...", "会話を読み込み中...")}
-        </span>
-      </div>
-    );
+    return <LoadingState label={uiText("加载会话中...", "Loading sessions...", "会話を読み込み中...")} />;
   }
 
   return (
@@ -523,7 +519,11 @@ export default function Sessions() {
                 className="input"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={uiText("搜索标题、路径或摘要...", "Search title, path, or preview...", "タイトル・パス・要約を検索...")}
+                placeholder={uiText(
+                  "搜索标题、路径或摘要...",
+                  "Search title, path, or preview...",
+                  "タイトル・パス・要約を検索...",
+                )}
                 style={{ paddingLeft: 34 }}
               />
             </div>
@@ -539,7 +539,11 @@ export default function Sessions() {
               ))}
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-secondary btn-sm" onClick={handleToggleAllVisibleSessions} disabled={sessions.length === 0}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleToggleAllVisibleSessions}
+                disabled={sessions.length === 0}
+              >
                 <SquareCheckBig size={14} />
                 {checkedSessions.length === sessions.length && sessions.length > 0
                   ? uiText("清空当前选择", "Clear visible selection", "現在の選択を解除")
@@ -551,105 +555,197 @@ export default function Sessions() {
                 disabled={checkedSessions.length === 0 || bulkDeleting}
               >
                 <Trash2 size={14} />
-                {uiText(`删除选中 (${checkedSessions.length})`, `Delete selected (${checkedSessions.length})`, `選択を削除 (${checkedSessions.length})`)}
+                {uiText(
+                  `删除选中 (${checkedSessions.length})`,
+                  `Delete selected (${checkedSessions.length})`,
+                  `選択を削除 (${checkedSessions.length})`,
+                )}
               </button>
             </div>
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 420px) minmax(0, 1fr)", gap: 16, flex: 1, minHeight: 0 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(320px, 420px) minmax(0, 1fr)",
+            gap: 16,
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
           <div className="section-card" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <History size={15} style={{ color: "var(--text-secondary)" }} />
-                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                  }}
+                >
                   {uiText("会话列表", "Session List", "会話一覧")}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {checkedSessions.length > 0 && (
                   <span className="badge badge-accent" style={{ fontSize: 10 }}>
-                    {uiText(`已选 ${checkedSessions.length}`, `${checkedSessions.length} selected`, `${checkedSessions.length} 件選択`)}
+                    {uiText(
+                      `已选 ${checkedSessions.length}`,
+                      `${checkedSessions.length} selected`,
+                      `${checkedSessions.length} 件選択`,
+                    )}
                   </span>
                 )}
-                <span className="badge badge-muted" style={{ fontSize: 10 }}>{sessions.length}</span>
+                <span className="badge badge-muted" style={{ fontSize: 10 }}>
+                  {sessions.length}
+                </span>
               </div>
             </div>
 
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
               {sessions.length === 0 ? (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, color: "var(--text-muted)", fontSize: 13 }}>
-                  {uiText("当前没有匹配的会话", "No sessions matched the current filters", "現在の条件に一致する会話はありません")}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flex: 1,
+                    color: "var(--text-muted)",
+                    fontSize: 13,
+                  }}
+                >
+                  {uiText(
+                    "当前没有匹配的会话",
+                    "No sessions matched the current filters",
+                    "現在の条件に一致する会話はありません",
+                  )}
                 </div>
-              ) : sessions.map((session) => (
-                <SessionListItem
-                  key={`${session.tool_id}-${session.id}-${session.source_path}`}
-                  session={session}
-                  selected={selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id}
-                  query={query}
-                  resumeCommand={buildResumeCommand(session.tool_id, session.id)}
-                  deleting={deletingId === session.id}
-                  checked={checkedSessionKeySet.has(sessionSelectionKey(session))}
-                  copyLabel={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
-                  copyTitle={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
-                  deleteTitle={uiText("删除会话", "Delete session", "会話を削除")}
-                  deleteLabel={uiText("删除会话", "Delete session", "会話を削除")}
-                  selectLabel={uiText("选择会话", "Select session", "会話を選択")}
-                  tokenLabel={(count) => uiText(`${formatTokenCount(count)} tokens`, `${formatTokenCount(count)} tokens`, `${formatTokenCount(count)} tokens`)}
-                  unknownTimeLabel={uiText("未知时间", "Unknown time", "時刻不明")}
-                  matchLabel={(count) => uiText(`${count} 处匹配`, `${count} match(es)`, `${count} 件一致`)}
-                  itemsLabel={(count) => uiText(`${count} 条记录`, `${count} items`, `${count} 件`)}
-                  onOpen={handleOpenSession}
-                  onToggleChecked={handleToggleCheckedSession}
-                  onCopyResume={handleCopyResumeCommand}
-                  onDelete={handleRequestDelete}
-                />
-              ))}
+              ) : (
+                sessions.map((session) => (
+                  <SessionListItem
+                    key={`${session.tool_id}-${session.id}-${session.source_path}`}
+                    session={session}
+                    selected={selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id}
+                    query={query}
+                    resumeCommand={buildResumeCommand(session.tool_id, session.id)}
+                    deleting={deletingId === session.id}
+                    checked={checkedSessionKeySet.has(sessionSelectionKey(session))}
+                    copyLabel={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
+                    copyTitle={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
+                    deleteTitle={uiText("删除会话", "Delete session", "会話を削除")}
+                    deleteLabel={uiText("删除会话", "Delete session", "会話を削除")}
+                    selectLabel={uiText("选择会话", "Select session", "会話を選択")}
+                    tokenLabel={(count) =>
+                      uiText(
+                        `${formatTokenCount(count)} tokens`,
+                        `${formatTokenCount(count)} tokens`,
+                        `${formatTokenCount(count)} tokens`,
+                      )
+                    }
+                    unknownTimeLabel={uiText("未知时间", "Unknown time", "時刻不明")}
+                    matchLabel={(count) => uiText(`${count} 处匹配`, `${count} match(es)`, `${count} 件一致`)}
+                    itemsLabel={(count) => uiText(`${count} 条记录`, `${count} items`, `${count} 件`)}
+                    onOpen={handleOpenSession}
+                    onToggleChecked={handleToggleCheckedSession}
+                    onCopyResume={handleCopyResumeCommand}
+                    onDelete={handleRequestDelete}
+                  />
+                ))
+              )}
             </div>
           </div>
 
           <div className="section-card" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
             {!selectedSession ? (
-              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                {uiText("选择一个会话查看详情、目录导航和恢复入口", "Select a session to inspect details, TOC navigation, and restore actions", "会話を選択すると詳細・目次・復元操作を表示します")}
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--text-muted)",
+                  fontSize: 13,
+                }}
+              >
+                {uiText(
+                  "选择一个会话查看详情、目录导航和恢复入口",
+                  "Select a session to inspect details, TOC navigation, and restore actions",
+                  "会話を選択すると詳細・目次・復元操作を表示します",
+                )}
               </div>
             ) : detailLoading ? (
-              <div className="loading-center" style={{ flex: 1 }}>
-                <div className="spinner" />
-                <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                  {uiText("正在读取会话详情...", "Loading session detail...", "会話の詳細を読み込み中...")}
-                </span>
-              </div>
+              <LoadingState
+                label={uiText("正在读取会话详情...", "Loading session detail...", "会話の詳細を読み込み中...")}
+              />
             ) : detail ? (
               <>
                 {/* Header: badges + title + delete */}
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    marginBottom: 12,
+                    alignItems: "flex-start",
+                  }}
+                >
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                      <span className="badge badge-accent" style={{ fontSize: 10 }}>{detail.session.tool_name}</span>
-                      <span className="badge badge-muted" style={{ fontSize: 10 }}>{detail.session.source_kind}</span>
-                      {detail.session.created_at && <span className="badge badge-muted" style={{ fontSize: 10 }}>{detail.session.created_at}</span>}
+                      <span className="badge badge-accent" style={{ fontSize: 10 }}>
+                        {detail.session.tool_name}
+                      </span>
+                      <span className="badge badge-muted" style={{ fontSize: 10 }}>
+                        {detail.session.source_kind}
+                      </span>
+                      {detail.session.created_at && (
+                        <span className="badge badge-muted" style={{ fontSize: 10 }}>
+                          {detail.session.created_at}
+                        </span>
+                      )}
                       {detail.session.tokens_used != null && (
                         <span className="badge badge-accent" style={{ fontSize: 10 }}>
-                          {uiText(`总 ${formatTokenCount(detail.session.tokens_used)} tokens`, `Total ${formatTokenCount(detail.session.tokens_used)} tokens`, `合計 ${formatTokenCount(detail.session.tokens_used)} tokens`)}
+                          {uiText(
+                            `总 ${formatTokenCount(detail.session.tokens_used)} tokens`,
+                            `Total ${formatTokenCount(detail.session.tokens_used)} tokens`,
+                            `合計 ${formatTokenCount(detail.session.tokens_used)} tokens`,
+                          )}
                         </span>
                       )}
                       {detail.session.input_tokens != null && (
                         <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                          {uiText(`输入 ${formatTokenCount(detail.session.input_tokens)}`, `Input ${formatTokenCount(detail.session.input_tokens)}`, `入力 ${formatTokenCount(detail.session.input_tokens)}`)}
+                          {uiText(
+                            `输入 ${formatTokenCount(detail.session.input_tokens)}`,
+                            `Input ${formatTokenCount(detail.session.input_tokens)}`,
+                            `入力 ${formatTokenCount(detail.session.input_tokens)}`,
+                          )}
                         </span>
                       )}
                       {detail.session.output_tokens != null && (
                         <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                          {uiText(`输出 ${formatTokenCount(detail.session.output_tokens)}`, `Output ${formatTokenCount(detail.session.output_tokens)}`, `出力 ${formatTokenCount(detail.session.output_tokens)}`)}
+                          {uiText(
+                            `输出 ${formatTokenCount(detail.session.output_tokens)}`,
+                            `Output ${formatTokenCount(detail.session.output_tokens)}`,
+                            `出力 ${formatTokenCount(detail.session.output_tokens)}`,
+                          )}
                         </span>
                       )}
                     </div>
-                    <h3 style={{
-                      fontSize: 15, fontWeight: 700, lineHeight: 1.35,
-                      overflow: "hidden", textOverflow: "ellipsis",
-                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                    }}>
+                    <h3
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 700,
+                        lineHeight: 1.35,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                      }}
+                    >
                       <HighlightedText text={detail.session.title} query={detailQuery} />
                     </h3>
                   </div>
@@ -665,28 +761,49 @@ export default function Sessions() {
                 </div>
 
                 {/* Resume command & directory — compact single bar */}
-                <div style={{
-                  display: "flex", flexDirection: "column", gap: 6, marginBottom: 12,
-                  padding: "8px 12px", borderRadius: 6,
-                  background: "var(--bg-elevated)", border: "1px solid var(--border-default)",
-                  fontSize: 11, color: "var(--text-muted)",
-                }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    marginBottom: 12,
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--border-default)",
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                  }}
+                >
                   {buildResumeCommand(detail.session.tool_id, detail.session.id) && (
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <code style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
-                        flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        userSelect: "all", cursor: "text",
-                      }}>
+                      <code
+                        style={{
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 11,
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          userSelect: "all",
+                          cursor: "text",
+                        }}
+                      >
                         {buildResumeCommand(detail.session.tool_id, detail.session.id)}
                       </code>
                       <button
                         className="btn btn-ghost btn-xs"
                         onClick={() => {
                           const cmd = buildResumeCommand(detail.session.tool_id, detail.session.id)!;
-                          void navigator.clipboard.writeText(cmd).then(() =>
-                            showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
-                          );
+                          void navigator.clipboard
+                            .writeText(cmd)
+                            .then(() =>
+                              showToast(
+                                "success",
+                                uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました"),
+                              ),
+                            );
                         }}
                         style={{ padding: "2px 5px", flexShrink: 0 }}
                       >
@@ -697,18 +814,30 @@ export default function Sessions() {
                   {detail.session.cwd && (
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <FolderOpen size={11} style={{ flexShrink: 0, opacity: 0.6 }} />
-                      <span style={{
-                        flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        userSelect: "all", cursor: "text",
-                      }}>
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          userSelect: "all",
+                          cursor: "text",
+                        }}
+                      >
                         {detail.session.cwd}
                       </span>
                       <button
                         className="btn btn-ghost btn-xs"
                         onClick={() => {
-                          void navigator.clipboard.writeText(detail.session.cwd!).then(() =>
-                            showToast("success", uiText("已复制目录路径", "Directory path copied", "ディレクトリパスをコピーしました")),
-                          );
+                          void navigator.clipboard
+                            .writeText(detail.session.cwd!)
+                            .then(() =>
+                              showToast(
+                                "success",
+                                uiText("已复制目录路径", "Directory path copied", "ディレクトリパスをコピーしました"),
+                              ),
+                            );
                         }}
                         style={{ padding: "2px 5px", flexShrink: 0 }}
                       >
@@ -738,7 +867,16 @@ export default function Sessions() {
                 {/* Entries — full width, no TOC sidebar */}
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
                   {filteredEntries.length === 0 ? (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: 13 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        height: "100%",
+                        color: "var(--text-muted)",
+                        fontSize: 13,
+                      }}
+                    >
                       {uiText("没有匹配的记录", "No entries matched", "一致する記録はありません")}
                     </div>
                   ) : (
@@ -754,25 +892,50 @@ export default function Sessions() {
                             background: "var(--bg-card)",
                           }}
                         >
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 8,
+                              alignItems: "center",
+                              marginBottom: 8,
+                            }}
+                          >
                             <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                               <span className={`badge ${entryBadgeColor(entry.kind)}`} style={{ fontSize: 10 }}>
                                 {entry.kind}
                               </span>
-                              <span style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
                                 <HighlightedText text={entry.title} query={detailQuery} />
                               </span>
                             </div>
                             {entry.timestamp && (
-                              <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>{entry.timestamp}</span>
+                              <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
+                                {entry.timestamp}
+                              </span>
                             )}
                           </div>
-                          <pre style={{
-                            margin: 0, fontSize: 11, lineHeight: 1.5,
-                            color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-word",
-                            fontFamily: "'JetBrains Mono', monospace",
-                            maxHeight: 320, overflow: "auto",
-                          }}>
+                          <pre
+                            style={{
+                              margin: 0,
+                              fontSize: 11,
+                              lineHeight: 1.5,
+                              color: "var(--text-secondary)",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              fontFamily: "'JetBrains Mono', monospace",
+                              maxHeight: 320,
+                              overflow: "auto",
+                            }}
+                          >
                             <HighlightedText text={entry.content} query={detailQuery} />
                           </pre>
                         </section>
@@ -782,8 +945,21 @@ export default function Sessions() {
                 </div>
               </>
             ) : (
-              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                {uiText("无法读取当前会话详情", "Failed to load this session detail", "この会話の詳細を読み込めませんでした")}
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--text-muted)",
+                  fontSize: 13,
+                }}
+              >
+                {uiText(
+                  "无法读取当前会话详情",
+                  "Failed to load this session detail",
+                  "この会話の詳細を読み込めませんでした",
+                )}
               </div>
             )}
           </div>
@@ -793,13 +969,15 @@ export default function Sessions() {
       <ConfirmDialog
         isOpen={Boolean(pendingDelete)}
         title={uiText("删除会话", "Delete Session", "会話を削除")}
-        message={pendingDelete
-          ? uiText(
-            `确定删除会话「${pendingDelete.title}」吗？这会移除本地会话文件，并在支持的后端上清理索引。`,
-            `Delete session "${pendingDelete.title}"? This removes the local session file and cleans indexes where supported.`,
-            `会話「${pendingDelete.title}」を削除しますか？ ローカルの会話ファイルを削除し、対応バックエンドの索引も掃除します。`,
-          )
-          : ""}
+        message={
+          pendingDelete
+            ? uiText(
+                `确定删除会话「${pendingDelete.title}」吗？这会移除本地会话文件，并在支持的后端上清理索引。`,
+                `Delete session "${pendingDelete.title}"? This removes the local session file and cleans indexes where supported.`,
+                `会話「${pendingDelete.title}」を削除しますか？ ローカルの会話ファイルを削除し、対応バックエンドの索引も掃除します。`,
+              )
+            : ""
+        }
         confirmText={uiText("删除", "Delete", "削除")}
         cancelText={uiText("取消", "Cancel", "キャンセル")}
         onCancel={() => setPendingDelete(null)}
@@ -809,13 +987,15 @@ export default function Sessions() {
       <ConfirmDialog
         isOpen={pendingBulkDelete.length > 0}
         title={uiText("批量删除会话", "Delete Selected Sessions", "選択した会話を削除")}
-        message={pendingBulkDelete.length > 0
-          ? uiText(
-            `确定删除选中的 ${pendingBulkDelete.length} 个会话吗？这会移除对应的本地会话文件。`,
-            `Delete ${pendingBulkDelete.length} selected session(s)? This removes the related local session files.`,
-            `選択した ${pendingBulkDelete.length} 件の会話を削除しますか？ 対応するローカル会話ファイルも削除されます。`,
-          )
-          : ""}
+        message={
+          pendingBulkDelete.length > 0
+            ? uiText(
+                `确定删除选中的 ${pendingBulkDelete.length} 个会话吗？这会移除对应的本地会话文件。`,
+                `Delete ${pendingBulkDelete.length} selected session(s)? This removes the related local session files.`,
+                `選択した ${pendingBulkDelete.length} 件の会話を削除しますか？ 対応するローカル会話ファイルも削除されます。`,
+              )
+            : ""
+        }
         confirmText={uiText("批量删除", "Delete Selected", "選択を削除")}
         cancelText={uiText("取消", "Cancel", "キャンセル")}
         variant="destructive"

@@ -232,15 +232,16 @@ fn looks_like_plain_text(value: &str) -> bool {
 }
 
 async fn fetch_remote_config(config_url: &str) -> Result<String, AppError> {
-    let response = reqwest::Client::builder()
-        .user_agent("CCHub/1.3")
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| AppError::Custom(format!("Failed to build HTTP client: {error}")))?
-        .get(config_url)
-        .send()
-        .await
-        .map_err(|error| AppError::Custom(format!("Failed to fetch config URL: {error}")))?;
+    let response = crate::shared::http_client::build_http_client(
+        None,
+        Some("CCHub/1.3"),
+        Duration::from_secs(15),
+    )
+    .map_err(|error| AppError::Custom(format!("Failed to build HTTP client: {error}")))?
+    .get(config_url)
+    .send()
+    .await
+    .map_err(|error| AppError::Custom(format!("Failed to fetch config URL: {error}")))?;
 
     let response = response
         .error_for_status()

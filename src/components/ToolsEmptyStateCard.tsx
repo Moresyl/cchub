@@ -1,4 +1,5 @@
 import { memo } from "react";
+import EmptyState from "./states/EmptyState";
 
 interface ToolsEmptyStateCardProps {
   title: string;
@@ -6,19 +7,10 @@ interface ToolsEmptyStateCardProps {
   marginBottom?: number;
 }
 
-function ToolsEmptyStateCardComponent({
-  title,
-  description,
-  marginBottom,
-}: ToolsEmptyStateCardProps) {
+function ToolsEmptyStateCardComponent({ title, description, marginBottom }: ToolsEmptyStateCardProps) {
   return (
     <div className="card" style={{ padding: "40px 20px", textAlign: "center", marginBottom }}>
-      <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
-        {title}
-      </p>
-      <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-        {description}
-      </p>
+      <EmptyState title={title} description={description} />
     </div>
   );
 }

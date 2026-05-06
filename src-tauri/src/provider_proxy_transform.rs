@@ -94,9 +94,12 @@ pub fn strip_codex_oauth_fields(body: &mut Value) {
         obj.remove("top_p");
         obj.insert("stream".to_string(), Value::Bool(true));
         obj.insert("store".to_string(), Value::Bool(false));
-        obj.entry("instructions".to_string()).or_insert(Value::String(String::new()));
-        obj.entry("tools".to_string()).or_insert(Value::Array(Vec::new()));
-        obj.entry("parallel_tool_calls".to_string()).or_insert(Value::Bool(false));
+        obj.entry("instructions".to_string())
+            .or_insert(Value::String(String::new()));
+        obj.entry("tools".to_string())
+            .or_insert(Value::Array(Vec::new()));
+        obj.entry("parallel_tool_calls".to_string())
+            .or_insert(Value::Bool(false));
     }
 }
 
@@ -2121,7 +2124,8 @@ mod tests_gemini_stream {
         ]);
 
         let input_stream = stream::iter(chunks);
-        let output = create_anthropic_sse_stream_from_gemini(input_stream, "gemini-2.5-flash".to_string());
+        let output =
+            create_anthropic_sse_stream_from_gemini(input_stream, "gemini-2.5-flash".to_string());
         tokio::pin!(output);
 
         let mut events: Vec<String> = Vec::new();
@@ -2145,7 +2149,8 @@ mod tests_gemini_stream {
         ]);
 
         let input_stream = stream::iter(chunks);
-        let output = create_anthropic_sse_stream_from_gemini(input_stream, "gemini-2.5-flash".to_string());
+        let output =
+            create_anthropic_sse_stream_from_gemini(input_stream, "gemini-2.5-flash".to_string());
         tokio::pin!(output);
 
         let mut events: Vec<String> = Vec::new();
@@ -2166,7 +2171,8 @@ mod tests_gemini_stream {
         ]);
 
         let input_stream = stream::iter(chunks);
-        let output = create_anthropic_sse_stream_from_gemini(input_stream, "gemini-2.5-pro".to_string());
+        let output =
+            create_anthropic_sse_stream_from_gemini(input_stream, "gemini-2.5-pro".to_string());
         tokio::pin!(output);
 
         let mut events: Vec<String> = Vec::new();

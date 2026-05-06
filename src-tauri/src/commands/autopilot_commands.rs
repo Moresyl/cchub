@@ -233,7 +233,9 @@ impl AutopilotRuntime {
 }
 
 #[tauri::command]
-pub fn get_autopilot_status(runtime: State<'_, AutopilotRuntime>) -> Result<AutopilotStatus, String> {
+pub fn get_autopilot_status(
+    runtime: State<'_, AutopilotRuntime>,
+) -> Result<AutopilotStatus, String> {
     refresh_runtime_status(runtime.inner().clone())
 }
 
@@ -490,7 +492,9 @@ pub fn stop_autopilot(runtime: State<'_, AutopilotRuntime>) -> Result<AutopilotS
 }
 
 #[tauri::command]
-pub fn list_autopilot_logs(runtime: State<'_, AutopilotRuntime>) -> Result<Vec<AutopilotStatus>, String> {
+pub fn list_autopilot_logs(
+    runtime: State<'_, AutopilotRuntime>,
+) -> Result<Vec<AutopilotStatus>, String> {
     let runtime = runtime.inner().clone();
     let current_snapshot = refresh_runtime_status(runtime.clone())?;
     let current_run_id = current_snapshot.current_run_id.clone();
@@ -519,7 +523,8 @@ pub fn list_autopilot_logs(runtime: State<'_, AutopilotRuntime>) -> Result<Vec<A
             Ok(value) => value,
             Err(_) => continue,
         };
-        if current_snapshot.running && current_run_id.as_deref() == record.current_run_id.as_deref() {
+        if current_snapshot.running && current_run_id.as_deref() == record.current_run_id.as_deref()
+        {
             record = current_snapshot.clone();
         }
         records.push(record);
@@ -576,7 +581,11 @@ pub fn clear_autopilot_logs(
     Ok(AutopilotClearResult { deleted_count })
 }
 
-fn run_native_autopilot(app: AppHandle, runtime: AutopilotRuntime, context: NativeAutopilotContext) {
+fn run_native_autopilot(
+    app: AppHandle,
+    runtime: AutopilotRuntime,
+    context: NativeAutopilotContext,
+) {
     if let Err(error) = run_native_autopilot_inner(&app, &runtime, &context) {
         let _ = append_main_log(&context.paths.main_log, "ERROR", &error);
         let _ = runtime.update_status(|status| {
@@ -626,7 +635,11 @@ fn run_native_autopilot_inner(
     emit_stage(app, "running", "开始执行任务", None);
 
     if context.request.dry_run {
-        append_main_log(&context.paths.main_log, "INFO", "Dry Run 完成，未执行 Codex")?;
+        append_main_log(
+            &context.paths.main_log,
+            "INFO",
+            "Dry Run 完成，未执行 Codex",
+        )?;
         runtime.update_status(|status| {
             status.running = false;
             status.status = AUTOPILOT_STATUS_COMPLETED.to_string();
@@ -641,7 +654,12 @@ fn run_native_autopilot_inner(
     if let Some(existing) = session_id.clone() {
         runtime.update_status(|status| {
             status.session_id = existing;
-            push_stage(status, "resume_ready", "检测到旧会话，可继续续跑".to_string(), None);
+            push_stage(
+                status,
+                "resume_ready",
+                "检测到旧会话，可继续续跑".to_string(),
+                None,
+            );
         })?;
     }
 
@@ -674,15 +692,30 @@ fn run_native_autopilot_inner(
                         Some(status.attempt),
                     );
                 })?;
-                emit_stage(app, "max_attempts", "达到最大尝试次数，任务已停止", Some(attempt));
+                emit_stage(
+                    app,
+                    "max_attempts",
+                    "达到最大尝试次数，任务已停止",
+                    Some(attempt),
+                );
                 return Ok(());
             }
         }
 
         runtime.update_status(|status| {
-            push_stage(status, "attempt", format!("开始第 {attempt} 轮执行"), Some(attempt));
+            push_stage(
+                status,
+                "attempt",
+                format!("开始第 {attempt} 轮执行"),
+                Some(attempt),
+            );
         })?;
-        emit_stage(app, "attempt", &format!("开始第 {attempt} 轮执行"), Some(attempt));
+        emit_stage(
+            app,
+            "attempt",
+            &format!("开始第 {attempt} 轮执行"),
+            Some(attempt),
+        );
 
         let round_start = Instant::now();
         let exec_mode = if attempt == 1 || session_id.is_none() {
@@ -690,8 +723,14 @@ fn run_native_autopilot_inner(
         } else {
             ExecMode::Resume
         };
-        let exec_result =
-            run_codex_round(app, runtime, context, exec_mode, session_id.as_deref(), attempt)?;
+        let exec_result = run_codex_round(
+            app,
+            runtime,
+            context,
+            exec_mode,
+            session_id.as_deref(),
+            attempt,
+        )?;
         let round_elapsed = round_start.elapsed();
 
         snapshot_last_message(&context.paths, attempt)?;
@@ -727,7 +766,12 @@ fn run_native_autopilot_inner(
                     Some(attempt),
                 );
             })?;
-            emit_stage(app, "completed", "完成协议校验通过，任务已完成", Some(attempt));
+            emit_stage(
+                app,
+                "completed",
+                "完成协议校验通过，任务已完成",
+                Some(attempt),
+            );
             return Ok(());
         }
 
@@ -761,7 +805,11 @@ fn run_native_autopilot_inner(
 
             if idle_streak >= DEFAULT_MAX_IDLE_STREAK {
                 let summary = "检测到连续空转，已自动停止".to_string();
-                append_main_log(&context.paths.main_log, "ERROR", "连续空转达到阈值，自动停止")?;
+                append_main_log(
+                    &context.paths.main_log,
+                    "ERROR",
+                    "连续空转达到阈值，自动停止",
+                )?;
                 runtime.update_status(|status| {
                     status.running = false;
                     status.status = AUTOPILOT_STATUS_IDLE_STOPPED.to_string();
@@ -773,7 +821,12 @@ fn run_native_autopilot_inner(
                     };
                     push_stage(status, "idle_stopped", summary, Some(attempt));
                 })?;
-                emit_stage(app, "idle_stopped", "检测到连续空转，已自动停止", Some(attempt));
+                emit_stage(
+                    app,
+                    "idle_stopped",
+                    "检测到连续空转，已自动停止",
+                    Some(attempt),
+                );
                 return Ok(());
             }
         } else {
@@ -796,7 +849,12 @@ fn run_native_autopilot_inner(
                 Some(attempt),
             );
         })?;
-        emit_stage(app, "waiting_retry", &format!("第 {attempt} 轮未完成，等待下次续跑"), Some(attempt));
+        emit_stage(
+            app,
+            "waiting_retry",
+            &format!("第 {attempt} 轮未完成，等待下次续跑"),
+            Some(attempt),
+        );
 
         if !sleep_with_stop(runtime, interval_secs) {
             finalize_stopped(runtime)?;
@@ -855,7 +913,9 @@ fn run_codex_round(
         )?;
     }
 
-    let mut child = command.spawn().map_err(|e| format!("启动 Codex 失败: {e}"))?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("启动 Codex 失败: {e}"))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     runtime.set_child(child)?;
@@ -1092,11 +1152,9 @@ fn completion_detected(last_message_path: &Path, done_token: &str) -> Result<boo
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>();
-    Ok(
-        lines.len() == 2
-            && lines.first().copied().unwrap_or_default() == done_token
-            && lines.get(1).copied().unwrap_or_default() == DEFAULT_CONFIRM_TEXT,
-    )
+    Ok(lines.len() == 2
+        && lines.first().copied().unwrap_or_default() == done_token
+        && lines.get(1).copied().unwrap_or_default() == DEFAULT_CONFIRM_TEXT)
 }
 
 fn refresh_runtime_status(runtime: AutopilotRuntime) -> Result<AutopilotStatus, String> {
@@ -1111,7 +1169,8 @@ fn refresh_runtime_status(runtime: AutopilotRuntime) -> Result<AutopilotStatus, 
         .as_deref()
         .map(|value| value != snapshot.session_id)
         .unwrap_or(false);
-    let preview_changed = !latest_preview.is_empty() && latest_preview != snapshot.last_message_preview;
+    let preview_changed =
+        !latest_preview.is_empty() && latest_preview != snapshot.last_message_preview;
 
     if !session_changed && !preview_changed {
         return Ok(snapshot);
@@ -1229,7 +1288,9 @@ fn snapshot_last_message(paths: &AutopilotPaths, attempt: u32) -> Result<(), Str
     if !paths.last_message.exists() {
         return Ok(());
     }
-    let target = paths.state_dir.join(format!("attempt-{attempt:04}.last.txt"));
+    let target = paths
+        .state_dir
+        .join(format!("attempt-{attempt:04}.last.txt"));
     fs::copy(&paths.last_message, target).map_err(|e| format!("保存回复快照失败: {e}"))?;
     Ok(())
 }
@@ -1332,7 +1393,7 @@ fn stream_codex_pipe<R: std::io::Read>(
     for line in reader.lines().map_while(Result::ok) {
         let _ = writeln!(writer, "{line}");
         line_count = line_count.saturating_add(1);
-        if line_count % 16 == 0 {
+        if line_count.is_multiple_of(16) {
             let _ = writer.flush();
         }
         last_event_ms.store(now_epoch_ms(), Ordering::Relaxed);
@@ -1383,7 +1444,12 @@ fn finalize_stopped(runtime: &AutopilotRuntime) -> Result<(), String> {
         status.running = false;
         status.status = AUTOPILOT_STATUS_STOPPED.to_string();
         status.finished_at = Some(now_string());
-        push_stage(status, "stopped", "任务已停止".to_string(), Some(status.attempt));
+        push_stage(
+            status,
+            "stopped",
+            "任务已停止".to_string(),
+            Some(status.attempt),
+        );
     })?;
     Ok(())
 }
@@ -1441,7 +1507,9 @@ fn resolve_codex_bin(value: &str) -> Result<String, String> {
         }
     }
 
-    Err(format!("找不到 Codex: {trimmed}（请确认已安装并在 PATH 中）"))
+    Err(format!(
+        "找不到 Codex: {trimmed}（请确认已安装并在 PATH 中）"
+    ))
 }
 
 fn canonicalize_existing_file(path: &str, label: &str) -> Result<PathBuf, String> {
@@ -1484,8 +1552,14 @@ fn resolve_run_dir(run_id: &str) -> Result<PathBuf, String> {
     if trimmed.is_empty() {
         return Err("日志记录 ID 不能为空".to_string());
     }
+    if trimmed.contains(['/', '\\']) {
+        return Err("非法的日志记录 ID".to_string());
+    }
     let path = Path::new(trimmed);
-    if path.components().any(|component| !matches!(component, Component::Normal(_))) {
+    if path
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
         return Err("非法的日志记录 ID".to_string());
     }
     Ok(utils::autopilot_runs_dir().join(trimmed))
@@ -1550,7 +1624,7 @@ fn kill_process_tree_by_pid(pid: u32) -> Result<(), String> {
         command.stderr(Stdio::null());
         utils::configure_background_command(&mut command);
         command.status().map_err(|e| format!("停止任务失败: {e}"))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -1607,34 +1681,13 @@ fn now_string() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_codex_process, completion_detected, generate_nonce, maybe_record_session_id,
-        now_string, run_native_autopilot_inner, sanitize_task_name, AutopilotPaths,
-        AutopilotRuntime, AutopilotStartRequest, NativeAutopilotContext, DEFAULT_CONFIRM_TEXT,
-        looks_like_uuid,
+        build_codex_process, completion_detected, generate_nonce, looks_like_uuid,
+        maybe_record_session_id, resolve_run_dir, sanitize_task_name, AutopilotPaths,
+        DEFAULT_CONFIRM_TEXT,
     };
-    use std::env;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
-
-    fn test_request(task_file: &std::path::Path, workdir: &std::path::Path) -> AutopilotStartRequest {
-        AutopilotStartRequest {
-            task_file: task_file.to_string_lossy().to_string(),
-            task_files: None,
-            workdir: workdir.to_string_lossy().to_string(),
-            model: String::new(),
-            profile: String::new(),
-            interval: Some(1),
-            max_attempts: Some(1),
-            codex_bin: Some("codex".to_string()),
-            fresh: false,
-            dry_run: true,
-            skip_git_check: true,
-            bypass: true,
-            full_auto: true,
-            verbose: false,
-        }
-    }
 
     fn test_paths(root: &std::path::Path, task_file_abs: PathBuf) -> AutopilotPaths {
         let log_dir = root.join("logs");
@@ -1682,10 +1735,7 @@ mod tests {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let _ = fs::write(
-            &path,
-            format!("cccc-bbbb-aaaa\n{DEFAULT_CONFIRM_TEXT}\n\n"),
-        );
+        let _ = fs::write(&path, format!("cccc-bbbb-aaaa\n{DEFAULT_CONFIRM_TEXT}\n\n"));
         assert!(completion_detected(&path, "cccc-bbbb-aaaa").unwrap_or(false));
         let _ = fs::remove_file(path);
     }
@@ -1711,6 +1761,16 @@ mod tests {
             fs::read_to_string(&paths.session_id_file).unwrap().trim(),
             "123e4567-e89b-12d3-a456-426614174000"
         );
+    }
+
+    #[test]
+    fn resolve_run_dir_rejects_path_traversal() {
+        assert!(resolve_run_dir("valid-run-id").is_ok());
+        assert!(resolve_run_dir("../outside").is_err());
+        assert!(resolve_run_dir("nested/path").is_err());
+        assert!(resolve_run_dir(r"nested\path").is_err());
+        assert!(resolve_run_dir("/tmp/outside").is_err());
+        assert!(resolve_run_dir("").is_err());
     }
 
     // Test disabled: run_native_autopilot_inner signature changed to require AppHandle
@@ -1746,6 +1806,9 @@ mod tests {
             command.get_program().to_string_lossy().to_ascii_lowercase(),
             node_exe.to_string_lossy().to_ascii_lowercase()
         );
-        assert_eq!(args.first().map(String::as_str), Some(script_path.to_string_lossy().as_ref()));
+        assert_eq!(
+            args.first().map(String::as_str),
+            Some(script_path.to_string_lossy().as_ref())
+        );
     }
 }

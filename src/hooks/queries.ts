@@ -279,10 +279,24 @@ export const queryKeys = {
   profilesPage: ["profiles-page"] as const,
   mcpServers: ["scan-mcp-servers"] as const,
   mcpServersPage: ["mcp-servers-page"] as const,
+  mcpClientsPage: ["mcp-clients-page"] as const,
   plugins: ["plugins"] as const,
   skills: ["scan-skills"] as const,
   skillBackups: ["skill-backups"] as const,
   skillSyncMethod: ["skill-sync-method"] as const,
+  hooks: ["scan-hooks"] as const,
+  workspaces: ["workspaces"] as const,
+  workflows: ["workflows"] as const,
+  hermesProviders: ["hermes-providers"] as const,
+  hermesMemory: ["hermes-memory"] as const,
+  autopilot: ["autopilot"] as const,
+  proxyAdvanced: ["proxy-advanced"] as const,
+  openClaw: ["openclaw"] as const,
+  toolSettings: ["tool-settings"] as const,
+  webdavSync: ["webdav-sync"] as const,
+  managedBackups: ["managed-backups"] as const,
+  welcomeCompleted: ["welcome-completed"] as const,
+  hermesRootOverride: ["hermes-root-override"] as const,
   visibleApps: ["visible-apps"] as const,
   skillsPage: ["skills-page"] as const,
   claudeMd: ["scan-claude-md"] as const,
@@ -291,10 +305,8 @@ export const queryKeys = {
   claudeMdPage: ["claude-md-page"] as const,
   toolsPage: ["tools-page"] as const,
   marketplaceLocal: ["marketplace-local"] as const,
-  marketplaceCatalog: (page = 1, limit = 50, category = "") =>
-    ["skillhub-catalog", page, limit, category] as const,
-  marketplaceSearch: (query: string, page = 0, pageSize = 50) =>
-    ["search-marketplace", query, page, pageSize] as const,
+  marketplaceCatalog: (page = 1, limit = 50, category = "") => ["skillhub-catalog", page, limit, category] as const,
+  marketplaceSearch: (query: string, page = 0, pageSize = 50) => ["search-marketplace", query, page, pageSize] as const,
   sessions: (toolId: string | null) => ["sessions", toolId ?? "all"] as const,
   logsPage: (date: string) => ["logs-page", date] as const,
   hudStatus: ["claude-hud-status"] as const,
@@ -353,17 +365,14 @@ export async function fetchMcpServersPageData() {
 }
 
 export async function fetchSkillsPageData() {
-  const [skills, plugins, tools, skillSyncMethod, visibleApps, skillBackups] =
-    await Promise.all([
-      invoke<SkillQueryResult[]>("scan_skills"),
-      invoke<PluginQueryResult[]>("get_plugins"),
-      invoke<DetectedToolQueryResult[]>("detect_tools"),
-      invoke<string>("get_skill_sync_method").catch(() => "copy"),
-      fetchVisibleAppsQuery(),
-      invoke<SkillBackupQueryResult[]>("get_skill_backups").catch(
-        () => [] as SkillBackupQueryResult[],
-      ),
-    ]);
+  const [skills, plugins, tools, skillSyncMethod, visibleApps, skillBackups] = await Promise.all([
+    invoke<SkillQueryResult[]>("scan_skills"),
+    invoke<PluginQueryResult[]>("get_plugins"),
+    invoke<DetectedToolQueryResult[]>("detect_tools"),
+    invoke<string>("get_skill_sync_method").catch(() => "copy"),
+    fetchVisibleAppsQuery(),
+    invoke<SkillBackupQueryResult[]>("get_skill_backups").catch(() => [] as SkillBackupQueryResult[]),
+  ]);
 
   return {
     skills,
@@ -376,31 +385,25 @@ export async function fetchSkillsPageData() {
 }
 
 export async function fetchToolsPageData(): Promise<ToolSettingsQueryResult> {
-  const [
-    permissionsLevel,
-    autoUpdateChannel,
-    claudeModel,
-    toolSearchEnabled,
-    codexSettings,
-    visibleApps,
-  ] = await Promise.all([
-    invoke<number>("get_claude_permissions_level").catch(() => 0),
-    invoke<string>("get_claude_auto_update").catch(() => "latest"),
-    invoke<string>("get_claude_model").catch(() => ""),
-    invoke<boolean>("get_claude_tool_search").catch(() => false),
-    invoke<{
-      approval_mode: string;
-      reasoning_effort: string;
-      disable_response_storage: boolean;
-      context_window_1m: boolean;
-    }>("get_codex_settings").catch(() => ({
-      approval_mode: "suggest",
-      reasoning_effort: "medium",
-      disable_response_storage: false,
-      context_window_1m: false,
-    })),
-    fetchVisibleAppsQuery(),
-  ]);
+  const [permissionsLevel, autoUpdateChannel, claudeModel, toolSearchEnabled, codexSettings, visibleApps] =
+    await Promise.all([
+      invoke<number>("get_claude_permissions_level").catch(() => 0),
+      invoke<string>("get_claude_auto_update").catch(() => "latest"),
+      invoke<string>("get_claude_model").catch(() => ""),
+      invoke<boolean>("get_claude_tool_search").catch(() => false),
+      invoke<{
+        approval_mode: string;
+        reasoning_effort: string;
+        disable_response_storage: boolean;
+        context_window_1m: boolean;
+      }>("get_codex_settings").catch(() => ({
+        approval_mode: "suggest",
+        reasoning_effort: "medium",
+        disable_response_storage: false,
+        context_window_1m: false,
+      })),
+      fetchVisibleAppsQuery(),
+    ]);
 
   return {
     permissionsLevel,

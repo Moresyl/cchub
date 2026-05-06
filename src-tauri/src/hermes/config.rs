@@ -72,8 +72,8 @@ pub fn write_value(conn: &Connection, value: &Value) -> Result<Option<PathBuf>, 
         created_backup = Some(backup_path);
     }
 
-    let mut content =
-        serde_yaml::to_string(value).map_err(|e| format!("Failed to serialize Hermes YAML: {e}"))?;
+    let mut content = serde_yaml::to_string(value)
+        .map_err(|e| format!("Failed to serialize Hermes YAML: {e}"))?;
     if !content.ends_with('\n') {
         content.push('\n');
     }

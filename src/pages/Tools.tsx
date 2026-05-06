@@ -1,5 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal, Code, Download, RefreshCw, Trash2 } from "lucide-react";
 import Hello2ccConfigSection, { type Hello2ccConfigField } from "../components/Hello2ccConfigSection";
@@ -15,10 +25,20 @@ import ToolsPermissionCard from "../components/ToolsPermissionCard";
 import ToolsTabButton from "../components/ToolsTabButton";
 import ToolsToggleCard from "../components/ToolsToggleCard";
 import { showToast } from "../components/Toast";
+import LoadingState from "../components/states/LoadingState";
 import { type ManagedAppId } from "../lib/appPreferences";
 
 const ProxyAdvancedPanel = lazy(() => import("./ProxyAdvanced"));
-import { useSetClaudeHudConfigMutation, useSetHello2ccConfigMutation } from "../hooks/mutations";
+import {
+  useSetClaudeHudConfigMutation,
+  useSetClaudeSettingMutation,
+  useSetClaudeStatuslineMutation,
+  useSetCodexSettingMutation,
+  useSetHello2ccConfigMutation,
+  useSetHello2ccEnabledMutation,
+  useUpdateClaudeHudMutation,
+  useUpdateHello2ccMutation,
+} from "../hooks/mutations";
 import {
   useDetectTools,
   fetchToolsPageData,
@@ -26,7 +46,6 @@ import {
   useHello2ccStatus,
   useHudStatus,
   type Hello2ccConfigQueryResult,
-  type Hello2ccStatusQueryResult,
   type ToolSettingsQueryResult,
 } from "../hooks/queries";
 
@@ -72,7 +91,6 @@ interface HudConfig {
 }
 
 type Hello2ccConfig = Hello2ccConfigQueryResult;
-type Hello2ccStatus = Hello2ccStatusQueryResult;
 type Hello2ccSelectKey = Exclude<keyof Hello2ccConfig, "mirror_session_model">;
 type HudGitStatusKey = keyof NonNullable<HudConfig["gitStatus"]>;
 type HudDisplayBooleanKey = Exclude<keyof NonNullable<HudConfig["display"]>, "contextValue">;
@@ -89,11 +107,22 @@ const DEFAULT_HUD_CONFIG: HudConfig = {
   pathLevels: 1,
   gitStatus: { enabled: true, showDirty: true, showAheadBehind: false, showFileStats: false },
   display: {
-    showModel: true, showProject: true, showContextBar: true, contextValue: "percent",
-    showConfigCounts: false, showDuration: false, showSpeed: false,
-    showUsage: true, usageBarEnabled: true, showTokenBreakdown: true,
-    showTools: false, showAgents: false, showTodos: false,
-    showSessionName: false, showClaudeCodeVersion: false, showMemoryUsage: false,
+    showModel: true,
+    showProject: true,
+    showContextBar: true,
+    contextValue: "percent",
+    showConfigCounts: false,
+    showDuration: false,
+    showSpeed: false,
+    showUsage: true,
+    usageBarEnabled: true,
+    showTokenBreakdown: true,
+    showTools: false,
+    showAgents: false,
+    showTodos: false,
+    showSessionName: false,
+    showClaudeCodeVersion: false,
+    showMemoryUsage: false,
   },
 };
 
@@ -119,8 +148,18 @@ const PERM_LEVELS = [
 ];
 
 const PERM_DESC_ZH = ["每次操作都确认", "允许读取，写操作确认", "允许读写，仅 Bash 确认", "跳过所有确认"];
-const PERM_DESC_EN = ["Confirm every action", "Allow read, confirm write", "Allow read/write, confirm Bash", "Skip all prompts"];
-const PERM_DESC_JA = ["毎回すべて確認", "読み取りを許可し、書き込みは確認", "読み書きを許可し、Bash のみ確認", "すべての確認をスキップ"];
+const PERM_DESC_EN = [
+  "Confirm every action",
+  "Allow read, confirm write",
+  "Allow read/write, confirm Bash",
+  "Skip all prompts",
+];
+const PERM_DESC_JA = [
+  "毎回すべて確認",
+  "読み取りを許可し、書き込みは確認",
+  "読み書きを許可し、Bash のみ確認",
+  "すべての確認をスキップ",
+];
 export default function Tools() {
   const queryClient = useQueryClient();
   const cachedToolsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchToolsPageData>>>(
@@ -133,14 +172,22 @@ export default function Tools() {
   const [toolSearch, setToolSearch] = useState(cachedToolsPageData?.toolSearchEnabled ?? false);
   const [codexApproval, setCodexApproval] = useState(cachedToolsPageData?.codexSettings.approval_mode ?? "suggest");
   const [codexReasoning, setCodexReasoning] = useState(cachedToolsPageData?.codexSettings.reasoning_effort ?? "medium");
-  const [codexDisableStorage, setCodexDisableStorage] = useState(cachedToolsPageData?.codexSettings.disable_response_storage ?? false);
-  const [codexContextWindow1M, setCodexContextWindow1M] = useState(cachedToolsPageData?.codexSettings.context_window_1m ?? false);
+  const [codexDisableStorage, setCodexDisableStorage] = useState(
+    cachedToolsPageData?.codexSettings.disable_response_storage ?? false,
+  );
+  const [codexContextWindow1M, setCodexContextWindow1M] = useState(
+    cachedToolsPageData?.codexSettings.context_window_1m ?? false,
+  );
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
     cachedToolsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
   );
   const [loading, setLoading] = useState(!cachedToolsPageData);
   const [hudInstalling, setHudInstalling] = useState(false);
-  const [hudUpdateInfo, setHudUpdateInfo] = useState<{ currentVersion: string; latestVersion: string; hasUpdate: boolean } | null>(null);
+  const [hudUpdateInfo, setHudUpdateInfo] = useState<{
+    currentVersion: string;
+    latestVersion: string;
+    hasUpdate: boolean;
+  } | null>(null);
   const [hudUpdating, setHudUpdating] = useState(false);
   const [hudChecking, setHudChecking] = useState(false);
   const [hello2ccInstalling, setHello2ccInstalling] = useState(false);
@@ -156,56 +203,70 @@ export default function Tools() {
   const { data: hello2ccStatus, refetch: refetchHello2ccStatus } = useHello2ccStatus();
   const setHudConfigMutation = useSetClaudeHudConfigMutation();
   const setHello2ccConfigMutation = useSetHello2ccConfigMutation();
+  const setClaudeSettingMutation = useSetClaudeSettingMutation<unknown>();
+  const setCodexSettingMutation = useSetCodexSettingMutation();
+  const setClaudeStatuslineMutation = useSetClaudeStatuslineMutation();
+  const setHello2ccEnabledMutation = useSetHello2ccEnabledMutation();
+  const updateClaudeHudMutation = useUpdateClaudeHudMutation();
+  const updateHello2ccMutation = useUpdateHello2ccMutation();
   const locale = getLocale();
-  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  ), [locale]);
+  const uiText = useCallback(
+    (zhText: string, enText: string, jaText?: string) =>
+      locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+    [locale],
+  );
   const hudStatus = migrateHudConfig((rawHudStatus as HudStatus | null) ?? null);
 
-  const toolById = useMemo(
-    () => new Map(tools.map((tool) => [tool.id, tool])),
-    [tools],
-  );
+  const toolById = useMemo(() => new Map(tools.map((tool) => [tool.id, tool])), [tools]);
   const visibleTabs = useMemo(
     () => (["claude", "codex"] as ToolTab[]).filter((id) => visibleApps.includes(id)),
     [visibleApps],
   );
   const visibleTabItems = useMemo(
-    () => visibleTabs.map((id) => ({
-      id,
-      label: toolById.get(id)?.name || id,
-      installed: toolById.get(id)?.installed ?? false,
-      Icon: id === "claude" ? Terminal : Code,
-    })),
+    () =>
+      visibleTabs.map((id) => ({
+        id,
+        label: toolById.get(id)?.name || id,
+        installed: toolById.get(id)?.installed ?? false,
+        Icon: id === "claude" ? Terminal : Code,
+      })),
     [toolById, visibleTabs],
   );
   const activeTabInstalled = toolById.get(tab)?.installed ?? false;
 
-  const loadData = useCallback(async (options: { force?: boolean } = {}) => {
-    const { force = false } = options;
-    if (!queryClient.getQueryData(queryKeys.toolsPage)) {
-      setLoading(true);
-    }
-    try {
-      const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.toolsPage,
-        queryFn: fetchToolsPageData,
-        staleTime: force ? 0 : 30_000,
-      });
-      setPermLevel(data.permissionsLevel);
-      setAutoUpdate(data.autoUpdateChannel);
-      setClaudeModel(data.claudeModel);
-      setToolSearch(data.toolSearchEnabled);
-      setCodexApproval(data.codexSettings.approval_mode);
-      setCodexReasoning(data.codexSettings.reasoning_effort);
-      setCodexDisableStorage(data.codexSettings.disable_response_storage);
-      setCodexContextWindow1M(data.codexSettings.context_window_1m);
-      setVisibleApps(data.visibleApps);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  }, [queryClient]);
+  const loadData = useCallback(
+    async (options: { force?: boolean } = {}) => {
+      const { force = false } = options;
+      if (!queryClient.getQueryData(queryKeys.toolsPage)) {
+        setLoading(true);
+      }
+      try {
+        const data = await queryClient.fetchQuery({
+          queryKey: queryKeys.toolsPage,
+          queryFn: fetchToolsPageData,
+          staleTime: force ? 0 : 30_000,
+        });
+        setPermLevel(data.permissionsLevel);
+        setAutoUpdate(data.autoUpdateChannel);
+        setClaudeModel(data.claudeModel);
+        setToolSearch(data.toolSearchEnabled);
+        setCodexApproval(data.codexSettings.approval_mode);
+        setCodexReasoning(data.codexSettings.reasoning_effort);
+        setCodexDisableStorage(data.codexSettings.disable_response_storage);
+        setCodexContextWindow1M(data.codexSettings.context_window_1m);
+        setVisibleApps(data.visibleApps);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [queryClient],
+  );
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
   useEffect(() => {
     if (visibleTabs.length === 0) return;
     if (!visibleTabs.includes(tab)) setTab(visibleTabs[0]);
@@ -232,38 +293,53 @@ export default function Tools() {
     [queryClient],
   );
 
-  const setClaudeSetting = useCallback(async <T,>(fn: string, args: Record<string, unknown>, onSuccess: (value: T) => void, syncCache?: (value: T) => void) => {
-    try {
-      const value = await invoke<T>(fn, args);
-      onSuccess(value);
-      syncCache?.(value);
-      showToast("success", uiText("已更新", "Updated", "更新しました"));
-    } catch (e) { showToast("error", `${e}`); }
-  }, [uiText]);
-
-  const setCodex = useCallback(async (key: string, value: string) => {
-    try {
-      await invoke("set_codex_setting", { key, value });
-      // Keep the react-query cache in sync; otherwise remounting the page within
-      // staleTime (30s) seeds local state from the stale cache and the select
-      // visually reverts to the pre-save value.
-      switch (key) {
-        case "approval_mode":
-          patchCodexCache({ approval_mode: value });
-          break;
-        case "reasoning_effort":
-          patchCodexCache({ reasoning_effort: value });
-          break;
-        case "disable_response_storage":
-          patchCodexCache({ disable_response_storage: value === "true" });
-          break;
-        case "context_window_1m":
-          patchCodexCache({ context_window_1m: value === "true" });
-          break;
+  const setClaudeSetting = useCallback(
+    async <T,>(
+      fn: string,
+      args: Record<string, unknown>,
+      onSuccess: (value: T) => void,
+      syncCache?: (value: T) => void,
+    ) => {
+      try {
+        const value = (await setClaudeSettingMutation.mutateAsync({ command: fn, args })) as T;
+        onSuccess(value);
+        syncCache?.(value);
+        showToast("success", uiText("已更新", "Updated", "更新しました"));
+      } catch (e) {
+        showToast("error", `${e}`);
       }
-      showToast("success", uiText("已更新", "Updated", "更新しました"));
-    } catch (e) { showToast("error", `${e}`); }
-  }, [patchCodexCache, uiText]);
+    },
+    [setClaudeSettingMutation, uiText],
+  );
+
+  const setCodex = useCallback(
+    async (key: string, value: string) => {
+      try {
+        await setCodexSettingMutation.mutateAsync({ key, value });
+        // Keep the react-query cache in sync; otherwise remounting the page within
+        // staleTime (30s) seeds local state from the stale cache and the select
+        // visually reverts to the pre-save value.
+        switch (key) {
+          case "approval_mode":
+            patchCodexCache({ approval_mode: value });
+            break;
+          case "reasoning_effort":
+            patchCodexCache({ reasoning_effort: value });
+            break;
+          case "disable_response_storage":
+            patchCodexCache({ disable_response_storage: value === "true" });
+            break;
+          case "context_window_1m":
+            patchCodexCache({ context_window_1m: value === "true" });
+            break;
+        }
+        showToast("success", uiText("已更新", "Updated", "更新しました"));
+      } catch (e) {
+        showToast("error", `${e}`);
+      }
+    },
+    [patchCodexCache, setCodexSettingMutation, uiText],
+  );
 
   const handleInstallHud = useCallback(async () => {
     setHudInstalling(true);
@@ -281,7 +357,9 @@ export default function Tools() {
   const checkHudUpdate = useCallback(async () => {
     setHudChecking(true);
     try {
-      const info = await invoke<{ currentVersion: string; latestVersion: string; hasUpdate: boolean }>("check_claude_hud_update");
+      const info = await invoke<{ currentVersion: string; latestVersion: string; hasUpdate: boolean }>(
+        "check_claude_hud_update",
+      );
       setHudUpdateInfo(info);
       if (!info.hasUpdate) {
         showToast("success", uiText("已是最新版本", "Already up to date", "すでに最新です"));
@@ -296,23 +374,26 @@ export default function Tools() {
   const handleUpdateHud = useCallback(async () => {
     setHudUpdating(true);
     try {
-      const result = await invoke<{ version: string; skipped: boolean }>("update_claude_hud");
+      const result = await updateClaudeHudMutation.mutateAsync();
       await refetchHudStatus();
       setHudUpdateInfo(null);
       if (result.skipped) {
         showToast("success", uiText("已是最新版本", "Already up to date", "すでに最新です"));
       } else {
-        showToast("success", uiText(`已更新到 v${result.version}`, `Updated to v${result.version}`, `v${result.version} に更新しました`));
+        showToast(
+          "success",
+          uiText(`已更新到 v${result.version}`, `Updated to v${result.version}`, `v${result.version} に更新しました`),
+        );
       }
     } catch (e) {
       showToast("error", uiText(`更新失败: ${e}`, `Update failed: ${e}`, `更新に失敗しました: ${e}`));
     } finally {
       setHudUpdating(false);
     }
-  }, [refetchHudStatus, uiText]);
+  }, [refetchHudStatus, uiText, updateClaudeHudMutation]);
 
-  const updateHello2ccDraft = useCallback(<K extends keyof Hello2ccConfig,>(key: K, value: Hello2ccConfig[K]) => {
-    setHello2ccDraft(prev => ({ ...prev, [key]: value }));
+  const updateHello2ccDraft = useCallback(<K extends keyof Hello2ccConfig>(key: K, value: Hello2ccConfig[K]) => {
+    setHello2ccDraft((prev) => ({ ...prev, [key]: value }));
   }, []);
 
   const handleInstallHello2cc = useCallback(async () => {
@@ -343,18 +424,21 @@ export default function Tools() {
     }
   }, [refetchHello2ccStatus, uiText]);
 
-  const toggleHello2ccEnabled = useCallback(async (enabled: boolean) => {
-    setHello2ccToggling(true);
-    try {
-      await invoke("set_hello2cc_enabled", { enabled });
-      await refetchHello2ccStatus();
-      showToast("success", uiText("已更新", "Updated", "更新しました"));
-    } catch (e) {
-      showToast("error", `${e}`);
-    } finally {
-      setHello2ccToggling(false);
-    }
-  }, [refetchHello2ccStatus, uiText]);
+  const toggleHello2ccEnabled = useCallback(
+    async (enabled: boolean) => {
+      setHello2ccToggling(true);
+      try {
+        await setHello2ccEnabledMutation.mutateAsync({ enabled });
+        await refetchHello2ccStatus();
+        showToast("success", uiText("已更新", "Updated", "更新しました"));
+      } catch (e) {
+        showToast("error", `${e}`);
+      } finally {
+        setHello2ccToggling(false);
+      }
+    },
+    [refetchHello2ccStatus, setHello2ccEnabledMutation, uiText],
+  );
 
   const checkHello2ccUpdate = useCallback(async () => {
     setHello2ccChecking(true);
@@ -374,16 +458,19 @@ export default function Tools() {
   const handleUpdateHello2cc = useCallback(async () => {
     setHello2ccUpdating(true);
     try {
-      const status = await invoke<Hello2ccStatus>("update_hello2cc");
+      const status = await updateHello2ccMutation.mutateAsync();
       setHello2ccUpdateInfo(null);
       await refetchHello2ccStatus();
-      showToast("success", uiText(`已更新到 v${status.version}`, `Updated to v${status.version}`, `v${status.version} に更新しました`));
+      showToast(
+        "success",
+        uiText(`已更新到 v${status.version}`, `Updated to v${status.version}`, `v${status.version} に更新しました`),
+      );
     } catch (e) {
       showToast("error", uiText(`更新失败: ${e}`, `Update failed: ${e}`, `更新に失敗しました: ${e}`));
     } finally {
       setHello2ccUpdating(false);
     }
-  }, [refetchHello2ccStatus, uiText]);
+  }, [refetchHello2ccStatus, uiText, updateHello2ccMutation]);
 
   const handleSaveHello2ccConfig = useCallback(async () => {
     try {
@@ -412,38 +499,48 @@ export default function Tools() {
     return { ...status, hudConfig: cfg };
   }
 
-  const toggleStatusLine = useCallback(async (enabled: boolean) => {
-    try {
-      await invoke("set_claude_statusline", { enabled });
-      await refetchHudStatus();
-      showToast("success", uiText("已更新", "Updated", "更新しました"));
-    } catch (e) { showToast("error", `${e}`); }
-  }, [refetchHudStatus, uiText]);
+  const toggleStatusLine = useCallback(
+    async (enabled: boolean) => {
+      try {
+        await setClaudeStatuslineMutation.mutateAsync({ enabled });
+        await refetchHudStatus();
+        showToast("success", uiText("已更新", "Updated", "更新しました"));
+      } catch (e) {
+        showToast("error", `${e}`);
+      }
+    },
+    [refetchHudStatus, setClaudeStatuslineMutation, uiText],
+  );
 
-  const updateHudConfig = useCallback(async (patch: Partial<HudConfig>) => {
-    if (!hudStatus) return;
-    const current = hudStatus.hudConfig || DEFAULT_HUD_CONFIG;
-    const updated: HudConfig = {
-      ...current,
-      ...patch,
-      gitStatus: { ...current.gitStatus, ...patch.gitStatus },
-      display: { ...current.display, ...patch.display },
-    };
-    try {
-      await setHudConfigMutation.mutateAsync(updated);
-      showToast("success", uiText("已更新", "Updated", "更新しました"));
-    } catch (e) { showToast("error", `${e}`); }
-  }, [hudStatus, setHudConfigMutation, uiText]);
+  const updateHudConfig = useCallback(
+    async (patch: Partial<HudConfig>) => {
+      if (!hudStatus) return;
+      const current = hudStatus.hudConfig || DEFAULT_HUD_CONFIG;
+      const updated: HudConfig = {
+        ...current,
+        ...patch,
+        gitStatus: { ...current.gitStatus, ...patch.gitStatus },
+        display: { ...current.display, ...patch.display },
+      };
+      try {
+        await setHudConfigMutation.mutateAsync(updated);
+        showToast("success", uiText("已更新", "Updated", "更新しました"));
+      } catch (e) {
+        showToast("error", `${e}`);
+      }
+    },
+    [hudStatus, setHudConfigMutation, uiText],
+  );
 
-  const commitPermLevel = useCallback(async (nextLevel = pendingPermLevelRef.current ?? permLevel) => {
-    pendingPermLevelRef.current = null;
-    await setClaudeSetting<number>(
-      "set_claude_permissions_level",
-      { level: nextLevel },
-      setPermLevel,
-      (v) => patchToolsPageCache({ permissionsLevel: v }),
-    );
-  }, [patchToolsPageCache, permLevel, setClaudeSetting]);
+  const commitPermLevel = useCallback(
+    async (nextLevel = pendingPermLevelRef.current ?? permLevel) => {
+      pendingPermLevelRef.current = null;
+      await setClaudeSetting<number>("set_claude_permissions_level", { level: nextLevel }, setPermLevel, (v) =>
+        patchToolsPageCache({ permissionsLevel: v }),
+      );
+    },
+    [patchToolsPageCache, permLevel, setClaudeSetting],
+  );
 
   const unavailableLabel = useMemo(() => uiText("未安装", "N/A", "未インストール"), [uiText]);
   const permLevelLabels = useMemo(
@@ -510,29 +607,93 @@ export default function Tools() {
   const hudGitStatusOptions = useMemo(
     () => [
       { key: "enabled" as HudGitStatusKey, label: uiText("显示分支", "Branch", "ブランチ表示"), defaultValue: true },
-      { key: "showDirty" as HudGitStatusKey, label: uiText("未提交标记", "Dirty Mark", "変更あり表示"), defaultValue: true },
-      { key: "showAheadBehind" as HudGitStatusKey, label: uiText("领先/落后", "Ahead/Behind", "先行/遅延"), defaultValue: false },
-      { key: "showFileStats" as HudGitStatusKey, label: uiText("文件统计", "File Stats", "ファイル統計"), defaultValue: false },
+      {
+        key: "showDirty" as HudGitStatusKey,
+        label: uiText("未提交标记", "Dirty Mark", "変更あり表示"),
+        defaultValue: true,
+      },
+      {
+        key: "showAheadBehind" as HudGitStatusKey,
+        label: uiText("领先/落后", "Ahead/Behind", "先行/遅延"),
+        defaultValue: false,
+      },
+      {
+        key: "showFileStats" as HudGitStatusKey,
+        label: uiText("文件统计", "File Stats", "ファイル統計"),
+        defaultValue: false,
+      },
     ],
     [uiText],
   );
   const hudDisplayOptions = useMemo(
     () => [
       { key: "showModel" as HudDisplayBooleanKey, label: uiText("模型名", "Model", "モデル名"), defaultValue: true },
-      { key: "showProject" as HudDisplayBooleanKey, label: uiText("项目路径", "Project Path", "プロジェクトパス"), defaultValue: true },
-      { key: "showContextBar" as HudDisplayBooleanKey, label: uiText("上下文进度条", "Context Bar", "コンテキストバー"), defaultValue: true },
-      { key: "showConfigCounts" as HudDisplayBooleanKey, label: uiText("配置计数", "Config Counts", "設定数"), defaultValue: false },
-      { key: "showDuration" as HudDisplayBooleanKey, label: uiText("会话时长", "Duration", "継続時間"), defaultValue: false },
-      { key: "showSpeed" as HudDisplayBooleanKey, label: uiText("输出速度", "Output Speed", "出力速度"), defaultValue: false },
+      {
+        key: "showProject" as HudDisplayBooleanKey,
+        label: uiText("项目路径", "Project Path", "プロジェクトパス"),
+        defaultValue: true,
+      },
+      {
+        key: "showContextBar" as HudDisplayBooleanKey,
+        label: uiText("上下文进度条", "Context Bar", "コンテキストバー"),
+        defaultValue: true,
+      },
+      {
+        key: "showConfigCounts" as HudDisplayBooleanKey,
+        label: uiText("配置计数", "Config Counts", "設定数"),
+        defaultValue: false,
+      },
+      {
+        key: "showDuration" as HudDisplayBooleanKey,
+        label: uiText("会话时长", "Duration", "継続時間"),
+        defaultValue: false,
+      },
+      {
+        key: "showSpeed" as HudDisplayBooleanKey,
+        label: uiText("输出速度", "Output Speed", "出力速度"),
+        defaultValue: false,
+      },
       { key: "showUsage" as HudDisplayBooleanKey, label: uiText("用量限制", "Usage", "使用量"), defaultValue: true },
-      { key: "usageBarEnabled" as HudDisplayBooleanKey, label: uiText("用量进度条", "Usage Bar", "使用量バー"), defaultValue: true },
-      { key: "showTokenBreakdown" as HudDisplayBooleanKey, label: uiText("Token 明细", "Token Detail", "トークン詳細"), defaultValue: true },
-      { key: "showTools" as HudDisplayBooleanKey, label: uiText("工具活动", "Tools", "ツール活動"), defaultValue: false },
-      { key: "showAgents" as HudDisplayBooleanKey, label: uiText("Agent 活动", "Agents", "Agent 活動"), defaultValue: false },
-      { key: "showTodos" as HudDisplayBooleanKey, label: uiText("Todo 进度", "Todos", "Todo 進捗"), defaultValue: false },
-      { key: "showSessionName" as HudDisplayBooleanKey, label: uiText("会话名称", "Session Name", "セッション名"), defaultValue: false },
-      { key: "showClaudeCodeVersion" as HudDisplayBooleanKey, label: uiText("CC 版本号", "CC Version", "CC バージョン"), defaultValue: false },
-      { key: "showMemoryUsage" as HudDisplayBooleanKey, label: uiText("内存占用", "Memory Usage", "メモリ使用量"), defaultValue: false },
+      {
+        key: "usageBarEnabled" as HudDisplayBooleanKey,
+        label: uiText("用量进度条", "Usage Bar", "使用量バー"),
+        defaultValue: true,
+      },
+      {
+        key: "showTokenBreakdown" as HudDisplayBooleanKey,
+        label: uiText("Token 明细", "Token Detail", "トークン詳細"),
+        defaultValue: true,
+      },
+      {
+        key: "showTools" as HudDisplayBooleanKey,
+        label: uiText("工具活动", "Tools", "ツール活動"),
+        defaultValue: false,
+      },
+      {
+        key: "showAgents" as HudDisplayBooleanKey,
+        label: uiText("Agent 活动", "Agents", "Agent 活動"),
+        defaultValue: false,
+      },
+      {
+        key: "showTodos" as HudDisplayBooleanKey,
+        label: uiText("Todo 进度", "Todos", "Todo 進捗"),
+        defaultValue: false,
+      },
+      {
+        key: "showSessionName" as HudDisplayBooleanKey,
+        label: uiText("会话名称", "Session Name", "セッション名"),
+        defaultValue: false,
+      },
+      {
+        key: "showClaudeCodeVersion" as HudDisplayBooleanKey,
+        label: uiText("CC 版本号", "CC Version", "CC バージョン"),
+        defaultValue: false,
+      },
+      {
+        key: "showMemoryUsage" as HudDisplayBooleanKey,
+        label: uiText("内存占用", "Memory Usage", "メモリ使用量"),
+        defaultValue: false,
+      },
     ],
     [uiText],
   );
@@ -562,14 +723,46 @@ export default function Tools() {
   );
   const hello2ccModelFields = useMemo(
     () => [
-      { fieldKey: "default_agent_model" as Hello2ccSelectKey, label: uiText("默认 Agent 槽位", "Default Agent Slot", "既定 Agent スロット"), description: uiText("统一默认值", "Global default", "全体デフォルト") },
-      { fieldKey: "primary_model" as Hello2ccSelectKey, label: uiText("Primary Model", "Primary Model", "Primary Model"), description: uiText("高能力 Agent", "High-capability agents", "高能力 Agent") },
-      { fieldKey: "subagent_model" as Hello2ccSelectKey, label: uiText("Subagent Model", "Subagent Model", "Subagent Model"), description: uiText("未指定模型的 Agent", "Agents without explicit model", "未指定モデルの Agent") },
-      { fieldKey: "guide_model" as Hello2ccSelectKey, label: uiText("Guide Model", "Guide Model", "Guide Model"), description: "Claude Code Guide" },
-      { fieldKey: "explore_model" as Hello2ccSelectKey, label: uiText("Explore Model", "Explore Model", "Explore Model"), description: "Explore" },
-      { fieldKey: "plan_model" as Hello2ccSelectKey, label: uiText("Plan Model", "Plan Model", "Plan Model"), description: "Plan" },
-      { fieldKey: "general_model" as Hello2ccSelectKey, label: uiText("General Model", "General Model", "General Model"), description: "General-Purpose" },
-      { fieldKey: "team_model" as Hello2ccSelectKey, label: uiText("Team Model", "Team Model", "Team Model"), description: uiText("团队 teammate", "Team teammates", "チーム teammate") },
+      {
+        fieldKey: "default_agent_model" as Hello2ccSelectKey,
+        label: uiText("默认 Agent 槽位", "Default Agent Slot", "既定 Agent スロット"),
+        description: uiText("统一默认值", "Global default", "全体デフォルト"),
+      },
+      {
+        fieldKey: "primary_model" as Hello2ccSelectKey,
+        label: uiText("Primary Model", "Primary Model", "Primary Model"),
+        description: uiText("高能力 Agent", "High-capability agents", "高能力 Agent"),
+      },
+      {
+        fieldKey: "subagent_model" as Hello2ccSelectKey,
+        label: uiText("Subagent Model", "Subagent Model", "Subagent Model"),
+        description: uiText("未指定模型的 Agent", "Agents without explicit model", "未指定モデルの Agent"),
+      },
+      {
+        fieldKey: "guide_model" as Hello2ccSelectKey,
+        label: uiText("Guide Model", "Guide Model", "Guide Model"),
+        description: "Claude Code Guide",
+      },
+      {
+        fieldKey: "explore_model" as Hello2ccSelectKey,
+        label: uiText("Explore Model", "Explore Model", "Explore Model"),
+        description: "Explore",
+      },
+      {
+        fieldKey: "plan_model" as Hello2ccSelectKey,
+        label: uiText("Plan Model", "Plan Model", "Plan Model"),
+        description: "Plan",
+      },
+      {
+        fieldKey: "general_model" as Hello2ccSelectKey,
+        label: uiText("General Model", "General Model", "General Model"),
+        description: "General-Purpose",
+      },
+      {
+        fieldKey: "team_model" as Hello2ccSelectKey,
+        label: uiText("Team Model", "Team Model", "Team Model"),
+        description: uiText("团队 teammate", "Team teammates", "チーム teammate"),
+      },
     ],
     [uiText],
   );
@@ -578,90 +771,128 @@ export default function Tools() {
     [uiText],
   );
   const noVisibleTabsDescription = useMemo(
-    () => uiText("可在设置页的 App 可见性中重新开启", "Re-enable them from Settings > App Visibility", "Settings > App Visibility から再表示できます"),
+    () =>
+      uiText(
+        "可在设置页的 App 可见性中重新开启",
+        "Re-enable them from Settings > App Visibility",
+        "Settings > App Visibility から再表示できます",
+      ),
     [uiText],
   );
   const notInstalledTitle = useMemo(
-    () => uiText(
-      `${tab === "claude" ? "Claude Code" : "Codex CLI"} 未安装`,
-      `${tab === "claude" ? "Claude Code" : "Codex CLI"} not installed`,
-      `${tab === "claude" ? "Claude Code" : "Codex CLI"} は未インストールです`,
-    ),
+    () =>
+      uiText(
+        `${tab === "claude" ? "Claude Code" : "Codex CLI"} 未安装`,
+        `${tab === "claude" ? "Claude Code" : "Codex CLI"} not installed`,
+        `${tab === "claude" ? "Claude Code" : "Codex CLI"} は未インストールです`,
+      ),
     [tab, uiText],
   );
   const notInstalledDescription = useMemo(
-    () => uiText("安装后即可在此管理工具设置", "Install it to manage settings here", "インストール後にここで设置を管理できます"),
+    () =>
+      uiText(
+        "安装后即可在此管理工具设置",
+        "Install it to manage settings here",
+        "インストール後にここで设置を管理できます",
+      ),
     [uiText],
   );
   const handleSelectTab = useCallback((value: string) => {
     setTab(value as ToolTab);
   }, []);
-  const handleSelectPermLevel = useCallback((value: string | number) => {
-    const nextLevel = Number(value);
-    setPermLevel(nextLevel);
-    pendingPermLevelRef.current = nextLevel;
-    void commitPermLevel(nextLevel);
-  }, [commitPermLevel]);
-  const handleSelectAutoUpdate = useCallback((value: string | number) => {
-    const nextValue = String(value);
-    setAutoUpdate(nextValue);
-    void setClaudeSetting<string>(
-      "set_claude_auto_update",
-      { channel: nextValue },
-      setAutoUpdate,
-      (v) => patchToolsPageCache({ autoUpdateChannel: v }),
-    );
-  }, [patchToolsPageCache, setClaudeSetting]);
-  const handleSelectClaudeModel = useCallback((value: string | number) => {
-    const nextValue = String(value);
-    setClaudeModel(nextValue);
-    void setClaudeSetting<string>(
-      "set_claude_model",
-      { model: nextValue },
-      setClaudeModel,
-      (v) => patchToolsPageCache({ claudeModel: v }),
-    );
-  }, [patchToolsPageCache, setClaudeSetting]);
-  const handleSelectHudLayout = useCallback((value: string | number) => {
-    void updateHudConfig({ lineLayout: value as HudConfig["lineLayout"] });
-  }, [updateHudConfig]);
-  const handleSelectHudPathLevel = useCallback((value: string | number) => {
-    void updateHudConfig({ pathLevels: Number(value) });
-  }, [updateHudConfig]);
-  const handleSelectHudContextValue = useCallback((value: string | number) => {
-    void updateHudConfig({ display: { contextValue: value as NonNullable<HudConfig["display"]>["contextValue"] } });
-  }, [updateHudConfig]);
-  const handleToggleHudGitStatus = useCallback((key: string, checked: boolean) => {
-    void updateHudConfig({ gitStatus: { [key]: checked } as Partial<NonNullable<HudConfig["gitStatus"]>> });
-  }, [updateHudConfig]);
-  const handleToggleHudDisplay = useCallback((key: string, checked: boolean) => {
-    void updateHudConfig({ display: { [key]: checked } as Partial<NonNullable<HudConfig["display"]>> });
-  }, [updateHudConfig]);
-  const handleSelectCodexApproval = useCallback((value: string | number) => {
-    const nextValue = String(value);
-    setCodexApproval(nextValue);
-    void setCodex("approval_mode", nextValue);
-  }, [setCodex]);
-  const handleSelectCodexReasoning = useCallback((value: string | number) => {
-    const nextValue = String(value);
-    setCodexReasoning(nextValue);
-    void setCodex("reasoning_effort", nextValue);
-  }, [setCodex]);
-  const handleToggleBypassPermissions = useCallback((enabled: boolean) => {
-    const nextLevel = enabled ? 3 : 0;
-    setPermLevel(nextLevel);
-    pendingPermLevelRef.current = nextLevel;
-    void commitPermLevel(nextLevel);
-  }, [commitPermLevel]);
-  const handleToggleToolSearch = useCallback((enabled: boolean) => {
-    setToolSearch(enabled);
-    void setClaudeSetting<boolean>(
-      "set_claude_tool_search",
-      { enabled },
-      setToolSearch,
-      (v) => patchToolsPageCache({ toolSearchEnabled: v }),
-    );
-  }, [patchToolsPageCache, setClaudeSetting]);
+  const handleSelectPermLevel = useCallback(
+    (value: string | number) => {
+      const nextLevel = Number(value);
+      setPermLevel(nextLevel);
+      pendingPermLevelRef.current = nextLevel;
+      void commitPermLevel(nextLevel);
+    },
+    [commitPermLevel],
+  );
+  const handleSelectAutoUpdate = useCallback(
+    (value: string | number) => {
+      const nextValue = String(value);
+      setAutoUpdate(nextValue);
+      void setClaudeSetting<string>("set_claude_auto_update", { channel: nextValue }, setAutoUpdate, (v) =>
+        patchToolsPageCache({ autoUpdateChannel: v }),
+      );
+    },
+    [patchToolsPageCache, setClaudeSetting],
+  );
+  const handleSelectClaudeModel = useCallback(
+    (value: string | number) => {
+      const nextValue = String(value);
+      setClaudeModel(nextValue);
+      void setClaudeSetting<string>("set_claude_model", { model: nextValue }, setClaudeModel, (v) =>
+        patchToolsPageCache({ claudeModel: v }),
+      );
+    },
+    [patchToolsPageCache, setClaudeSetting],
+  );
+  const handleSelectHudLayout = useCallback(
+    (value: string | number) => {
+      void updateHudConfig({ lineLayout: value as HudConfig["lineLayout"] });
+    },
+    [updateHudConfig],
+  );
+  const handleSelectHudPathLevel = useCallback(
+    (value: string | number) => {
+      void updateHudConfig({ pathLevels: Number(value) });
+    },
+    [updateHudConfig],
+  );
+  const handleSelectHudContextValue = useCallback(
+    (value: string | number) => {
+      void updateHudConfig({ display: { contextValue: value as NonNullable<HudConfig["display"]>["contextValue"] } });
+    },
+    [updateHudConfig],
+  );
+  const handleToggleHudGitStatus = useCallback(
+    (key: string, checked: boolean) => {
+      void updateHudConfig({ gitStatus: { [key]: checked } as Partial<NonNullable<HudConfig["gitStatus"]>> });
+    },
+    [updateHudConfig],
+  );
+  const handleToggleHudDisplay = useCallback(
+    (key: string, checked: boolean) => {
+      void updateHudConfig({ display: { [key]: checked } as Partial<NonNullable<HudConfig["display"]>> });
+    },
+    [updateHudConfig],
+  );
+  const handleSelectCodexApproval = useCallback(
+    (value: string | number) => {
+      const nextValue = String(value);
+      setCodexApproval(nextValue);
+      void setCodex("approval_mode", nextValue);
+    },
+    [setCodex],
+  );
+  const handleSelectCodexReasoning = useCallback(
+    (value: string | number) => {
+      const nextValue = String(value);
+      setCodexReasoning(nextValue);
+      void setCodex("reasoning_effort", nextValue);
+    },
+    [setCodex],
+  );
+  const handleToggleBypassPermissions = useCallback(
+    (enabled: boolean) => {
+      const nextLevel = enabled ? 3 : 0;
+      setPermLevel(nextLevel);
+      pendingPermLevelRef.current = nextLevel;
+      void commitPermLevel(nextLevel);
+    },
+    [commitPermLevel],
+  );
+  const handleToggleToolSearch = useCallback(
+    (enabled: boolean) => {
+      setToolSearch(enabled);
+      void setClaudeSetting<boolean>("set_claude_tool_search", { enabled }, setToolSearch, (v) =>
+        patchToolsPageCache({ toolSearchEnabled: v }),
+      );
+    },
+    [patchToolsPageCache, setClaudeSetting],
+  );
   const handleChangePermLevelRange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const nextLevel = Number(event.target.value);
     pendingPermLevelRef.current = nextLevel;
@@ -673,11 +904,14 @@ export default function Tools() {
   const handleCommitPermLevelBlur = useCallback(() => {
     void commitPermLevel();
   }, [commitPermLevel]);
-  const handleCommitPermLevelKeyUp = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End") {
-      void commitPermLevel();
-    }
-  }, [commitPermLevel]);
+  const handleCommitPermLevelKeyUp = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End") {
+        void commitPermLevel();
+      }
+    },
+    [commitPermLevel],
+  );
   const handleInstallHudClick = useCallback(() => {
     void handleInstallHud();
   }, [handleInstallHud]);
@@ -687,23 +921,38 @@ export default function Tools() {
   const handleCheckHudUpdateClick = useCallback(() => {
     void checkHudUpdate();
   }, [checkHudUpdate]);
-  const handleToggleHudSeparators = useCallback((checked: boolean) => {
-    void updateHudConfig({ showSeparators: checked });
-  }, [updateHudConfig]);
-  const handleChangeHello2ccSelect = useCallback((fieldKey: string, value: string) => {
-    updateHello2ccDraft(fieldKey as Hello2ccSelectKey, value as Hello2ccConfig[Hello2ccSelectKey]);
-  }, [updateHello2ccDraft]);
-  const handleToggleHello2ccMirrorSessionModel = useCallback((enabled: boolean) => {
-    updateHello2ccDraft("mirror_session_model", enabled);
-  }, [updateHello2ccDraft]);
-  const handleToggleCodexDisableStorage = useCallback((enabled: boolean) => {
-    setCodexDisableStorage(enabled);
-    void setCodex("disable_response_storage", String(enabled));
-  }, [setCodex]);
-  const handleToggleCodexContextWindow1M = useCallback((enabled: boolean) => {
-    setCodexContextWindow1M(enabled);
-    void setCodex("context_window_1m", String(enabled));
-  }, [setCodex]);
+  const handleToggleHudSeparators = useCallback(
+    (checked: boolean) => {
+      void updateHudConfig({ showSeparators: checked });
+    },
+    [updateHudConfig],
+  );
+  const handleChangeHello2ccSelect = useCallback(
+    (fieldKey: string, value: string) => {
+      updateHello2ccDraft(fieldKey as Hello2ccSelectKey, value as Hello2ccConfig[Hello2ccSelectKey]);
+    },
+    [updateHello2ccDraft],
+  );
+  const handleToggleHello2ccMirrorSessionModel = useCallback(
+    (enabled: boolean) => {
+      updateHello2ccDraft("mirror_session_model", enabled);
+    },
+    [updateHello2ccDraft],
+  );
+  const handleToggleCodexDisableStorage = useCallback(
+    (enabled: boolean) => {
+      setCodexDisableStorage(enabled);
+      void setCodex("disable_response_storage", String(enabled));
+    },
+    [setCodex],
+  );
+  const handleToggleCodexContextWindow1M = useCallback(
+    (enabled: boolean) => {
+      setCodexContextWindow1M(enabled);
+      void setCodex("context_window_1m", String(enabled));
+    },
+    [setCodex],
+  );
   const hello2ccConfigSource = hello2ccStatus?.config ?? DEFAULT_HELLO2CC_CONFIG;
   const handleInstallHello2ccClick = useCallback(() => {
     void handleInstallHello2cc();
@@ -726,19 +975,21 @@ export default function Tools() {
   const perm = PERM_LEVELS[permLevel] || PERM_LEVELS[0];
   const hc = hudStatus?.hudConfig || DEFAULT_HUD_CONFIG;
   const hudResolvedGitStatusOptions = useMemo(
-    () => hudGitStatusOptions.map((option) => ({
-      key: option.key,
-      label: option.label,
-      checked: hc.gitStatus?.[option.key] ?? option.defaultValue,
-    })),
+    () =>
+      hudGitStatusOptions.map((option) => ({
+        key: option.key,
+        label: option.label,
+        checked: hc.gitStatus?.[option.key] ?? option.defaultValue,
+      })),
     [hc.gitStatus, hudGitStatusOptions],
   );
   const hudResolvedDisplayOptions = useMemo(
-    () => hudDisplayOptions.map((option) => ({
-      key: option.key,
-      label: option.label,
-      checked: hc.display?.[option.key] ?? option.defaultValue,
-    })),
+    () =>
+      hudDisplayOptions.map((option) => ({
+        key: option.key,
+        label: option.label,
+        checked: hc.display?.[option.key] ?? option.defaultValue,
+      })),
     [hc.display, hudDisplayOptions],
   );
   const hudInstallAction = useMemo(
@@ -754,24 +1005,29 @@ export default function Tools() {
     [handleInstallHudClick, hudInstalling, uiText],
   );
   const hudPrimaryAction = useMemo(
-    () => (hudUpdateInfo?.hasUpdate
-      ? {
-        label: uiText(`更新到 v${hudUpdateInfo.latestVersion}`, `Update to v${hudUpdateInfo.latestVersion}`, `v${hudUpdateInfo.latestVersion} に更新`),
-        icon: Download,
-        pending: hudUpdating,
-        onClick: handleUpdateHudClick,
-        disabled: hudUpdating,
-        variant: "primary" as const,
-        gap: 5,
-      }
-      : {
-        label: uiText("检查更新", "Check Update", "更新を確認"),
-        icon: RefreshCw,
-        pending: hudChecking,
-        onClick: handleCheckHudUpdateClick,
-        disabled: hudChecking,
-        title: uiText("检查更新", "Check for updates", "更新を確認"),
-      }),
+    () =>
+      hudUpdateInfo?.hasUpdate
+        ? {
+            label: uiText(
+              `更新到 v${hudUpdateInfo.latestVersion}`,
+              `Update to v${hudUpdateInfo.latestVersion}`,
+              `v${hudUpdateInfo.latestVersion} に更新`,
+            ),
+            icon: Download,
+            pending: hudUpdating,
+            onClick: handleUpdateHudClick,
+            disabled: hudUpdating,
+            variant: "primary" as const,
+            gap: 5,
+          }
+        : {
+            label: uiText("检查更新", "Check Update", "更新を確認"),
+            icon: RefreshCw,
+            pending: hudChecking,
+            onClick: handleCheckHudUpdateClick,
+            disabled: hudChecking,
+            title: uiText("检查更新", "Check for updates", "更新を確認"),
+          },
     [handleCheckHudUpdateClick, handleUpdateHudClick, hudChecking, hudUpdateInfo, hudUpdating, uiText],
   );
   const hudToggle = useMemo(
@@ -796,24 +1052,36 @@ export default function Tools() {
     [handleInstallHello2ccClick, hello2ccInstalling, uiText],
   );
   const hello2ccPrimaryAction = useMemo(
-    () => (hello2ccUpdateInfo?.hasUpdate
-      ? {
-        label: uiText(`更新到 v${hello2ccUpdateInfo.latestVersion}`, `Update to v${hello2ccUpdateInfo.latestVersion}`, `v${hello2ccUpdateInfo.latestVersion} に更新`),
-        icon: Download,
-        pending: hello2ccUpdating,
-        onClick: handleUpdateHello2ccClick,
-        disabled: hello2ccUpdating,
-        variant: "primary" as const,
-        gap: 5,
-      }
-      : {
-        label: uiText("检查更新", "Check Update", "更新を確認"),
-        icon: RefreshCw,
-        pending: hello2ccChecking,
-        onClick: handleCheckHello2ccUpdateClick,
-        disabled: hello2ccChecking,
-      }),
-    [handleCheckHello2ccUpdateClick, handleUpdateHello2ccClick, hello2ccChecking, hello2ccUpdateInfo, hello2ccUpdating, uiText],
+    () =>
+      hello2ccUpdateInfo?.hasUpdate
+        ? {
+            label: uiText(
+              `更新到 v${hello2ccUpdateInfo.latestVersion}`,
+              `Update to v${hello2ccUpdateInfo.latestVersion}`,
+              `v${hello2ccUpdateInfo.latestVersion} に更新`,
+            ),
+            icon: Download,
+            pending: hello2ccUpdating,
+            onClick: handleUpdateHello2ccClick,
+            disabled: hello2ccUpdating,
+            variant: "primary" as const,
+            gap: 5,
+          }
+        : {
+            label: uiText("检查更新", "Check Update", "更新を確認"),
+            icon: RefreshCw,
+            pending: hello2ccChecking,
+            onClick: handleCheckHello2ccUpdateClick,
+            disabled: hello2ccChecking,
+          },
+    [
+      handleCheckHello2ccUpdateClick,
+      handleUpdateHello2ccClick,
+      hello2ccChecking,
+      hello2ccUpdateInfo,
+      hello2ccUpdating,
+      uiText,
+    ],
   );
   const hello2ccSecondaryAction = useMemo(
     () => ({
@@ -841,14 +1109,22 @@ export default function Tools() {
       {
         fieldKey: "routing_policy",
         label: uiText("路由策略", "Routing Policy", "ルーティングポリシー"),
-        description: uiText("决定是否在原生 Agent 调用前注入模型槽位", "Choose whether native agent calls receive silent model injection", "ネイティブ Agent 呼び出し前にモデル注入するかを選びます"),
+        description: uiText(
+          "决定是否在原生 Agent 调用前注入模型槽位",
+          "Choose whether native agent calls receive silent model injection",
+          "ネイティブ Agent 呼び出し前にモデル注入するかを選びます",
+        ),
         value: hello2ccDraft.routing_policy,
         options: hello2ccRoutingOptions,
       },
       {
         fieldKey: "compatibility_mode",
         label: uiText("兼容模式", "Compatibility Mode", "互換モード"),
-        description: uiText("与其他插件共存时可切到仅净化模式", "Use sanitize-only when coexisting with other orchestration plugins", "他プラグインと共存する場合は sanitize-only を使います"),
+        description: uiText(
+          "与其他插件共存时可切到仅净化模式",
+          "Use sanitize-only when coexisting with other orchestration plugins",
+          "他プラグインと共存する場合は sanitize-only を使います",
+        ),
         value: hello2ccDraft.compatibility_mode,
         options: hello2ccCompatibilityOptions,
       },
@@ -860,11 +1136,18 @@ export default function Tools() {
         options: hello2ccModelOptions,
       })),
     ],
-    [hello2ccCompatibilityOptions, hello2ccDraft, hello2ccModelFields, hello2ccModelOptions, hello2ccRoutingOptions, uiText],
+    [
+      hello2ccCompatibilityOptions,
+      hello2ccDraft,
+      hello2ccModelFields,
+      hello2ccModelOptions,
+      hello2ccRoutingOptions,
+      uiText,
+    ],
   );
 
   if (loading) {
-    return <div className="loading-center"><div className="spinner" /><span style={{ fontSize: 13, color: "var(--text-muted)" }}>{uiText("加载中...", "Loading...", "読み込み中...")}</span></div>;
+    return <LoadingState label={uiText("加载中...", "Loading...", "読み込み中...")} />;
   }
 
   return (
@@ -872,11 +1155,17 @@ export default function Tools() {
       <div className="page-header">
         <div>
           <h2 className="page-title">{uiText("工具", "Tools", "ツール")}</h2>
-          <p className="page-subtitle">{uiText("管理 AI 编程工具的配置和权限", "Manage AI coding tool settings", "AI コーディングツールの設定と権限を管理")}</p>
+          <p className="page-subtitle">
+            {uiText(
+              "管理 AI 编程工具的配置和权限",
+              "Manage AI coding tool settings",
+              "AI コーディングツールの設定と権限を管理",
+            )}
+          </p>
         </div>
       </div>
 
-        {/* Tabs */}
+      {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         {visibleTabItems.map(({ id, label, installed, Icon }) => {
           return (
@@ -896,19 +1185,12 @@ export default function Tools() {
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {visibleTabs.length === 0 && (
-          <ToolsEmptyStateCard
-            title={noVisibleTabsTitle}
-            description={noVisibleTabsDescription}
-            marginBottom={12}
-          />
+          <ToolsEmptyStateCard title={noVisibleTabsTitle} description={noVisibleTabsDescription} marginBottom={12} />
         )}
 
         {/* Not installed hint */}
         {visibleTabs.length > 0 && !activeTabInstalled && (
-          <ToolsEmptyStateCard
-            title={notInstalledTitle}
-            description={notInstalledDescription}
-          />
+          <ToolsEmptyStateCard title={notInstalledTitle} description={notInstalledDescription} />
         )}
 
         {tab === "claude" && toolById.get("claude")?.installed && (
@@ -931,7 +1213,11 @@ export default function Tools() {
             {/* Bypass Permissions */}
             <ToolsToggleCard
               title={uiText("绕过权限确认", "Bypass Permissions", "権限確認をバイパス")}
-              description={uiText("跳过所有权限确认，全自动执行", "Skip all permission prompts, fully autonomous", "すべての権限確認をスキップして完全自動で実行します")}
+              description={uiText(
+                "跳过所有权限确认，全自动执行",
+                "Skip all permission prompts, fully autonomous",
+                "すべての権限確認をスキップして完全自動で実行します",
+              )}
               value={permLevel === 3}
               onChange={handleToggleBypassPermissions}
               labelOn="ON"
@@ -959,7 +1245,11 @@ export default function Tools() {
             {/* Tool Search */}
             <ToolsToggleCard
               title="Tool Search"
-              description={uiText("启用工具搜索功能（实验性）", "Enable tool search (experimental)", "ツール検索機能を有効化します（実験的）")}
+              description={uiText(
+                "启用工具搜索功能（实验性）",
+                "Enable tool search (experimental)",
+                "ツール検索機能を有効化します（実験的）",
+              )}
               value={toolSearch}
               onChange={handleToggleToolSearch}
               labelOn={uiText("已启用", "Enabled", "有効")}
@@ -970,7 +1260,11 @@ export default function Tools() {
             <div className="card" style={{ padding: "16px 18px" }}>
               <ToolsManagedSectionHeader
                 title="StatusLine (claude-hud)"
-                description={uiText("终端底部实时状态栏", "Real-time status bar at terminal bottom", "ターミナル下部のリアルタイムステータスバー")}
+                description={uiText(
+                  "终端底部实时状态栏",
+                  "Real-time status bar at terminal bottom",
+                  "ターミナル下部のリアルタイムステータスバー",
+                )}
                 version={hudStatus?.version}
                 installed={hudStatus?.installed ?? false}
                 installAction={hudInstallAction}
@@ -979,7 +1273,15 @@ export default function Tools() {
               />
 
               {hudStatus?.installed && (
-                <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+                <div
+                  style={{
+                    borderTop: "1px solid var(--border)",
+                    paddingTop: 12,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 14,
+                  }}
+                >
                   {/* Layout */}
                   <ToolsChoiceRow
                     title={uiText("布局模式", "Layout Mode", "レイアウトモード")}
@@ -991,7 +1293,11 @@ export default function Tools() {
                   {/* Separators */}
                   <ToolsCheckboxRow
                     title={uiText("分隔线", "Separators", "区切り線")}
-                    label={uiText("活动区域前显示分隔线", "Show separator before activity", "アクティビティの前に区切り線を表示")}
+                    label={uiText(
+                      "活动区域前显示分隔线",
+                      "Show separator before activity",
+                      "アクティビティの前に区切り線を表示",
+                    )}
                     checked={hc.showSeparators === true}
                     onChange={handleToggleHudSeparators}
                   />
@@ -1033,7 +1339,11 @@ export default function Tools() {
             <div className="card" style={{ padding: "16px 18px" }}>
               <ToolsManagedSectionHeader
                 title="hello2cc"
-                description={uiText("让第三方模型更接近 Claude Code 原生工作流", "Make third-party models behave more like native Claude Code", "サードパーティーモデルを Claude Code ネイティブに近づけます")}
+                description={uiText(
+                  "让第三方模型更接近 Claude Code 原生工作流",
+                  "Make third-party models behave more like native Claude Code",
+                  "サードパーティーモデルを Claude Code ネイティブに近づけます",
+                )}
                 version={hello2ccStatus?.version}
                 installed={hello2ccStatus?.installed ?? false}
                 installAction={hello2ccInstallAction}
@@ -1050,7 +1360,11 @@ export default function Tools() {
                   fields={hello2ccSelectFields}
                   onSelectChange={handleChangeHello2ccSelect}
                   mirrorTitle={uiText("镜像当前会话模型", "Mirror Session Model", "現在のセッションモデルをミラー")}
-                  mirrorDescription={uiText("缺少显式模型时优先跟随当前会话模型槽位", "Prefer the current session model when no explicit slot is set", "明示的なモデルがない場合は現在のセッションモデルを優先します")}
+                  mirrorDescription={uiText(
+                    "缺少显式模型时优先跟随当前会话模型槽位",
+                    "Prefer the current session model when no explicit slot is set",
+                    "明示的なモデルがない場合は現在のセッションモデルを優先します",
+                  )}
                   mirrorValue={hello2ccDraft.mirror_session_model}
                   onMirrorChange={handleToggleHello2ccMirrorSessionModel}
                   mirrorLabelOn={uiText("已启用", "Enabled", "有効")}
@@ -1067,7 +1381,13 @@ export default function Tools() {
 
             {/* Proxy Advanced — 代理增强（仅 Claude） */}
             <div className="card" style={{ padding: "16px 18px" }}>
-              <Suspense fallback={<div style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center" }}><div className="spinner" /></div>}>
+              <Suspense
+                fallback={
+                  <div style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div className="spinner" />
+                  </div>
+                }
+              >
                 <ProxyAdvancedPanel embedded mode="claude" />
               </Suspense>
             </div>
@@ -1097,7 +1417,11 @@ export default function Tools() {
             {/* Disable Response Storage */}
             <ToolsToggleCard
               title={uiText("禁用响应存储", "Disable Response Storage", "応答保存を無効化")}
-              description={uiText("不保存 API 响应到本地", "Don't save API responses locally", "API 応答をローカルに保存しません")}
+              description={uiText(
+                "不保存 API 响应到本地",
+                "Don't save API responses locally",
+                "API 応答をローカルに保存しません",
+              )}
               value={codexDisableStorage}
               onChange={handleToggleCodexDisableStorage}
               labelOn={uiText("已禁用", "Disabled", "無効")}
@@ -1106,7 +1430,11 @@ export default function Tools() {
 
             <ToolsToggleCard
               title={uiText("1M 上下文窗口", "1M Context Window", "1M コンテキストウィンドウ")}
-              description={uiText("一键写入 `model_context_window = 1000000`", "Write `model_context_window = 1000000` with one toggle", "`model_context_window = 1000000` をワンタップで書き込みます")}
+              description={uiText(
+                "一键写入 `model_context_window = 1000000`",
+                "Write `model_context_window = 1000000` with one toggle",
+                "`model_context_window = 1000000` をワンタップで書き込みます",
+              )}
               value={codexContextWindow1M}
               onChange={handleToggleCodexContextWindow1M}
               labelOn={uiText("已开启", "Enabled", "有効")}
@@ -1115,13 +1443,18 @@ export default function Tools() {
 
             {/* Proxy Advanced — Codex OAuth 字段剥离 */}
             <div className="card" style={{ padding: "16px 18px" }}>
-              <Suspense fallback={<div style={{ minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center" }}><div className="spinner" /></div>}>
+              <Suspense
+                fallback={
+                  <div style={{ minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div className="spinner" />
+                  </div>
+                }
+              >
                 <ProxyAdvancedPanel embedded mode="codex" />
               </Suspense>
             </div>
           </div>
         )}
-
       </div>
     </div>
   );

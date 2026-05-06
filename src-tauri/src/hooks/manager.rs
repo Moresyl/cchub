@@ -286,7 +286,10 @@ pub fn delete_hook_from_settings(
 
     // Remove hooks key entirely if empty
     if hooks_obj.is_empty() {
-        settings.as_object_mut().unwrap().remove("hooks");
+        settings
+            .as_object_mut()
+            .ok_or_else(|| "Settings root must be a JSON object".to_string())?
+            .remove("hooks");
     }
 
     let output = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;

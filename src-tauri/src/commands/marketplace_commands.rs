@@ -12,6 +12,20 @@ fn log_command_timing(command: &str, started_at: std::time::Instant) {
     );
 }
 
+fn proxy_url_from_db(db: &State<'_, DbState>) -> String {
+    db.0.lock()
+        .ok()
+        .and_then(|conn| {
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key = 'proxy_url'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+        })
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn get_marketplace_entries() -> Result<Vec<registry::RegistryEntry>, String> {
     // No local data - MCP entries come from npm search
@@ -23,6 +37,7 @@ pub async fn search_marketplace(
     query: String,
     page: Option<u32>,
     page_size: Option<u32>,
+    db: State<'_, DbState>,
 ) -> Result<serde_json::Value, String> {
     let started_at = std::time::Instant::now();
     if query.trim().is_empty() {
@@ -30,7 +45,8 @@ pub async fn search_marketplace(
     }
     let p = page.unwrap_or(0);
     let ps = page_size.unwrap_or(50);
-    let result = registry::search_npm_registry(&query, p, ps)
+    let proxy_url = proxy_url_from_db(&db);
+    let result = registry::search_npm_registry(&query, p, ps, Some(proxy_url.as_str()))
         .await
         .map(|(entries, total)| serde_json::json!({ "entries": entries, "total": total }));
     log_command_timing("search_marketplace", started_at);
@@ -95,8 +111,10 @@ pub fn get_skills_marketplace() -> Vec<registry::SkillRegistryEntry> {
 #[tauri::command]
 pub async fn fetch_custom_skill_source(
     url: String,
+    db: State<'_, DbState>,
 ) -> Result<Vec<registry::SkillRegistryEntry>, String> {
-    registry::fetch_custom_source(&url).await
+    let proxy_url = proxy_url_from_db(&db);
+    registry::fetch_custom_source(&url, Some(proxy_url.as_str())).await
 }
 
 #[tauri::command]
@@ -104,8 +122,10 @@ pub async fn fetch_skills_from_repo(
     owner: String,
     repo: String,
     branch: String,
+    db: State<'_, DbState>,
 ) -> Result<Vec<registry::SkillRegistryEntry>, String> {
-    registry::fetch_skills_from_github_repo(&owner, &repo, &branch).await
+    let proxy_url = proxy_url_from_db(&db);
+    registry::fetch_skills_from_github_repo(&owner, &repo, &branch, Some(proxy_url.as_str())).await
 }
 
 // ── SkillHub API ──
@@ -115,9 +135,11 @@ pub async fn get_skillhub_catalog(
     page: u32,
     limit: u32,
     category: String,
+    db: State<'_, DbState>,
 ) -> Result<serde_json::Value, String> {
     let started_at = std::time::Instant::now();
-    let result = registry::fetch_skillhub_catalog(page, limit, &category)
+    let proxy_url = proxy_url_from_db(&db);
+    let result = registry::fetch_skillhub_catalog(page, limit, &category, Some(proxy_url.as_str()))
         .await
         .map(|(entries, total)| {
             serde_json::json!({
@@ -133,13 +155,19 @@ pub async fn get_skillhub_catalog(
 pub async fn search_skillhub_skills(
     query: String,
     limit: u32,
+    db: State<'_, DbState>,
 ) -> Result<Vec<registry::SkillRegistryEntry>, String> {
-    registry::search_skillhub(query.trim(), limit).await
+    let proxy_url = proxy_url_from_db(&db);
+    registry::search_skillhub(query.trim(), limit, Some(proxy_url.as_str())).await
 }
 
 #[tauri::command]
-pub async fn get_skillhub_skill_content(slug: String) -> Result<String, String> {
-    registry::fetch_skillhub_skill_content(&slug).await
+pub async fn get_skillhub_skill_content(
+    slug: String,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let proxy_url = proxy_url_from_db(&db);
+    registry::fetch_skillhub_skill_content(&slug, Some(proxy_url.as_str())).await
 }
 
 #[tauri::command]

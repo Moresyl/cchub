@@ -13,14 +13,13 @@ src-tauri/target/
 .idea/
 *.swp
 *.swo
-docs
+# Docs (do not commit)
+/docs/
 # OS
-*docs
-*/docs
 .DS_Store
 Thumbs.db
 desktop.ini
-
+todo.md
 # Env
 .env
 .env.*

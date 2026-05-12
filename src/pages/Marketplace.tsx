@@ -11,6 +11,8 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
+const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
+const CodeEditor = lazy(() => import("../components/CodeEditor"));
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import {
@@ -31,18 +33,16 @@ import {
   ArrowLeft,
   RotateCcw,
   Wand2,
-  Terminal,
   Monitor,
-  Sparkles,
 } from "lucide-react";
 import { getLocale, t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import MarketplaceCategoryTab from "../components/MarketplaceCategoryTab";
 import MarketplaceCustomSourceRow from "../components/MarketplaceCustomSourceRow";
-import MarketplaceMcpCard, { type MarketplaceMcpCardEntry } from "../components/MarketplaceMcpCard";
+import MarketplaceMcpCard from "../components/MarketplaceMcpCard";
 import MarketplaceRecommendedRepoRow from "../components/MarketplaceRecommendedRepoRow";
-import MarketplaceSkillCard, { type MarketplaceSkillCardEntry } from "../components/MarketplaceSkillCard";
+import MarketplaceSkillCard from "../components/MarketplaceSkillCard";
 import FeaturedSkillBundleCard, { type FeaturedSkillBundle } from "../components/FeaturedSkillBundleCard";
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
@@ -60,74 +60,15 @@ import {
 } from "../hooks/queries";
 import { useUpdateMcpServerConfigMutation } from "../hooks/mutations";
 
-const TOOL_ICONS: Record<string, typeof Monitor> = {
-  claude: Terminal,
-  codex: Monitor,
-  gemini: Sparkles,
-  opencode: Globe,
-  hermes: Monitor,
-};
-
-// scan_mcp_servers / scan_skills 按工具返回每条记录；同名 skill/server 装到
-// 多个工具时会出现多条。列表视图按 name.toLowerCase() 去重，per-tool 的
-// "已安装"状态另由 installedIdsByTool / installedSkillsByTool 驱动。
-function dedupByName<T extends { name: string }>(arr: T[]): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const item of arr) {
-    const key = item.name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
-}
-
-const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
-const CodeEditor = lazy(() => import("../components/CodeEditor"));
-
-type RegistryEntry = MarketplaceMcpCardEntry;
-
-type SkillEntry = MarketplaceSkillCardEntry;
-
-interface InstalledMcpServer {
-  id: string;
-  name: string;
-  command: string | null;
-  args: string;
-  env: string;
-  status: string;
-  transport: string;
-  source: string;
-  package_name: string | null;
-  version: string | null;
-  config_path: string | null;
-}
-
-interface InstalledSkillRecord {
-  id: string;
-  name: string;
-  description: string | null;
-  tool_id: string | null;
-  plugin_id: string | null;
-  trigger_command: string | null;
-  file_path: string | null;
-}
-
-const MCP_CATEGORY_ZH: Record<string, string> = {
-  local: "本地",
-  search: "搜索",
-  database: "数据库",
-  ai: "AI",
-  "dev-tools": "开发工具",
-  browser: "浏览器",
-  filesystem: "文件系统",
-  cloud: "云服务",
-  productivity: "效率",
-  npm: "npm",
-  "official-plugin": "官方插件",
-  "community-plugin": "社区插件",
-};
+import {
+  MCP_CATEGORY_ZH,
+  TOOL_ICONS,
+  dedupByName,
+  type InstalledMcpServer,
+  type InstalledSkillRecord,
+  type RegistryEntry,
+  type SkillEntry,
+} from "./marketplace/helpers";
 
 export default function Marketplace() {
   const queryClient = useQueryClient();

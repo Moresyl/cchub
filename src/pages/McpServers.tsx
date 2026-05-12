@@ -22,7 +22,7 @@ import {
 import { t, tReplace, getLocale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
-import McpServerCard, { type McpServerCardServer } from "../components/McpServerCard";
+import McpServerCard from "../components/McpServerCard";
 import EmptyState from "../components/states/EmptyState";
 import ErrorState from "../components/states/ErrorState";
 import LoadingState from "../components/states/LoadingState";
@@ -38,60 +38,14 @@ import {
 import { MANAGED_APPS, type ManagedAppId } from "../lib/appPreferences";
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
-type McpServer = McpServerCardServer;
-
-interface HealthCheckResult {
-  server_id: string;
-  server_name: string;
-  status: string;
-  command_exists: boolean;
-  can_start: boolean;
-  error_message: string | null;
-  latency_ms: number | null;
-  checked_at: string;
-}
-
-interface RuntimeDepStatus {
-  name: string;
-  display_name: string;
-  installed: boolean;
-  version: string | null;
-}
-
-interface WizardPreset {
-  id: string;
-  labelZh: string;
-  labelEn: string;
-  command: string;
-  args: string[];
-}
-
-const WIZARD_PRESETS: WizardPreset[] = [
-  {
-    id: "npx",
-    labelZh: "Node / npx",
-    labelEn: "Node / npx",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-example"],
-  },
-  { id: "uvx", labelZh: "Python / uvx", labelEn: "Python / uvx", command: "uvx", args: ["mcp-server-example"] },
-  {
-    id: "docker",
-    labelZh: "Docker",
-    labelEn: "Docker",
-    command: "docker",
-    args: ["run", "--rm", "mcp/server-example"],
-  },
-  { id: "node", labelZh: "本地脚本", labelEn: "Local Script", command: "node", args: ["/path/to/server.js"] },
-];
-
-function formatJson(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-}
+import {
+  WIZARD_PRESETS,
+  formatJson,
+  type HealthCheckResult,
+  type McpServer,
+  type RuntimeDepStatus,
+  type WizardPreset,
+} from "./mcp-servers/helpers";
 
 export default function McpServers() {
   const queryClient = useQueryClient();

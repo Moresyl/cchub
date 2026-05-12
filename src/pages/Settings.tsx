@@ -20,6 +20,7 @@ import SettingsNetworkProxySection from "../components/SettingsNetworkProxySecti
 import SettingsPreferredTerminalSection from "../components/SettingsPreferredTerminalSection";
 import SettingsToolPathSection from "../components/SettingsToolPathSection";
 import SettingsWindowBehaviorSection from "../components/SettingsWindowBehaviorSection";
+import { buildAppUpdateLabels, buildMigrationCenterLabels } from "./settings/labels";
 import { useSettingsMigrationState } from "../hooks/useSettingsMigrationState";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
 import {
@@ -627,120 +628,8 @@ export default function Settings() {
     (updaterEnvironmentState?.disabled_by_env ?? false) || (appUpdate?.disabled_by_env ?? false);
   const updaterEnvValue = updaterEnvironmentState?.env_var_value ?? null;
 
-  const migrationCenterLabels = useMemo(
-    () => ({
-      title: i.settings.migrationCenter,
-      description: i.settings.migrationCenterDesc,
-      readyLabel: i.settings.migrationCenterReady,
-      activeLabel: loc === "zh" ? "当前展开" : "Open",
-      viewLabel: loc === "zh" ? "查看" : "View",
-      importSummary: i.settings.importSummary,
-      importSummaryPending: i.settings.importSummaryPending,
-      pendingImports: i.settings.pendingImports,
-      migrationHealth: i.settings.migrationHealth,
-      authGuide: i.settings.authGuide,
-      migrationExport: i.settings.migrationExport,
-      migrationExporting: i.settings.migrationExporting,
-      migrationImport: i.settings.migrationImport,
-      migrationImporting: i.settings.migrationImporting,
-      pendingImportsRepairAll: i.settings.pendingImportsRepairAll,
-      pendingImportsRepairingAll: i.settings.pendingImportsRepairingAll,
-      fullRescan: i.settings.fullRescan,
-      fullRescanning: i.settings.fullRescanning,
-      importSummaryEmpty: i.settings.importSummaryEmpty,
-      importSummaryBackup: i.settings.importSummaryBackup,
-      openPathLabel: i.settings.authGuideOpenPath,
-      migrationCenterLastRescanEmpty: i.settings.migrationCenterLastRescanEmpty,
-      importSummaryImportedAt: i.settings.importSummaryImportedAt,
-      importSummaryData: i.settings.importSummaryData,
-      importSummaryToolConfigs: i.settings.importSummaryToolConfigs,
-      importSummarySkills: i.settings.importSummarySkills,
-      importSummaryFiles: i.settings.importSummaryFiles,
-      rescanMcp: i.settings.rescanMcp,
-      rescanSkills: i.settings.rescanSkills,
-      rescanHooks: i.settings.rescanHooks,
-      rescanDocs: i.settings.rescanDocs,
-      rescanWorkflows: i.settings.rescanWorkflows,
-      rescanConfigRoots: i.settings.rescanConfigRoots,
-      pendingImportsDesc: i.settings.pendingImportsDesc,
-      pendingImportsAutoMatchDesc: i.settings.pendingImportsAutoMatchDesc,
-      pendingImportsAutoMatching: i.settings.pendingImportsAutoMatching,
-      pendingImportsAutoMatch: i.settings.pendingImportsAutoMatch,
-      pendingImportsEmpty: i.settings.pendingImportsEmpty,
-      pendingImportsOldPath: i.settings.pendingImportsOldPath,
-      pendingImportsNewPath: i.settings.pendingImportsNewPath,
-      pendingImportsPick: i.settings.pendingImportsPick,
-      pendingImportsApply: i.settings.pendingImportsApply,
-      pendingImportsApplying: i.settings.pendingImportsApplying,
-      pendingImportsFiles: i.settings.pendingImportsFiles,
-      migrationHealthDesc: i.settings.migrationHealthDesc,
-      migrationHealthRefreshing: i.settings.migrationHealthRefreshing,
-      migrationHealthRefresh: i.settings.migrationHealthRefresh,
-      migrationHealthReady: i.settings.migrationHealthReady,
-      migrationHealthCliMissing: i.settings.migrationHealthCliMissing,
-      migrationHealthConfigDirMissing: i.settings.migrationHealthConfigDirMissing,
-      migrationHealthConfigMissing: i.settings.migrationHealthConfigMissing,
-      migrationHealthMcpMissing: i.settings.migrationHealthMcpMissing,
-      migrationHealthSkillsMissing: i.settings.migrationHealthSkillsMissing,
-      migrationHealthInstall: i.settings.migrationHealthInstall,
-      migrationHealthBootstrap: i.settings.migrationHealthBootstrap,
-      migrationHealthBootstrapping: i.settings.migrationHealthBootstrapping,
-      migrationHealthCli: i.settings.migrationHealthCli,
-      migrationHealthPath: i.settings.migrationHealthPath,
-      migrationHealthStatusOk: i.settings.migrationHealthStatusOk,
-      migrationHealthStatusMissing: i.settings.migrationHealthStatusMissing,
-      migrationHealthConfigDir: i.settings.migrationHealthConfigDir,
-      migrationHealthConfigFile: i.settings.migrationHealthConfigFile,
-      migrationHealthMcpConfig: i.settings.migrationHealthMcpConfig,
-      migrationHealthSkillsDir: i.settings.migrationHealthSkillsDir,
-      migrationHealthCustomPath: i.settings.migrationHealthCustomPath,
-      authGuideDesc: i.settings.authGuideDesc,
-      authGuideReady: i.settings.authGuideReady,
-      authGuideCodexLogin: i.settings.authGuideCodexLogin,
-      authGuideGeminiKey: i.settings.authGuideGeminiKey,
-      authGuideCopyCommand: i.settings.authGuideCopyCommand,
-      authGuideCopyPath: i.settings.authGuideCopyPath,
-      authGuidePrepareFile: i.settings.authGuidePrepareFile,
-      authGuideOpenDocs: i.settings.authGuideOpenDocs,
-    }),
-    [i.settings, loc],
-  );
-
-  const appUpdateLabels = useMemo(
-    () => ({
-      appUpdate: i.settings.appUpdate,
-      currentVersion: i.settings.currentVersion,
-      checkForUpdate: i.settings.checkForUpdate,
-      checking: i.settings.checking,
-      updateAvailable: i.settings.updateAvailable,
-      downloading: i.settings.downloading,
-      installUpdate: i.settings.installUpdate,
-      updateNotConfigured: i.settings.updateNotConfigured,
-      noUpdate: i.settings.noUpdate,
-      updateFailed: i.settings.updateFailed,
-      disabledTitle: uiText(
-        "已被 DISABLE_AUTOUPDATER 环境变量禁用",
-        "Disabled by the DISABLE_AUTOUPDATER environment variable",
-        "DISABLE_AUTOUPDATER 環境変数により無効化されています",
-      ),
-      disabledDescription: uiText(
-        "当前会跳过应用更新检查与在线安装。移除该环境变量后重新启动 CCHub，即可恢复正常更新流程。",
-        "App update checks and in-app install are skipped while this environment variable is set. Remove it and restart CCHub to restore normal updates.",
-        "この環境変数が設定されている間、アプリ更新確認とアプリ内インストールはスキップされます。削除して CCHub を再起動すると通常の更新に戻ります。",
-      ),
-      disabledCheckDescription: uiText(
-        "更新检查已被环境变量短路",
-        "Update checks are short-circuited by environment configuration",
-        "環境設定により更新確認は短絡されています",
-      ),
-      openDownloadsLabel: loc === "zh" ? "前往下载页" : "Open Downloads",
-      releaseOnlyDescription:
-        loc === "zh"
-          ? "已通过发布页检测到新版本。当前构建未提供在线安装清单，将打开下载页手动更新。"
-          : "A newer release was found from GitHub. This build does not have an online install manifest, so the download page will be opened.",
-    }),
-    [i.settings, loc],
-  );
+  const migrationCenterLabels = useMemo(() => buildMigrationCenterLabels(i, loc), [i, loc]);
+  const appUpdateLabels = useMemo(() => buildAppUpdateLabels(i, loc), [i, loc]);
 
   return (
     <div className="animate-in">

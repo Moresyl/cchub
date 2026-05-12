@@ -1,4 +1,14 @@
-import { Profiler, lazy, Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import {
+  Profiler,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -7,11 +17,13 @@ import { AlertTriangle, Settings2, X } from "lucide-react";
 import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import ErrorBoundary from "./components/ErrorBoundary";
-import CommandPalette from "./components/CommandPalette";
 import { showToast, ToastContainer } from "./components/Toast";
 import DeepLinkImportDialog from "./components/DeepLinkImportDialog";
 import WelcomeDialog from "./components/WelcomeDialog";
 import NavigationProgress from "./components/NavigationProgress";
+
+// CommandPalette 仅在 Ctrl+K 时显示，懒加载避免 cmdk 进入主 bundle。
+const CommandPalette = lazy(() => import("./components/CommandPalette"));
 import { getLocale, setLocale, type Locale } from "./lib/i18n";
 import { getTheme, setTheme, type Theme } from "./lib/theme";
 import type { EnvironmentConflict } from "./lib/appPreferences";
@@ -175,46 +187,58 @@ function AppShell() {
   const uiText = (zhText: string, enText: string, jaText?: string) =>
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 
+  // 使用 ref 持有最新 navigate，避免 navigate 引用变化导致全局监听重新绑定。
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
+
   useEffect(() => {
     void loadEnvConflicts();
     void loadWelcomeState();
     const handleFocus = () => void loadEnvConflicts();
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTextEditingTarget = Boolean(target?.closest("input, textarea, [contenteditable='true'], .cm-editor"));
+      // 快速路径：非修饰键/非 Escape 直接返回，避免每次按键都走完整流程。
+      const hasModifier = event.ctrlKey || event.metaKey;
+      if (!hasModifier && event.key !== "Escape") return;
 
-      if ((event.ctrlKey || event.metaKey) && event.key === ",") {
-        event.preventDefault();
-        navigate("/settings");
+      if (hasModifier) {
+        const key = event.key;
+        if (key === ",") {
+          event.preventDefault();
+          navigateRef.current("/settings");
+          return;
+        }
+
+        // 仅对单字符快捷键做 lowercase 转换
+        const lower = key.length === 1 ? key.toLowerCase() : key;
+        if (lower === "k") {
+          event.preventDefault();
+          setCommandPaletteOpen(true);
+          return;
+        }
+        if (lower === "s") {
+          event.preventDefault();
+          window.dispatchEvent(new CustomEvent("cchub-shortcut-save"));
+          return;
+        }
+        if (lower === "n") {
+          event.preventDefault();
+          window.dispatchEvent(new CustomEvent("cchub-shortcut-new"));
+          return;
+        }
+        if (lower === "f") {
+          const target = event.target as HTMLElement | null;
+          if (target?.closest("input, textarea, [contenteditable='true'], .cm-editor")) return;
+          event.preventDefault();
+          window.dispatchEvent(new CustomEvent("cchub-shortcut-search"));
+          return;
+        }
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandPaletteOpen(true);
-        return;
-      }
-
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("cchub-shortcut-save"));
-        return;
-      }
-
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("cchub-shortcut-new"));
-        return;
-      }
-
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
-        if (isTextEditingTarget) return;
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("cchub-shortcut-search"));
-        return;
-      }
-
-      if (event.key === "Escape" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      // Escape：仅在无任何修饰符时分发
+      if (!event.altKey && !event.shiftKey) {
         window.dispatchEvent(new CustomEvent("cchub-shortcut-escape"));
       }
     };
@@ -229,7 +253,9 @@ function AppShell() {
       window.removeEventListener("keydown", handleKeyDown);
       void unlistenFailover.then((fn) => fn());
     };
-  }, [navigate]);
+    // 该 effect 只需在组件挂载时执行一次，handler 通过 navigateRef 读取最新值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (envConflicts.length === 0) {
@@ -308,12 +334,16 @@ function AppShell() {
         onSelectTheme={handleWelcomeThemeChange}
         onFinish={() => void handleWelcomeFinish()}
       />
-      <CommandPalette
-        open={commandPaletteOpen}
-        onOpenChange={setCommandPaletteOpen}
-        navigate={navigate}
-        currentPath={location.pathname}
-      />
+      {commandPaletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open={commandPaletteOpen}
+            onOpenChange={setCommandPaletteOpen}
+            navigate={navigate}
+            currentPath={location.pathname}
+          />
+        </Suspense>
+      )}
       <div className="app-layout">
         <Sidebar />
         <div className="main-area">

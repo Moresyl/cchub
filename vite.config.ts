@@ -24,6 +24,30 @@ function manualChunks(id: string) {
     return "markdown-rendering";
   }
 
+  if (
+    normalized.includes("/node_modules/codemirror/")
+    || normalized.includes("/node_modules/@codemirror/")
+    || normalized.includes("/node_modules/@lezer/")
+  ) {
+    return "codemirror";
+  }
+
+  if (normalized.includes("/node_modules/cmdk/")) {
+    return "cmdk";
+  }
+
+  if (normalized.includes("/node_modules/@tanstack/react-query/")) {
+    return "tanstack-query";
+  }
+
+  if (normalized.includes("/node_modules/zustand/")) {
+    return "zustand";
+  }
+
+  if (normalized.includes("/node_modules/lucide-react/")) {
+    return "lucide";
+  }
+
   if (normalized.includes("/node_modules/@mdxeditor/gurx/")) {
     return "mdxeditor-gurx";
   }
@@ -68,7 +92,21 @@ export default defineConfig(async () => ({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },
+  // Tauri WebView 是 Chromium/Edge WebView2 —— 直接编到现代 ES，避免无谓 polyfill / 降级。
+  esbuild: {
+    legalComments: "none",
+    drop: ["debugger"],
+    pure: ["console.debug", "console.trace"],
+  },
   build: {
+    target: "es2022",
+    cssTarget: "chrome105",
+    minify: "esbuild",
+    sourcemap: false,
+    cssCodeSplit: true,
+    reportCompressedSize: false,
+    chunkSizeWarningLimit: 1024,
+    assetsInlineLimit: 4096,
     rollupOptions: {
       output: {
         manualChunks,

@@ -27,8 +27,14 @@ rusqlite = { version = "0.34", features = ["bundled"] }
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["full", "parking_lot"] }
+reqwest = { version = "0.12", features = [
+    "json",
+    "stream",
+    "gzip",
+    "brotli",
+    "http2",
+] }
 axum = "0.8.6"
 bytes = "1"
 futures-util = "0.3"
@@ -60,7 +66,20 @@ incremental = false
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
+lto = "fat"
 opt-level = "s"
 panic = "unwind"
 strip = "symbols"
+incremental = false
+debug = false
+overflow-checks = false
+
+# 对依赖也应用 release 优化（特别是热路径库）
+[profile.release.package."*"]
+opt-level = "s"
+codegen-units = 1
+
+# build script 不需要重度优化（加快冷编译）
+[profile.release.build-override]
+opt-level = 0
+codegen-units = 256

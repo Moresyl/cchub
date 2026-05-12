@@ -164,6 +164,22 @@ export default function Sessions() {
   const uiText = (zhText: string, enText: string, jaText?: string) =>
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 
+  // 把传给 SessionListItem 的 label/格式化函数缓存为稳定引用，避免每次渲染都让 memo 失效。
+  const sessionListLabels = useMemo(() => {
+    const text = (zh: string, en: string, ja?: string) => (locale === "zh" ? zh : locale === "ja" ? (ja ?? en) : en);
+    return {
+      copyLabel: text("复制恢复命令", "Copy resume command", "復元コマンドをコピー"),
+      copyTitle: text("复制恢复命令", "Copy resume command", "復元コマンドをコピー"),
+      deleteTitle: text("删除会话", "Delete session", "会話を削除"),
+      deleteLabel: text("删除会话", "Delete session", "会話を削除"),
+      selectLabel: text("选择会话", "Select session", "会話を選択"),
+      unknownTimeLabel: text("未知时间", "Unknown time", "時刻不明"),
+      tokenLabel: (count: number) => `${formatTokenCount(count)} tokens`,
+      matchLabel: (count: number) => text(`${count} 处匹配`, `${count} match(es)`, `${count} 件一致`),
+      itemsLabel: (count: number) => text(`${count} 条记录`, `${count} items`, `${count} 件`),
+    };
+  }, [locale]);
+
   useEffect(() => {
     void queryClient
       .fetchQuery({
@@ -634,21 +650,15 @@ export default function Sessions() {
                     resumeCommand={buildResumeCommand(session.tool_id, session.id)}
                     deleting={deletingId === session.id}
                     checked={checkedSessionKeySet.has(sessionSelectionKey(session))}
-                    copyLabel={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
-                    copyTitle={uiText("复制恢复命令", "Copy resume command", "復元コマンドをコピー")}
-                    deleteTitle={uiText("删除会话", "Delete session", "会話を削除")}
-                    deleteLabel={uiText("删除会话", "Delete session", "会話を削除")}
-                    selectLabel={uiText("选择会话", "Select session", "会話を選択")}
-                    tokenLabel={(count) =>
-                      uiText(
-                        `${formatTokenCount(count)} tokens`,
-                        `${formatTokenCount(count)} tokens`,
-                        `${formatTokenCount(count)} tokens`,
-                      )
-                    }
-                    unknownTimeLabel={uiText("未知时间", "Unknown time", "時刻不明")}
-                    matchLabel={(count) => uiText(`${count} 处匹配`, `${count} match(es)`, `${count} 件一致`)}
-                    itemsLabel={(count) => uiText(`${count} 条记录`, `${count} items`, `${count} 件`)}
+                    copyLabel={sessionListLabels.copyLabel}
+                    copyTitle={sessionListLabels.copyTitle}
+                    deleteTitle={sessionListLabels.deleteTitle}
+                    deleteLabel={sessionListLabels.deleteLabel}
+                    selectLabel={sessionListLabels.selectLabel}
+                    tokenLabel={sessionListLabels.tokenLabel}
+                    unknownTimeLabel={sessionListLabels.unknownTimeLabel}
+                    matchLabel={sessionListLabels.matchLabel}
+                    itemsLabel={sessionListLabels.itemsLabel}
                     onOpen={handleOpenSession}
                     onToggleChecked={handleToggleCheckedSession}
                     onCopyResume={handleCopyResumeCommand}

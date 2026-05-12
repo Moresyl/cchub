@@ -1,18 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-hooks/rules-of-hooks */
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, X, ArrowRightLeft, Search, Monitor, Plus } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import {
   applyPresetToFields,
@@ -35,18 +24,12 @@ import {
   useSaveSharedConfigProfilesAndRefreshMutation,
   useUpdateConfigProfileAndRefreshMutation,
 } from "../hooks/mutations";
-import ProfileCard from "../components/ProfileCard";
-import ProfileToolFilterTab from "../components/ProfileToolFilterTab";
 import { type ModelInfo } from "../components/ModelSelector";
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
-import EmptyState from "../components/states/EmptyState";
 import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
-const HermesProvidersPanel = lazy(() => import("./HermesProviders"));
 
 import {
-  TOOL_ICONS,
-  extractConfigSummary,
   formatModelFetchError,
   prettyJson,
   supportsModelFetch,
@@ -59,6 +42,7 @@ import {
 import { mergeDraftFields, mergeSharedDraftFields, type DraftFieldsStateUpdate } from "./profiles/draftMerge";
 import ProfilesConfirmDialogs from "./profiles/Dialogs";
 import ProfileEditorView from "./profiles/EditorView";
+import ProfilesListView from "./profiles/ListView";
 
 export default function Profiles() {
   const queryClient = useQueryClient();
@@ -1120,178 +1104,45 @@ export default function Profiles() {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">{locale === "zh" ? "配置切换" : "Config Profiles"}</h2>
-          <p className="page-subtitle">
-            {locale === "zh"
-              ? `共 ${profiles.length} 个配置，当前生效 ${activeIds.length} 个`
-              : `${profiles.length} profiles, ${activeIds.length} active`}
-          </p>
-        </div>
-        {filterTool !== "hermes" && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-secondary btn-sm" onClick={handleRefreshProfiles} style={{ gap: 6 }}>
-              <RefreshCw size={14} />
-              {locale === "zh" ? "刷新" : "Refresh"}
-            </button>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={handleOpenCreateProfile}
-              disabled={installedTools.length === 0}
-              style={{ gap: 6 }}
-            >
-              <Plus size={14} />
-              {locale === "zh" ? "新增" : "New"}
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 360 }}>
-          <Search
-            size={14}
-            style={{
-              position: "absolute",
-              left: 12,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--text-muted)",
-            }}
-          />
-          <input
-            ref={searchInputRef}
-            className="input"
-            style={{ paddingLeft: 36 }}
-            placeholder={localeText("搜索配置...", "Search...", "設定を検索...")}
-            value={search}
-            onChange={handleSearchChange}
-          />
-          {search && (
-            <button
-              className="btn btn-ghost btn-icon-sm"
-              style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
-              onClick={handleClearSearch}
-            >
-              <X size={14} />
-            </button>
-          )}
-        </div>
-        <div className="tab-bar" style={{ overflow: "auto", flexShrink: 0 }}>
-          {tools.map((tool) => (
-            <ProfileToolFilterTab
-              key={tool.id}
-              toolId={tool.id}
-              toolName={tool.name}
-              count={toolCounts[tool.id] || 0}
-              active={filterTool === tool.id}
-              dimmed={!tool.installed && (toolCounts[tool.id] || 0) === 0}
-              onToggle={handleToggleFilterTool}
-            />
-          ))}
-        </div>
-      </div>
-
-      {filterTool === "hermes" && (
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-          <Suspense fallback={<LoadingState />}>
-            <HermesProvidersPanel embedded />
-          </Suspense>
-        </div>
-      )}
-
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          display: filterTool === "hermes" ? "none" : "flex",
-          flexDirection: "column",
-          gap: 10,
-        }}
-      >
-        {filteredProfiles.length === 0 ? (
-          <EmptyState
-            icon={<ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} />}
-            title={locale === "zh" ? "没有可显示的配置" : "No configurations to display"}
-            description={
-              locale === "zh"
-                ? "点击右上角「新增」保存一份当前配置，之后就可以在这里一键切换。"
-                : 'Click "New" to save a configuration, then switch here.'
-            }
-          />
-        ) : (
-          filteredProfiles.map((profile) => {
-            const Icon = TOOL_ICONS[profile.tool_id] || Monitor;
-            const isActive = activeIdSet.has(profile.id);
-            const summary = extractConfigSummary(profile.tool_id, profile.config_snapshot);
-            const ping = pingResults[profile.id];
-            const streamCheck = streamCheckResults[profile.id];
-            const sharedCount =
-              profile.source_type === "shared" && profile.source_key ? sharedGroupCounts[profile.source_key] || 1 : 0;
-            const pingTone =
-              ping?.status === "fast"
-                ? "badge-success"
-                : ping?.status === "medium"
-                  ? "badge-warning"
-                  : ping?.status === "slow"
-                    ? "badge-danger"
-                    : ping?.status === "error"
-                      ? "badge-danger"
-                      : "badge-muted";
-            const streamTone =
-              streamCheck?.status === "healthy"
-                ? "badge-success"
-                : streamCheck?.status === "reachable"
-                  ? "badge-warning"
-                  : streamCheck?.status === "unsupported"
-                    ? "badge-muted"
-                    : streamCheck?.status === "unconfigured"
-                      ? "badge-muted"
-                      : "badge-danger";
-            return (
-              <ProfileCard
-                key={profile.id}
-                profile={profile}
-                icon={Icon}
-                isActive={isActive}
-                toolTag={profile.tool_id}
-                iconUrl={summary.iconUrl}
-                sharedTag={localeText(
-                  `共享 ${sharedCount} App`,
-                  `Shared ${sharedCount} apps`,
-                  `${sharedCount} App 共有`,
-                )}
-                baseUrl={summary.baseUrl}
-                model={summary.model}
-                sharedCount={sharedCount}
-                ping={ping}
-                pingTone={pingTone}
-                streamCheck={streamCheck}
-                streamTone={streamTone}
-                reorderEnabled={reorderEnabled}
-                isDragging={draggingProfileId === profile.id}
-                isDragOver={dragOverProfileId === profile.id}
-                isPinging={pingingId === profile.id}
-                isStreamChecking={streamCheckingId === profile.id}
-                isApplying={applying === profile.id}
-                text={profileCardText}
-                onDragStart={handleCardDragStart}
-                onDragEnter={handleCardDragEnter}
-                onDragEnd={handleCardDragEnd}
-                onDrop={handleCardDrop}
-                onPing={handlePing}
-                onStreamCheck={handleStreamCheck}
-                onApply={doApply}
-                onDuplicate={handleDuplicate}
-                onEdit={openEditModal}
-                onDelete={handleDelete}
-              />
-            );
-          })
-        )}
-      </div>
+      <ProfilesListView
+        locale={locale}
+        localeText={localeText}
+        profiles={profiles}
+        activeIds={activeIds}
+        tools={tools}
+        installedTools={installedTools}
+        toolCounts={toolCounts}
+        filterTool={filterTool}
+        filteredProfiles={filteredProfiles}
+        activeIdSet={activeIdSet}
+        pingResults={pingResults}
+        streamCheckResults={streamCheckResults}
+        sharedGroupCounts={sharedGroupCounts}
+        search={search}
+        searchInputRef={searchInputRef}
+        reorderEnabled={reorderEnabled}
+        draggingProfileId={draggingProfileId}
+        dragOverProfileId={dragOverProfileId}
+        pingingId={pingingId}
+        streamCheckingId={streamCheckingId}
+        applying={applying}
+        profileCardText={profileCardText}
+        handleRefreshProfiles={handleRefreshProfiles}
+        handleOpenCreateProfile={handleOpenCreateProfile}
+        handleSearchChange={handleSearchChange}
+        handleClearSearch={handleClearSearch}
+        handleToggleFilterTool={handleToggleFilterTool}
+        handleCardDragStart={handleCardDragStart}
+        handleCardDragEnter={handleCardDragEnter}
+        handleCardDragEnd={handleCardDragEnd}
+        handleCardDrop={handleCardDrop}
+        handlePing={handlePing}
+        handleStreamCheck={handleStreamCheck}
+        doApply={doApply}
+        handleDuplicate={handleDuplicate}
+        openEditModal={openEditModal}
+        handleDelete={handleDelete}
+      />
 
       <ProfilesConfirmDialogs
         locale={locale}

@@ -8,7 +8,6 @@ import {
   buildStructuredConfig,
   createDefaultStructuredFields,
   getPresetCategories,
-  parseStructuredConfig,
   supportsStructuredConfig,
   type StructuredDraftFields,
 } from "../lib/configProfiles";
@@ -30,9 +29,7 @@ import ErrorState from "../components/states/ErrorState";
 import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
 
 import {
-  formatModelFetchError,
   prettyJson,
-  supportsModelFetch,
   type ConfigProfile,
   type DetectedTool,
   type ProviderConfigFragment,
@@ -40,6 +37,15 @@ import {
   type ProviderStreamCheckResult,
 } from "./profiles/helpers";
 import { mergeDraftFields, mergeSharedDraftFields, type DraftFieldsStateUpdate } from "./profiles/draftMerge";
+import { buildEditorViewProps } from "./profiles/editorProps";
+import {
+  performCloseModal,
+  performFetchModels,
+  performOpenEditModal,
+  useFilteredProfiles,
+  useProfileCardText,
+  useProfilesKeyboardShortcuts,
+} from "./profiles/hooks";
 import ProfilesConfirmDialogs from "./profiles/Dialogs";
 import ProfileEditorView from "./profiles/EditorView";
 import ProfilesListView from "./profiles/ListView";
@@ -93,54 +99,12 @@ export default function Profiles() {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelFetchError, setModelFetchError] = useState<string | null>(null);
 
-  const {
-    presetId: draftPresetId,
-    baseUrl: draftBaseUrl,
-    useFullUrl: draftUseFullUrl,
-    iconUrl: draftIconUrl,
-    apiKey: draftApiKey,
-    model: draftModel,
-    reasoningModel: draftReasoningModel,
-    haikuModel: draftHaikuModel,
-    sonnetModel: draftSonnetModel,
-    opusModel: draftOpusModel,
-    authField: draftAuthField,
-    apiFormat: draftApiFormat,
-    apiProtocol: draftApiProtocol,
-    modelName: draftModelName,
-    npm: draftNpm,
-    endpointCandidates: draftEndpointCandidates,
-    costMultiplier: draftCostMultiplier,
-    requiresOAuth: draftRequiresOAuth,
-    providerType: draftProviderType,
-    oauthAccountId: draftOauthAccountId,
-    hideAttribution: draftHideAttribution,
-    effortHigh: draftEffortHigh,
-    enableTeammates: draftEnableTeammates,
-    codexWireApi: draftCodexWireApi,
-    codexReasoningEffort: draftCodexReasoningEffort,
-    modelCatalogAlias: draftModelCatalogAlias,
-    openCodeContextLimit: draftOpenCodeContextLimit,
-    openCodeOutputLimit: draftOpenCodeOutputLimit,
-    openCodeInputModalities: draftOpenCodeInputModalities,
-    openCodeOutputModalities: draftOpenCodeOutputModalities,
-    openCodeThinkingLevel: draftOpenCodeThinkingLevel,
-    hermesProvider: draftHermesProvider,
-    hermesApiKeyEnv: draftHermesApiKeyEnv,
-  } = draftFields;
+  const { baseUrl: draftBaseUrl, useFullUrl: draftUseFullUrl, apiKey: draftApiKey } = draftFields;
 
   const [confirmAction, setConfirmAction] = useState<{ type: string; profile: ConfigProfile } | null>(null);
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const draftFieldsRef = useRef(draftFields);
-  const shortcutFlagsRef = useRef({ canSave: false, isEditing: false });
-  const shortcutHandlersRef = useRef<{
-    save: () => Promise<void>;
-    create: () => Promise<void>;
-  }>({
-    save: async () => {},
-    create: async () => {},
-  });
   const applyConfigProfileMutation = useApplyConfigProfileMutation();
   const saveConfigProfileMutation = useSaveConfigProfileAndRefreshMutation();
   const updateConfigProfileMutation = useUpdateConfigProfileAndRefreshMutation();
@@ -289,64 +253,45 @@ export default function Profiles() {
 
   const openEditModal = useCallback(
     (profile: ConfigProfile) => {
-      const sharedProfiles =
-        profile.source_type === "shared" && profile.source_key
-          ? profiles.filter((item) => item.source_type === "shared" && item.source_key === profile.source_key)
-          : [profile];
-      const otherProfiles = sharedProfiles.filter((item) => item.id !== profile.id);
-      setEditingProfile(profile);
-      setShowCreateModal(false);
-      setDraftName(profile.name);
-      setDraftTool(profile.tool_id);
-      setDraftTargetTools(sharedProfiles.map((item) => item.tool_id));
-      setDraftContent(prettyJson(profile.config_snapshot));
-      setShowApiKey(false);
-      setFetchingModels(false);
-      setFetchedModels([]);
-      setFetchedModelDetails([]);
-      setModelFetchError(null);
-      if (supportsStructuredConfig(profile.tool_id)) {
-        let merged = createDefaultStructuredFields(profile.tool_id);
-        for (const item of otherProfiles) {
-          if (!supportsStructuredConfig(item.tool_id)) continue;
-          merged = mergeSharedDraftFields(
-            merged,
-            item.tool_id,
-            parseStructuredConfig(item.tool_id, item.config_snapshot),
-            false,
-          );
-        }
-        merged = mergeSharedDraftFields(
-          merged,
-          profile.tool_id,
-          parseStructuredConfig(profile.tool_id, profile.config_snapshot),
-          true,
-        );
-        setDraftFields(merged);
-        setDraftContent(buildStructuredConfig(profile.tool_id, merged));
-      } else {
-        resetStructuredDraft("claude");
-      }
-      setDraftLoading(false);
+      performOpenEditModal({
+        profile,
+        profiles,
+        setEditingProfile,
+        setShowCreateModal,
+        setDraftName,
+        setDraftTool,
+        setDraftTargetTools,
+        setDraftContent,
+        setShowApiKey,
+        setFetchingModels,
+        setFetchedModels,
+        setFetchedModelDetails,
+        setModelFetchError,
+        setDraftFields,
+        setDraftLoading,
+        resetStructuredDraft,
+      });
     },
     [profiles, resetStructuredDraft, setDraftFields],
   );
 
   const closeModal = useCallback(() => {
-    setShowCreateModal(false);
-    setEditingProfile(null);
-    setDraftName("");
-    setDraftTargetTools(["claude"]);
-    setDraftContent("");
-    setDraftLoading(false);
-    setDraftFields(createDefaultStructuredFields("claude"));
-    setDraftFragmentName("");
-    setSaving(false);
-    setShowApiKey(false);
-    setFetchingModels(false);
-    setFetchedModels([]);
-    setFetchedModelDetails([]);
-    setModelFetchError(null);
+    performCloseModal({
+      setShowCreateModal,
+      setEditingProfile,
+      setDraftName,
+      setDraftTargetTools,
+      setDraftContent,
+      setDraftLoading,
+      setDraftFields,
+      setDraftFragmentName,
+      setSaving,
+      setShowApiKey,
+      setFetchingModels,
+      setFetchedModels,
+      setFetchedModelDetails,
+      setModelFetchError,
+    });
   }, [setDraftFields]);
 
   const doDeleteFragment = useCallback(
@@ -434,45 +379,13 @@ export default function Profiles() {
     updateConfigProfileMutation,
   ]);
 
-  useEffect(() => {
-    shortcutFlagsRef.current = {
-      canSave: (showCreateModal || !!editingProfile) && draftName.trim().length > 0 && !saving,
-      isEditing: showCreateModal || !!editingProfile,
-    };
-  }, [draftName, editingProfile, saving, showCreateModal]);
-
-  useEffect(() => {
-    shortcutHandlersRef.current = {
-      save: handleSaveModal,
-      create: openCreateModal,
-    };
-  }, [handleSaveModal, openCreateModal]);
-
-  useEffect(() => {
-    const handleSaveShortcut = () => {
-      if (shortcutFlagsRef.current.canSave) {
-        void shortcutHandlersRef.current.save();
-      }
-    };
-    const handleNewShortcut = () => {
-      if (!shortcutFlagsRef.current.isEditing) {
-        void shortcutHandlersRef.current.create();
-      }
-    };
-    const handleSearchShortcut = () => {
-      if (shortcutFlagsRef.current.isEditing) return;
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    };
-    window.addEventListener("cchub-shortcut-save", handleSaveShortcut);
-    window.addEventListener("cchub-shortcut-new", handleNewShortcut);
-    window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
-    return () => {
-      window.removeEventListener("cchub-shortcut-save", handleSaveShortcut);
-      window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
-      window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
-    };
-  }, []);
+  useProfilesKeyboardShortcuts({
+    canSave: (showCreateModal || !!editingProfile) && draftName.trim().length > 0 && !saving,
+    isEditing: showCreateModal || !!editingProfile,
+    onSave: handleSaveModal,
+    onCreate: openCreateModal,
+    searchInputRef,
+  });
 
   const doApply = useCallback(
     async (profile: ConfigProfile) => {
@@ -771,75 +684,22 @@ export default function Profiles() {
     },
     [draftTool, updateStructuredDraft],
   );
-  const handleFetchModels = useCallback(async () => {
-    if (fetchingModels || !supportsModelFetch(draftTool)) {
-      return;
-    }
-    if (!draftApiKey.trim()) {
-      showToast(
-        "error",
-        localeText(
-          "请先填写 API Key，再拉取模型列表",
-          "Enter an API key before fetching models",
-          "モデル一覧を取得する前に API Key を入力してください",
-        ),
-      );
-      return;
-    }
-    if (draftUseFullUrl && !draftBaseUrl.trim()) {
-      showToast(
-        "error",
-        localeText(
-          "完整端点模式下需要填写完整接口地址",
-          "Full endpoint mode requires a complete endpoint URL",
-          "完全なエンドポイントモードでは完全な URL が必要です",
-        ),
-      );
-      return;
-    }
-
-    setFetchingModels(true);
-    setModelFetchError(null);
-    try {
-      const details = await invoke<ModelInfo[]>("fetch_provider_models_detailed", {
-        toolId: draftTool,
-        baseUrl: draftBaseUrl,
-        apiKey: draftApiKey,
-        useFullUrl: draftUseFullUrl,
-      });
-      setFetchedModelDetails(details);
-      const models = details.map((m) => m.id);
-      setFetchedModels(models);
-      if (models.length === 0) {
-        showToast(
-          "success",
-          localeText(
-            "已连接成功，但供应商没有返回可选模型",
-            "Connected successfully, but the provider returned no models",
-            "接続には成功しましたが、プロバイダーは利用可能なモデルを返しませんでした",
-          ),
-        );
-      } else {
-        showToast(
-          "success",
-          localeText(
-            `已发现 ${models.length} 个模型`,
-            `Discovered ${models.length} models`,
-            `${models.length} 個のモデルを検出しました`,
-          ),
-        );
-      }
-    } catch (error) {
-      const message = formatModelFetchError(error, localeText);
-      setFetchedModels([]);
-      setFetchedModelDetails([]);
-      setFetchedModelDetails([]);
-      setModelFetchError(message);
-      showToast("error", message);
-    } finally {
-      setFetchingModels(false);
-    }
-  }, [draftApiKey, draftBaseUrl, draftTool, draftUseFullUrl, fetchingModels, localeText]);
+  const handleFetchModels = useCallback(
+    () =>
+      performFetchModels({
+        fetchingModels,
+        draftTool,
+        draftApiKey,
+        draftUseFullUrl,
+        draftBaseUrl,
+        localeText,
+        setFetchingModels,
+        setModelFetchError,
+        setFetchedModelDetails,
+        setFetchedModels,
+      }),
+    [draftApiKey, draftBaseUrl, draftTool, draftUseFullUrl, fetchingModels, localeText],
+  );
   const handleRequestFragmentDelete = useCallback(
     (fragmentId: string) => {
       const fragment = providerFragments.find((item) => item.id === fragmentId);
@@ -910,31 +770,7 @@ export default function Profiles() {
     },
     [buildCurrentFields, draftTargetTools, editingProfile?.source_type, resetStructuredDraft, updateDraftFieldsState],
   );
-  const profileCardText = useMemo(
-    () => ({
-      activeTag: locale === "zh" ? "当前生效" : "Active",
-      pingFast: locale === "zh" ? "快速" : "Fast",
-      pingMedium: locale === "zh" ? "一般" : "Medium",
-      pingSlow: locale === "zh" ? "较慢" : "Slow",
-      pingError: locale === "zh" ? "异常" : "Error",
-      streamHealthy: locale === "zh" ? "流检通过" : "Stream OK",
-      streamReachable: locale === "zh" ? "流检可达" : "Stream Reachable",
-      streamUnsupported: locale === "zh" ? "流检暂不支持" : "Stream Unsupported",
-      streamUnconfigured: locale === "zh" ? "流检未配置" : "Stream Unconfigured",
-      streamError: locale === "zh" ? "流检异常" : "Stream Error",
-      dragEnabledTitle: locale === "zh" ? "拖拽调整顺序" : "Drag to reorder",
-      dragDisabledTitle:
-        locale === "zh" ? "先选择单个工具并清空搜索后再排序" : "Filter to one tool and clear search to reorder",
-      pingTitle: locale === "zh" ? "端点测速" : "Ping endpoint",
-      streamTitle: locale === "zh" ? "流式健康检查" : "Stream health check",
-      duplicateTitle: locale === "zh" ? "复制" : "Duplicate",
-      editTitle: locale === "zh" ? "编辑" : "Edit",
-      deleteTitle: locale === "zh" ? "删除" : "Delete",
-      activeButton: locale === "zh" ? "已生效" : "Active",
-      applyButton: locale === "zh" ? "切换" : "Apply",
-    }),
-    [locale],
-  );
+  const profileCardText = useProfileCardText(locale);
 
   const toolCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -957,32 +793,7 @@ export default function Profiles() {
   // search 输入触发的 filter 涉及对每个 profile 的 config_snapshot（可能 KB 级 JSON）
   // 做 toLowerCase + includes，搜索框敲键阶段交给 deferredValue 跑在低优先级。
   const deferredSearch = useDeferredValue(search);
-  const filteredProfiles = useMemo(() => {
-    const keyword = deferredSearch.trim().toLowerCase();
-    return [...profiles]
-      .filter((profile) => {
-        if (filterTool && profile.tool_id !== filterTool) return false;
-        if (!keyword) return true;
-        return (
-          profile.name.toLowerCase().includes(keyword) ||
-          profile.tool_id.toLowerCase().includes(keyword) ||
-          profile.config_snapshot.toLowerCase().includes(keyword)
-        );
-      })
-      .sort((a, b) => {
-        const toolDiff = a.tool_id.localeCompare(b.tool_id);
-        if (!filterTool && toolDiff !== 0) return toolDiff;
-        const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
-        if (orderDiff !== 0) return orderDiff;
-        const aTime = a.updated_at || a.created_at || "";
-        const bTime = b.updated_at || b.created_at || "";
-        const timeDiff = bTime.localeCompare(aTime);
-        if (timeDiff !== 0) return timeDiff;
-        const activeDiff = Number(activeIdSet.has(b.id)) - Number(activeIdSet.has(a.id));
-        if (activeDiff !== 0) return activeDiff;
-        return a.name.localeCompare(b.name);
-      });
-  }, [profiles, filterTool, deferredSearch, activeIdSet]);
+  const filteredProfiles = useFilteredProfiles(profiles, filterTool, deferredSearch, activeIdSet);
 
   function handleCardDragStart(profileId: string) {
     setDraggingProfileId(profileId);
@@ -1025,81 +836,48 @@ export default function Profiles() {
   const isStructured = supportsStructuredConfig(draftTool);
 
   if (isEditing) {
-    return (
-      <ProfileEditorView
-        locale={locale}
-        localeText={localeText}
-        editingProfile={editingProfile}
-        closeModal={closeModal}
-        handleSaveModal={handleSaveModal}
-        draftName={draftName}
-        saving={saving}
-        tools={tools}
-        draftTool={draftTool}
-        isStructured={isStructured}
-        draftTargetTools={draftTargetTools}
-        structuredInstalledTools={structuredInstalledTools}
-        handleDraftToolChange={handleDraftToolChange}
-        handleDraftNameChange={handleDraftNameChange}
-        handleToggleDraftTargetTool={handleToggleDraftTargetTool}
-        draftPresetId={draftPresetId}
-        presetCategories={presetCategories}
-        draftFragmentName={draftFragmentName}
-        savingFragment={savingFragment}
-        providerFragments={providerFragments}
-        toolNameMap={toolNameMap}
-        deletingFragmentId={deletingFragmentId}
-        handleApplyPreset={handleApplyPreset}
-        handleDraftFragmentNameChange={handleDraftFragmentNameChange}
-        handleSaveFragmentClick={handleSaveFragmentClick}
-        handleApplyFragmentById={handleApplyFragmentById}
-        handleRequestFragmentDelete={handleRequestFragmentDelete}
-        draftProviderType={draftProviderType}
-        draftRequiresOAuth={draftRequiresOAuth}
-        draftOauthAccountId={draftOauthAccountId}
-        showApiKey={showApiKey}
-        draftApiKey={draftApiKey}
-        draftBaseUrl={draftBaseUrl}
-        draftUseFullUrl={draftUseFullUrl}
-        draftIconUrl={draftIconUrl}
-        draftCostMultiplier={draftCostMultiplier}
-        draftEndpointCandidates={draftEndpointCandidates}
-        draftAuthField={draftAuthField}
-        draftApiFormat={draftApiFormat}
-        draftCodexReasoningEffort={draftCodexReasoningEffort}
-        draftCodexWireApi={draftCodexWireApi}
-        draftApiProtocol={draftApiProtocol}
-        draftModelCatalogAlias={draftModelCatalogAlias}
-        draftNpm={draftNpm}
-        draftOpenCodeThinkingLevel={draftOpenCodeThinkingLevel}
-        draftHermesProvider={draftHermesProvider}
-        draftHermesApiKeyEnv={draftHermesApiKeyEnv}
-        updateStructuredDraft={updateStructuredDraft}
-        handleSelectDraftOauthAccount={handleSelectDraftOauthAccount}
-        handleToggleShowApiKey={handleToggleShowApiKey}
-        draftModel={draftModel}
-        draftReasoningModel={draftReasoningModel}
-        draftHaikuModel={draftHaikuModel}
-        draftSonnetModel={draftSonnetModel}
-        draftOpusModel={draftOpusModel}
-        draftModelName={draftModelName}
-        draftOpenCodeContextLimit={draftOpenCodeContextLimit}
-        draftOpenCodeOutputLimit={draftOpenCodeOutputLimit}
-        draftOpenCodeInputModalities={draftOpenCodeInputModalities}
-        draftOpenCodeOutputModalities={draftOpenCodeOutputModalities}
-        fetchedModels={fetchedModels}
-        fetchedModelDetails={fetchedModelDetails}
-        fetchingModels={fetchingModels}
-        modelFetchError={modelFetchError}
-        handleFetchModels={handleFetchModels}
-        draftContent={draftContent}
-        draftHideAttribution={draftHideAttribution}
-        draftEffortHigh={draftEffortHigh}
-        draftEnableTeammates={draftEnableTeammates}
-        draftLoading={draftLoading}
-        setDraftContent={setDraftContent}
-      />
-    );
+    const editorProps = buildEditorViewProps({
+      locale,
+      localeText,
+      editingProfile,
+      closeModal,
+      handleSaveModal,
+      draftName,
+      saving,
+      tools,
+      draftTool,
+      isStructured,
+      draftTargetTools,
+      structuredInstalledTools,
+      handleDraftToolChange,
+      handleDraftNameChange,
+      handleToggleDraftTargetTool,
+      presetCategories,
+      draftFragmentName,
+      savingFragment,
+      providerFragments,
+      toolNameMap,
+      deletingFragmentId,
+      handleApplyPreset,
+      handleDraftFragmentNameChange,
+      handleSaveFragmentClick,
+      handleApplyFragmentById,
+      handleRequestFragmentDelete,
+      draftFields,
+      showApiKey,
+      updateStructuredDraft,
+      handleSelectDraftOauthAccount,
+      handleToggleShowApiKey,
+      fetchedModels,
+      fetchedModelDetails,
+      fetchingModels,
+      modelFetchError,
+      handleFetchModels,
+      draftContent,
+      draftLoading,
+      setDraftContent,
+    });
+    return <ProfileEditorView {...editorProps} />;
   }
 
   return (

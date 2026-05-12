@@ -191,6 +191,23 @@ CREATE TABLE IF NOT EXISTS proxy_usage_daily_rollups (
 
 CREATE INDEX IF NOT EXISTS idx_proxy_usage_daily_rollups_day
 ON proxy_usage_daily_rollups(day DESC, tool_id ASC);
+
+-- tray menu refresh + Profiles 页都按 tool_id 过滤后再按 sort_order 排序，
+-- 这个复合索引让"取某工具的 profiles 列表"完全走索引，避免全表扫。
+CREATE INDEX IF NOT EXISTS idx_config_profiles_tool_id_sort_order
+ON config_profiles(tool_id, sort_order);
+
+-- activity_logs 在 mcp 健康检查、卸载 server 时会按 server_id 删除/统计
+CREATE INDEX IF NOT EXISTS idx_activity_logs_server_id
+ON activity_logs(server_id);
+
+-- skills 表按 plugin_id 过滤插件下的 skill 列表
+CREATE INDEX IF NOT EXISTS idx_skills_plugin_id
+ON skills(plugin_id);
+
+-- proxy_request_logs 按 profile_id 过滤（profile 详情页 / 删除 profile 级联清理）
+CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_profile_id
+ON proxy_request_logs(profile_id);
 "#
     .to_string()
 }

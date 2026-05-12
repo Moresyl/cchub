@@ -33,8 +33,7 @@ import SkillCard, { type SkillCardSkill } from "../components/SkillCard";
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
 import EmptyState from "../components/states/EmptyState";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import MarkdownPreview from "../components/MarkdownPreview";
 import { type ManagedAppId } from "../lib/appPreferences";
 import { fetchSkillsPageData, queryKeys } from "../hooks/queries";
 import {
@@ -1261,7 +1260,7 @@ export default function Skills() {
                     className="markdown-preview"
                     style={{ maxHeight: 500, overflowY: "auto", fontSize: 13, lineHeight: 1.8 }}
                   >
-                    <Markdown remarkPlugins={[remarkGfm]}>{skillContent}</Markdown>
+                    <MarkdownPreview content={skillContent} />
                   </div>
                 ) : (
                   <div className="code-block" style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>

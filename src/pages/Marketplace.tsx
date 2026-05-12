@@ -47,8 +47,7 @@ import FeaturedSkillBundleCard, { type FeaturedSkillBundle } from "../components
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
 import EmptyState from "../components/states/EmptyState";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import MarkdownPreview from "../components/MarkdownPreview";
 import type { DetectedTool } from "../types/skills";
 import { type ManagedAppId } from "../lib/appPreferences";
 import { useMarketplaceFilters, type McpCategory, type SkillCategory } from "../stores/marketplaceFilters";
@@ -2096,7 +2095,7 @@ export default function Marketplace() {
               className="markdown-preview"
               style={{ flex: 1, overflowY: "auto", fontSize: 13, lineHeight: 1.8, minHeight: 200 }}
             >
-              <Markdown remarkPlugins={[remarkGfm]}>{previewSkill.content}</Markdown>
+              <MarkdownPreview content={previewSkill.content} />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setPreviewSkill(null)}>

@@ -52,6 +52,10 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
     conn.execute_batch("PRAGMA foreign_keys = ON;")?; // Enforce foreign key constraints
     conn.execute_batch("PRAGMA busy_timeout = 5000;")?; // Wait up to 5s on locked DB instead of failing immediately
     conn.execute_batch("PRAGMA synchronous = NORMAL;")?; // Good balance of safety vs performance with WAL
+                                                         // 性能调优：增大页缓存到 16MB（默认仅 2MB），临时表放内存，启用 64MB mmap I/O
+    conn.execute_batch("PRAGMA cache_size = -16384;")?; // 负数表示 KiB，~16MB 缓存
+    conn.execute_batch("PRAGMA temp_store = MEMORY;")?; // 临时表/索引存内存，避免磁盘写
+    conn.execute_batch("PRAGMA mmap_size = 67108864;")?; // 64MB mmap，加速大量读取
 
     if !db_exists {
         conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?; // Enable incremental vacuum for new DBs

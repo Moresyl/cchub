@@ -987,15 +987,32 @@ export default function Marketplace() {
 
   const bundleInstalledCount = useCallback(
     (bundle: FeaturedSkillBundle) => {
-      // Count how many of this bundle's skills appear under the active tool.
-      // Falls back to the in-flight progress counter while a fresh install is
-      // running and the entry list hasn't been merged yet.
+      // 优先用从市场加载到的 skillEntries 精确比对 bundle 下每一项的安装态。
+      // 这条路径仅在用户当次会话已点过"一键安装"或主动加载该 source 后才命中。
       const prefix = `${bundle.owner}/${bundle.repo}:`;
       const bundleEntries = skillEntries.filter((s) => s.id.startsWith(prefix));
-      if (bundleEntries.length === 0) {
-        return bundleProgress[bundle.id] ?? 0;
+      if (bundleEntries.length > 0) {
+        return bundleEntries.filter((s) => currentToolInstalledSkills.has(s.name.toLowerCase())).length;
       }
-      return bundleEntries.filter((s) => currentToolInstalledSkills.has(s.name.toLowerCase())).length;
+
+      // 重启 CCHub 后 skillEntries 不会自动重新拉取（远程 fetch 是用户驱动的），
+      // 但 currentToolInstalledSkills 来自本地 scan_skills，包含磁盘上所有 skill。
+      // 这里用 bundle.tags（其元素就是 superpowers 的 skill 文件名）做本地交集，
+      // 让"是否完整安装"的判断不再依赖远程列表是否已加载。
+      if (bundle.tags.length > 0) {
+        const installedKnown = bundle.tags.reduce(
+          (count, tag) => (currentToolInstalledSkills.has(tag.toLowerCase()) ? count + 1 : count),
+          0,
+        );
+        // 已知 tags 全部命中 → 视为 bundle 完整安装，回填到 totalSkills 让按钮变"已安装"
+        if (installedKnown === bundle.tags.length) {
+          return bundle.totalSkills;
+        }
+        // 部分命中：返回已检测到的数量与进行中安装计数取最大值（兼顾刚刚开始安装的场景）
+        return Math.max(installedKnown, bundleProgress[bundle.id] ?? 0);
+      }
+
+      return bundleProgress[bundle.id] ?? 0;
     },
     [bundleProgress, currentToolInstalledSkills, skillEntries],
   );

@@ -415,7 +415,20 @@ pub fn run() {
 
             // Attach menu to tray icon (created by tauri.conf.json trayIcon config)
             if let Some(tray) = app.tray_by_id("main") {
-                refresh_tray_menu(&app_handle)?;
+                // tray menu 构建需要锁 DB + 读取 profiles，放到独立线程不阻塞 setup() 完成，
+                // 用户先看到窗口，~10ms 后右键托盘菜单也已就绪。
+                {
+                    let handle = app_handle.clone();
+                    std::thread::spawn(move || {
+                        if let Err(error) = refresh_tray_menu(&handle) {
+                            utils::append_runtime_log(
+                                "warn",
+                                "tray",
+                                &format!("Failed to build tray menu: {error}"),
+                            );
+                        }
+                    });
+                }
                 let handle = app_handle.clone();
                 tray.on_menu_event(move |_app, event| match event.id().as_ref() {
                     "show" => {

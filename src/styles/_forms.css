@@ -1,0 +1,44 @@
+
+/* ═══ Toggle ═══ */
+
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border: none;
+  outline: none;
+  flex-shrink: 0;
+}
+.toggle.on { background: var(--text-primary); }
+.toggle.off { background: var(--bg-badge); }
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: left 0.2s ease;
+}
+.toggle.on .toggle-knob { left: 23px; }
+.toggle.off .toggle-knob { left: 3px; }
+
+/* Small toggle for list items */
+.toggle.toggle-sm {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+}
+.toggle.toggle-sm .toggle-knob {
+  width: 14px;
+  height: 14px;
+  top: 3px;
+}
+.toggle.toggle-sm.on .toggle-knob { left: 19px; }
+.toggle.toggle-sm.off .toggle-knob { left: 3px; }
+.toggle.on { background: var(--success); }
+

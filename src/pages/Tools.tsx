@@ -1,34 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type KeyboardEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal, Code, Download, RefreshCw, Trash2 } from "lucide-react";
-import Hello2ccConfigSection, { type Hello2ccConfigField } from "../components/Hello2ccConfigSection";
-import ToolsChoiceCard from "../components/ToolsChoiceCard";
-import ToolsCheckboxSection from "../components/ToolsCheckboxSection";
-import ToolsCheckboxRow from "../components/ToolsCheckboxRow";
-import ToolsChoiceRow from "../components/ToolsChoiceRow";
-import { type Hello2ccSelectOption } from "../components/Hello2ccSelectField";
+import { type Hello2ccConfigField } from "../components/Hello2ccConfigSection";
 import { getLocale } from "../lib/i18n";
 import ToolsEmptyStateCard from "../components/ToolsEmptyStateCard";
-import ToolsManagedSectionHeader from "../components/ToolsManagedSectionHeader";
-import ToolsPermissionCard from "../components/ToolsPermissionCard";
 import ToolsTabButton from "../components/ToolsTabButton";
-import ToolsToggleCard from "../components/ToolsToggleCard";
 import { showToast } from "../components/Toast";
 import LoadingState from "../components/states/LoadingState";
 import { type ManagedAppId } from "../lib/appPreferences";
 
-const ProxyAdvancedPanel = lazy(() => import("./ProxyAdvanced"));
 import {
   useSetClaudeHudConfigMutation,
   useSetClaudeSettingMutation,
@@ -59,11 +40,12 @@ import {
   type Hello2ccSelectKey,
   type Hello2ccUpdateInfo,
   type HudConfig,
-  type HudDisplayBooleanKey,
-  type HudGitStatusKey,
   type HudStatus,
   type ToolTab,
 } from "./tools/helpers";
+import { useToolsOptions, buildHello2ccSelectFields } from "./tools/useToolsOptions";
+import ClaudeTab from "./tools/ClaudeTab";
+import CodexTab from "./tools/CodexTab";
 
 export default function Tools() {
   const queryClient = useQueryClient();
@@ -447,261 +429,27 @@ export default function Tools() {
     [patchToolsPageCache, permLevel, setClaudeSetting],
   );
 
-  const unavailableLabel = useMemo(() => uiText("未安装", "N/A", "未インストール"), [uiText]);
-  const permLevelLabels = useMemo(
-    () => PERM_LEVELS.map((level) => uiText(level.label_zh, level.label_en, level.label_ja)),
-    [uiText],
-  );
-  const autoUpdateOptions = useMemo(
-    () => [
-      { value: "latest", label: uiText("最新", "Latest", "最新") },
-      { value: "stable", label: uiText("稳定", "Stable", "安定版") },
-      { value: "disabled", label: uiText("关闭", "Off", "オフ") },
-    ],
-    [uiText],
-  );
-  const claudeModelOptions = useMemo(
-    () => [
-      { value: "opus", label: "Opus" },
-      { value: "sonnet", label: "Sonnet" },
-      { value: "haiku", label: "Haiku" },
-    ],
-    [],
-  );
-  const hudLayoutOptions = useMemo(
-    () => [
-      { value: "expanded", label: uiText("多行展开", "Expanded", "展開表示"), style: { fontSize: 11 } },
-      { value: "compact", label: uiText("单行紧凑", "Compact", "コンパクト"), style: { fontSize: 11 } },
-    ],
-    [uiText],
-  );
-  const hudPathLevelOptions = useMemo(
-    () => [1, 2, 3].map((value) => ({ value, label: String(value), style: { fontSize: 11, minWidth: 24 } })),
-    [],
-  );
-  const hudContextValueOptions = useMemo(
-    () => [
-      { value: "percent", label: "45%", style: { fontSize: 11 } },
-      { value: "tokens", label: "45k/200k", style: { fontSize: 11 } },
-      { value: "remaining", label: uiText("剩余", "Remain", "残り"), style: { fontSize: 11 } },
-      { value: "both", label: uiText("全部", "Both", "両方"), style: { fontSize: 11 } },
-    ],
-    [uiText],
-  );
-  const codexApprovalOptions = useMemo(
-    () => [
-      { value: "suggest", label: uiText("建议", "Suggest", "提案") },
-      { value: "auto-edit", label: uiText("自动编辑", "Auto Edit", "自動編集") },
-      { value: "full-auto", label: uiText("全自动", "Full Auto", "フルオート") },
-    ],
-    [uiText],
-  );
-  const codexReasoningOptions = useMemo(
-    () => [
-      { value: "low", label: uiText("低", "Low", "低") },
-      { value: "medium", label: uiText("中", "Medium", "中") },
-      { value: "high", label: uiText("高", "High", "高") },
-      { value: "xhigh", label: uiText("极高", "XHigh", "最高") },
-    ],
-    [uiText],
-  );
-  const permLevelOptions = useMemo(
-    () => PERM_LEVELS.map((level, index) => ({ value: index, label: permLevelLabels[index], color: level.color })),
-    [permLevelLabels],
-  );
-  const hudGitStatusOptions = useMemo(
-    () => [
-      { key: "enabled" as HudGitStatusKey, label: uiText("显示分支", "Branch", "ブランチ表示"), defaultValue: true },
-      {
-        key: "showDirty" as HudGitStatusKey,
-        label: uiText("未提交标记", "Dirty Mark", "変更あり表示"),
-        defaultValue: true,
-      },
-      {
-        key: "showAheadBehind" as HudGitStatusKey,
-        label: uiText("领先/落后", "Ahead/Behind", "先行/遅延"),
-        defaultValue: false,
-      },
-      {
-        key: "showFileStats" as HudGitStatusKey,
-        label: uiText("文件统计", "File Stats", "ファイル統計"),
-        defaultValue: false,
-      },
-    ],
-    [uiText],
-  );
-  const hudDisplayOptions = useMemo(
-    () => [
-      { key: "showModel" as HudDisplayBooleanKey, label: uiText("模型名", "Model", "モデル名"), defaultValue: true },
-      {
-        key: "showProject" as HudDisplayBooleanKey,
-        label: uiText("项目路径", "Project Path", "プロジェクトパス"),
-        defaultValue: true,
-      },
-      {
-        key: "showContextBar" as HudDisplayBooleanKey,
-        label: uiText("上下文进度条", "Context Bar", "コンテキストバー"),
-        defaultValue: true,
-      },
-      {
-        key: "showConfigCounts" as HudDisplayBooleanKey,
-        label: uiText("配置计数", "Config Counts", "設定数"),
-        defaultValue: false,
-      },
-      {
-        key: "showDuration" as HudDisplayBooleanKey,
-        label: uiText("会话时长", "Duration", "継続時間"),
-        defaultValue: false,
-      },
-      {
-        key: "showSpeed" as HudDisplayBooleanKey,
-        label: uiText("输出速度", "Output Speed", "出力速度"),
-        defaultValue: false,
-      },
-      { key: "showUsage" as HudDisplayBooleanKey, label: uiText("用量限制", "Usage", "使用量"), defaultValue: true },
-      {
-        key: "usageBarEnabled" as HudDisplayBooleanKey,
-        label: uiText("用量进度条", "Usage Bar", "使用量バー"),
-        defaultValue: true,
-      },
-      {
-        key: "showTokenBreakdown" as HudDisplayBooleanKey,
-        label: uiText("Token 明细", "Token Detail", "トークン詳細"),
-        defaultValue: true,
-      },
-      {
-        key: "showTools" as HudDisplayBooleanKey,
-        label: uiText("工具活动", "Tools", "ツール活動"),
-        defaultValue: false,
-      },
-      {
-        key: "showAgents" as HudDisplayBooleanKey,
-        label: uiText("Agent 活动", "Agents", "Agent 活動"),
-        defaultValue: false,
-      },
-      {
-        key: "showTodos" as HudDisplayBooleanKey,
-        label: uiText("Todo 进度", "Todos", "Todo 進捗"),
-        defaultValue: false,
-      },
-      {
-        key: "showSessionName" as HudDisplayBooleanKey,
-        label: uiText("会话名称", "Session Name", "セッション名"),
-        defaultValue: false,
-      },
-      {
-        key: "showClaudeCodeVersion" as HudDisplayBooleanKey,
-        label: uiText("CC 版本号", "CC Version", "CC バージョン"),
-        defaultValue: false,
-      },
-      {
-        key: "showMemoryUsage" as HudDisplayBooleanKey,
-        label: uiText("内存占用", "Memory Usage", "メモリ使用量"),
-        defaultValue: false,
-      },
-    ],
-    [uiText],
-  );
-  const hello2ccRoutingOptions = useMemo<Hello2ccSelectOption[]>(
-    () => [
-      { value: "native-inject", label: "native-inject" },
-      { value: "prompt-only", label: "prompt-only" },
-    ],
-    [],
-  );
-  const hello2ccCompatibilityOptions = useMemo<Hello2ccSelectOption[]>(
-    () => [
-      { value: "full", label: "full" },
-      { value: "sanitize-only", label: "sanitize-only" },
-    ],
-    [],
-  );
-  const hello2ccModelOptions = useMemo<Hello2ccSelectOption[]>(
-    () => [
-      { value: "", label: uiText("留空", "Blank", "空欄") },
-      { value: "inherit", label: "inherit" },
-      { value: "opus", label: "opus" },
-      { value: "sonnet", label: "sonnet" },
-      { value: "haiku", label: "haiku" },
-    ],
-    [uiText],
-  );
-  const hello2ccModelFields = useMemo(
-    () => [
-      {
-        fieldKey: "default_agent_model" as Hello2ccSelectKey,
-        label: uiText("默认 Agent 槽位", "Default Agent Slot", "既定 Agent スロット"),
-        description: uiText("统一默认值", "Global default", "全体デフォルト"),
-      },
-      {
-        fieldKey: "primary_model" as Hello2ccSelectKey,
-        label: uiText("Primary Model", "Primary Model", "Primary Model"),
-        description: uiText("高能力 Agent", "High-capability agents", "高能力 Agent"),
-      },
-      {
-        fieldKey: "subagent_model" as Hello2ccSelectKey,
-        label: uiText("Subagent Model", "Subagent Model", "Subagent Model"),
-        description: uiText("未指定模型的 Agent", "Agents without explicit model", "未指定モデルの Agent"),
-      },
-      {
-        fieldKey: "guide_model" as Hello2ccSelectKey,
-        label: uiText("Guide Model", "Guide Model", "Guide Model"),
-        description: "Claude Code Guide",
-      },
-      {
-        fieldKey: "explore_model" as Hello2ccSelectKey,
-        label: uiText("Explore Model", "Explore Model", "Explore Model"),
-        description: "Explore",
-      },
-      {
-        fieldKey: "plan_model" as Hello2ccSelectKey,
-        label: uiText("Plan Model", "Plan Model", "Plan Model"),
-        description: "Plan",
-      },
-      {
-        fieldKey: "general_model" as Hello2ccSelectKey,
-        label: uiText("General Model", "General Model", "General Model"),
-        description: "General-Purpose",
-      },
-      {
-        fieldKey: "team_model" as Hello2ccSelectKey,
-        label: uiText("Team Model", "Team Model", "Team Model"),
-        description: uiText("团队 teammate", "Team teammates", "チーム teammate"),
-      },
-    ],
-    [uiText],
-  );
-  const noVisibleTabsTitle = useMemo(
-    () => uiText("当前已隐藏所有工具页签", "All tool tabs are currently hidden", "すべてのツールタブは現在非表示です"),
-    [uiText],
-  );
-  const noVisibleTabsDescription = useMemo(
-    () =>
-      uiText(
-        "可在设置页的 App 可见性中重新开启",
-        "Re-enable them from Settings > App Visibility",
-        "Settings > App Visibility から再表示できます",
-      ),
-    [uiText],
-  );
-  const notInstalledTitle = useMemo(
-    () =>
-      uiText(
-        `${tab === "claude" ? "Claude Code" : "Codex CLI"} 未安装`,
-        `${tab === "claude" ? "Claude Code" : "Codex CLI"} not installed`,
-        `${tab === "claude" ? "Claude Code" : "Codex CLI"} は未インストールです`,
-      ),
-    [tab, uiText],
-  );
-  const notInstalledDescription = useMemo(
-    () =>
-      uiText(
-        "安装后即可在此管理工具设置",
-        "Install it to manage settings here",
-        "インストール後にここで设置を管理できます",
-      ),
-    [uiText],
-  );
+  const {
+    unavailableLabel,
+    autoUpdateOptions,
+    claudeModelOptions,
+    hudLayoutOptions,
+    hudPathLevelOptions,
+    hudContextValueOptions,
+    codexApprovalOptions,
+    codexReasoningOptions,
+    permLevelOptions,
+    hudGitStatusOptions,
+    hudDisplayOptions,
+    hello2ccRoutingOptions,
+    hello2ccCompatibilityOptions,
+    hello2ccModelOptions,
+    hello2ccModelFields,
+    noVisibleTabsTitle,
+    noVisibleTabsDescription,
+    notInstalledTitle,
+    notInstalledDescription,
+  } = useToolsOptions(uiText, tab);
   const handleSelectTab = useCallback((value: string) => {
     setTab(value as ToolTab);
   }, []);
@@ -1010,37 +758,15 @@ export default function Tools() {
   const hello2ccHasChanges = JSON.stringify(hello2ccDraft) !== JSON.stringify(hello2ccConfigSource);
   const permDescription = uiText(PERM_DESC_ZH[permLevel], PERM_DESC_EN[permLevel], PERM_DESC_JA[permLevel]);
   const hello2ccSelectFields = useMemo<Hello2ccConfigField[]>(
-    () => [
-      {
-        fieldKey: "routing_policy",
-        label: uiText("路由策略", "Routing Policy", "ルーティングポリシー"),
-        description: uiText(
-          "决定是否在原生 Agent 调用前注入模型槽位",
-          "Choose whether native agent calls receive silent model injection",
-          "ネイティブ Agent 呼び出し前にモデル注入するかを選びます",
-        ),
-        value: hello2ccDraft.routing_policy,
-        options: hello2ccRoutingOptions,
-      },
-      {
-        fieldKey: "compatibility_mode",
-        label: uiText("兼容模式", "Compatibility Mode", "互換モード"),
-        description: uiText(
-          "与其他插件共存时可切到仅净化模式",
-          "Use sanitize-only when coexisting with other orchestration plugins",
-          "他プラグインと共存する場合は sanitize-only を使います",
-        ),
-        value: hello2ccDraft.compatibility_mode,
-        options: hello2ccCompatibilityOptions,
-      },
-      ...hello2ccModelFields.map((field) => ({
-        fieldKey: field.fieldKey,
-        label: field.label,
-        description: field.description,
-        value: hello2ccDraft[field.fieldKey],
-        options: hello2ccModelOptions,
-      })),
-    ],
+    () =>
+      buildHello2ccSelectFields({
+        uiText,
+        hello2ccDraft,
+        hello2ccRoutingOptions,
+        hello2ccCompatibilityOptions,
+        hello2ccModelFields,
+        hello2ccModelOptions,
+      }),
     [
       hello2ccCompatibilityOptions,
       hello2ccDraft,
@@ -1099,266 +825,72 @@ export default function Tools() {
         )}
 
         {tab === "claude" && toolById.get("claude")?.installed && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {/* Permission Slider */}
-            <ToolsPermissionCard
-              title={uiText("权限模式", "Permission Mode", "権限モード")}
-              currentLabel={uiText(perm.label_zh, perm.label_en, perm.label_ja)}
-              currentDescription={permDescription}
-              currentColor={perm.color}
-              value={permLevel}
-              options={permLevelOptions}
-              onSelect={handleSelectPermLevel}
-              onRangeChange={handleChangePermLevelRange}
-              onRangePointerUp={handleCommitPermLevelPointerUp}
-              onRangeKeyUp={handleCommitPermLevelKeyUp}
-              onRangeBlur={handleCommitPermLevelBlur}
-            />
-
-            {/* Bypass Permissions */}
-            <ToolsToggleCard
-              title={uiText("绕过权限确认", "Bypass Permissions", "権限確認をバイパス")}
-              description={uiText(
-                "跳过所有权限确认，全自动执行",
-                "Skip all permission prompts, fully autonomous",
-                "すべての権限確認をスキップして完全自動で実行します",
-              )}
-              value={permLevel === 3}
-              onChange={handleToggleBypassPermissions}
-              labelOn="ON"
-              labelOff="OFF"
-            />
-
-            {/* Auto Update */}
-            <ToolsChoiceCard
-              title={uiText("自动更新", "Auto Update", "自動更新")}
-              description={uiText("Claude Code 更新频道", "Update channel", "Claude Code の更新チャンネル")}
-              value={autoUpdate}
-              onSelect={handleSelectAutoUpdate}
-              options={autoUpdateOptions}
-            />
-
-            {/* Model Selection */}
-            <ToolsChoiceCard
-              title={uiText("模型选择", "Model", "モデル")}
-              description={uiText("切换默认使用的模型", "Switch default model", "既定モデルを切り替えます")}
-              value={claudeModelOptions.find((option) => claudeModel.includes(String(option.value)))?.value ?? ""}
-              onSelect={handleSelectClaudeModel}
-              options={claudeModelOptions}
-            />
-
-            {/* Tool Search */}
-            <ToolsToggleCard
-              title="Tool Search"
-              description={uiText(
-                "启用工具搜索功能（实验性）",
-                "Enable tool search (experimental)",
-                "ツール検索機能を有効化します（実験的）",
-              )}
-              value={toolSearch}
-              onChange={handleToggleToolSearch}
-              labelOn={uiText("已启用", "Enabled", "有効")}
-              labelOff={uiText("已关闭", "Disabled", "無効")}
-            />
-
-            {/* StatusLine (claude-hud) */}
-            <div className="card" style={{ padding: "16px 18px" }}>
-              <ToolsManagedSectionHeader
-                title="StatusLine (claude-hud)"
-                description={uiText(
-                  "终端底部实时状态栏",
-                  "Real-time status bar at terminal bottom",
-                  "ターミナル下部のリアルタイムステータスバー",
-                )}
-                version={hudStatus?.version}
-                installed={hudStatus?.installed ?? false}
-                installAction={hudInstallAction}
-                primaryAction={hudPrimaryAction}
-                toggle={hudToggle}
-              />
-
-              {hudStatus?.installed && (
-                <div
-                  style={{
-                    borderTop: "1px solid var(--border)",
-                    paddingTop: 12,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 14,
-                  }}
-                >
-                  {/* Layout */}
-                  <ToolsChoiceRow
-                    title={uiText("布局模式", "Layout Mode", "レイアウトモード")}
-                    value={hc.lineLayout || "expanded"}
-                    onSelect={handleSelectHudLayout}
-                    options={hudLayoutOptions}
-                  />
-
-                  {/* Separators */}
-                  <ToolsCheckboxRow
-                    title={uiText("分隔线", "Separators", "区切り線")}
-                    label={uiText(
-                      "活动区域前显示分隔线",
-                      "Show separator before activity",
-                      "アクティビティの前に区切り線を表示",
-                    )}
-                    checked={hc.showSeparators === true}
-                    onChange={handleToggleHudSeparators}
-                  />
-
-                  {/* Path Levels */}
-                  <ToolsChoiceRow
-                    title={uiText("路径层级", "Path Levels", "パス階層")}
-                    value={hc.pathLevels || 1}
-                    onSelect={handleSelectHudPathLevel}
-                    options={hudPathLevelOptions}
-                  />
-
-                  {/* Context Value Format */}
-                  <ToolsChoiceRow
-                    title={uiText("上下文格式", "Context Format", "コンテキスト形式")}
-                    value={hc.display?.contextValue || "percent"}
-                    onSelect={handleSelectHudContextValue}
-                    options={hudContextValueOptions}
-                  />
-
-                  {/* Git Status */}
-                  <ToolsCheckboxSection
-                    title="Git Status"
-                    options={hudResolvedGitStatusOptions}
-                    onToggle={handleToggleHudGitStatus}
-                  />
-
-                  {/* Display Options */}
-                  <ToolsCheckboxSection
-                    title={uiText("显示选项", "Display", "表示項目")}
-                    options={hudResolvedDisplayOptions}
-                    onToggle={handleToggleHudDisplay}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* hello2cc */}
-            <div className="card" style={{ padding: "16px 18px" }}>
-              <ToolsManagedSectionHeader
-                title="hello2cc"
-                description={uiText(
-                  "让第三方模型更接近 Claude Code 原生工作流",
-                  "Make third-party models behave more like native Claude Code",
-                  "サードパーティーモデルを Claude Code ネイティブに近づけます",
-                )}
-                version={hello2ccStatus?.version}
-                installed={hello2ccStatus?.installed ?? false}
-                installAction={hello2ccInstallAction}
-                primaryAction={hello2ccPrimaryAction}
-                secondaryAction={hello2ccSecondaryAction}
-                toggle={hello2ccToggle}
-                actionsWrap
-              />
-
-              {hello2ccStatus?.installed && (
-                <Hello2ccConfigSection
-                  pathLabel={uiText("插件缓存目录", "Plugin cache path", "プラグインキャッシュパス")}
-                  installPath={hello2ccStatus.installPath}
-                  fields={hello2ccSelectFields}
-                  onSelectChange={handleChangeHello2ccSelect}
-                  mirrorTitle={uiText("镜像当前会话模型", "Mirror Session Model", "現在のセッションモデルをミラー")}
-                  mirrorDescription={uiText(
-                    "缺少显式模型时优先跟随当前会话模型槽位",
-                    "Prefer the current session model when no explicit slot is set",
-                    "明示的なモデルがない場合は現在のセッションモデルを優先します",
-                  )}
-                  mirrorValue={hello2ccDraft.mirror_session_model}
-                  onMirrorChange={handleToggleHello2ccMirrorSessionModel}
-                  mirrorLabelOn={uiText("已启用", "Enabled", "有効")}
-                  mirrorLabelOff={uiText("已关闭", "Disabled", "無効")}
-                  resetLabel={uiText("重置", "Reset", "リセット")}
-                  saveLabel={uiText("保存配置", "Save Config", "設定を保存")}
-                  hasChanges={hello2ccHasChanges}
-                  isSaving={setHello2ccConfigMutation.isPending}
-                  onReset={handleResetHello2ccDraft}
-                  onSave={handleSaveHello2ccConfigClick}
-                />
-              )}
-            </div>
-
-            {/* Proxy Advanced — 代理增强（仅 Claude） */}
-            <div className="card" style={{ padding: "16px 18px" }}>
-              <Suspense
-                fallback={
-                  <div style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <div className="spinner" />
-                  </div>
-                }
-              >
-                <ProxyAdvancedPanel embedded mode="claude" />
-              </Suspense>
-            </div>
-          </div>
+          <ClaudeTab
+            uiText={uiText}
+            perm={perm}
+            permLevel={permLevel}
+            permDescription={permDescription}
+            permLevelOptions={permLevelOptions}
+            handleSelectPermLevel={handleSelectPermLevel}
+            handleChangePermLevelRange={handleChangePermLevelRange}
+            handleCommitPermLevelPointerUp={handleCommitPermLevelPointerUp}
+            handleCommitPermLevelKeyUp={handleCommitPermLevelKeyUp}
+            handleCommitPermLevelBlur={handleCommitPermLevelBlur}
+            handleToggleBypassPermissions={handleToggleBypassPermissions}
+            autoUpdate={autoUpdate}
+            autoUpdateOptions={autoUpdateOptions}
+            handleSelectAutoUpdate={handleSelectAutoUpdate}
+            claudeModel={claudeModel}
+            claudeModelOptions={claudeModelOptions}
+            handleSelectClaudeModel={handleSelectClaudeModel}
+            toolSearch={toolSearch}
+            handleToggleToolSearch={handleToggleToolSearch}
+            hudStatus={hudStatus}
+            hudInstallAction={hudInstallAction}
+            hudPrimaryAction={hudPrimaryAction}
+            hudToggle={hudToggle}
+            hc={hc}
+            hudLayoutOptions={hudLayoutOptions}
+            handleSelectHudLayout={handleSelectHudLayout}
+            handleToggleHudSeparators={handleToggleHudSeparators}
+            hudPathLevelOptions={hudPathLevelOptions}
+            handleSelectHudPathLevel={handleSelectHudPathLevel}
+            hudContextValueOptions={hudContextValueOptions}
+            handleSelectHudContextValue={handleSelectHudContextValue}
+            hudResolvedGitStatusOptions={hudResolvedGitStatusOptions}
+            handleToggleHudGitStatus={handleToggleHudGitStatus}
+            hudResolvedDisplayOptions={hudResolvedDisplayOptions}
+            handleToggleHudDisplay={handleToggleHudDisplay}
+            hello2ccStatus={hello2ccStatus}
+            hello2ccInstallAction={hello2ccInstallAction}
+            hello2ccPrimaryAction={hello2ccPrimaryAction}
+            hello2ccSecondaryAction={hello2ccSecondaryAction}
+            hello2ccToggle={hello2ccToggle}
+            hello2ccSelectFields={hello2ccSelectFields}
+            handleChangeHello2ccSelect={handleChangeHello2ccSelect}
+            hello2ccDraft={hello2ccDraft}
+            handleToggleHello2ccMirrorSessionModel={handleToggleHello2ccMirrorSessionModel}
+            hello2ccHasChanges={hello2ccHasChanges}
+            setHello2ccConfigMutation={setHello2ccConfigMutation}
+            handleResetHello2ccDraft={handleResetHello2ccDraft}
+            handleSaveHello2ccConfigClick={handleSaveHello2ccConfigClick}
+          />
         )}
 
         {tab === "codex" && toolById.get("codex")?.installed && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {/* Approval Mode */}
-            <ToolsChoiceCard
-              title={uiText("审批模式", "Approval Mode", "承認モード")}
-              description={uiText("操作确认级别", "Action confirmation level", "操作確認レベル")}
-              value={codexApproval}
-              onSelect={handleSelectCodexApproval}
-              options={codexApprovalOptions}
-            />
-
-            {/* Reasoning Effort */}
-            <ToolsChoiceCard
-              title={uiText("推理强度", "Reasoning Effort", "推論強度")}
-              description={uiText("模型推理计算量", "Model reasoning compute", "モデルの推論計算量")}
-              value={codexReasoning}
-              onSelect={handleSelectCodexReasoning}
-              options={codexReasoningOptions}
-            />
-
-            {/* Disable Response Storage */}
-            <ToolsToggleCard
-              title={uiText("禁用响应存储", "Disable Response Storage", "応答保存を無効化")}
-              description={uiText(
-                "不保存 API 响应到本地",
-                "Don't save API responses locally",
-                "API 応答をローカルに保存しません",
-              )}
-              value={codexDisableStorage}
-              onChange={handleToggleCodexDisableStorage}
-              labelOn={uiText("已禁用", "Disabled", "無効")}
-              labelOff={uiText("已启用", "Enabled", "有効")}
-            />
-
-            <ToolsToggleCard
-              title={uiText("1M 上下文窗口", "1M Context Window", "1M コンテキストウィンドウ")}
-              description={uiText(
-                "一键写入 `model_context_window = 1000000`",
-                "Write `model_context_window = 1000000` with one toggle",
-                "`model_context_window = 1000000` をワンタップで書き込みます",
-              )}
-              value={codexContextWindow1M}
-              onChange={handleToggleCodexContextWindow1M}
-              labelOn={uiText("已开启", "Enabled", "有効")}
-              labelOff={uiText("默认", "Default", "既定")}
-            />
-
-            {/* Proxy Advanced — Codex OAuth 字段剥离 */}
-            <div className="card" style={{ padding: "16px 18px" }}>
-              <Suspense
-                fallback={
-                  <div style={{ minHeight: 80, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <div className="spinner" />
-                  </div>
-                }
-              >
-                <ProxyAdvancedPanel embedded mode="codex" />
-              </Suspense>
-            </div>
-          </div>
+          <CodexTab
+            uiText={uiText}
+            codexApproval={codexApproval}
+            codexApprovalOptions={codexApprovalOptions}
+            handleSelectCodexApproval={handleSelectCodexApproval}
+            codexReasoning={codexReasoning}
+            codexReasoningOptions={codexReasoningOptions}
+            handleSelectCodexReasoning={handleSelectCodexReasoning}
+            codexDisableStorage={codexDisableStorage}
+            handleToggleCodexDisableStorage={handleToggleCodexDisableStorage}
+            codexContextWindow1M={codexContextWindow1M}
+            handleToggleCodexContextWindow1M={handleToggleCodexContextWindow1M}
+          />
         )}
       </div>
     </div>

@@ -5,27 +5,22 @@ import {
   RefreshCw,
   Zap,
   Package,
-  FileText,
   ExternalLink,
   Search,
   X,
   FolderOpen,
   Monitor,
   Check,
-  Edit3,
   Trash2,
-  RotateCcw,
   Upload,
 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
 import { showToast } from "../components/Toast";
-import ConfirmDialog from "../components/ConfirmDialog";
 import SkillCard from "../components/SkillCard";
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
 import EmptyState from "../components/states/EmptyState";
-import MarkdownPreview from "../components/MarkdownPreview";
 import { type ManagedAppId } from "../lib/appPreferences";
 import { fetchSkillsPageData, queryKeys } from "../hooks/queries";
 import {
@@ -53,6 +48,9 @@ import {
 } from "./skills/helpers";
 import SkillsEditingView from "./skills/EditingView";
 import SkillsExplorerView from "./skills/ExplorerView";
+import SkillsDetailPanel from "./skills/DetailPanel";
+import SkillsConfirmDialogs from "./skills/Dialogs";
+import SkillsBackupList from "./skills/BackupList";
 
 export default function Skills() {
   const queryClient = useQueryClient();
@@ -249,12 +247,6 @@ export default function Skills() {
       setExplorerPreview("Failed to load file");
     }
   }, []);
-
-  const startEditSkill = useCallback(() => {
-    if (!skillContent) return;
-    setEditingSkill(true);
-    setEditContent(skillContent);
-  }, [skillContent]);
 
   const handleSaveSkill = useCallback(async () => {
     if (!selectedSkill?.file_path) return;
@@ -543,105 +535,15 @@ export default function Skills() {
         </div>
       </div>
 
-      {skillBackups.length > 0 && (
-        <div className="section-card" style={{ marginBottom: 16 }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              alignItems: "center",
-              marginBottom: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div className="section-card-title" style={{ marginBottom: 4 }}>
-                <RotateCcw size={16} style={{ color: "var(--text-secondary)" }} />
-                {locale === "zh" ? "Skill 备份" : "Skill Backups"}
-              </div>
-              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                {locale === "zh"
-                  ? `自动保留最近 ${skillBackups.length} 个卸载备份，可恢复或删除`
-                  : `Recent uninstall backups are kept automatically. You can restore or delete them here.`}
-              </p>
-            </div>
-            <span className="badge badge-accent">{skillBackups.length}</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {skillBackups.slice(0, 8).map((backup) => (
-              <div
-                key={backup.id}
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: 10,
-                  background: "var(--bg-input)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{backup.skill_name}</span>
-                    <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                      {backup.size_bytes < 1024
-                        ? `${backup.size_bytes} B`
-                        : `${(backup.size_bytes / 1024).toFixed(1)} KB`}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {backup.original_path}
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                    {backup.created_at.replace("T", " ").slice(0, 19)}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    disabled={backupBusyId === backup.id}
-                    onClick={async () => {
-                      setBackupBusyId(backup.id);
-                      try {
-                        const { restoredTo, data } = await restoreSkillBackupMutation.mutateAsync({ id: backup.id });
-                        applySkillsPageData(data);
-                        showToast("success", locale === "zh" ? `已恢复到 ${restoredTo}` : `Restored to ${restoredTo}`);
-                      } catch (e) {
-                        showToast("error", String(e));
-                      } finally {
-                        setBackupBusyId((current) => (current === backup.id ? null : current));
-                      }
-                    }}
-                    style={{ gap: 6 }}
-                  >
-                    <RotateCcw size={13} />
-                    {locale === "zh" ? "恢复" : "Restore"}
-                  </button>
-                  <button
-                    className="btn btn-danger-ghost btn-sm"
-                    disabled={backupBusyId === backup.id}
-                    onClick={() => setPendingBackupDelete(backup)}
-                    style={{ gap: 6 }}
-                  >
-                    <Trash2 size={13} />
-                    {locale === "zh" ? "删除备份" : "Delete Backup"}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <SkillsBackupList
+        skillBackups={skillBackups}
+        backupBusyId={backupBusyId}
+        setBackupBusyId={setBackupBusyId}
+        setPendingBackupDelete={setPendingBackupDelete}
+        restoreSkillBackupMutation={restoreSkillBackupMutation}
+        applySkillsPageData={applySkillsPageData}
+        locale={locale}
+      />
 
       {/* Tool Selector */}
       {visibleTools.length > 0 && (
@@ -899,320 +801,38 @@ export default function Skills() {
 
         {/* Detail Panel */}
         {selectedSkill && (
-          <div style={{ width: 520, overflowY: "auto", flexShrink: 0 }}>
-            <div className="section-card" style={{ position: "sticky", top: 0 }}>
-              <div
-                style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div
-                    className="icon-box"
-                    style={{ background: "var(--warning-subtle)", width: 42, height: 42, borderRadius: 8 }}
-                  >
-                    <Zap size={20} style={{ color: "var(--warning)" }} />
-                  </div>
-                  <div>
-                    <h3 style={{ fontSize: 15, fontWeight: 700 }}>{selectedSkill.name}</h3>
-                    {selectedSkill.plugin_id && (
-                      <span className="badge badge-muted" style={{ marginTop: 4 }}>
-                        {selectedSkill.plugin_id}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  {selectedSkill.file_path && !editingSkill && (
-                    <>
-                      <button
-                        onClick={() => handleToggleSkill(selectedSkill)}
-                        title={
-                          selectedSkill.file_path.endsWith(".disabled")
-                            ? locale === "zh"
-                              ? "启用"
-                              : "Enable"
-                            : locale === "zh"
-                              ? "禁用"
-                              : "Disable"
-                        }
-                        style={{
-                          position: "relative",
-                          width: 40,
-                          height: 22,
-                          borderRadius: 11,
-                          border: "none",
-                          cursor: "pointer",
-                          background: selectedSkill.file_path.endsWith(".disabled")
-                            ? "var(--border-strong)"
-                            : "var(--success)",
-                          transition: "background 0.2s",
-                          padding: 0,
-                          flexShrink: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            position: "absolute",
-                            top: 2,
-                            left: selectedSkill.file_path.endsWith(".disabled") ? 2 : 20,
-                            width: 18,
-                            height: 18,
-                            borderRadius: "50%",
-                            background: "#fff",
-                            transition: "left 0.2s",
-                            boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                          }}
-                        />
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-icon-sm"
-                        onClick={() => handleDeleteSkill(selectedSkill)}
-                        title={locale === "zh" ? "删除" : "Delete"}
-                      >
-                        <Trash2 size={15} style={{ color: "var(--danger)" }} />
-                      </button>
-                    </>
-                  )}
-                  <button
-                    className="btn btn-ghost btn-icon-sm"
-                    onClick={() => {
-                      setSelectedSkill(null);
-                      setEditingSkill(false);
-                    }}
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 18 }}>
-                {selectedSkill.description && (
-                  <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                    {selectedSkill.description}
-                  </p>
-                )}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  {selectedSkill.trigger_command && (
-                    <div>
-                      <span className="field-label">{locale === "zh" ? "触发命令" : "Trigger"}</span>
-                      <code
-                        className="badge badge-accent"
-                        style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
-                      >
-                        {selectedSkill.trigger_command}
-                      </code>
-                    </div>
-                  )}
-                  {selectedSkill.plugin_id && (
-                    <div>
-                      <span className="field-label">{locale === "zh" ? "来源插件" : "Plugin"}</span>
-                      <span className="badge badge-muted">{selectedSkill.plugin_id}</span>
-                    </div>
-                  )}
-                </div>
-                {selectedSkill.file_path && (
-                  <div>
-                    <span className="field-label">{locale === "zh" ? "文件路径" : "File Path"}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <FileText size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontFamily: "'JetBrains Mono', monospace",
-                          color: "var(--text-muted)",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {selectedSkill.file_path}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Sync to other tools */}
-              {selectedSkill.file_path && (
-                <div style={{ marginBottom: 18 }}>
-                  <span className="field-label">{locale === "zh" ? "同步到工具" : "Sync to tools"}</span>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {visibleTools.map((tool) => {
-                      const Icon = TOOL_ICONS[tool.id] || Monitor;
-                      const isSynced = syncedSkills[selectedSkill.id]?.has(tool.id) || false;
-                      const isCurrent = tool.id === activeTool;
-                      return (
-                        <button
-                          key={tool.id}
-                          className={`btn btn-xs ${isSynced ? "btn-primary" : isCurrent ? "btn-ghost" : tool.installed ? "btn-secondary" : "btn-ghost"}`}
-                          style={{ gap: 5, opacity: tool.installed ? 1 : 0.4 }}
-                          disabled={!tool.installed || isCurrent}
-                          title={
-                            !tool.installed
-                              ? locale === "zh"
-                                ? "未安装"
-                                : "Not installed"
-                              : isCurrent
-                                ? locale === "zh"
-                                  ? "当前工具"
-                                  : "Current tool"
-                                : isSynced
-                                  ? locale === "zh"
-                                    ? "点击取消同步"
-                                    : "Click to unsync"
-                                  : ""
-                          }
-                          onClick={async () => {
-                            if (isSynced) {
-                              // Unsync = delete from target tool
-                              try {
-                                const skillName =
-                                  selectedSkill
-                                    .file_path!.split(/[/\\]/)
-                                    .pop()
-                                    ?.replace(/\.md(\.disabled)?$/, "") || selectedSkill.name;
-                                await removeSyncedSkillMutation.mutateAsync({
-                                  skillName,
-                                  targetSkillsDir: tool.skills_dir,
-                                });
-                                setSyncedSkills((prev) => {
-                                  const next = { ...prev };
-                                  if (next[selectedSkill.id]) {
-                                    const s = new Set(next[selectedSkill.id]);
-                                    s.delete(tool.id);
-                                    next[selectedSkill.id] = s;
-                                  }
-                                  return next;
-                                });
-                                showToast(
-                                  "success",
-                                  locale === "zh" ? `已从 ${tool.name} 移除` : `Removed from ${tool.name}`,
-                                );
-                              } catch (e) {
-                                showToast("error", String(e));
-                              }
-                            } else {
-                              // Sync = copy to target tool
-                              try {
-                                await copySkillBetweenToolsMutation.mutateAsync({
-                                  path: selectedSkill.file_path!,
-                                  targetSkillsDir: tool.skills_dir,
-                                  method: skillSyncMethod,
-                                });
-                                setSyncedSkills((prev) => {
-                                  const next = { ...prev };
-                                  if (!next[selectedSkill.id]) next[selectedSkill.id] = new Set();
-                                  next[selectedSkill.id] = new Set([...next[selectedSkill.id], tool.id]);
-                                  return next;
-                                });
-                                showToast(
-                                  "success",
-                                  locale === "zh" ? `已同步到 ${tool.name}` : `Synced to ${tool.name}`,
-                                );
-                              } catch (e) {
-                                showToast("error", String(e));
-                              }
-                            }
-                          }}
-                        >
-                          {isSynced ? <Check size={11} style={{ color: "#fff" }} /> : <Icon size={12} />}
-                          {tool.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <div
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}
-                >
-                  <span className="field-label" style={{ marginBottom: 0 }}>
-                    {locale === "zh" ? "技能内容" : "Content"}
-                  </span>
-                  {selectedSkill.file_path && skillContent && (
-                    <button className="btn btn-secondary btn-xs" onClick={startEditSkill} style={{ gap: 5 }}>
-                      <Edit3 size={12} />
-                      {locale === "zh" ? "编辑" : "Edit"}
-                    </button>
-                  )}
-                </div>
-                {loadingContent ? (
-                  <LoadingState />
-                ) : skillContent ? (
-                  <div
-                    className="markdown-preview"
-                    style={{ maxHeight: 500, overflowY: "auto", fontSize: 13, lineHeight: 1.8 }}
-                  >
-                    <MarkdownPreview content={skillContent} />
-                  </div>
-                ) : (
-                  <div className="code-block" style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>
-                    {locale === "zh" ? "无可用内容" : "No content available"}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <SkillsDetailPanel
+            selectedSkill={selectedSkill}
+            skillContent={skillContent}
+            loadingContent={loadingContent}
+            editingSkill={editingSkill}
+            syncedSkills={syncedSkills}
+            setSyncedSkills={setSyncedSkills}
+            tools={tools}
+            skillSyncMethod={skillSyncMethod}
+            handleToggleSkill={handleToggleSkill}
+            handleDeleteSkill={handleDeleteSkill}
+            setEditingSkill={setEditingSkill}
+            setSelectedSkill={setSelectedSkill}
+            copySkillBetweenToolsMutation={copySkillBetweenToolsMutation}
+            removeSyncedSkillMutation={removeSyncedSkillMutation}
+            locale={locale}
+            i={i}
+          />
         )}
       </div>
 
-      <ConfirmDialog
-        isOpen={!!pendingDelete}
-        title={
-          pendingDelete?.type === "plugin"
-            ? locale === "zh"
-              ? "删除插件"
-              : "Delete Plugin"
-            : locale === "zh"
-              ? "删除技能"
-              : "Delete Skill"
-        }
-        message={
-          pendingDelete?.type === "plugin"
-            ? locale === "zh"
-              ? `确定删除插件「${pendingDelete?.item.name}」？此操作不可恢复。`
-              : `Delete plugin "${pendingDelete?.item.name}"? This cannot be undone.`
-            : locale === "zh"
-              ? `确定删除技能「${pendingDelete?.item.name}」？`
-              : `Delete skill "${pendingDelete?.item.name}"?`
-        }
-        confirmText={locale === "zh" ? "删除" : "Delete"}
-        variant="destructive"
-        onConfirm={() => {
-          if (!pendingDelete) return;
-          if (pendingDelete.type === "plugin") void doDeletePlugin(pendingDelete.item as Plugin);
-          else void doDeleteSkill(pendingDelete.item as Skill);
-          setPendingDelete(null);
-        }}
-        onCancel={() => setPendingDelete(null)}
-      />
-
-      <ConfirmDialog
-        isOpen={!!pendingBackupDelete}
-        title={locale === "zh" ? "删除 Skill 备份" : "Delete Skill Backup"}
-        message={
-          pendingBackupDelete
-            ? locale === "zh"
-              ? `确定删除备份「${pendingBackupDelete.skill_name}」？删除后将无法再从该备份恢复。`
-              : `Delete backup "${pendingBackupDelete.skill_name}"? This backup cannot be restored after deletion.`
-            : ""
-        }
-        confirmText={locale === "zh" ? "删除备份" : "Delete Backup"}
-        variant="destructive"
-        onConfirm={() => {
-          const backup = pendingBackupDelete;
-          if (!backup) return;
-          setPendingBackupDelete(null);
-          setBackupBusyId(backup.id);
-          void deleteSkillBackupMutation
-            .mutateAsync({ id: backup.id })
-            .then((data) => applySkillsPageData(data))
-            .then(() => showToast("success", locale === "zh" ? "备份已删除" : "Backup deleted"))
-            .catch((error) => showToast("error", String(error)))
-            .finally(() => setBackupBusyId((current) => (current === backup.id ? null : current)));
-        }}
-        onCancel={() => setPendingBackupDelete(null)}
+      <SkillsConfirmDialogs
+        pendingDelete={pendingDelete}
+        setPendingDelete={setPendingDelete}
+        pendingBackupDelete={pendingBackupDelete}
+        setPendingBackupDelete={setPendingBackupDelete}
+        setBackupBusyId={setBackupBusyId}
+        doDeletePlugin={doDeletePlugin}
+        doDeleteSkill={doDeleteSkill}
+        deleteSkillBackupMutation={deleteSkillBackupMutation}
+        applySkillsPageData={applySkillsPageData}
+        locale={locale}
       />
     </div>
   );

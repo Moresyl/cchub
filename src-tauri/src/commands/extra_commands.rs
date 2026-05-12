@@ -6418,22 +6418,26 @@ fn codex_state_databases(root: &std::path::Path) -> Vec<PathBuf> {
     paths
 }
 
-fn scan_codex_sessions(
-    conn: &rusqlite::Connection,
+/// 并行版 codex 扫描：plan 中的 root / db_files / generic_roots 已在 db lock 内备好,
+/// 此处只做文件 IO + SQLite 读取，不再依赖主 db 连接，可以安全跨线程执行。
+fn scan_codex_sessions_from_plan(
+    root: Option<&std::path::Path>,
+    db_files: &[PathBuf],
+    generic_roots: &[PathBuf],
     query: &str,
-) -> Result<Vec<SessionSummary>, String> {
-    let root = resolve_tool_config_dir(conn, "codex")?;
+) -> Vec<SessionSummary> {
+    let Some(root) = root else { return Vec::new() };
     if !root.exists() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
-    let history_index = load_codex_history_index(&root);
-    let mut sessions = Vec::new();
-    let mut seen_ids = HashSet::new();
+    let history_index = load_codex_history_index(root);
+    let mut sessions: Vec<SessionSummary> = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
 
-    for db_path in codex_state_databases(&root) {
+    for db_path in db_files {
         let external = match rusqlite::Connection::open_with_flags(
-            &db_path,
+            db_path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         ) {
             Ok(conn) => conn,
@@ -6449,7 +6453,7 @@ fn scan_codex_sessions(
             Err(_) => continue,
         };
 
-        let rows = match stmt.query_map([], |row| {
+        let Ok(rows) = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -6459,18 +6463,16 @@ fn scan_codex_sessions(
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
             ))
-        }) {
-            Ok(rows) => rows,
-            Err(_) => continue,
+        }) else {
+            continue;
         };
 
-        for row in rows {
+        for row in rows.flatten() {
             let (id, rollout_path, created_at_raw, updated_at_raw, cwd, title, first_user_message) =
-                row.map_err(|e| e.to_string())?;
+                row;
             if !seen_ids.insert(id.clone()) {
                 continue;
             }
-
             let rollout_file_path = {
                 let path = PathBuf::from(&rollout_path);
                 if path.is_absolute() {
@@ -6480,7 +6482,6 @@ fn scan_codex_sessions(
                 }
             };
             let token_totals = read_session_token_totals_from_jsonl(&rollout_file_path);
-
             let history_items = history_index.get(&id).cloned().unwrap_or_default();
             let preview_source = history_items
                 .last()
@@ -6502,7 +6503,6 @@ fn scan_codex_sessions(
             if !query.is_empty() && search_hit_count == 0 {
                 continue;
             }
-
             sessions.push(SessionSummary {
                 id: id.clone(),
                 tool_id: "codex".to_string(),
@@ -6536,10 +6536,55 @@ fn scan_codex_sessions(
     }
 
     if !sessions.is_empty() {
-        return Ok(sessions);
+        return sessions;
     }
 
-    scan_generic_tool_sessions(conn, "codex", query)
+    // sqlite 未命中 → 走 generic 兜底（用预先收集好的 roots，不再访问主 db）
+    scan_generic_tool_sessions_from_roots("codex", generic_roots, query)
+}
+
+/// 并行版 generic 扫描：roots 已在 db lock 内备好，本函数只做文件遍历 + 解析。
+fn scan_generic_tool_sessions_from_roots(
+    tool_id: &str,
+    roots: &[PathBuf],
+    query: &str,
+) -> Vec<SessionSummary> {
+    let mut jsonl_files = Vec::new();
+    let mut sqlite_files = Vec::new();
+    let mut seen_jsonl = HashSet::new();
+    let mut seen_sqlite = HashSet::new();
+
+    for root in roots {
+        collect_session_candidate_files(
+            tool_id,
+            root,
+            root,
+            &mut jsonl_files,
+            &mut sqlite_files,
+            0,
+        );
+    }
+
+    let mut sessions = Vec::new();
+    for path in jsonl_files {
+        let key = path.to_string_lossy().to_string();
+        if !seen_jsonl.insert(key) {
+            continue;
+        }
+        if let Some(summary) = parse_generic_jsonl_session_summary(tool_id, &path, query) {
+            sessions.push(summary);
+        }
+    }
+
+    for path in sqlite_files {
+        let key = path.to_string_lossy().to_string();
+        if !seen_sqlite.insert(key) {
+            continue;
+        }
+        sessions.extend(scan_generic_sqlite_sessions(tool_id, &path, query));
+    }
+
+    sessions
 }
 
 fn parse_generic_jsonl_session_summary(
@@ -6571,17 +6616,28 @@ fn parse_generic_jsonl_session_summary(
     let mut message_count = 0usize;
     let mut token_totals = SessionTokenTotals::default();
 
+    // 长会话（如 claude 历史几千条消息）的 jsonl 可能有上万行。原实现对每一行都做
+    // serde_json::from_str + token accumulator，导致 get_sessions 在 list 阶段就被
+    // 一两个大文件拖到几秒。这里做两级 cap：
+    //   - token 扫描上限 MAX_TOKEN_LINES：超出后直接 break，停止 JSON 解析
+    //   - metadata 提取上限 MAX_META_LINES：仍 continue 但跳过 metadata 字段，
+    //     用于让 created_at/title/cwd/preview 之类字段在前面行内尽快定位完
+    const MAX_TOKEN_LINES: usize = 2000;
+    const MAX_META_LINES: usize = 120;
     for (line_index, line) in BufReader::new(file)
         .lines()
         .map_while(Result::ok)
         .enumerate()
     {
+        if line_index >= MAX_TOKEN_LINES {
+            break;
+        }
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
         accumulate_token_usage_from_value(&value, &mut token_totals, 0);
 
-        if line_index >= 120 {
+        if line_index >= MAX_META_LINES {
             continue;
         }
 
@@ -6870,49 +6926,6 @@ fn scan_generic_sqlite_sessions(
     sessions
 }
 
-fn scan_generic_tool_sessions(
-    conn: &rusqlite::Connection,
-    tool_id: &str,
-    query: &str,
-) -> Result<Vec<SessionSummary>, String> {
-    let mut jsonl_files = Vec::new();
-    let mut sqlite_files = Vec::new();
-    let mut seen_jsonl = HashSet::new();
-    let mut seen_sqlite = HashSet::new();
-
-    for root in session_roots_for_tool(conn, tool_id)? {
-        collect_session_candidate_files(
-            tool_id,
-            &root,
-            &root,
-            &mut jsonl_files,
-            &mut sqlite_files,
-            0,
-        );
-    }
-
-    let mut sessions = Vec::new();
-    for path in jsonl_files {
-        let key = path.to_string_lossy().to_string();
-        if !seen_jsonl.insert(key) {
-            continue;
-        }
-        if let Some(summary) = parse_generic_jsonl_session_summary(tool_id, &path, query) {
-            sessions.push(summary);
-        }
-    }
-
-    for path in sqlite_files {
-        let key = path.to_string_lossy().to_string();
-        if !seen_sqlite.insert(key) {
-            continue;
-        }
-        sessions.extend(scan_generic_sqlite_sessions(tool_id, &path, query));
-    }
-
-    Ok(sessions)
-}
-
 fn scan_sessions_from_conn(
     conn: &rusqlite::Connection,
     tool_id: Option<String>,
@@ -6938,15 +6951,80 @@ fn scan_sessions_from_conn(
         ],
     };
 
-    let mut sessions = Vec::new();
-    for tool in tool_ids {
-        if tool == "codex" {
-            sessions.extend(scan_codex_sessions(conn, &query)?);
-        } else {
-            sessions.extend(scan_generic_tool_sessions(conn, tool, &query)?);
-        }
+    // 第一阶段：在 db lock 持有期间收集每个 tool 的 session 根目录与 codex 候选文件，
+    // 这是唯一需要 conn 的工作。之后释放 db 影响，把昂贵的文件 IO + JSON 解析
+    // 放到独立线程并行执行 —— 6 个 tool 同时跑，磁盘 IO 并发度直接提升 ~6x。
+    enum ToolPlan {
+        Codex {
+            root: Option<PathBuf>,
+            db_files: Vec<PathBuf>,
+            generic_roots: Vec<PathBuf>,
+        },
+        Generic {
+            roots: Vec<PathBuf>,
+        },
     }
 
+    let plans: Vec<(&str, ToolPlan)> = tool_ids
+        .into_iter()
+        .map(|tool| {
+            if tool == "codex" {
+                let root = resolve_tool_config_dir(conn, "codex")
+                    .ok()
+                    .filter(|p| p.exists());
+                let db_files = root
+                    .as_ref()
+                    .map(|r| codex_state_databases(r))
+                    .unwrap_or_default();
+                let generic_roots = session_roots_for_tool(conn, "codex").unwrap_or_default();
+                (
+                    tool,
+                    ToolPlan::Codex {
+                        root,
+                        db_files,
+                        generic_roots,
+                    },
+                )
+            } else {
+                let roots = session_roots_for_tool(conn, tool).unwrap_or_default();
+                (tool, ToolPlan::Generic { roots })
+            }
+        })
+        .collect();
+
+    // 第二阶段：并行扫描（不再需要 conn）。std::thread::scope 让每个 tool 的工作借用
+    // `query` 与 plan 的引用，scope 结束前 join 所有子线程，确保安全。
+    let query_ref = &query;
+    let sessions: Vec<SessionSummary> = std::thread::scope(|s| {
+        let handles: Vec<_> = plans
+            .into_iter()
+            .map(|(tool, plan)| {
+                s.spawn(move || -> Vec<SessionSummary> {
+                    match plan {
+                        ToolPlan::Codex {
+                            root,
+                            db_files,
+                            generic_roots,
+                        } => scan_codex_sessions_from_plan(
+                            root.as_deref(),
+                            &db_files,
+                            &generic_roots,
+                            query_ref,
+                        ),
+                        ToolPlan::Generic { roots } => {
+                            scan_generic_tool_sessions_from_roots(tool, &roots, query_ref)
+                        }
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
+
+    let mut sessions = sessions;
     sessions.sort_by(|left, right| {
         right
             .updated_at

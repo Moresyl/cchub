@@ -24,7 +24,6 @@ import {
   type StructuredDraftFields,
 } from "../lib/configProfiles";
 import { showToast } from "../components/Toast";
-import ConfirmDialog from "../components/ConfirmDialog";
 import {
   useApplyConfigProfileMutation,
   useDeleteConfigProfileGroupAndRefreshMutation,
@@ -37,7 +36,6 @@ import {
   useUpdateConfigProfileAndRefreshMutation,
 } from "../hooks/mutations";
 import ProfileCard from "../components/ProfileCard";
-import ProfileEditor from "../components/ProfileEditor";
 import ProfileToolFilterTab from "../components/ProfileToolFilterTab";
 import { type ModelInfo } from "../components/ModelSelector";
 import LoadingState from "../components/states/LoadingState";
@@ -58,15 +56,9 @@ import {
   type ProviderPingResult,
   type ProviderStreamCheckResult,
 } from "./profiles/helpers";
-import {
-  ProfileBasicInfoSection,
-  ProfileConnectionSection,
-  ProfileModelsSection,
-  ProfilePlainConfigSection,
-  ProfilePresetSection,
-  ProfileRawConfigSection,
-} from "./profiles/sections";
 import { mergeDraftFields, mergeSharedDraftFields, type DraftFieldsStateUpdate } from "./profiles/draftMerge";
+import ProfilesConfirmDialogs from "./profiles/Dialogs";
+import ProfileEditorView from "./profiles/EditorView";
 
 export default function Profiles() {
   const queryClient = useQueryClient();
@@ -1050,141 +1042,79 @@ export default function Profiles() {
 
   if (isEditing) {
     return (
-      <ProfileEditor
-        title={
-          editingProfile
-            ? locale === "zh"
-              ? "编辑配置"
-              : "Edit Configuration"
-            : locale === "zh"
-              ? "新增配置"
-              : "New Configuration"
-        }
-        subtitle={
-          editingProfile
-            ? locale === "zh"
-              ? "修改配置名称和参数"
-              : "Update configuration name and parameters"
-            : locale === "zh"
-              ? "创建一个新的工具配置"
-              : "Create a new tool configuration"
-        }
-        onClose={closeModal}
-        onSave={() => void handleSaveModal()}
-        saveDisabled={!draftName.trim() || saving}
+      <ProfileEditorView
+        locale={locale}
+        localeText={localeText}
+        editingProfile={editingProfile}
+        closeModal={closeModal}
+        handleSaveModal={handleSaveModal}
+        draftName={draftName}
         saving={saving}
-      >
-        <ProfileBasicInfoSection
-          locale={locale}
-          localeText={localeText}
-          tools={tools}
-          draftTool={draftTool}
-          draftName={draftName}
-          isStructured={isStructured}
-          syncTargetsLocked={
-            !!editingProfile && !(draftTargetTools.length > 1 || editingProfile.source_type === "shared")
-          }
-          draftTargetTools={draftTargetTools}
-          structuredInstalledTools={structuredInstalledTools}
-          onToolChange={handleDraftToolChange}
-          onNameChange={handleDraftNameChange}
-          onToggleDraftTargetTool={handleToggleDraftTargetTool}
-        />
-
-        {isStructured && (
-          <>
-            <ProfilePresetSection
-              locale={locale}
-              localeText={localeText}
-              draftTool={draftTool}
-              draftPresetId={draftPresetId}
-              presetCategories={presetCategories}
-              draftFragmentName={draftFragmentName}
-              savingFragment={savingFragment}
-              providerFragments={providerFragments}
-              toolNameMap={toolNameMap}
-              deletingFragmentId={deletingFragmentId}
-              onPresetApply={handleApplyPreset}
-              onFragmentNameChange={handleDraftFragmentNameChange}
-              onSaveFragment={handleSaveFragmentClick}
-              onApplyFragment={handleApplyFragmentById}
-              onDeleteFragment={handleRequestFragmentDelete}
-            />
-
-            <ProfileConnectionSection
-              locale={locale}
-              localeText={localeText}
-              draftTool={draftTool}
-              draftProviderType={draftProviderType}
-              draftRequiresOAuth={draftRequiresOAuth}
-              draftOauthAccountId={draftOauthAccountId}
-              showApiKey={showApiKey}
-              draftApiKey={draftApiKey}
-              draftBaseUrl={draftBaseUrl}
-              draftUseFullUrl={draftUseFullUrl}
-              draftIconUrl={draftIconUrl}
-              draftCostMultiplier={draftCostMultiplier}
-              draftEndpointCandidates={draftEndpointCandidates}
-              draftAuthField={draftAuthField}
-              draftApiFormat={draftApiFormat}
-              draftCodexReasoningEffort={draftCodexReasoningEffort}
-              draftCodexWireApi={draftCodexWireApi}
-              draftApiProtocol={draftApiProtocol}
-              draftModelCatalogAlias={draftModelCatalogAlias}
-              draftNpm={draftNpm}
-              draftOpenCodeThinkingLevel={draftOpenCodeThinkingLevel}
-              draftHermesProvider={draftHermesProvider}
-              draftHermesApiKeyEnv={draftHermesApiKeyEnv}
-              onDraftChange={updateStructuredDraft}
-              onAccountSelect={handleSelectDraftOauthAccount}
-              onToggleApiKeyVisibility={handleToggleShowApiKey}
-            />
-
-            <ProfileModelsSection
-              locale={locale}
-              localeText={localeText}
-              draftTool={draftTool}
-              draftModel={draftModel}
-              draftReasoningModel={draftReasoningModel}
-              draftHaikuModel={draftHaikuModel}
-              draftSonnetModel={draftSonnetModel}
-              draftOpusModel={draftOpusModel}
-              draftModelName={draftModelName}
-              draftOpenCodeContextLimit={draftOpenCodeContextLimit}
-              draftOpenCodeOutputLimit={draftOpenCodeOutputLimit}
-              draftOpenCodeInputModalities={draftOpenCodeInputModalities}
-              draftOpenCodeOutputModalities={draftOpenCodeOutputModalities}
-              fetchedModels={fetchedModels}
-              fetchedModelDetails={fetchedModelDetails}
-              fetchingModels={fetchingModels}
-              modelFetchError={modelFetchError}
-              onFetchModels={handleFetchModels}
-              onDraftChange={updateStructuredDraft}
-            />
-
-            <ProfileRawConfigSection
-              locale={locale}
-              draftTool={draftTool}
-              draftContent={draftContent}
-              draftHideAttribution={draftHideAttribution}
-              draftEffortHigh={draftEffortHigh}
-              draftEnableTeammates={draftEnableTeammates}
-              onDraftChange={updateStructuredDraft}
-              onContentChange={setDraftContent}
-            />
-          </>
-        )}
-
-        {!isStructured && (
-          <ProfilePlainConfigSection
-            locale={locale}
-            draftTool={draftTool}
-            draftContent={draftContent}
-            draftLoading={draftLoading}
-            onContentChange={setDraftContent}
-          />
-        )}
-      </ProfileEditor>
+        tools={tools}
+        draftTool={draftTool}
+        isStructured={isStructured}
+        draftTargetTools={draftTargetTools}
+        structuredInstalledTools={structuredInstalledTools}
+        handleDraftToolChange={handleDraftToolChange}
+        handleDraftNameChange={handleDraftNameChange}
+        handleToggleDraftTargetTool={handleToggleDraftTargetTool}
+        draftPresetId={draftPresetId}
+        presetCategories={presetCategories}
+        draftFragmentName={draftFragmentName}
+        savingFragment={savingFragment}
+        providerFragments={providerFragments}
+        toolNameMap={toolNameMap}
+        deletingFragmentId={deletingFragmentId}
+        handleApplyPreset={handleApplyPreset}
+        handleDraftFragmentNameChange={handleDraftFragmentNameChange}
+        handleSaveFragmentClick={handleSaveFragmentClick}
+        handleApplyFragmentById={handleApplyFragmentById}
+        handleRequestFragmentDelete={handleRequestFragmentDelete}
+        draftProviderType={draftProviderType}
+        draftRequiresOAuth={draftRequiresOAuth}
+        draftOauthAccountId={draftOauthAccountId}
+        showApiKey={showApiKey}
+        draftApiKey={draftApiKey}
+        draftBaseUrl={draftBaseUrl}
+        draftUseFullUrl={draftUseFullUrl}
+        draftIconUrl={draftIconUrl}
+        draftCostMultiplier={draftCostMultiplier}
+        draftEndpointCandidates={draftEndpointCandidates}
+        draftAuthField={draftAuthField}
+        draftApiFormat={draftApiFormat}
+        draftCodexReasoningEffort={draftCodexReasoningEffort}
+        draftCodexWireApi={draftCodexWireApi}
+        draftApiProtocol={draftApiProtocol}
+        draftModelCatalogAlias={draftModelCatalogAlias}
+        draftNpm={draftNpm}
+        draftOpenCodeThinkingLevel={draftOpenCodeThinkingLevel}
+        draftHermesProvider={draftHermesProvider}
+        draftHermesApiKeyEnv={draftHermesApiKeyEnv}
+        updateStructuredDraft={updateStructuredDraft}
+        handleSelectDraftOauthAccount={handleSelectDraftOauthAccount}
+        handleToggleShowApiKey={handleToggleShowApiKey}
+        draftModel={draftModel}
+        draftReasoningModel={draftReasoningModel}
+        draftHaikuModel={draftHaikuModel}
+        draftSonnetModel={draftSonnetModel}
+        draftOpusModel={draftOpusModel}
+        draftModelName={draftModelName}
+        draftOpenCodeContextLimit={draftOpenCodeContextLimit}
+        draftOpenCodeOutputLimit={draftOpenCodeOutputLimit}
+        draftOpenCodeInputModalities={draftOpenCodeInputModalities}
+        draftOpenCodeOutputModalities={draftOpenCodeOutputModalities}
+        fetchedModels={fetchedModels}
+        fetchedModelDetails={fetchedModelDetails}
+        fetchingModels={fetchingModels}
+        modelFetchError={modelFetchError}
+        handleFetchModels={handleFetchModels}
+        draftContent={draftContent}
+        draftHideAttribution={draftHideAttribution}
+        draftEffortHigh={draftEffortHigh}
+        draftEnableTeammates={draftEnableTeammates}
+        draftLoading={draftLoading}
+        setDraftContent={setDraftContent}
+      />
     );
   }
 
@@ -1363,75 +1293,19 @@ export default function Profiles() {
         )}
       </div>
 
-      <ConfirmDialog
-        isOpen={!!confirmAction}
-        title={
-          confirmAction?.profile.source_type === "shared"
-            ? localeText("删除共享配置", "Delete Shared Provider", "共有 Provider を削除")
-            : locale === "zh"
-              ? "删除配置"
-              : "Delete Configuration"
-        }
-        message={
-          confirmAction?.profile.source_type === "shared" && confirmAction.profile.source_key
-            ? localeText(
-                `确定删除共享配置「${confirmAction.profile.name}」？这会同时删除 ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 个 App 上的联动配置。`,
-                `Delete shared provider "${confirmAction.profile.name}"? This also removes the linked profiles across ${sharedGroupCounts[confirmAction.profile.source_key] || 1} apps.`,
-                `共有 Provider「${confirmAction.profile.name}」を削除しますか？ ${sharedGroupCounts[confirmAction.profile.source_key] || 1} 個の App にある連動プロファイルも同時に削除されます。`,
-              )
-            : locale === "zh"
-              ? `确定删除配置「${confirmAction?.profile.name}」？此操作不可撤销。`
-              : `Delete "${confirmAction?.profile.name}"? This cannot be undone.`
-        }
-        confirmText={localeText("删除", "Delete", "削除")}
-        variant="destructive"
-        onConfirm={() => {
-          if (confirmAction) void doDelete(confirmAction.profile);
-          setConfirmAction(null);
-        }}
-        onCancel={() => setConfirmAction(null)}
-      />
-      <ConfirmDialog
-        isOpen={!!confirmFragmentDelete}
-        title={localeText("删除配置片段", "Delete Provider Fragment", "Provider フラグメントを削除")}
-        message={
-          confirmFragmentDelete
-            ? localeText(
-                `确定删除配置片段「${confirmFragmentDelete.name}」？删除后将无法继续复用这组字段。`,
-                `Delete provider fragment "${confirmFragmentDelete.name}"? You will no longer be able to reuse this field set.`,
-                `Provider フラグメント「${confirmFragmentDelete.name}」を削除しますか？ このフィールドセットは再利用できなくなります。`,
-              )
-            : ""
-        }
-        confirmText={localeText("删除", "Delete", "削除")}
-        variant="destructive"
-        onConfirm={() => {
-          const fragment = confirmFragmentDelete;
-          setConfirmFragmentDelete(null);
-          if (!fragment) return;
-          void doDeleteFragment(fragment);
-        }}
-        onCancel={() => setConfirmFragmentDelete(null)}
-      />
-      <ConfirmDialog
-        isOpen={!!streamCheckConfirmProfile}
-        title={localeText("流式健康检查", "Stream Health Check", "ストリームヘルスチェック")}
-        message={localeText(
-          "将向 Provider 发送一条最小化的流式请求，用于验证端点是否能成功返回首个流式分片。\n\n首次确认后，后续将直接执行。",
-          "CCHub will send a minimal streaming request to verify that this provider endpoint can return the first stream chunk successfully.\n\nAfter you confirm once, future checks will run immediately.",
-          "Provider に最小限のストリーミングリクエストを送り、最初のストリームチャンクを正しく返せるか確認します。\n\n一度確認すると、以後はすぐに実行されます。",
-        )}
-        confirmText={localeText("继续检查", "Run Check", "チェックを実行")}
-        cancelText={localeText("取消", "Cancel", "キャンセル")}
-        variant="info"
-        onConfirm={() => {
-          const profile = streamCheckConfirmProfile;
-          setStreamCheckConfirmProfile(null);
-          if (!profile) return;
-          localStorage.setItem("cchub-stream-check-confirmed", "1");
-          void runStreamCheck(profile);
-        }}
-        onCancel={() => setStreamCheckConfirmProfile(null)}
+      <ProfilesConfirmDialogs
+        locale={locale}
+        localeText={localeText}
+        confirmAction={confirmAction}
+        setConfirmAction={setConfirmAction}
+        doDelete={doDelete}
+        sharedGroupCounts={sharedGroupCounts}
+        confirmFragmentDelete={confirmFragmentDelete}
+        setConfirmFragmentDelete={setConfirmFragmentDelete}
+        doDeleteFragment={doDeleteFragment}
+        streamCheckConfirmProfile={streamCheckConfirmProfile}
+        setStreamCheckConfirmProfile={setStreamCheckConfirmProfile}
+        runStreamCheck={runStreamCheck}
       />
     </div>
   );

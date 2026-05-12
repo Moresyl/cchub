@@ -36,8 +36,13 @@ function ToastItemComponent({ toast, onDismiss }: ToastItemProps) {
   return (
     <div
       style={{
-        display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 16px",
-        borderRadius: 8, background: color.bg, border: `1px solid ${color.border}`,
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 10,
+        padding: "12px 16px",
+        borderRadius: 8,
+        background: color.bg,
+        border: `1px solid ${color.border}`,
         animation: "slideIn 0.2s ease",
       }}
     >
@@ -59,32 +64,48 @@ export const ToastContainer = memo(function ToastContainer() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const dismissToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const addToast = useCallback((type: ToastType, message: string, duration?: number) => {
     const id = Date.now().toString() + Math.random().toString(36).slice(2);
-    setToasts(prev => [...prev, { id, type, message }]);
+    // 限制最多 5 条同时显示，避免出现错误风暴时大量 toast 同时入栈占满屏幕
+    // 并阻塞用户操作（每条 toast 都要计算 layout、消失时还会触发 N 次 setState）。
+    setToasts((prev) => {
+      const next = [...prev, { id, type, message }];
+      return next.length > 5 ? next.slice(next.length - 5) : next;
+    });
     setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
+      setToasts((prev) => prev.filter((t) => t.id !== id));
     }, duration ?? 4000);
   }, []);
 
   useEffect(() => {
     addToastFn = addToast;
-    return () => { addToastFn = null; };
+    return () => {
+      addToastFn = null;
+    };
   }, [addToast]);
 
   if (toasts.length === 0) return null;
 
   return (
-    <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 9999, display: "flex", flexDirection: "column", gap: 8, maxWidth: 480, minWidth: 300 }}>
-      {toasts.map(toast => (
-        <ToastItem
-          key={toast.id}
-          toast={toast}
-          onDismiss={dismissToast}
-        />
+    <div
+      style={{
+        position: "fixed",
+        top: 12,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 9999,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        maxWidth: 480,
+        minWidth: 300,
+      }}
+    >
+      {toasts.map((toast) => (
+        <ToastItem key={toast.id} toast={toast} onDismiss={dismissToast} />
       ))}
     </div>
   );

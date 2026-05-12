@@ -68,13 +68,15 @@ function SessionListItemComponent({
 }: SessionListItemProps) {
   return (
     <button
-      className="card card-interactive"
+      className="card card-interactive cv-auto"
       onClick={() => onOpen(session)}
       style={{
         textAlign: "left",
         padding: 14,
         borderColor: selected ? "var(--accent)" : "var(--border-default)",
         background: selected ? "var(--accent-subtle)" : "var(--bg-card)",
+        // 列表项实际渲染高度约 110-130px，给浏览器准确的占位避免滚动跳动
+        containIntrinsicSize: "0 120px",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
@@ -90,8 +92,12 @@ function SessionListItemComponent({
             >
               <CheckSquare size={14} style={{ color: checked ? "var(--accent)" : undefined }} />
             </button>
-            <span className="badge badge-accent" style={{ fontSize: 10 }}>{session.tool_name}</span>
-            <span className="badge badge-muted" style={{ fontSize: 10 }}>{session.source_backend}</span>
+            <span className="badge badge-accent" style={{ fontSize: 10 }}>
+              {session.tool_name}
+            </span>
+            <span className="badge badge-muted" style={{ fontSize: 10 }}>
+              {session.source_backend}
+            </span>
             {session.search_hit_count > 0 && query.trim() && (
               <span className="badge badge-success" style={{ fontSize: 10 }}>
                 {matchLabel(session.search_hit_count)}
@@ -104,7 +110,16 @@ function SessionListItemComponent({
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5 }}>
             <HighlightedText text={session.preview} query={query} />
           </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              marginTop: 10,
+              fontSize: 11,
+              color: "var(--text-muted)",
+            }}
+          >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               <Clock3 size={12} />
               {session.updated_at || session.created_at || unknownTimeLabel}
@@ -140,7 +155,9 @@ function SessionListItemComponent({
               title={copyTitle}
             >
               <Copy size={12} />
-              <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0, 0, 0, 0)" }}>{copyLabel}</span>
+              <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0, 0, 0, 0)" }}>
+                {copyLabel}
+              </span>
             </button>
           )}
           <button
@@ -153,7 +170,9 @@ function SessionListItemComponent({
             title={deleteTitle}
           >
             <Trash2 size={12} />
-            <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0, 0, 0, 0)" }}>{deleteLabel}</span>
+            <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0, 0, 0, 0)" }}>
+              {deleteLabel}
+            </span>
           </button>
         </div>
       </div>

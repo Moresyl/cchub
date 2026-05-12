@@ -30,8 +30,15 @@ function ProxyRequestRowComponent({
 }: ProxyRequestRowProps) {
   return (
     <div
-      className="list-row"
-      style={{ padding: "10px 12px", display: "flex", flexDirection: "column", alignItems: "stretch", gap: 6 }}
+      className="list-row cv-auto"
+      style={{
+        padding: "10px 12px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "stretch",
+        gap: 6,
+        containIntrinsicSize: "0 56px",
+      }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
@@ -86,9 +93,7 @@ function ProxyRequestRowComponent({
       </div>
 
       {item.error_message && (
-        <div style={{ fontSize: 11, color: "var(--danger)", lineHeight: 1.5 }}>
-          {item.error_message}
-        </div>
+        <div style={{ fontSize: 11, color: "var(--danger)", lineHeight: 1.5 }}>{item.error_message}</div>
       )}
     </div>
   );

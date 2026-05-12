@@ -107,6 +107,26 @@ export default defineConfig(async () => ({
     reportCompressedSize: false,
     chunkSizeWarningLimit: 1024,
     assetsInlineLimit: 4096,
+    // Vite 默认对所有动态 import 的依赖链都会注入 <link rel="modulepreload">，
+    // 这会让 codemirror（1.66MB）、mdxeditor 等纯按需 chunk 在冷启动就被下载，
+    // 拖累首屏可交互时间。这里过滤掉重型 chunk，让它们真正按需加载。
+    modulePreload: {
+      resolveDependencies: (_filename, deps) =>
+        deps.filter((dep) => {
+          const normalized = dep.replace(/\\/g, "/");
+          if (
+            normalized.includes("/codemirror-")
+            || normalized.includes("/mdxeditor-")
+            || normalized.includes("/markdown-rendering-")
+            || normalized.includes("/MarkdownEditorImpl-")
+            || normalized.includes("/MarkdownPreviewImpl-")
+            || normalized.includes("/CodeEditor-")
+          ) {
+            return false;
+          }
+          return true;
+        }),
+    },
     rollupOptions: {
       output: {
         manualChunks,

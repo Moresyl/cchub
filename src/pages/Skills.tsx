@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useDeferredValue, useEffect, lazy, Suspense, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, lazy, Suspense, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw,
@@ -11,16 +11,10 @@ import {
   X,
   FolderOpen,
   Monitor,
-  Terminal,
   Check,
-  Folder,
-  File,
-  ChevronDown,
   Edit3,
   Trash2,
   Save,
-  Sparkles,
-  Globe,
   ArrowLeft,
   RotateCcw,
   Upload,
@@ -29,7 +23,7 @@ import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
-import SkillCard, { type SkillCardSkill } from "../components/SkillCard";
+import SkillCard from "../components/SkillCard";
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
 import EmptyState from "../components/states/EmptyState";
@@ -51,54 +45,17 @@ import {
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 
-type Skill = SkillCardSkill;
-
-interface Plugin {
-  id: string;
-  name: string;
-  description: string | null;
-  source_url: string | null;
-  version: string | null;
-}
-
-interface SkillBackup {
-  id: string;
-  skill_name: string;
-  original_path: string;
-  backup_path: string;
-  created_at: string;
-  size_bytes: number;
-}
-
-const TOOL_ICONS: Record<string, typeof Monitor> = {
-  claude: Terminal,
-  codex: Monitor,
-  gemini: Sparkles,
-  opencode: Globe,
-  hermes: Monitor,
-};
-
-const PROMPT_PATTERN = /prompt|提示|template|模板|指令|instruction/i;
-
-function isPromptSkill(skill: Skill) {
-  return (
-    !skill.plugin_id && PROMPT_PATTERN.test(`${skill.name} ${skill.description || ""} ${skill.trigger_command || ""}`)
-  );
-}
-
-function isCommandSkill(skill: Skill) {
-  return !skill.plugin_id && !isPromptSkill(skill) && !!skill.trigger_command;
-}
-
-function isStandaloneSkill(skill: Skill) {
-  return !skill.plugin_id && !isPromptSkill(skill) && !isCommandSkill(skill);
-}
-
-function hasSkillUpdate(skill: Skill) {
-  return Boolean(
-    skill.source_url && skill.latest_sha256 && skill.current_sha256 && skill.latest_sha256 !== skill.current_sha256,
-  );
-}
+import {
+  TOOL_ICONS,
+  hasSkillUpdate,
+  isCommandSkill,
+  isPromptSkill,
+  isStandaloneSkill,
+  type Plugin,
+  type Skill,
+  type SkillBackup,
+} from "./skills/helpers";
+import TreeNode from "./skills/TreeNode";
 
 export default function Skills() {
   const queryClient = useQueryClient();
@@ -1344,76 +1301,3 @@ export default function Skills() {
     </div>
   );
 }
-
-const TreeNode = memo(function TreeNode({
-  node,
-  onSelect,
-  selectedPath,
-  depth = 0,
-}: {
-  node: FolderNode;
-  onSelect: (path: string) => void;
-  selectedPath: string | null;
-  depth?: number;
-}) {
-  const [open, setOpen] = useState(depth < 1);
-  const handleToggleOpen = useCallback(() => {
-    setOpen((current) => !current);
-  }, []);
-  const handleSelectNode = useCallback(() => {
-    onSelect(node.path);
-  }, [node.path, onSelect]);
-
-  if (node.is_dir) {
-    return (
-      <div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "4px 8px",
-            paddingLeft: depth * 16 + 8,
-            cursor: "pointer",
-            borderRadius: 4,
-            fontSize: 13,
-            color: "var(--text-secondary)",
-          }}
-          onClick={handleToggleOpen}
-        >
-          <ChevronDown
-            size={13}
-            style={{ transform: open ? "none" : "rotate(-90deg)", transition: "transform 0.15s", flexShrink: 0 }}
-          />
-          <Folder size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
-        </div>
-        {open &&
-          node.children.map((child) => (
-            <TreeNode key={child.path} node={child} onSelect={onSelect} selectedPath={selectedPath} depth={depth + 1} />
-          ))}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "4px 8px",
-        paddingLeft: depth * 16 + 28,
-        cursor: "pointer",
-        borderRadius: 4,
-        fontSize: 13,
-        color: selectedPath === node.path ? "var(--text-primary)" : "var(--text-muted)",
-        background: selectedPath === node.path ? "var(--bg-card-hover)" : "transparent",
-      }}
-      onClick={handleSelectNode}
-    >
-      <File size={13} style={{ flexShrink: 0 }} />
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
-    </div>
-  );
-});

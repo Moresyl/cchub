@@ -5,6 +5,7 @@ import {
   memo,
   Suspense,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -2212,8 +2213,11 @@ export default function Profiles() {
     return counts;
   }, [profiles]);
 
+  // search 输入触发的 filter 涉及对每个 profile 的 config_snapshot（可能 KB 级 JSON）
+  // 做 toLowerCase + includes，搜索框敲键阶段交给 deferredValue 跑在低优先级。
+  const deferredSearch = useDeferredValue(search);
   const filteredProfiles = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
+    const keyword = deferredSearch.trim().toLowerCase();
     return [...profiles]
       .filter((profile) => {
         if (filterTool && profile.tool_id !== filterTool) return false;
@@ -2237,7 +2241,7 @@ export default function Profiles() {
         if (activeDiff !== 0) return activeDiff;
         return a.name.localeCompare(b.name);
       });
-  }, [profiles, filterTool, search, activeIdSet]);
+  }, [profiles, filterTool, deferredSearch, activeIdSet]);
 
   function handleCardDragStart(profileId: string) {
     setDraggingProfileId(profileId);

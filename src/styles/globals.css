@@ -112,6 +112,19 @@ body {
 
 #root { height: 100vh; }
 
+/* ═══ 性能：视口外渲染跳过 ═══
+   - .cv-auto: 用于长列表容器中的列表项，浏览器对屏幕外的项跳过 layout/paint，
+     大幅降低长列表（240+ 行）滚动时的 jank。
+   - contain-intrinsic-size 给出占位高度，避免滚动条跳动；具体页面可覆盖。
+   - .cv-list: 列表容器本身可加 contain: layout style，防止子树重排冒泡到父级。 */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 96px;
+}
+.cv-list {
+  contain: layout style;
+}
+
 /* ═══ Scrollbar ═══ */
 
 * {

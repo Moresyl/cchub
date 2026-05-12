@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useEffect, lazy, Suspense, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, lazy, Suspense, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw,
@@ -436,46 +436,57 @@ export default function Skills() {
     return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
   }, [editingSkill, showExplorer]);
 
-  const visibleSkills = skills.filter((skill) => {
-    if (skill.tool_id) return skill.tool_id === activeTool;
-    return activeTool === "claude";
-  });
+  const visibleSkills = useMemo(
+    () =>
+      skills.filter((skill) => {
+        if (skill.tool_id) return skill.tool_id === activeTool;
+        return activeTool === "claude";
+      }),
+    [skills, activeTool],
+  );
 
-  const visiblePlugins = activeTool === "claude" ? plugins : [];
-  const updatableVisibleSkillCount = visibleSkills.filter(hasSkillUpdate).length;
+  const visiblePlugins = useMemo(() => (activeTool === "claude" ? plugins : []), [activeTool, plugins]);
+  const updatableVisibleSkillCount = useMemo(() => visibleSkills.filter(hasSkillUpdate).length, [visibleSkills]);
 
-  const filteredSkills = visibleSkills.filter((s) => {
-    if (search) {
-      const q = search.toLowerCase();
-      if (
-        !s.name.toLowerCase().includes(q) &&
-        !(s.description || "").toLowerCase().includes(q) &&
-        !(s.trigger_command || "").toLowerCase().includes(q)
-      )
-        return false;
-    }
-    switch (category) {
-      case "skill":
-        return isStandaloneSkill(s);
-      case "prompt":
-        return isPromptSkill(s);
-      case "command":
-        return isCommandSkill(s);
-      case "plugin":
-        return false;
-      default:
-        return true; // "all"
-    }
-  });
+  // 搜索框输入时让过滤跑在低优先级，避免 setState 触发的同步过滤+渲染阻塞键盘输入。
+  // useDeferredValue 让 React 在主线程压力大时延后非紧急更新，输入框 echo 始终流畅。
+  const deferredSearch = useDeferredValue(search);
+  const filteredSkills = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    return visibleSkills.filter((s) => {
+      if (q) {
+        if (
+          !s.name.toLowerCase().includes(q) &&
+          !(s.description || "").toLowerCase().includes(q) &&
+          !(s.trigger_command || "").toLowerCase().includes(q)
+        )
+          return false;
+      }
+      switch (category) {
+        case "skill":
+          return isStandaloneSkill(s);
+        case "prompt":
+          return isPromptSkill(s);
+        case "command":
+          return isCommandSkill(s);
+        case "plugin":
+          return false;
+        default:
+          return true; // "all"
+      }
+    });
+  }, [visibleSkills, deferredSearch, category]);
 
-  const filteredPlugins = visiblePlugins.filter((p) => {
-    if (category !== "all" && category !== "plugin") return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!p.name.toLowerCase().includes(q) && !(p.description || "").toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
+  const filteredPlugins = useMemo(() => {
+    if (category !== "all" && category !== "plugin") return [];
+    const q = deferredSearch.trim().toLowerCase();
+    return visiblePlugins.filter((p) => {
+      if (q) {
+        if (!p.name.toLowerCase().includes(q) && !(p.description || "").toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [visiblePlugins, deferredSearch, category]);
 
   const visibleToolIds = new Set(visibleApps);
   const visibleTools = tools.filter((tool) => visibleToolIds.has(tool.id as ManagedAppId));

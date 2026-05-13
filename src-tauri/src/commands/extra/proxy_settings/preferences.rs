@@ -1,21 +1,13 @@
 #![allow(clippy::too_many_arguments)]
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use std::collections::HashSet;
+use tauri::State;
 
-use crate::copilot_auth::{self, CopilotAuthState};
 use crate::db::DbState;
 use crate::hermes;
-use crate::shared::{github_release, github_urls, http_client};
 
 use super::super::config_profiles::*;
-use super::super::log_command_timing;
 use super::super::statusline::*;
 use super::super::types::*;
-use super::*;
 
 // ── Proxy Settings ──
 

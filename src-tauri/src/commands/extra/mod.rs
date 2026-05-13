@@ -21,5 +21,4 @@ pub use custom_paths::*;
 pub use mcp_clients::*;
 pub use proxy_settings::*;
 pub use statusline::*;
-pub use types::*;
 pub use workspaces::*;

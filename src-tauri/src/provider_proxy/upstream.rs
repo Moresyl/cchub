@@ -1,29 +1,21 @@
 // 把 active profile 翻译成 upstream URL/headers，处理 Copilot OAuth 与候选端点。
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
+use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
 use bytes::Bytes;
-use rusqlite::Connection;
 use serde_json::Value;
-use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 use crate::copilot_auth::{self, CopilotAuthState};
-use crate::db::DbState;
 use crate::provider_proxy_transform::{anthropic_to_openai, anthropic_to_responses};
 
 use super::profiles::{
-    active_profile_id_for_tool, canonicalize_base_url, default_base_url_for_claude,
-    default_base_url_for_codex, default_base_url_for_gemini, extract_copilot_account_id,
-    extract_cost_multiplier, extract_metadata_endpoint_candidates, extract_metadata_object,
-    extract_provider_type, extract_use_full_url, filter_endpoint_candidates, profile_circuit_key,
-    read_profile_candidates_for_tool, strip_beta_query,
+    default_base_url_for_claude, default_base_url_for_codex, default_base_url_for_gemini,
+    extract_copilot_account_id, extract_cost_multiplier, extract_metadata_endpoint_candidates,
+    extract_provider_type, extract_use_full_url, filter_endpoint_candidates,
 };
-use super::{
-    ClaudeApiFormat, LocalProviderProxyRuntime, ProfileCandidate, ProxyRequestInsights,
-    UpstreamTarget, LOCAL_PROVIDER_PROXY_TOKEN,
-};
+use super::{ClaudeApiFormat, ProxyRequestInsights, UpstreamTarget};
 
 pub(super) fn is_retryable_upstream_status(status: StatusCode) -> bool {
     matches!(

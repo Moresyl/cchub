@@ -1,21 +1,13 @@
 #![allow(clippy::too_many_arguments)]
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, PathBuf};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::State;
 
-use crate::db::DbState;
-use crate::shared::{github_release, github_urls, http_client};
-use crate::utils::configure_background_command;
+use crate::shared::{github_urls, http_client};
 
-use super::super::config_profiles::*;
-use super::super::log_command_timing;
 use super::super::proxy_settings::*;
-use super::super::types::*;
 use super::*;
 
 pub fn hello2cc_manifest_urls() -> Vec<String> {

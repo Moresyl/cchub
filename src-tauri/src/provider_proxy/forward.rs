@@ -5,12 +5,11 @@ use bytes::Bytes;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::copilot_auth;
 use crate::db::DbState;
 use crate::provider_proxy_transform::{
-    anthropic_to_openai, anthropic_to_responses, create_anthropic_sse_stream,
-    create_anthropic_sse_stream_from_gemini, create_anthropic_sse_stream_from_responses,
-    openai_error_to_anthropic, rectify_anthropic_request_bytes,
+    create_anthropic_sse_stream, create_anthropic_sse_stream_from_gemini,
+    create_anthropic_sse_stream_from_responses, openai_error_to_anthropic,
+    rectify_anthropic_request_bytes,
 };
 
 use super::cost::{
@@ -29,9 +28,7 @@ use super::{
     build_proxy_error, build_upstream_request_url, extract_request_insights,
     extract_upstream_target, is_hop_by_hop_header, is_retryable_upstream_status,
     next_proxy_request_id, parse_json_bytes, read_local_provider_proxy_settings_from_conn,
-    reqwest_client, transform_claude_request_body, ClaudeApiFormat, LocalProviderProxySettings,
-    ProxyUsageMetrics, LOCAL_PROVIDER_PROXY_SETTINGS_KEY, LOCAL_PROVIDER_PROXY_TOKEN,
-    MAX_PROXY_BODY_BYTES,
+    reqwest_client, transform_claude_request_body, ClaudeApiFormat, MAX_PROXY_BODY_BYTES,
 };
 
 #[allow(clippy::never_loop)]

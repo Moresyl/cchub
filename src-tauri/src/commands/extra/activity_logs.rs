@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use tauri::State;
 
 use crate::db::DbState;

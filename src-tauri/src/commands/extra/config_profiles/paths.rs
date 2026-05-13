@@ -1,24 +1,13 @@
 #![allow(clippy::too_many_arguments)]
-use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
-use std::path::{Component, Path, PathBuf};
-use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use std::path::{Path, PathBuf};
 
-use crate::copilot_auth::{self, CopilotAuthState};
-use crate::db::DbState;
 use crate::hermes;
-use crate::shared::http_client;
 use crate::utils::configure_background_command;
 
-use super::super::log_command_timing;
-use super::super::proxy_settings::*;
 use super::super::statusline::*;
-use super::super::types::*;
-use super::*;
 
 // ── Config Profiles ──
 

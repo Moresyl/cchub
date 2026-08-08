@@ -29,7 +29,7 @@ pnpm test           # Vitest 单元测试
 
 ## 提交规范
 
-- 作者必须是 `Moresl`，禁止 `Co-Authored-By` / `claude` / `anthropic` 等 AI 贡献者标记
+- 作者必须是 `Moresyl`，禁止 `Co-Authored-By` / `claude` / `anthropic` 等 AI 贡献者标记
 - 中文 commit message，格式 `类型: 简短描述`（如 `重构:`、`修复:`、`性能:`）
 - 不要在 commit message 里堆细节，简洁说清"做了什么"即可
 

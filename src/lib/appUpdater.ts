@@ -28,7 +28,7 @@ export interface AppUpdateHandle {
   releaseUrl?: string;
 }
 
-const RELEASE_API_URL = "https://api.github.com/repos/Moresl/cchub/releases/latest";
+const RELEASE_API_URL = "https://api.github.com/repos/Moresyl/cchub/releases/latest";
 
 function buildNoUpdateResult(currentVersion: string, overrides?: Partial<AppUpdateResult>): AppUpdateResult {
   return {

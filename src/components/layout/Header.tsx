@@ -21,7 +21,7 @@ function HeaderComponent() {
   }, [currentTheme]);
 
   const handleOpenGithub = useCallback(() => {
-    void open("https://github.com/Moresl/cchub");
+    void open("https://github.com/Moresyl/cchub");
   }, []);
 
   return (

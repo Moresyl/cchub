@@ -6,6 +6,8 @@ interface SettingsAboutSectionProps {
   description: string;
   appVersion: string;
   license: string;
+  checkUpdateLabel: string;
+  onCheckUpdate: () => void;
 }
 
 function SettingsAboutSectionComponent({
@@ -13,6 +15,8 @@ function SettingsAboutSectionComponent({
   description,
   appVersion,
   license,
+  checkUpdateLabel,
+  onCheckUpdate,
 }: SettingsAboutSectionProps) {
   return (
     <div className="section-card">
@@ -21,9 +25,12 @@ function SettingsAboutSectionComponent({
         {title}
       </div>
       <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>{description}</p>
-      <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+      <div style={{ display: "flex", gap: 12, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
         <span className="badge badge-muted">{appVersion}</span>
         <span className="badge badge-muted">{license}</span>
+        <button className="btn btn-secondary btn-sm" type="button" onClick={onCheckUpdate}>
+          {checkUpdateLabel}
+        </button>
       </div>
     </div>
   );

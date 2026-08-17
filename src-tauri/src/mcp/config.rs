@@ -199,7 +199,12 @@ fn parse_server_entry(
     source: &str,
     config_path: &str,
 ) -> Option<ScannedMcpServer> {
-    let command = cfg.get("command").and_then(|v| v.as_str())?.to_string();
+    let remote_url = cfg.get("url").and_then(|value| value.as_str());
+    let command = cfg
+        .get("command")
+        .and_then(|value| value.as_str())
+        .or(remote_url)?
+        .to_string();
 
     let args: Vec<String> = cfg
         .get("args")
@@ -211,15 +216,27 @@ fn parse_server_entry(
         })
         .unwrap_or_default();
 
-    let env: HashMap<String, String> = cfg
+    let mut env: HashMap<String, String> = cfg
         .get("env")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
+    for key in ["headers", "http_headers"] {
+        if let Some(headers) = cfg
+            .get(key)
+            .and_then(|value| serde_json::from_value::<HashMap<String, String>>(value.clone()).ok())
+        {
+            env.extend(headers);
+        }
+    }
 
     let transport = cfg
         .get("type")
         .and_then(|v| v.as_str())
-        .unwrap_or("stdio")
+        .unwrap_or(if remote_url.is_some() {
+            "http"
+        } else {
+            "stdio"
+        })
         .to_string();
 
     Some(ScannedMcpServer {
@@ -373,8 +390,13 @@ fn scan_codex_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
                 None => continue,
             };
 
-            let command = match cfg_table.get("command").and_then(|v| v.as_str()) {
-                Some(c) => c.to_string(),
+            let remote_url = cfg_table.get("url").and_then(|value| value.as_str());
+            let command = match cfg_table
+                .get("command")
+                .and_then(|value| value.as_str())
+                .or(remote_url)
+            {
+                Some(command) => command.to_string(),
                 None => continue,
             };
 
@@ -396,13 +418,27 @@ fn scan_codex_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
                     }
                 }
             }
+            if let Some(headers) = cfg_table
+                .get("http_headers")
+                .and_then(|value| value.as_table())
+            {
+                for (key, value) in headers {
+                    if let Some(value) = value.as_str() {
+                        env.insert(key.clone(), value.to_string());
+                    }
+                }
+            }
 
             servers.push(ScannedMcpServer {
                 name: name.clone(),
                 command,
                 args,
                 env,
-                transport: "stdio".to_string(),
+                transport: if remote_url.is_some() {
+                    "http".to_string()
+                } else {
+                    "stdio".to_string()
+                },
                 source: "codex".to_string(),
                 config_path: config_path.clone(),
             });
@@ -791,7 +827,25 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{scan_grok_mcp_toml, ScannedMcpServer};
+    use super::{parse_server_entry, scan_grok_mcp_toml, ScannedMcpServer};
+
+    #[test]
+    fn parses_remote_json_mcp_entries_and_headers() {
+        let value = serde_json::json!({
+            "type": "http",
+            "url": "https://example.com/mcp",
+            "headers": { "Authorization": "Bearer secret" }
+        });
+        let server = parse_server_entry("remote", &value, "claude", "/tmp/config.json")
+            .expect("remote MCP should be discovered");
+
+        assert_eq!(server.command, "https://example.com/mcp");
+        assert_eq!(server.transport, "http");
+        assert_eq!(
+            server.env.get("Authorization").map(String::as_str),
+            Some("Bearer secret")
+        );
+    }
 
     #[test]
     fn scans_grok_stdio_and_remote_mcp_entries() {

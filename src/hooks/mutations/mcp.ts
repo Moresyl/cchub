@@ -2,11 +2,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { queryKeys } from "../queries";
 
-export interface ToggleMcpServerInput {
-  id: string;
-  enabled: boolean;
-}
-
 export interface UninstallMcpServerInput {
   name: string;
 }
@@ -44,15 +39,6 @@ export interface BulkToggleMcpAppResult {
 
 function invalidateMcpServers(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServersPage });
-}
-
-export function useToggleMcpServerMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (input: ToggleMcpServerInput) => invoke("toggle_mcp_server", { ...input }),
-    onSuccess: () => invalidateMcpServers(queryClient),
-  });
 }
 
 export function useToggleMcpAppMutation() {

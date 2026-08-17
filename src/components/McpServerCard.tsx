@@ -22,11 +22,9 @@ interface McpServerCardProps {
   sourceLabel: string;
   healthStatus: string | null;
   healthTitle: string | null;
-  toggleTitle: string;
   editTitle: string;
   deleteTitle: string;
   onSelect: (server: McpServerCardServer) => void;
-  onToggle: (server: McpServerCardServer) => void;
   onEdit: (server: McpServerCardServer) => void;
   onDelete: (server: McpServerCardServer) => void;
 }
@@ -59,11 +57,9 @@ function McpServerCardComponent({
   sourceLabel,
   healthStatus,
   healthTitle,
-  toggleTitle,
   editTitle,
   deleteTitle,
   onSelect,
-  onToggle,
   onEdit,
   onDelete,
 }: McpServerCardProps) {
@@ -77,7 +73,9 @@ function McpServerCardComponent({
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span className={`dot ${server.status === "active" ? "dot-active" : server.status === "error" ? "dot-error" : "dot-disabled"}`} />
+          <span
+            className={`dot ${server.status === "active" ? "dot-active" : server.status === "error" ? "dot-error" : "dot-disabled"}`}
+          />
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>{server.name}</span>
@@ -85,37 +83,32 @@ function McpServerCardComponent({
               {healthStatus && (
                 <span
                   title={healthTitle ?? undefined}
-                  style={{ width: 8, height: 8, borderRadius: "50%", background: getHealthColor(healthStatus), display: "inline-block" }}
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: getHealthColor(healthStatus),
+                    display: "inline-block",
+                  }}
                 />
               )}
             </div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span className={`badge ${sourceBadge}`}>
-            {sourceLabel}
-          </span>
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggle(server);
-            }}
-            title={toggleTitle}
-            style={{ cursor: "pointer" }}
-          >
-            <div className={`toggle toggle-sm ${server.status === "disabled" ? "off" : "on"}`}><div className="toggle-knob" /></div>
-          </button>
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            onClick={(event) => {
-              event.stopPropagation();
-              onEdit(server);
-            }}
-            title={editTitle}
-          >
-            <Edit3 size={15} />
-          </button>
+          <span className={`badge ${sourceBadge}`}>{sourceLabel}</span>
+          {server.transport === "stdio" && (
+            <button
+              className="btn btn-ghost btn-icon-sm"
+              onClick={(event) => {
+                event.stopPropagation();
+                onEdit(server);
+              }}
+              title={editTitle}
+            >
+              <Edit3 size={15} />
+            </button>
+          )}
           <button
             className="btn btn-danger-ghost btn-icon-sm"
             onClick={(event) => {
@@ -129,7 +122,17 @@ function McpServerCardComponent({
         </div>
       </div>
       {commandPreview && (
-        <p style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-muted)", marginTop: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <p
+          style={{
+            fontSize: 12,
+            fontFamily: "'JetBrains Mono', monospace",
+            color: "var(--text-muted)",
+            marginTop: 8,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           {commandPreview}
         </p>
       )}

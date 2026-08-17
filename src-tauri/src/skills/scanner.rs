@@ -7,6 +7,14 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone)]
+struct InstalledPluginRoot {
+    id: String,
+    path: PathBuf,
+    version: Option<String>,
+    installed_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FolderNode {
     pub name: String,
@@ -139,42 +147,116 @@ pub fn get_skills_dir() -> Option<PathBuf> {
 
 /// Scan locally installed plugins from ~/.claude/plugins/
 pub fn scan_local_plugins() -> Vec<Plugin> {
-    let plugins_dir = match get_plugins_dir() {
-        Some(d) if d.exists() => d,
-        _ => return Vec::new(),
-    };
+    discover_installed_plugin_roots()
+        .into_iter()
+        .map(|root| {
+            let (description, package_version, source_url) = read_plugin_metadata(&root.path);
+            let name = root
+                .id
+                .rsplit_once('@')
+                .map(|(name, _)| name)
+                .filter(|name| !name.is_empty())
+                .unwrap_or(&root.id)
+                .to_string();
+            Plugin {
+                id: root.id,
+                name,
+                description,
+                source_url,
+                version: root.version.or(package_version),
+                installed_at: root
+                    .installed_at
+                    .or_else(|| get_dir_created_time(&root.path)),
+                updated_at: get_dir_modified_time(&root.path),
+            }
+        })
+        .collect()
+}
 
-    let mut plugins = Vec::new();
+fn discover_installed_plugin_roots() -> Vec<InstalledPluginRoot> {
+    let Some(plugins_dir) = get_plugins_dir() else {
+        return Vec::new();
+    };
+    let mut roots = Vec::new();
+    let mut seen_paths = HashSet::new();
+
+    let manifest_path = plugins_dir.join("installed_plugins.json");
+    if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(entries) = value.get("plugins").and_then(serde_json::Value::as_object) {
+                for (id, records) in entries {
+                    let Some(record) = records.as_array().and_then(|items| {
+                        items
+                            .iter()
+                            .rev()
+                            .find(|item| item.get("installPath").is_some())
+                    }) else {
+                        continue;
+                    };
+                    let Some(path) = record
+                        .get("installPath")
+                        .and_then(serde_json::Value::as_str)
+                        .map(PathBuf::from)
+                        .filter(|path| path.is_dir())
+                    else {
+                        continue;
+                    };
+                    let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+                    if !seen_paths.insert(canonical) {
+                        continue;
+                    }
+                    roots.push(InstalledPluginRoot {
+                        id: id.clone(),
+                        path,
+                        version: record
+                            .get("version")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string),
+                        installed_at: record
+                            .get("installedAt")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string),
+                    });
+                }
+            }
+        }
+    }
 
     if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            if !path.is_dir() || !is_direct_plugin_root(&path) {
                 continue;
             }
-
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            // Try to read package.json or plugin metadata
-            let (description, version, source_url) = read_plugin_metadata(&path);
-
-            plugins.push(Plugin {
-                id: name.clone(),
-                name,
-                description,
-                source_url,
-                version,
-                installed_at: get_dir_created_time(&path),
-                updated_at: get_dir_modified_time(&path),
+            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if !seen_paths.insert(canonical) {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().to_string();
+            roots.push(InstalledPluginRoot {
+                id,
+                path,
+                version: None,
+                installed_at: None,
             });
         }
     }
 
-    plugins
+    roots
+}
+
+fn is_direct_plugin_root(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    if matches!(name, "cache" | "marketplaces" | "repos" | "downloads") {
+        return false;
+    }
+    path.join("package.json").is_file()
+        || path.join(".claude-plugin").join("plugin.json").is_file()
+        || path.join("skills").is_dir()
+        || path.join("commands").is_dir()
 }
 
 pub fn scan_local_skills_for_conn(conn: &Connection) -> Vec<Skill> {
@@ -185,7 +267,7 @@ pub fn scan_local_skills_for_conn(conn: &Connection) -> Vec<Skill> {
 #[derive(Debug, Clone)]
 struct SkillScanRoot {
     path: PathBuf,
-    is_plugin_dir: bool,
+    plugin_id: Option<String>,
     tool_id: Option<String>,
 }
 
@@ -203,11 +285,12 @@ pub(crate) fn prepare_local_skill_scan(conn: &Connection) -> SkillScanPlan {
     let mut roots = Vec::new();
     let mut scanned_dirs = HashSet::new();
 
-    // Scan skills within plugins
-    if let Some(plugins_dir) = get_plugins_dir() {
+    // The Claude plugin manifest is the source of truth for cached installs.
+    // Direct CCHub installs are included only when they contain plugin markers.
+    for plugin in discover_installed_plugin_roots() {
         roots.push(SkillScanRoot {
-            path: plugins_dir,
-            is_plugin_dir: true,
+            path: plugin.path,
+            plugin_id: Some(plugin.id),
             tool_id: Some("claude".to_string()),
         });
     }
@@ -222,7 +305,7 @@ pub(crate) fn prepare_local_skill_scan(conn: &Connection) -> SkillScanPlan {
             .unwrap_or_else(|| "claude".to_string());
         roots.push(SkillScanRoot {
             path: shared_dir,
-            is_plugin_dir: false,
+            plugin_id: None,
             tool_id: Some(shared_tool),
         });
     }
@@ -235,7 +318,7 @@ pub(crate) fn prepare_local_skill_scan(conn: &Connection) -> SkillScanPlan {
         }
         roots.push(SkillScanRoot {
             path: skills_dir,
-            is_plugin_dir: false,
+            plugin_id: None,
             tool_id: Some(tool.id),
         });
     }
@@ -253,7 +336,7 @@ pub(crate) fn scan_local_skills_from_plan(plan: &SkillScanPlan) -> Vec<Skill> {
             scan_skills_in_dir(
                 &root.path,
                 &mut skills,
-                root.is_plugin_dir,
+                root.plugin_id.as_deref(),
                 root.tool_id.as_deref(),
                 &plan.metadata_map,
             );
@@ -266,16 +349,46 @@ pub(crate) fn scan_local_skills_from_plan(plan: &SkillScanPlan) -> Vec<Skill> {
 fn scan_skills_in_dir(
     dir: &PathBuf,
     skills: &mut Vec<Skill>,
-    is_plugin_dir: bool,
+    plugin_id: Option<&str>,
     tool_id: Option<&str>,
     metadata_map: &HashMap<String, updater::SkillSourceMetadata>,
 ) {
+    let is_plugin_dir = plugin_id.is_some();
     let walker = walkdir(dir, is_plugin_dir);
-    for skill_file in walker {
-        if let Some(skill) = parse_skill_file(&skill_file, is_plugin_dir, tool_id, metadata_map) {
+    for skill_file in walker
+        .into_iter()
+        .filter(|path| is_skill_candidate(path, is_plugin_dir))
+    {
+        if let Some(skill) = parse_skill_file(&skill_file, plugin_id, tool_id, metadata_map) {
             skills.push(skill);
         }
     }
+}
+
+fn is_skill_candidate(path: &Path, is_plugin_dir: bool) -> bool {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !(file_name.ends_with(".md") || file_name.ends_with(".md.disabled")) {
+        return false;
+    }
+    if matches!(
+        file_name.as_str(),
+        "readme.md" | "readme.md.disabled" | "changelog.md" | "changelog.md.disabled"
+    ) {
+        return false;
+    }
+    if !is_plugin_dir || matches!(file_name.as_str(), "skill.md" | "skill.md.disabled") {
+        return true;
+    }
+    path.ancestors().any(|ancestor| {
+        matches!(
+            ancestor.file_name().and_then(|name| name.to_str()),
+            Some("skills" | "commands" | "agents")
+        )
+    })
 }
 
 fn walkdir(dir: &PathBuf, deep: bool) -> Vec<PathBuf> {
@@ -297,10 +410,11 @@ fn walk_recursive(
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() {
-                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
-                // Skill files are typically .md files with frontmatter
-                if ext == "md" && name != "README" && name != "CHANGELOG" {
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
+                if file_name.ends_with(".md") || file_name.ends_with(".md.disabled") {
                     results.push(path);
                 }
             } else if path.is_dir() {
@@ -315,12 +429,17 @@ fn walk_recursive(
 
 fn parse_skill_file(
     path: &PathBuf,
-    is_plugin_dir: bool,
+    plugin_id: Option<&str>,
     tool_id: Option<&str>,
     metadata_map: &HashMap<String, updater::SkillSourceMetadata>,
 ) -> Option<Skill> {
     let content = std::fs::read_to_string(path).ok()?;
-    let file_name = path.file_stem()?.to_string_lossy().to_string();
+    let raw_file_name = path.file_name()?.to_string_lossy();
+    let file_name = raw_file_name
+        .strip_suffix(".md.disabled")
+        .or_else(|| raw_file_name.strip_suffix(".md"))
+        .unwrap_or(&raw_file_name)
+        .to_string();
     let path_key = path.to_string_lossy().to_string();
     let metadata = metadata_map.get(&path_key);
     let current_sha256 = Some(updater::sha256_hex(&content));
@@ -332,22 +451,12 @@ fn parse_skill_file(
         (file_name.clone(), None, None)
     };
 
-    // Determine plugin_id from path
-    let plugin_id = if is_plugin_dir {
-        path.ancestors()
-            .nth(2)
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().to_string())
-    } else {
-        None
-    };
-
     Some(Skill {
         id: path_key,
         name,
         description,
         tool_id: tool_id.map(str::to_string),
-        plugin_id,
+        plugin_id: plugin_id.map(str::to_string),
         trigger_command: trigger,
         file_path: Some(path.to_string_lossy().to_string()),
         version: None,
@@ -455,7 +564,7 @@ mod tests {
         let plan = SkillScanPlan {
             roots: vec![SkillScanRoot {
                 path: root.clone(),
-                is_plugin_dir: false,
+                plugin_id: None,
                 tool_id: Some("codex".to_string()),
             }],
             metadata_map: HashMap::new(),
@@ -466,6 +575,42 @@ mod tests {
         assert_eq!(skills[0].name, "Fast Skill");
         assert_eq!(skills[0].tool_id.as_deref(), Some("codex"));
         assert!(skills[0].current_sha256.is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn includes_disabled_skills_but_excludes_plugin_docs() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("cchub-plugin-scan-{unique}"));
+        std::fs::create_dir_all(root.join("skills").join("real")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(
+            root.join("skills").join("real").join("SKILL.md.disabled"),
+            "disabled",
+        )
+        .unwrap();
+        std::fs::write(root.join("docs").join("guide.md"), "documentation").unwrap();
+
+        let plan = SkillScanPlan {
+            roots: vec![SkillScanRoot {
+                path: root.clone(),
+                plugin_id: Some("real-plugin@market".to_string()),
+                tool_id: Some("claude".to_string()),
+            }],
+            metadata_map: HashMap::new(),
+        };
+        let skills = scan_local_skills_from_plan(&plan);
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "SKILL");
+        assert_eq!(skills[0].plugin_id.as_deref(), Some("real-plugin@market"));
+        assert!(skills[0]
+            .file_path
+            .as_deref()
+            .is_some_and(|path| path.ends_with("SKILL.md.disabled")));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

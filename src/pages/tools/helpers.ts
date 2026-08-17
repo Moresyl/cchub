@@ -41,6 +41,18 @@ export interface HudConfig {
   };
 }
 
+/** Migrate legacy `layout` field to `lineLayout` + `showSeparators`. */
+export function migrateHudConfig(status: HudStatus | null): HudStatus | null {
+  if (!status?.hudConfig) return status;
+  const config = status.hudConfig as HudConfig & { layout?: string };
+  if ("layout" in config && !config.lineLayout) {
+    config.lineLayout = "compact";
+    config.showSeparators = config.layout === "separators";
+    delete config.layout;
+  }
+  return { ...status, hudConfig: config };
+}
+
 export type Hello2ccConfig = Hello2ccConfigQueryResult;
 export type Hello2ccSelectKey = Exclude<keyof Hello2ccConfig, "mirror_session_model">;
 export type HudGitStatusKey = keyof NonNullable<HudConfig["gitStatus"]>;

@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "cchub"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "async-stream",
  "axum",

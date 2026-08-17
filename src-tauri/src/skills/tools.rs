@@ -111,50 +111,32 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
     },
 ];
 
-/// Detect AI coding tools installed on the system
-pub fn detect_tools() -> Vec<DetectedTool> {
-    detect_tools_with_conn(None)
-}
-
 pub fn detect_tools_for_conn(conn: &Connection) -> Vec<DetectedTool> {
-    detect_tools_with_conn(Some(conn))
+    detect_tools_with_conn(conn)
 }
 
-/// `detect_tools` 在应用启动后会被多个 query 在 1 秒内连续调用 5+ 次，
+/// `detect_tools` 会被多个页面查询在短时间内连续调用，
 /// 每次都做 12+ 次同步 fs::exists；安装/卸载工具属于罕见事件，所以
 /// 这里加一个短 TTL 的进程内缓存避免重复 stat。
 const DETECT_TOOLS_TTL: Duration = Duration::from_millis(1500);
 static DETECT_TOOLS_CACHE: Mutex<Option<(Instant, Vec<DetectedTool>)>> = Mutex::new(None);
 
-/// 安装/卸载工具或修改 hermes root 后调用，使下一次 detect_tools 重新扫描。
-/// 目前缓存 TTL 是 1.5s，足以覆盖启动 prefetch 集中调用；用户主动安装/卸载是
-/// 罕见动作且需要 UI 在 1-2 秒内反映，自然过期就能满足，因此暂未在 mutation
-/// 路径调用此 invalidate（保留 API 以便未来需要更激进刷新时使用）。
-#[allow(dead_code)]
-pub fn invalidate_detect_tools_cache() {
-    if let Ok(mut guard) = DETECT_TOOLS_CACHE.lock() {
-        *guard = None;
-    }
-}
-
 fn base_dir_for_candidate(
     candidate: &ToolCandidate,
     home: &std::path::Path,
-    conn: Option<&Connection>,
+    conn: &Connection,
 ) -> PathBuf {
     if candidate.id == "hermes" {
-        if let Some(conn) = conn {
-            if let Ok(path) = crate::hermes::hermes_root(conn) {
-                return path;
-            }
+        if let Ok(path) = crate::hermes::hermes_root(conn) {
+            return path;
         }
     }
 
     home.join(candidate.dir)
 }
 
-fn detect_tools_with_conn(conn: Option<&Connection>) -> Vec<DetectedTool> {
-    // 命中短 TTL 缓存就直接返回，避免在启动数据预热时重复 12×stat。
+fn detect_tools_with_conn(conn: &Connection) -> Vec<DetectedTool> {
+    // 命中短 TTL 缓存就直接返回，避免切页时重复 12×stat。
     if let Ok(guard) = DETECT_TOOLS_CACHE.lock() {
         if let Some((cached_at, ref cached)) = *guard {
             if cached_at.elapsed() < DETECT_TOOLS_TTL {

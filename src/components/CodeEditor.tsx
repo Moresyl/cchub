@@ -3,7 +3,6 @@ import { EditorView, basicSetup } from "codemirror";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { EditorState } from "@codemirror/state";
 import { json } from "@codemirror/lang-json";
-import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { ViewUpdate } from "@codemirror/view";
@@ -86,11 +85,10 @@ function getLangExtension(language: string) {
   switch (language) {
     case "json":
       return [json(), jsonLinter];
+    case "text":
     case "yaml":
     case "toml":
     case "markdown":
-      return [javascript()];
-    case "text":
       return [];
     default:
       return [];

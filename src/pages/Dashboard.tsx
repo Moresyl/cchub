@@ -11,6 +11,7 @@ import DashboardHermesRootOverride from "../components/DashboardHermesRootOverri
 import DashboardServerRow, { type DashboardServerRowServer } from "../components/DashboardServerRow";
 import DashboardSkillRow, { type DashboardSkillRowSkill } from "../components/DashboardSkillRow";
 import LoadingState from "../components/states/LoadingState";
+import { scheduleIdleTask } from "../lib/idleTask";
 
 type McpServer = DashboardServerRowServer;
 type Skill = DashboardSkillRowSkill;
@@ -91,7 +92,6 @@ export default function Dashboard() {
           setSkills(skillsPage.skills as Skill[]);
           setPlugins(scannedPlugins);
         });
-        void refetchTools();
       } catch (error) {
         if (!cancelled && requestId === refreshRequestIdRef.current) {
           console.error(error);
@@ -100,13 +100,14 @@ export default function Dashboard() {
     };
 
     void loadInitial();
-    const timer = window.setTimeout(() => {
-      void refreshScannedData();
-    }, 120);
+    const cancelRefresh = scheduleIdleTask(() => void refreshScannedData(), {
+      delay: 1_000,
+      timeout: 6_000,
+    });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      cancelRefresh();
     };
   }, [refetchTools]);
 

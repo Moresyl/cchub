@@ -1,20 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  RefreshCw,
-  Zap,
-  Package,
-  ExternalLink,
-  Search,
-  X,
-  FolderOpen,
-  Monitor,
-  Check,
-  Trash2,
-  Upload,
-  PackagePlus,
-} from "lucide-react";
+import { Zap, Package, ExternalLink, Search, X, Monitor, Check, Trash2 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
 import { showToast } from "../components/Toast";
@@ -53,6 +40,7 @@ import SkillsDetailPanel from "./skills/DetailPanel";
 import SkillsConfirmDialogs from "./skills/Dialogs";
 import SkillsBackupList from "./skills/BackupList";
 import PluginInstallDialog from "./skills/PluginInstallDialog";
+import SkillsPageHeader from "./skills/PageHeader";
 export default function Skills() {
   const queryClient = useQueryClient();
   const cachedSkillsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchSkillsPageData>>>(
@@ -533,50 +521,29 @@ export default function Skills() {
   ];
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {/* Page Header */}
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">{i.skills.title}</h2>
-          <p className="page-subtitle">
+      <SkillsPageHeader
+        title={i.skills.title}
+        subtitle={
+          <>
             {tReplace(i.skills.totalSkills, { count: visibleSkills.length + visiblePlugins.length })}
             {installedTools.length > 0 && ` · ${tReplace(i.skills.toolCount, { count: installedTools.length })}`}
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => void handleBatchUpdateSkills()}
-            disabled={updatableVisibleSkillCount === 0 || batchUpdating}
-            style={{ gap: 6 }}
-          >
-            {batchUpdating ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Check size={14} />}
-            {locale === "zh"
-              ? `全部更新 (${updatableVisibleSkillCount})`
-              : `Update All (${updatableVisibleSkillCount})`}
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={handleImportSkill} style={{ gap: 6 }}>
-            <Upload size={14} />
-            {i.skills.importSkill}
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => setPluginInstallOpen(true)}
-            style={{ gap: 6 }}
-            title={locale === "zh" ? "安装插件" : "Install plugin"}
-          >
-            <PackagePlus size={14} />
-            {locale === "zh" ? "安装插件" : "Install plugin"}
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={openExplorer} style={{ gap: 6 }}>
-            <FolderOpen size={14} />
-            {i.skills.explore}
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => void load({ force: true })}>
-            <RefreshCw size={14} />
-            {i.common.refresh}
-          </button>
-        </div>
-      </div>
+          </>
+        }
+        updateLabel={
+          locale === "zh" ? `全部更新 (${updatableVisibleSkillCount})` : `Update All (${updatableVisibleSkillCount})`
+        }
+        importLabel={i.skills.importSkill}
+        installPluginLabel={locale === "zh" ? "安装插件" : "Install plugin"}
+        exploreLabel={i.skills.explore}
+        refreshLabel={i.common.refresh}
+        batchUpdating={batchUpdating}
+        canBatchUpdate={updatableVisibleSkillCount > 0 && !batchUpdating}
+        onBatchUpdate={() => void handleBatchUpdateSkills()}
+        onImport={handleImportSkill}
+        onInstallPlugin={() => setPluginInstallOpen(true)}
+        onExplore={openExplorer}
+        onRefresh={() => void load({ force: true })}
+      />
       <SkillsBackupList
         skillBackups={skillBackups}
         backupBusyId={backupBusyId}

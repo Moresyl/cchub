@@ -13,10 +13,11 @@ fn log_command_timing(command: &str, started_at: std::time::Instant) {
 #[tauri::command]
 pub fn scan_skills(db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
     let started_at = std::time::Instant::now();
-    let result = (|| {
+    let plan = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        Ok(scanner::scan_local_skills_for_conn(&conn))
-    })();
+        scanner::prepare_local_skill_scan(&conn)
+    };
+    let result = Ok(scanner::scan_local_skills_from_plan(&plan));
     log_command_timing("scan_skills", started_at);
     result
 }
@@ -181,8 +182,11 @@ pub fn check_path_exists(path: String) -> bool {
 
 #[tauri::command]
 pub fn get_skill_categories(db: State<'_, DbState>) -> Result<scanner::CategoryCounts, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let skills = scanner::scan_local_skills_for_conn(&conn);
+    let plan = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        scanner::prepare_local_skill_scan(&conn)
+    };
+    let skills = scanner::scan_local_skills_from_plan(&plan);
     Ok(scanner::get_category_counts(&skills))
 }
 

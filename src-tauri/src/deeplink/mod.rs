@@ -132,6 +132,13 @@ impl DeepLinkState {
         let mut queue = self.errors.lock()?;
         Ok(std::mem::take(&mut *queue))
     }
+
+    pub fn has_pending(&self) -> Result<bool, AppError> {
+        if !self.imports.lock()?.is_empty() {
+            return Ok(true);
+        }
+        Ok(!self.errors.lock()?.is_empty())
+    }
 }
 
 pub async fn merge_deeplink_request(
@@ -706,7 +713,7 @@ pub fn infer_homepage_from_endpoint(endpoint: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_text_payload;
+    use super::{decode_text_payload, DeepLinkErrorPayload, DeepLinkState};
 
     #[test]
     fn restores_plus_signs_from_query_decoding() {
@@ -714,5 +721,22 @@ mod tests {
         let with_query_space = encoded.replace('+', " ");
         let expected = String::from_utf8(vec![0xe0, 0xa0, 0xbe]).unwrap();
         assert_eq!(decode_text_payload(&with_query_space).unwrap(), expected);
+    }
+
+    #[test]
+    fn reports_pending_errors_without_consuming_them() {
+        let state = DeepLinkState::default();
+        assert!(!state.has_pending().unwrap());
+
+        state
+            .enqueue_error(DeepLinkErrorPayload {
+                url: "cchub://redacted".to_string(),
+                error: "invalid payload".to_string(),
+            })
+            .unwrap();
+
+        assert!(state.has_pending().unwrap());
+        assert_eq!(state.take_errors().unwrap().len(), 1);
+        assert!(!state.has_pending().unwrap());
     }
 }

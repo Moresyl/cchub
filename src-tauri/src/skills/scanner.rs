@@ -1,4 +1,4 @@
-use super::tools::{detect_tools, detect_tools_for_conn};
+use super::tools::detect_tools_for_conn;
 use super::updater;
 use crate::commands::extra_commands::configured_skill_storage_dir;
 use crate::db::models::{Plugin, Skill};
@@ -178,66 +178,84 @@ pub fn scan_local_plugins() -> Vec<Plugin> {
 }
 
 pub fn scan_local_skills_for_conn(conn: &Connection) -> Vec<Skill> {
-    scan_local_skills_with_conn(Some(conn))
+    let plan = prepare_local_skill_scan(conn);
+    scan_local_skills_from_plan(&plan)
 }
 
-fn scan_local_skills_with_conn(conn: Option<&Connection>) -> Vec<Skill> {
-    let mut skills = Vec::new();
-    let metadata_map = conn
-        .and_then(|value| updater::load_skill_metadata_map(value).ok())
-        .unwrap_or_default();
+#[derive(Debug, Clone)]
+struct SkillScanRoot {
+    path: PathBuf,
+    is_plugin_dir: bool,
+    tool_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SkillScanPlan {
+    roots: Vec<SkillScanRoot>,
+    metadata_map: HashMap<String, updater::SkillSourceMetadata>,
+}
+
+/// Snapshot database-backed scan configuration while the SQLite lock is held.
+/// The expensive directory walk and hashing can then run after releasing it.
+pub(crate) fn prepare_local_skill_scan(conn: &Connection) -> SkillScanPlan {
+    let metadata_map = updater::load_skill_metadata_map(conn).unwrap_or_default();
+    let detected_tools = detect_tools_for_conn(conn);
+    let mut roots = Vec::new();
+    let mut scanned_dirs = HashSet::new();
 
     // Scan skills within plugins
     if let Some(plugins_dir) = get_plugins_dir() {
-        if plugins_dir.exists() {
-            scan_skills_in_dir(
-                &plugins_dir,
-                &mut skills,
-                true,
-                Some("claude"),
-                &metadata_map,
-            );
-        }
+        roots.push(SkillScanRoot {
+            path: plugins_dir,
+            is_plugin_dir: true,
+            tool_id: Some("claude".to_string()),
+        });
     }
 
     // Scan standalone skills for every detected tool
-    let detected_tools = conn.map(detect_tools_for_conn).unwrap_or_else(detect_tools);
-    let mut scanned_dirs = HashSet::new();
-    if let Some(conn) = conn {
-        if let Some(shared_dir) = configured_skill_storage_dir(conn) {
-            scanned_dirs.insert(shared_dir.clone());
-            if shared_dir.exists() {
-                let shared_tool = detected_tools
-                    .iter()
-                    .find(|tool| tool.installed)
-                    .map(|tool| tool.id.as_str())
-                    .unwrap_or("claude");
-                scan_skills_in_dir(
-                    &shared_dir,
-                    &mut skills,
-                    false,
-                    Some(shared_tool),
-                    &metadata_map,
-                );
-            }
-        }
+    if let Some(shared_dir) = configured_skill_storage_dir(conn) {
+        scanned_dirs.insert(shared_dir.clone());
+        let shared_tool = detected_tools
+            .iter()
+            .find(|tool| tool.installed)
+            .map(|tool| tool.id.clone())
+            .unwrap_or_else(|| "claude".to_string());
+        roots.push(SkillScanRoot {
+            path: shared_dir,
+            is_plugin_dir: false,
+            tool_id: Some(shared_tool),
+        });
     }
     for tool in detected_tools.into_iter().filter(|tool| tool.installed) {
-        let skills_dir = conn
-            .and_then(|value| {
-                crate::commands::extra_commands::resolve_tool_skills_dir(value, &tool.id).ok()
-            })
+        let skills_dir = crate::commands::extra_commands::resolve_tool_skills_dir(conn, &tool.id)
+            .ok()
             .unwrap_or_else(|| PathBuf::from(&tool.skills_dir));
         if !scanned_dirs.insert(skills_dir.clone()) {
             continue;
         }
-        if skills_dir.exists() {
+        roots.push(SkillScanRoot {
+            path: skills_dir,
+            is_plugin_dir: false,
+            tool_id: Some(tool.id),
+        });
+    }
+
+    SkillScanPlan {
+        roots,
+        metadata_map,
+    }
+}
+
+pub(crate) fn scan_local_skills_from_plan(plan: &SkillScanPlan) -> Vec<Skill> {
+    let mut skills = Vec::new();
+    for root in &plan.roots {
+        if root.path.exists() {
             scan_skills_in_dir(
-                &skills_dir,
+                &root.path,
                 &mut skills,
-                false,
-                Some(tool.id.as_str()),
-                &metadata_map,
+                root.is_plugin_dir,
+                root.tool_id.as_deref(),
+                &plan.metadata_map,
             );
         }
     }
@@ -412,4 +430,42 @@ fn get_dir_modified_time(path: &PathBuf) -> Option<String> {
 
 fn get_file_created_time(path: &PathBuf) -> Option<String> {
     get_dir_created_time(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{scan_local_skills_from_plan, SkillScanPlan, SkillScanRoot};
+    use std::collections::HashMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn scans_from_a_database_free_plan() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("cchub-skill-scan-{unique}"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("sample.md"),
+            "---\nname: Fast Skill\ndescription: scan without database lock\n---\n",
+        )
+        .unwrap();
+
+        let plan = SkillScanPlan {
+            roots: vec![SkillScanRoot {
+                path: root.clone(),
+                is_plugin_dir: false,
+                tool_id: Some("codex".to_string()),
+            }],
+            metadata_map: HashMap::new(),
+        };
+        let skills = scan_local_skills_from_plan(&plan);
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "Fast Skill");
+        assert_eq!(skills[0].tool_id.as_deref(), Some("codex"));
+        assert!(skills[0].current_sha256.is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

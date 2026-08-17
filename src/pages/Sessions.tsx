@@ -4,7 +4,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { invoke } from "@tauri-apps/api/core";
 import { Copy, FolderOpen, History, RefreshCw, Search, SquareCheckBig, Trash2 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
-import { getAppLabel, type ManagedAppId } from "../lib/appPreferences";
+import { type ManagedAppId } from "../lib/appPreferences";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import HighlightedText from "../components/HighlightedText";
@@ -16,6 +16,7 @@ import { fetchSessionsPageData, fetchVisibleAppsQuery, queryKeys } from "../hook
 
 import {
   buildResumeCommand,
+  buildSessionToolFilters,
   buildSessionDeleteTarget,
   buildSessionListLabels,
   countSessionHits,
@@ -316,13 +317,7 @@ export default function Sessions() {
   }, []);
 
   const toolFilters = useMemo<Array<{ id: ManagedAppId | "all"; label: string }>>(
-    () => [
-      { id: "all" as const, label: uiText("全部 App", "All Apps", "すべての App") },
-      ...TOOL_ORDER.filter((toolId) => visibleApps.includes(toolId)).map((toolId) => ({
-        id: toolId,
-        label: getAppLabel(toolId),
-      })),
-    ],
+    () => buildSessionToolFilters(visibleApps, uiText("全部 App", "All Apps", "すべての App")),
     [uiText, visibleApps],
   );
 

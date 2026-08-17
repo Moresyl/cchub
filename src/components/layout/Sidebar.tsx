@@ -37,6 +37,7 @@ import {
   fetchToolsPageData,
   queryKeys,
 } from "../../hooks/queries";
+import { preloadRoute } from "../../lib/routes";
 import type { LucideIcon } from "lucide-react";
 
 const navItems = [
@@ -69,7 +70,7 @@ interface SidebarNavItemProps {
   path: string;
   label: string;
   icon: LucideIcon;
-  onPrefetch: (path: string) => void;
+  onPrefetch: (path: string, priority: "hover" | "focus") => void;
   onPrefetchCancel: () => void;
 }
 
@@ -84,9 +85,9 @@ function SidebarNavItemComponent({ path, label, icon: Icon, onPrefetch, onPrefet
           event.preventDefault();
         }
       }}
-      onPointerEnter={() => onPrefetch(path)}
+      onPointerEnter={() => onPrefetch(path, "hover")}
       onPointerLeave={onPrefetchCancel}
-      onFocus={() => onPrefetch(path)}
+      onFocus={() => onPrefetch(path, "focus")}
       onBlur={onPrefetchCancel}
       className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
     >
@@ -111,88 +112,80 @@ function SidebarComponent() {
   }, []);
   useEffect(() => cancelHover, [cancelHover]);
 
-  const runPrefetch = useCallback(
+  const prefetchRouteData = useCallback(
     (path: string) => {
+      const ignorePreloadFailure = (promise: Promise<unknown>) => {
+        void promise.catch((error: unknown) => {
+          console.debug("Route data preload failed", path, error);
+        });
+      };
+
       switch (path) {
         case "/mcp-servers":
-          void Promise.all([
-            import("../../pages/McpServers"),
+          ignorePreloadFailure(
             queryClient.prefetchQuery({
               queryKey: queryKeys.mcpServersPage,
               queryFn: fetchMcpServersPageData,
             }),
-          ]);
+          );
           return;
         case "/skills":
-          void Promise.all([
-            import("../../pages/Skills"),
+          ignorePreloadFailure(
             queryClient.prefetchQuery({
               queryKey: queryKeys.skillsPage,
               queryFn: fetchSkillsPageData,
             }),
-          ]);
+          );
           return;
         case "/marketplace":
-          void Promise.all([
-            import("../../pages/Marketplace"),
-            queryClient.prefetchQuery({
-              queryKey: queryKeys.marketplaceLocal,
-              queryFn: fetchMarketplaceLocalData,
-            }),
-            queryClient.prefetchQuery({
-              queryKey: queryKeys.marketplaceCatalog(),
-              queryFn: () => fetchMarketplaceCatalogPage(),
-            }),
-            queryClient.prefetchQuery({
-              queryKey: queryKeys.marketplaceSearch("mcp server"),
-              queryFn: () => fetchMarketplaceSearchPage("mcp server"),
-            }),
-          ]);
+          ignorePreloadFailure(
+            Promise.all([
+              queryClient.prefetchQuery({
+                queryKey: queryKeys.marketplaceLocal,
+                queryFn: fetchMarketplaceLocalData,
+              }),
+              queryClient.prefetchQuery({
+                queryKey: queryKeys.marketplaceCatalog(),
+                queryFn: () => fetchMarketplaceCatalogPage(),
+              }),
+              queryClient.prefetchQuery({
+                queryKey: queryKeys.marketplaceSearch("mcp server"),
+                queryFn: () => fetchMarketplaceSearchPage("mcp server"),
+              }),
+            ]),
+          );
           return;
         case "/profiles":
-          void Promise.all([
-            import("../../pages/Profiles"),
+          ignorePreloadFailure(
             queryClient.prefetchQuery({
               queryKey: queryKeys.profilesPage,
               queryFn: fetchProfilesPageData,
             }),
-          ]);
+          );
           return;
         case "/tools":
-          void Promise.all([
-            import("../../pages/Tools"),
+          ignorePreloadFailure(
             queryClient.prefetchQuery({
               queryKey: queryKeys.toolsPage,
               queryFn: fetchToolsPageData,
             }),
-          ]);
+          );
           return;
         case "/claude-md":
-          void Promise.all([
-            import("../../pages/ClaudeMd"),
+          ignorePreloadFailure(
             queryClient.prefetchQuery({
               queryKey: queryKeys.claudeMdPage,
               queryFn: fetchClaudeMdPageData,
             }),
-          ]);
+          );
           return;
         case "/sessions":
-          void Promise.all([
-            import("../../pages/Sessions"),
+          ignorePreloadFailure(
             queryClient.prefetchQuery({
               queryKey: queryKeys.sessions(null),
               queryFn: () => fetchSessionsPageData(null),
             }),
-          ]);
-          return;
-        case "/":
-          void import("../../pages/Dashboard");
-          return;
-        case "/usage":
-          void import("../../pages/Usage");
-          return;
-        case "/prompts":
-          void import("../../pages/Prompts");
+          );
           return;
         default:
           return;
@@ -202,16 +195,21 @@ function SidebarComponent() {
   );
 
   const prefetchRoute = useCallback(
-    (path: string) => {
+    (path: string, priority: "hover" | "focus") => {
       cancelHover();
-      // chunk 预加载立即执行（廉价，浏览器会去重）
-      // 数据预取延迟 180ms，避免鼠标掠过时触发昂贵的后端扫描
+      // 模块下载不会占用 Tauri 数据库锁，可在出现导航意图时立即开始。
+      preloadRoute(path);
+      if (priority === "focus") {
+        prefetchRouteData(path);
+        return;
+      }
+      // 文件系统扫描和数据库查询延后到明确悬停，避免鼠标掠过侧栏时争抢 IPC。
       hoverTimerRef.current = window.setTimeout(() => {
         hoverTimerRef.current = null;
-        runPrefetch(path);
-      }, 180);
+        prefetchRouteData(path);
+      }, 650);
     },
-    [cancelHover, runPrefetch],
+    [cancelHover, prefetchRouteData],
   );
 
   return (

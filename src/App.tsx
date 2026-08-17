@@ -45,6 +45,8 @@ const pageImports = {
   "/mcp-servers": () => import("./pages/McpServers"),
   "/mcp-clients": () => import("./pages/McpClients"),
   "/logs": () => import("./pages/Logs"),
+  "/usage": () => import("./pages/Usage"),
+  "/prompts": () => import("./pages/Prompts"),
   "/skills": () => import("./pages/Skills"),
   "/workflows": () => import("./pages/Workflows"),
   "/autopilot": () => import("./pages/Autopilot"),
@@ -196,6 +198,9 @@ function AppShell() {
   useEffect(() => {
     void loadEnvConflicts();
     void loadWelcomeState();
+    void invoke("sync_models_dev_pricing", { force: false }).catch((error) => {
+      console.debug("Automatic model pricing sync skipped or failed", error);
+    });
     const handleFocus = () => void loadEnvConflicts();
     const handleKeyDown = (event: KeyboardEvent) => {
       // 快速路径：非修饰键/非 Escape 直接返回，避免每次按键都走完整流程。

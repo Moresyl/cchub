@@ -66,7 +66,16 @@ export default function Tools() {
     cachedToolsPageData?.codexSettings.context_window_1m ?? false,
   );
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
-    cachedToolsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
+    cachedToolsPageData?.visibleApps ?? [
+      "claude",
+      "codex",
+      "gemini",
+      "grokbuild",
+      "opencode",
+      "openclaw",
+      "hermes",
+      "pi",
+    ],
   );
   const [loading, setLoading] = useState(!cachedToolsPageData);
   const [hudInstalling, setHudInstalling] = useState(false);

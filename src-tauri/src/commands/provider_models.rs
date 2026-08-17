@@ -1,5 +1,7 @@
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use tauri::State;
 
 use crate::db::DbState;
@@ -75,6 +77,16 @@ pub struct ModelInfo {
     pub output_price: Option<String>,
 }
 
+/// Model shape used by the provider editor. It intentionally keeps optional
+/// ownership metadata so OpenAI-compatible gateways can return richer rows
+/// without forcing the UI to understand every vendor-specific field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchedModel {
+    pub id: String,
+    pub owned_by: Option<String>,
+}
+
 fn build_provider_models_client(conn: &rusqlite::Connection) -> Result<reqwest::Client, String> {
     let proxy_url: Option<String> = conn
         .query_row(
@@ -111,7 +123,7 @@ fn derive_root_from_full_url(tool_id: &str, base_url: &str) -> Result<String, St
 
     let replacements = match tool_id {
         "claude" => vec!["/v1/messages", "/messages"],
-        "codex" | "openclaw" | "opencode" => {
+        "codex" | "grokbuild" | "openclaw" | "opencode" | "hermes" => {
             vec![
                 "/v1/chat/completions",
                 "/chat/completions",
@@ -244,6 +256,172 @@ fn sort_and_dedup_models(models: Vec<String>) -> Vec<String> {
     next
 }
 
+fn generic_models_url(
+    base_url: &str,
+    is_full_url: bool,
+    explicit: Option<&str>,
+) -> Result<Url, String> {
+    let candidate = explicit
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            let trimmed = trim_query_and_fragment(base_url).trim_end_matches('/');
+            if trimmed.ends_with("/models") {
+                trimmed.to_string()
+            } else if trimmed.ends_with("/v1") || trimmed.ends_with("/v1beta") {
+                format!("{trimmed}/models")
+            } else if is_full_url {
+                let root = [
+                    "/chat/completions",
+                    "/v1/chat/completions",
+                    "/responses",
+                    "/v1/responses",
+                    "/messages",
+                    "/v1/messages",
+                ]
+                .iter()
+                .find_map(|suffix| trimmed.strip_suffix(suffix))
+                .unwrap_or(trimmed);
+                if root.ends_with("/v1") || root.ends_with("/v1beta") {
+                    format!("{root}/models")
+                } else {
+                    format!("{root}/v1/models")
+                }
+            } else {
+                format!("{trimmed}/v1/models")
+            }
+        });
+    let url = Url::parse(&candidate).map_err(|error| format!("Invalid models URL: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("Models URL must use HTTP(S) and include a host".to_string());
+    }
+    Ok(url)
+}
+
+fn parse_fetched_models(payload: &Value) -> Vec<FetchedModel> {
+    let entries = payload
+        .get("data")
+        .or_else(|| payload.get("models"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut models = entries
+        .into_iter()
+        .filter_map(|entry| {
+            if let Some(id) = entry.as_str().and_then(normalize_model_id) {
+                return Some(FetchedModel { id, owned_by: None });
+            }
+            let id = entry
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(normalize_model_id)?;
+            Some(FetchedModel {
+                id,
+                owned_by: entry
+                    .get("owned_by")
+                    .or_else(|| entry.get("ownedBy"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            })
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    models.dedup_by(|left, right| left.id == right.id);
+    models
+}
+
+fn apply_model_fetch_headers(
+    mut request: reqwest::RequestBuilder,
+    api_key: &str,
+    api_format: Option<&str>,
+    custom_user_agent: Option<&str>,
+    request_headers: Option<&BTreeMap<String, String>>,
+) -> reqwest::RequestBuilder {
+    if let Some(headers) = request_headers {
+        for (name, value) in headers {
+            if let (Ok(name), Ok(value)) = (
+                reqwest::header::HeaderName::from_bytes(name.trim().as_bytes()),
+                reqwest::header::HeaderValue::from_str(value),
+            ) {
+                request = request.header(name, value);
+            }
+        }
+    }
+    let format = api_format.unwrap_or_default().to_ascii_lowercase();
+    if !api_key.trim().is_empty() {
+        if format.contains("anthropic") {
+            request = request
+                .header("x-api-key", api_key.trim())
+                .header("anthropic-version", "2023-06-01");
+        } else if format.contains("google") || format.contains("gemini") {
+            request = request.header("x-goog-api-key", api_key.trim());
+        } else {
+            request = request.header("authorization", format!("Bearer {}", api_key.trim()));
+        }
+    }
+    if let Some(user_agent) = custom_user_agent
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(user_agent) {
+            request = request.header(reqwest::header::USER_AGENT, value);
+        }
+    }
+    request
+}
+
+/// Fetches a model list without requiring a saved provider profile. This is
+/// useful while a provider form is still being edited and supports explicit
+/// endpoints, custom headers and common provider auth conventions.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn fetch_models_for_config(
+    base_url: String,
+    api_key: String,
+    is_full_url: Option<bool>,
+    models_url: Option<String>,
+    custom_user_agent: Option<String>,
+    api_format: Option<String>,
+    request_headers: Option<BTreeMap<String, String>>,
+) -> Result<Vec<FetchedModel>, String> {
+    let url = generic_models_url(
+        &base_url,
+        is_full_url.unwrap_or(false),
+        models_url.as_deref(),
+    )?;
+    let client = crate::shared::http_client::build_http_client(
+        None,
+        Some("CCHub Model Fetcher"),
+        std::time::Duration::from_secs(PROVIDER_MODELS_TIMEOUT_SECS),
+    )?;
+    let response = apply_model_fetch_headers(
+        client.get(url),
+        &api_key,
+        api_format.as_deref(),
+        custom_user_agent.as_deref(),
+        request_headers.as_ref(),
+    )
+    .send()
+    .await
+    .map_err(|error| format!("Model request failed: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Failed to read model response: {error}"))?;
+    if !status.is_success() {
+        let detail = body.chars().take(500).collect::<String>();
+        return Err(format!("Model endpoint returned HTTP {status}: {detail}"));
+    }
+    let payload: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("Invalid model response JSON: {error}"))?;
+    let models = parse_fetched_models(&payload);
+    if models.is_empty() {
+        return Err("Model endpoint returned no usable models".to_string());
+    }
+    Ok(models)
+}
+
 #[tauri::command]
 pub async fn fetch_provider_models(
     tool_id: String,
@@ -293,7 +471,7 @@ pub async fn fetch_provider_models(
                     .collect(),
             ))
         }
-        "codex" | "openclaw" | "opencode" => {
+        "codex" | "grokbuild" | "openclaw" | "opencode" | "hermes" => {
             if api_key.trim().is_empty() {
                 return Err("API key is required to fetch models".to_string());
             }
@@ -452,6 +630,8 @@ pub async fn fetch_provider_models_detailed(
     base_url: String,
     api_key: String,
     use_full_url: Option<bool>,
+    custom_user_agent: Option<String>,
+    request_headers: Option<BTreeMap<String, String>>,
     db: State<'_, DbState>,
 ) -> Result<Vec<ModelInfo>, String> {
     let client = {
@@ -468,13 +648,18 @@ pub async fn fetch_provider_models_detailed(
                 return Err("API key is required".to_string());
             }
             let models_url = build_claude_models_url(&base_url, use_full_url)?;
-            let response = client
-                .get(&models_url)
-                .header("x-api-key", api_key.trim())
-                .header("anthropic-version", "2023-06-01")
-                .send()
-                .await
-                .map_err(|e| format!("Request failed: {e}"))?;
+            let response = apply_model_fetch_headers(
+                client.get(&models_url),
+                "",
+                Some("anthropic"),
+                custom_user_agent.as_deref(),
+                request_headers.as_ref(),
+            )
+            .header("x-api-key", api_key.trim())
+            .header("anthropic-version", "2023-06-01")
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {e}"))?;
             let status = response.status();
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
@@ -504,17 +689,22 @@ pub async fn fetch_provider_models_detailed(
             models.dedup_by(|a, b| a.id == b.id);
             Ok(models)
         }
-        "codex" | "openclaw" | "opencode" => {
+        "codex" | "grokbuild" | "openclaw" | "opencode" | "hermes" => {
             if api_key.trim().is_empty() {
                 return Err("API key is required".to_string());
             }
             let models_url = build_openai_models_url(&base_url, use_full_url)?;
-            let response = client
-                .get(&models_url)
-                .header("authorization", format!("Bearer {}", api_key.trim()))
-                .send()
-                .await
-                .map_err(|e| format!("Request failed: {e}"))?;
+            let response = apply_model_fetch_headers(
+                client.get(&models_url),
+                "",
+                Some("openai"),
+                custom_user_agent.as_deref(),
+                request_headers.as_ref(),
+            )
+            .header("authorization", format!("Bearer {}", api_key.trim()))
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {e}"))?;
             let status = response.status();
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
@@ -551,11 +741,16 @@ pub async fn fetch_provider_models_detailed(
             let mut url = Url::parse(&build_gemini_models_url(&base_url, use_full_url)?)
                 .map_err(|e| format!("Invalid URL: {e}"))?;
             url.query_pairs_mut().append_pair("key", api_key.trim());
-            let response = client
-                .get(url)
-                .send()
-                .await
-                .map_err(|e| format!("Request failed: {e}"))?;
+            let response = apply_model_fetch_headers(
+                client.get(url),
+                "",
+                Some("gemini"),
+                custom_user_agent.as_deref(),
+                request_headers.as_ref(),
+            )
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {e}"))?;
             let status = response.status();
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();

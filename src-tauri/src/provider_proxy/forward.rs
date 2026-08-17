@@ -2,6 +2,7 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, Response, StatusCode};
 use bytes::Bytes;
+use serde_json::Value;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -28,7 +29,8 @@ use super::{
     build_proxy_error, build_upstream_request_url, extract_request_insights,
     extract_upstream_target, is_hop_by_hop_header, is_retryable_upstream_status,
     next_proxy_request_id, parse_json_bytes, read_local_provider_proxy_settings_from_conn,
-    reqwest_client, transform_claude_request_body, ClaudeApiFormat, MAX_PROXY_BODY_BYTES,
+    read_response_body_limited, reqwest_client, transform_claude_request_body, ClaudeApiFormat,
+    MAX_PROXY_BODY_BYTES, MAX_PROXY_RESPONSE_BODY_BYTES,
 };
 
 #[allow(clippy::never_loop)]
@@ -38,7 +40,7 @@ pub(super) async fn forward_proxy_request(
     relative_path: String,
     request: Request<Body>,
 ) -> Response<Body> {
-    let settings = {
+    let (settings, proxy_url) = {
         let db = app_handle.state::<DbState>();
         let conn = match db.0.lock() {
             Ok(conn) => conn,
@@ -49,7 +51,17 @@ pub(super) async fn forward_proxy_request(
                 );
             }
         };
-        read_local_provider_proxy_settings_from_conn(&conn)
+        let proxy_url = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'proxy_url'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+        (
+            read_local_provider_proxy_settings_from_conn(&conn),
+            proxy_url,
+        )
     };
 
     if !settings.enabled_apps.iter().any(|item| item == &tool_id) {
@@ -80,7 +92,7 @@ pub(super) async fn forward_proxy_request(
     let profile_candidate_count = profile_candidates.len();
 
     let method = request.method().clone();
-    let client = match reqwest_client() {
+    let client = match reqwest_client(proxy_url.as_deref()) {
         Ok(client) => client,
         Err(error) => return build_proxy_error(StatusCode::BAD_GATEWAY, error),
     };
@@ -181,6 +193,7 @@ pub(super) async fn forward_proxy_request(
                         request_query.as_deref(),
                         api_format,
                         upstream.is_github_copilot,
+                        upstream.is_codex_oauth,
                         Some(body_bytes.as_ref()),
                     );
                     let transformed_body =
@@ -197,8 +210,13 @@ pub(super) async fn forward_proxy_request(
                 ),
             };
 
+        let effective_body_bytes = apply_local_proxy_body_override(
+            effective_body_bytes,
+            upstream.request_body_override.as_ref(),
+        );
         let optimizer_result = apply_proxy_optimizers(
             &tool_id,
+            upstream.is_codex_oauth,
             effective_body_bytes,
             &original_headers,
             &optimizer_config,
@@ -230,6 +248,9 @@ pub(super) async fn forward_proxy_request(
                     builder = builder.header(name, value);
                 }
                 for (name, value) in &upstream.headers {
+                    builder = builder.header(name, value);
+                }
+                for (name, value) in &upstream.request_header_overrides {
                     builder = builder.header(name, value);
                 }
                 for (name, value) in &optimizer_extra_headers {
@@ -350,8 +371,13 @@ pub(super) async fn forward_proxy_request(
                         });
 
                         if is_json_response && (!is_stream_response || !status.is_success()) {
-                            match response.bytes().await {
-                                Ok(bytes) => {
+                            match read_response_body_limited(
+                                response,
+                                MAX_PROXY_RESPONSE_BODY_BYTES,
+                            )
+                            .await
+                            {
+                                Ok((_response_status, headers, bytes)) => {
                                     let parsed = parse_json_bytes(&bytes);
                                     let upstream_error_message = parsed
                                         .as_ref()
@@ -559,7 +585,7 @@ pub(super) async fn forward_proxy_request(
                                         let gemini_model = request_insights
                                             .request_model
                                             .clone()
-                                            .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+                                            .unwrap_or_else(|| "gemini-3.6-flash".to_string());
                                         Body::from_stream(create_usage_tracking_stream(
                                             create_anthropic_sse_stream_from_gemini(
                                                 response.bytes_stream(),
@@ -621,7 +647,35 @@ pub(super) async fn forward_proxy_request(
                             status.as_u16(),
                             error_message.as_deref(),
                         );
-                        return build_forward_response(response);
+                        match read_response_body_limited(response, MAX_PROXY_RESPONSE_BODY_BYTES)
+                            .await
+                        {
+                            Ok((status, headers, bytes)) => {
+                                return build_forward_response_from_parts(
+                                    status,
+                                    &headers,
+                                    Body::from(bytes),
+                                );
+                            }
+                            Err(error) => {
+                                let message = format!(
+                                    "Failed to read upstream response body for {} ({}/{}): {error}",
+                                    upstream.profile_name, tool_id, upstream.profile_id
+                                );
+                                log_proxy_request(
+                                    &app_handle,
+                                    &request_id,
+                                    &tool_id,
+                                    &upstream,
+                                    &request_insights,
+                                    None,
+                                    latency_ms,
+                                    StatusCode::BAD_GATEWAY.as_u16(),
+                                    Some(&message),
+                                );
+                                return build_proxy_error(StatusCode::BAD_GATEWAY, message);
+                            }
+                        }
                     }
                     Err(error) => {
                         let message = format!(
@@ -692,4 +746,60 @@ pub(super) async fn forward_proxy_request(
         StatusCode::BAD_GATEWAY,
         last_error.unwrap_or_else(|| format!("No upstream provider available for {tool_id}")),
     )
+}
+
+fn apply_local_proxy_body_override(body: Bytes, override_value: Option<&Value>) -> Bytes {
+    let Some(override_value) = override_value else {
+        return body;
+    };
+    let Ok(mut target) = serde_json::from_slice::<Value>(&body) else {
+        return body;
+    };
+    if !target.is_object() || !override_value.is_object() {
+        return body;
+    }
+    merge_json_objects(&mut target, override_value);
+    serde_json::to_vec(&target).map(Bytes::from).unwrap_or(body)
+}
+
+fn merge_json_objects(target: &mut Value, overrides: &Value) {
+    let Some(target_object) = target.as_object_mut() else {
+        *target = overrides.clone();
+        return;
+    };
+    let Some(override_object) = overrides.as_object() else {
+        *target = overrides.clone();
+        return;
+    };
+    for (key, value) in override_object {
+        if let Some(current) = target_object.get_mut(key) {
+            if current.is_object() && value.is_object() {
+                merge_json_objects(current, value);
+                continue;
+            }
+        }
+        target_object.insert(key.clone(), value.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_local_proxy_body_override;
+    use bytes::Bytes;
+    use serde_json::json;
+
+    #[test]
+    fn local_proxy_body_override_deep_merges_json_without_stream() {
+        let body =
+            Bytes::from(r#"{"model":"demo","generationConfig":{"temperature":0.7},"stream":true}"#);
+        let result = apply_local_proxy_body_override(
+            body,
+            Some(&json!({ "generationConfig": { "temperature": 0.2 }, "max_tokens": 64 })),
+        );
+        let value: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(value["model"], "demo");
+        assert_eq!(value["generationConfig"]["temperature"], 0.2);
+        assert_eq!(value["max_tokens"], 64);
+        assert_eq!(value["stream"], true);
+    }
 }

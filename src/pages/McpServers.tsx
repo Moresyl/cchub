@@ -1,20 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  RefreshCw,
-  Edit3,
-  X,
-  Plug,
-  Copy,
-  Check,
-  Activity,
-  FileText,
-  Share2,
-  MonitorCheck,
-  Upload,
-  PackagePlus,
-} from "lucide-react";
+import { RefreshCw, X, Plug, Activity, MonitorCheck, Upload, PackagePlus, Search } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -27,13 +14,12 @@ import { useMcpValidation, type McpWizardDraft } from "../hooks/useMcpValidation
 import { fetchMcpServersPageData, queryKeys } from "../hooks/queries";
 import {
   useInstallMcpServerMutation,
+  useBulkToggleMcpAppMutation,
   useToggleMcpServerMutation,
   useUninstallMcpServerMutation,
   useUpdateMcpServerConfigMutation,
 } from "../hooks/mutations";
 import { MANAGED_APPS, type ManagedAppId } from "../lib/appPreferences";
-const CodeEditor = lazy(() => import("../components/CodeEditor"));
-
 import {
   formatJson,
   type HealthCheckResult,
@@ -43,6 +29,17 @@ import {
 } from "./mcp-servers/helpers";
 import McpServerEditView from "./mcp-servers/EditView";
 import McpServerWizardView from "./mcp-servers/WizardView";
+import McpServerDetailPanel from "./mcp-servers/DetailPanel";
+
+const MCP_SYNCABLE_APPS = [
+  { id: "claude", label: "Claude" },
+  { id: "claude-desktop", label: "Claude Desktop" },
+  { id: "codex", label: "Codex" },
+  { id: "gemini", label: "Gemini" },
+  { id: "grokbuild", label: "Grok Build" },
+  { id: "opencode", label: "OpenCode" },
+  { id: "hermes", label: "Hermes" },
+] as const;
 
 export default function McpServers() {
   const queryClient = useQueryClient();
@@ -82,11 +79,16 @@ export default function McpServers() {
     argsText: "",
     envText: "",
   });
+  const [search, setSearch] = useState("");
+  const [bulkApp, setBulkApp] = useState<string>(MCP_SYNCABLE_APPS[0].id);
+  const [serverAppStatus, setServerAppStatus] = useState<Record<string, Record<string, boolean>>>({});
+  const [appStatusLoading, setAppStatusLoading] = useState(false);
   const i = t();
   const zh = getLocale() === "zh";
   const wizardValidation = useMcpValidation(wizardDraft);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
   const toggleMcpServerMutation = useToggleMcpServerMutation();
+  const bulkToggleMcpAppMutation = useBulkToggleMcpAppMutation();
   const uninstallMcpServerMutation = useUninstallMcpServerMutation();
   const updateMcpServerConfigMutation = useUpdateMcpServerConfigMutation();
   const installMcpServerMutation = useInstallMcpServerMutation<McpServer>();
@@ -113,9 +115,25 @@ export default function McpServers() {
         setSelected((current) =>
           current ? (data.servers.find((server) => server.id === current.id) ?? current) : current,
         );
+        setAppStatusLoading(true);
+        const statusResults = await Promise.allSettled(
+          data.servers.map(
+            async (server) =>
+              [
+                server.id,
+                await invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: server.name }),
+              ] as const,
+          ),
+        );
+        const nextStatus: Record<string, Record<string, boolean>> = {};
+        for (const result of statusResults) {
+          if (result.status === "fulfilled") nextStatus[result.value[0]] = result.value[1];
+        }
+        setServerAppStatus(nextStatus);
       } catch (e) {
         setLoadError(String(e));
       } finally {
+        setAppStatusLoading(false);
         setLoading(false);
       }
     },
@@ -289,7 +307,12 @@ export default function McpServers() {
         } else {
           await invoke("sync_mcp_server_to_tool", { serverName: selected.name, targetTool: toolId });
         }
-        setToolSyncStatus((prev) => ({ ...prev, [toolId]: !isSynced }));
+        const nextSynced = !isSynced;
+        setToolSyncStatus((prev) => ({ ...prev, [toolId]: nextSynced }));
+        setServerAppStatus((prev) => ({
+          ...prev,
+          [selected.id]: { ...(prev[selected.id] ?? {}), [toolId]: nextSynced },
+        }));
       } catch (e) {
         console.error(e);
       } finally {
@@ -322,15 +345,63 @@ export default function McpServers() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [selected]);
-
   const handleSelectServer = useCallback((server: McpServer) => {
     setSelected(server);
     setEditing(false);
     setSaveSuccess(false);
-    invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: server.name })
+    void invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: server.name })
       .then(setToolSyncStatus)
       .catch(() => setToolSyncStatus({}));
   }, []);
+  const handleBulkToggle = useCallback(
+    async (enabled: boolean) => {
+      if (bulkToggleMcpAppMutation.isPending || appStatusLoading || servers.length === 0) return;
+      const serverIds = servers
+        .filter((server) => Boolean(serverAppStatus[server.id]?.[bulkApp]) !== enabled)
+        .map((server) => server.id);
+      if (serverIds.length === 0) {
+        showToast("success", zh ? "所有服务已经是目标状态" : "All servers already have the requested state");
+        return;
+      }
+      const result = await bulkToggleMcpAppMutation.mutateAsync({ serverIds, app: bulkApp, enabled });
+      setServerAppStatus((current) => {
+        const next = { ...current };
+        for (const serverId of result.succeeded) {
+          next[serverId] = { ...(next[serverId] ?? {}), [bulkApp]: enabled };
+        }
+        return next;
+      });
+      if (result.failed.length > 0) {
+        showToast("error", tReplace(i.mcp.bulkFailed, { count: result.failed.length }));
+      } else {
+        showToast("success", enabled ? i.mcp.bulkEnable : i.mcp.bulkDisable);
+      }
+    },
+    [appStatusLoading, bulkApp, bulkToggleMcpAppMutation, i.mcp, servers, serverAppStatus, zh],
+  );
+  const filteredServers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return servers;
+    return servers.filter((server) => {
+      // Keep this allow-list free of env values and credentials.
+      const searchable = [
+        server.id,
+        server.name,
+        server.command,
+        server.args,
+        server.transport,
+        server.source,
+        server.package_name,
+        server.version,
+        server.config_path,
+      ];
+      return searchable.some((value) => value?.toLowerCase().includes(query));
+    });
+  }, [search, servers]);
+  const bulkEnabledCount = servers.reduce(
+    (count, server) => count + (serverAppStatus[server.id]?.[bulkApp] ? 1 : 0),
+    0,
+  );
 
   const handleEditServer = useCallback(
     (server: McpServer) => {
@@ -483,6 +554,72 @@ export default function McpServers() {
         </div>
       </div>
 
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <div style={{ position: "relative", flex: "1 1 280px", minWidth: 220 }}>
+          <Search
+            size={14}
+            style={{
+              position: "absolute",
+              left: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--text-muted)",
+            }}
+          />
+          <input
+            className="input"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={i.mcp.searchPlaceholder}
+            aria-label={i.mcp.searchPlaceholder}
+            style={{ width: "100%", paddingLeft: 32 }}
+          />
+        </div>
+        <div
+          className="section-card"
+          style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", flex: "0 1 auto" }}
+        >
+          <span style={{ fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{i.mcp.bulkApp}</span>
+          <select
+            className="input"
+            value={bulkApp}
+            onChange={(event) => setBulkApp(event.target.value)}
+            disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending}
+            style={{ minWidth: 130, width: "auto", padding: "5px 8px" }}
+          >
+            {MCP_SYNCABLE_APPS.map((app) => (
+              <option key={app.id} value={app.id}>
+                {app.label}
+              </option>
+            ))}
+          </select>
+          <span className="badge badge-muted" title={zh ? "已同步数量 / 总数量" : "Synced / total"}>
+            {appStatusLoading ? "..." : `${bulkEnabledCount}/${servers.length}`}
+          </span>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => void handleBulkToggle(true)}
+            disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
+          >
+            {bulkToggleMcpAppMutation.isPending ? i.mcp.bulkRunning : i.mcp.bulkEnable}
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => void handleBulkToggle(false)}
+            disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
+          >
+            {i.mcp.bulkDisable}
+          </button>
+        </div>
+      </div>
+      {search.trim() && (
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+          {zh
+            ? `显示 ${filteredServers.length} / ${servers.length} 个服务`
+            : `Showing ${filteredServers.length} of ${servers.length} servers`}
+        </div>
+      )}
+
       {wizardOpen && (
         <McpServerWizardView
           i={i}
@@ -572,7 +709,7 @@ export default function McpServers() {
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 24, flex: 1, minHeight: 0 }}>
           {/* Server List */}
           <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
-            {servers.map((server) => (
+            {filteredServers.map((server) => (
               <McpServerCard
                 key={server.id}
                 server={server}
@@ -603,197 +740,22 @@ export default function McpServers() {
           {/* Detail Panel */}
           <div style={{ overflowY: "auto" }}>
             {selected ? (
-              <div className="section-card" style={{ position: "sticky", top: 0 }}>
-                {/* Panel Header */}
-                <div
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span
-                      className={`dot ${selected.status === "active" ? "dot-active" : selected.status === "error" ? "dot-error" : "dot-disabled"}`}
-                    />
-                    <h3 style={{ fontSize: 15, fontWeight: 700 }}>{selected.name}</h3>
-                    {selected.version && (
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>v{selected.version}</span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn btn-ghost btn-icon-sm" onClick={copyConfig} title="Copy config">
-                      {copied ? <Check size={14} style={{ color: "var(--success)" }} /> : <Copy size={14} />}
-                    </button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => startEdit(selected)}>
-                      <Edit3 size={14} />
-                      {i.mcp.editConfig}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Save success indicator */}
-                {saveSuccess && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      marginBottom: 16,
-                      padding: "8px 12px",
-                      borderRadius: 6,
-                      background: "var(--success-subtle)",
-                    }}
-                  >
-                    <Check size={14} style={{ color: "var(--success)" }} />
-                    <span style={{ fontSize: 12, color: "var(--success)", fontWeight: 500 }}>
-                      {zh ? "已保存到配置文件" : "Saved to config file"}
-                    </span>
-                  </div>
-                )}
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                  {/* Status badges */}
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span
-                      className={`badge ${selected.status === "active" ? "badge-success" : selected.status === "error" ? "badge-danger" : "badge-muted"}`}
-                    >
-                      {selected.status === "active" ? i.mcp.active : i.mcp.disabled}
-                    </span>
-                    <span className="badge badge-muted">{selected.transport}</span>
-                    <span className={`badge ${getSourceBadge(selected.source)}`}>
-                      {getSourceLabel(selected.source)}
-                    </span>
-                  </div>
-
-                  {/* Config Path */}
-                  {selected.config_path && (
-                    <div>
-                      <span className="field-label">{i.mcp.configPath}</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <FileText size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-                        <span
-                          style={{
-                            fontSize: 11,
-                            fontFamily: "'JetBrains Mono', monospace",
-                            color: "var(--text-secondary)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {selected.config_path}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Health Status */}
-                  {healthResults[selected.id] &&
-                    (() => {
-                      const h = healthResults[selected.id];
-                      return (
-                        <div>
-                          <span className="field-label">{i.mcp.healthStatus}</span>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                              <span
-                                className={`badge ${h.status === "healthy" ? "badge-success" : h.status === "unhealthy" ? "badge-danger" : "badge-muted"}`}
-                              >
-                                {h.status === "healthy"
-                                  ? i.mcp.healthy
-                                  : h.status === "unhealthy"
-                                    ? i.mcp.unhealthy
-                                    : i.mcp.unknown}
-                              </span>
-                              <span className={`badge ${h.command_exists ? "badge-success" : "badge-danger"}`}>
-                                {i.mcp.commandExists}: {h.command_exists ? "✓" : "✗"}
-                              </span>
-                              {h.latency_ms != null && (
-                                <span className="badge badge-muted">
-                                  {i.mcp.latency}: {h.latency_ms}ms
-                                </span>
-                              )}
-                            </div>
-                            {h.error_message && (
-                              <div className="code-block" style={{ fontSize: 11, color: "var(--danger)" }}>
-                                {h.error_message}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                  {/* Command */}
-                  <div>
-                    <span className="field-label">{i.mcp.command}</span>
-                    <div className="code-block" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
-                      {selected.command || i.common.na}
-                    </div>
-                  </div>
-
-                  {/* Arguments */}
-                  <div>
-                    <span className="field-label">{i.mcp.arguments}</span>
-                    <CodeEditor
-                      value={formatJson(selected.args)}
-                      language="json"
-                      readOnly
-                      minHeight={80}
-                      maxHeight={180}
-                    />
-                  </div>
-
-                  {/* Environment */}
-                  <div>
-                    <span className="field-label">{i.mcp.environment}</span>
-                    <CodeEditor
-                      value={(() => {
-                        try {
-                          const e = JSON.parse(selected.env);
-                          return Object.keys(e).length ? JSON.stringify(e, null, 2) : "{}";
-                        } catch {
-                          return selected.env;
-                        }
-                      })()}
-                      language="json"
-                      readOnly
-                      minHeight={80}
-                      maxHeight={180}
-                    />
-                  </div>
-
-                  {/* Sync to other tools */}
-                  {installedTools.length > 0 && (
-                    <div>
-                      <span className="field-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <Share2 size={12} />
-                        {zh ? "同步到其他工具" : "Sync to other tools"}
-                      </span>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {installedTools.map((tool) => {
-                          const isSynced = toolSyncStatus[tool.id] || false;
-                          return (
-                            <button
-                              key={tool.id}
-                              className={`btn btn-xs ${isSynced ? "btn-primary" : "btn-secondary"}`}
-                              style={{ gap: 4, textTransform: "capitalize" }}
-                              disabled={syncingTo === tool.id}
-                              onClick={() => toggleToolSync(tool.id)}
-                            >
-                              {syncingTo === tool.id ? (
-                                <div className="spinner" style={{ width: 11, height: 11 }} />
-                              ) : isSynced ? (
-                                <Check size={11} />
-                              ) : (
-                                <Share2 size={11} />
-                              )}
-                              {tool.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <McpServerDetailPanel
+                selected={selected}
+                i={i}
+                zh={zh}
+                copied={copied}
+                copyConfig={copyConfig}
+                startEdit={startEdit}
+                saveSuccess={saveSuccess}
+                healthResult={healthResults[selected.id]}
+                getSourceBadge={getSourceBadge}
+                getSourceLabel={getSourceLabel}
+                installedTools={installedTools}
+                toolSyncStatus={toolSyncStatus}
+                syncingTo={syncingTo}
+                toggleToolSync={toggleToolSync}
+              />
             ) : (
               <div
                 className="card"
@@ -805,7 +767,6 @@ export default function McpServers() {
           </div>
         </div>
       )}
-
       <ConfirmDialog
         isOpen={!!pendingDelete}
         title={i.mcp?.remove || "移除"}

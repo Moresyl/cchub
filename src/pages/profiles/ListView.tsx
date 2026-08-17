@@ -6,6 +6,7 @@ import ProfileCard from "../../components/ProfileCard";
 import ProfileToolFilterTab from "../../components/ProfileToolFilterTab";
 import LoadingState from "../../components/states/LoadingState";
 import EmptyState from "../../components/states/EmptyState";
+import UniversalProviderManager from "../../components/UniversalProviderManager";
 
 import {
   TOOL_ICONS,
@@ -41,6 +42,7 @@ interface ProfilesListViewProps {
   dragOverProfileId: string | null;
   pingingId: string | null;
   streamCheckingId: string | null;
+  batchStreamChecking: boolean;
   applying: string | null;
   profileCardText: any;
   handleRefreshProfiles: () => void;
@@ -54,6 +56,8 @@ interface ProfilesListViewProps {
   handleCardDrop: (profileId: string) => void;
   handlePing: (profile: ConfigProfile) => void;
   handleStreamCheck: (profile: ConfigProfile) => void;
+  handleUsage: (profile: ConfigProfile) => void;
+  handleStreamCheckAll: () => void;
   doApply: (profile: ConfigProfile) => void;
   handleDuplicate: (profile: ConfigProfile) => void;
   openEditModal: (profile: ConfigProfile) => void;
@@ -95,6 +99,17 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
               {locale === "zh" ? "刷新" : "Refresh"}
             </button>
             <button
+              className="btn btn-secondary btn-sm"
+              onClick={props.handleStreamCheckAll}
+              disabled={props.batchStreamChecking}
+              style={{ gap: 6 }}
+            >
+              <RefreshCw size={14} />
+              {props.batchStreamChecking
+                ? localeText("检查中...", "Checking...", "確認中...")
+                : localeText("全量流检", "Check all streams", "全体ストリーム確認")}
+            </button>
+            <button
               className="btn btn-primary btn-sm"
               onClick={props.handleOpenCreateProfile}
               disabled={installedTools.length === 0}
@@ -106,6 +121,12 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
           </div>
         )}
       </div>
+
+      <UniversalProviderManager
+        locale={locale}
+        localeText={localeText}
+        onProfilesChanged={props.handleRefreshProfiles}
+      />
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 360 }}>
@@ -224,6 +245,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
                 onDrop={props.handleCardDrop}
                 onPing={props.handlePing}
                 onStreamCheck={props.handleStreamCheck}
+                onUsage={props.handleUsage}
                 onApply={props.doApply}
                 onDuplicate={props.handleDuplicate}
                 onEdit={props.openEditModal}

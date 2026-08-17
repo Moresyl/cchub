@@ -707,6 +707,10 @@ pub fn build_session_resume_command(
         "gemini" => Ok(gemini_resume_command(session_id)),
         "opencode" => Ok(opencode_resume_command(session_id)),
         "openclaw" => openclaw_resume_command(source_path, session_id),
+        "pi" => Ok(format!(
+            "pi --session {}",
+            shell_single_quote(source_path.unwrap_or(session_id))
+        )),
         _ => Err(format!("Session restore is not supported for {tool_id}")),
     }
 }

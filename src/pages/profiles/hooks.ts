@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { showToast } from "../../components/Toast";
@@ -12,19 +12,78 @@ import {
   type StructuredDraftFields,
 } from "../../lib/configProfiles";
 
-import { formatModelFetchError, prettyJson, supportsModelFetch, type ConfigProfile } from "./helpers";
+import {
+  formatModelFetchError,
+  prettyJson,
+  supportsModelFetch,
+  type ConfigProfile,
+  type ProviderStreamCheckResult,
+} from "./helpers";
 import { mergeSharedDraftFields } from "./draftMerge";
 
 type LocaleText = (zh: string, en: string, ja?: string) => string;
+
+interface BatchStreamCheckContext {
+  localeText: LocaleText;
+  setChecking: (value: boolean) => void;
+  setResults: Dispatch<SetStateAction<Record<string, ProviderStreamCheckResult>>>;
+}
+
+export async function performBatchStreamCheck(ctx: BatchStreamCheckContext): Promise<void> {
+  if (localStorage.getItem("cchub-stream-check-confirmed") !== "1") {
+    const confirmed = window.confirm(
+      ctx.localeText(
+        "全量流检会向每个配置的供应商发送最小流式请求，可能消耗额度。继续吗？",
+        "Batch stream checks send a minimal streaming request to every configured provider and may consume quota. Continue?",
+        "全体ストリーム確認は各 Provider に最小ストリームリクエストを送り、クォータを消費する場合があります。続行しますか？",
+      ),
+    );
+    if (!confirmed) return;
+    localStorage.setItem("cchub-stream-check-confirmed", "1");
+  }
+
+  ctx.setChecking(true);
+  try {
+    const results = await invoke<ProviderStreamCheckResult[]>("stream_check_all_config_profiles");
+    ctx.setResults((current) => ({
+      ...current,
+      ...Object.fromEntries(results.map((result) => [result.profile_id, result])),
+    }));
+    const healthy = results.filter((result) => result.status === "healthy").length;
+    showToast(
+      "success",
+      ctx.localeText(
+        `全量流检完成：${healthy}/${results.length} 健康`,
+        `Batch stream check complete: ${healthy}/${results.length} healthy`,
+        `全体ストリーム確認完了: ${healthy}/${results.length} healthy`,
+      ),
+    );
+  } catch (error) {
+    showToast(
+      "error",
+      ctx.localeText(
+        `全量流检失败: ${error}`,
+        `Batch stream check failed: ${error}`,
+        `全体ストリーム確認に失敗: ${error}`,
+      ),
+    );
+  } finally {
+    ctx.setChecking(false);
+  }
+}
 
 // 把页面里十几个 boolean / list state 的 setter 一起塞进来；
 // 不在这里 useCallback，因为 caller 已经把 deps 锁定好了。
 interface FetchModelsContext {
   fetchingModels: boolean;
   draftTool: string;
+  draftProviderType: string;
+  draftOAuthAccountId: string;
   draftApiKey: string;
   draftUseFullUrl: boolean;
   draftBaseUrl: string;
+  draftCustomUserAgent: string;
+  draftRequestHeaders: Record<string, string>;
   localeText: LocaleText;
   setFetchingModels: (v: boolean) => void;
   setModelFetchError: (v: string | null) => void;
@@ -34,6 +93,89 @@ interface FetchModelsContext {
 
 export async function performFetchModels(ctx: FetchModelsContext): Promise<void> {
   if (ctx.fetchingModels || !supportsModelFetch(ctx.draftTool)) return;
+  if (ctx.draftProviderType === "github_copilot") {
+    ctx.setFetchingModels(true);
+    ctx.setModelFetchError(null);
+    try {
+      const models = await invoke<Array<{ id: string; name: string; vendor: string }>>("copilot_get_models", {
+        accountId: ctx.draftOAuthAccountId.trim() || null,
+      });
+      const details = models.map((model) => ({
+        id: model.id,
+        display_name: model.name,
+        context_window: null,
+        max_output_tokens: null,
+        input_price: null,
+        output_price: null,
+      }));
+      ctx.setFetchedModelDetails(details);
+      ctx.setFetchedModels(models.map((model) => model.id));
+    } catch (error) {
+      const message = formatModelFetchError(error, ctx.localeText);
+      ctx.setModelFetchError(message);
+      ctx.setFetchedModelDetails([]);
+      ctx.setFetchedModels([]);
+    } finally {
+      ctx.setFetchingModels(false);
+    }
+    return;
+  }
+  if (ctx.draftProviderType === "codex_oauth") {
+    ctx.setFetchingModels(true);
+    ctx.setModelFetchError(null);
+    try {
+      const models = await invoke<Array<{ id: string; displayName?: string | null; ownedBy?: string | null }>>(
+        "get_codex_oauth_models",
+        { accountId: ctx.draftOAuthAccountId.trim() || null },
+      );
+      const details = models.map((model) => ({
+        id: model.id,
+        display_name: model.displayName ?? model.id,
+        context_window: null,
+        max_output_tokens: null,
+        input_price: null,
+        output_price: null,
+      }));
+      ctx.setFetchedModelDetails(details);
+      ctx.setFetchedModels(models.map((model) => model.id));
+    } catch (error) {
+      const message = formatModelFetchError(error, ctx.localeText);
+      ctx.setModelFetchError(message);
+      ctx.setFetchedModelDetails([]);
+      ctx.setFetchedModels([]);
+    } finally {
+      ctx.setFetchingModels(false);
+    }
+    return;
+  }
+  if (ctx.draftProviderType === "xai_oauth") {
+    ctx.setFetchingModels(true);
+    ctx.setModelFetchError(null);
+    try {
+      const models = await invoke<Array<{ id: string; displayName?: string | null; ownedBy?: string | null }>>(
+        "get_xai_oauth_models",
+        { accountId: ctx.draftOAuthAccountId.trim() || null },
+      );
+      const details = models.map((model) => ({
+        id: model.id,
+        display_name: model.displayName ?? model.id,
+        context_window: null,
+        max_output_tokens: null,
+        input_price: null,
+        output_price: null,
+      }));
+      ctx.setFetchedModelDetails(details);
+      ctx.setFetchedModels(models.map((model) => model.id));
+    } catch (error) {
+      const message = formatModelFetchError(error, ctx.localeText);
+      ctx.setModelFetchError(message);
+      ctx.setFetchedModelDetails([]);
+      ctx.setFetchedModels([]);
+    } finally {
+      ctx.setFetchingModels(false);
+    }
+    return;
+  }
   if (!ctx.draftApiKey.trim()) {
     showToast(
       "error",
@@ -65,6 +207,8 @@ export async function performFetchModels(ctx: FetchModelsContext): Promise<void>
       baseUrl: ctx.draftBaseUrl,
       apiKey: ctx.draftApiKey,
       useFullUrl: ctx.draftUseFullUrl,
+      customUserAgent: ctx.draftCustomUserAgent,
+      requestHeaders: ctx.draftRequestHeaders,
     });
     ctx.setFetchedModelDetails(details);
     const models = details.map((m) => m.id);
@@ -166,6 +310,7 @@ export function useProfileCardText(locale: string) {
         locale === "zh" ? "先选择单个工具并清空搜索后再排序" : "Filter to one tool and clear search to reorder",
       pingTitle: locale === "zh" ? "端点测速" : "Ping endpoint",
       streamTitle: locale === "zh" ? "流式健康检查" : "Stream health check",
+      usageTitle: locale === "zh" ? "查询用量" : "Query usage",
       duplicateTitle: locale === "zh" ? "复制" : "Duplicate",
       editTitle: locale === "zh" ? "编辑" : "Edit",
       deleteTitle: locale === "zh" ? "删除" : "Delete",
@@ -174,6 +319,31 @@ export function useProfileCardText(locale: string) {
     }),
     [locale],
   );
+}
+
+export function useProfileDragHandlers(options: {
+  reorderEnabled: boolean;
+  draggingProfileId: string | null;
+  setDraggingProfileId: (value: string | null) => void;
+  setDragOverProfileId: (value: string | null) => void;
+  reorderProfiles: (draggingId: string, targetId: string) => void | Promise<void>;
+}) {
+  const handleCardDragStart = (profileId: string) => options.setDraggingProfileId(profileId);
+  const handleCardDragEnter = (profileId: string) => {
+    if (options.reorderEnabled && options.draggingProfileId && options.draggingProfileId !== profileId) {
+      options.setDragOverProfileId(profileId);
+    }
+  };
+  const handleCardDragEnd = () => {
+    options.setDraggingProfileId(null);
+    options.setDragOverProfileId(null);
+  };
+  const handleCardDrop = (profileId: string) => {
+    if (options.reorderEnabled && options.draggingProfileId) {
+      void options.reorderProfiles(options.draggingProfileId, profileId);
+    }
+  };
+  return { handleCardDragStart, handleCardDragEnter, handleCardDragEnd, handleCardDrop };
 }
 
 // 把编辑入口里大段的 setState 序列收到这里，Profiles.tsx 只保留薄包装。

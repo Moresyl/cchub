@@ -148,12 +148,9 @@ fn candidate_home_dirs() -> Vec<PathBuf> {
 }
 
 pub fn compatible_db_paths() -> Vec<PathBuf> {
-    let compat_dir = [".cc", "switch"].join("-");
-    let compat_db = ["cc", "switch.db"].join("-");
-
     candidate_home_dirs()
         .into_iter()
-        .map(|home| home.join(&compat_dir).join(&compat_db))
+        .map(|home| home.join(".cchub").join("cchub.db"))
         .filter(|path| path.exists())
         .collect()
 }
@@ -177,7 +174,7 @@ pub(crate) fn ensure_official_config_profiles_seeded(
     let seeded_at = chrono::Utc::now().to_rfc3339();
     let codex_config = [
         r#"model_provider = "custom""#,
-        r#"model = "gpt-5.4""#,
+        r#"model = "gpt-5.6-sol""#,
         r#"model_reasoning_effort = "high""#,
         "disable_response_storage = true",
         "",
@@ -207,6 +204,21 @@ pub(crate) fn ensure_official_config_profiles_seeded(
             .to_string(),
         ),
         (
+            "grokbuild",
+            "Grok Official",
+            serde_json::json!({
+                "baseUrl": "https://api.x.ai/v1",
+                "model": "grok-4.5",
+                "providerType": "xai_oauth",
+                "metadata": {
+                    "category": "official",
+                    "websiteUrl": "https://x.ai/",
+                    "seededAt": seeded_at,
+                },
+            })
+            .to_string(),
+        ),
+        (
             "codex",
             "OpenAI Official",
             serde_json::json!({
@@ -226,7 +238,7 @@ pub(crate) fn ensure_official_config_profiles_seeded(
             serde_json::json!({
                 "env": {
                     "GOOGLE_GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
-                    "GEMINI_MODEL": "gemini-2.5-pro",
+                    "GEMINI_MODEL": "gemini-3.6-flash",
                 },
                 "metadata": {
                     "category": "official",
@@ -272,8 +284,8 @@ pub(crate) fn ensure_official_config_profiles_seeded(
                     "apiKey": "",
                 },
                 "models": {
-                    "gpt-5.4": {
-                        "name": "gpt-5.4",
+                    "gpt-5.6-sol": {
+                        "name": "gpt-5.6-sol",
                     },
                 },
             })
@@ -347,6 +359,9 @@ pub fn apply_snapshot_if_profile_active(
 
     if active_profile_id.as_deref() == Some(profile_id) {
         apply_tool_snapshot(conn, tool_id, config_snapshot)?;
+        if tool_id == "claude" {
+            crate::commands::claude_extension::sync_for_profile(conn, config_snapshot)?;
+        }
     }
 
     Ok(())
@@ -569,7 +584,7 @@ pub fn normalize_external_profile_snapshot(tool_id: &str, settings_config: &str)
     let value: serde_json::Value = serde_json::from_str(settings_config).ok()?;
 
     match tool_id {
-        "claude" | "codex" | "gemini" => serde_json::to_string_pretty(&value).ok(),
+        "claude" | "codex" | "gemini" | "pi" => serde_json::to_string_pretty(&value).ok(),
         _ => None,
     }
 }

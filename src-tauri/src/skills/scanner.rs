@@ -1,9 +1,10 @@
 use super::tools::{detect_tools, detect_tools_for_conn};
 use super::updater;
+use crate::commands::extra_commands::configured_skill_storage_dir;
 use crate::db::models::{Plugin, Skill};
 use rusqlite::Connection;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize)]
@@ -201,8 +202,35 @@ fn scan_local_skills_with_conn(conn: Option<&Connection>) -> Vec<Skill> {
 
     // Scan standalone skills for every detected tool
     let detected_tools = conn.map(detect_tools_for_conn).unwrap_or_else(detect_tools);
+    let mut scanned_dirs = HashSet::new();
+    if let Some(conn) = conn {
+        if let Some(shared_dir) = configured_skill_storage_dir(conn) {
+            scanned_dirs.insert(shared_dir.clone());
+            if shared_dir.exists() {
+                let shared_tool = detected_tools
+                    .iter()
+                    .find(|tool| tool.installed)
+                    .map(|tool| tool.id.as_str())
+                    .unwrap_or("claude");
+                scan_skills_in_dir(
+                    &shared_dir,
+                    &mut skills,
+                    false,
+                    Some(shared_tool),
+                    &metadata_map,
+                );
+            }
+        }
+    }
     for tool in detected_tools.into_iter().filter(|tool| tool.installed) {
-        let skills_dir = PathBuf::from(&tool.skills_dir);
+        let skills_dir = conn
+            .and_then(|value| {
+                crate::commands::extra_commands::resolve_tool_skills_dir(value, &tool.id).ok()
+            })
+            .unwrap_or_else(|| PathBuf::from(&tool.skills_dir));
+        if !scanned_dirs.insert(skills_dir.clone()) {
+            continue;
+        }
         if skills_dir.exists() {
             scan_skills_in_dir(
                 &skills_dir,

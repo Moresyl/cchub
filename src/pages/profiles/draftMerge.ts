@@ -23,6 +23,11 @@ export function mergeSharedDraftFields(
     next.apiKeyUrl = parsed.apiKeyUrl || next.apiKeyUrl;
     next.category = parsed.category || next.category;
     next.endpointCandidates = parsed.endpointCandidates || next.endpointCandidates;
+    next.customEndpoints = parsed.customEndpoints.length ? parsed.customEndpoints : next.customEndpoints;
+    next.customUserAgent = parsed.customUserAgent || next.customUserAgent;
+    next.requestHeaders = Object.keys(parsed.requestHeaders).length ? parsed.requestHeaders : next.requestHeaders;
+    next.requestHeaderOverrides = parsed.requestHeaderOverrides || next.requestHeaderOverrides;
+    next.requestBodyOverrides = parsed.requestBodyOverrides || next.requestBodyOverrides;
     next.costMultiplier = parsed.costMultiplier || next.costMultiplier;
     next.requiresOAuth = parsed.requiresOAuth || next.requiresOAuth;
     next.providerType = parsed.providerType || next.providerType;

@@ -2,21 +2,27 @@
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
+use futures_util::StreamExt;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
+use crate::codex_oauth::CodexOAuthState;
 use crate::copilot_auth::{self, CopilotAuthState};
 use crate::provider_proxy_transform::{anthropic_to_openai, anthropic_to_responses};
+use crate::xai_oauth::XaiOAuthState;
 
 use super::profiles::{
     default_base_url_for_claude, default_base_url_for_codex, default_base_url_for_gemini,
-    extract_copilot_account_id, extract_cost_multiplier, extract_metadata_endpoint_candidates,
-    extract_provider_type, extract_use_full_url, filter_endpoint_candidates,
+    extract_bound_account_id, extract_copilot_account_id, extract_cost_multiplier,
+    extract_metadata_endpoint_candidates, extract_provider_type, extract_use_full_url,
+    filter_endpoint_candidates,
 };
-use super::{ClaudeApiFormat, ProxyRequestInsights, UpstreamTarget};
-
+use super::{ClaudeApiFormat, UpstreamTarget};
+#[path = "request_insights.rs"]
+mod request_insights;
+pub(super) use request_insights::extract_request_insights;
 pub(super) fn is_retryable_upstream_status(status: StatusCode) -> bool {
     matches!(
         status.as_u16(),
@@ -35,10 +41,14 @@ pub(super) async fn extract_upstream_target(
     let metadata_candidates = extract_metadata_endpoint_candidates(&parsed);
     let provider_type = extract_provider_type(&parsed);
     let is_github_copilot = provider_type.as_deref() == Some("github_copilot");
+    let is_codex_oauth = provider_type.as_deref() == Some("codex_oauth");
+    let is_xai_oauth = provider_type.as_deref() == Some("xai_oauth");
     let cost_multiplier = extract_cost_multiplier(&parsed);
     let use_full_url = extract_use_full_url(&parsed);
+    let transport_headers = extract_transport_headers(&parsed);
+    let (request_header_overrides, request_body_override) = extract_local_proxy_overrides(&parsed);
 
-    match tool_id {
+    let target = match tool_id {
         "claude" => {
             let env = parsed
                 .get("env")
@@ -71,6 +81,31 @@ pub(super) async fn extract_upstream_target(
                         )
                     })?;
                 copilot_auth::copilot_request_headers(&token)
+            } else if is_codex_oauth {
+                let account_id = extract_bound_account_id(&parsed, "codex_oauth");
+                let manager = app_handle.state::<CodexOAuthState>().0.clone();
+                let token = manager
+                    .get_valid_token(account_id.as_deref())
+                    .await
+                    .map_err(|error| {
+                        format!("Codex OAuth is not ready for provider {profile_name}: {error}")
+                    })?;
+                let mut headers = vec![("authorization".to_string(), format!("Bearer {token}"))];
+                if let Some(account_id) = account_id {
+                    headers.push(("chatgpt-account-id".to_string(), account_id));
+                }
+                headers.push(("originator".to_string(), "cchub".to_string()));
+                headers
+            } else if is_xai_oauth {
+                let account_id = extract_bound_account_id(&parsed, "xai_oauth");
+                let manager = app_handle.state::<XaiOAuthState>().0.clone();
+                let token = manager
+                    .get_valid_token(account_id.as_deref())
+                    .await
+                    .map_err(|error| {
+                        format!("xAI OAuth is not ready for provider {profile_name}: {error}")
+                    })?;
+                vec![("authorization".to_string(), format!("Bearer {token}"))]
             } else {
                 let token = env
                     .get("ANTHROPIC_AUTH_TOKEN")
@@ -92,7 +127,6 @@ pub(super) async fn extract_upstream_target(
                 }
             };
             let claude_api_format = ClaudeApiFormat::from_str(api_format);
-
             Ok(UpstreamTarget {
                 profile_id,
                 profile_name,
@@ -100,8 +134,11 @@ pub(super) async fn extract_upstream_target(
                 base_url,
                 use_full_url,
                 headers,
+                request_header_overrides: Vec::new(),
+                request_body_override: None,
                 claude_api_format: Some(claude_api_format),
                 is_github_copilot,
+                is_codex_oauth,
                 cost_multiplier,
             })
         }
@@ -121,7 +158,6 @@ pub(super) async fn extract_upstream_target(
                 .ok_or_else(|| {
                     format!("Provider {profile_name} does not define an OPENAI_API_KEY")
                 })?;
-
             Ok(UpstreamTarget {
                 profile_id,
                 profile_name,
@@ -129,8 +165,106 @@ pub(super) async fn extract_upstream_target(
                 base_url,
                 use_full_url,
                 headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                request_header_overrides: Vec::new(),
+                request_body_override: None,
                 claude_api_format: None,
                 is_github_copilot: false,
+                is_codex_oauth: false,
+                cost_multiplier,
+            })
+        }
+        "grokbuild" => {
+            let config = parsed
+                .get("config")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let config_value = config.parse::<toml::Value>().ok();
+            let selected_model = config_value
+                .as_ref()
+                .and_then(|value| value.get("models"))
+                .and_then(|value| value.get("default"))
+                .and_then(|value| value.as_str())
+                .or_else(|| parsed.get("model").and_then(Value::as_str))
+                .unwrap_or("grok-4.5");
+            let selected = config_value
+                .as_ref()
+                .and_then(|value| value.get("model"))
+                .and_then(|value| value.get(selected_model));
+            let legacy_provider = config_value.as_ref().and_then(|value| {
+                let provider_name = value.get("model_provider")?.as_str()?;
+                value.get("model_providers")?.get(provider_name)
+            });
+            let base_url = selected
+                .and_then(|value| value.get("base_url"))
+                .and_then(toml::Value::as_str)
+                .or_else(|| {
+                    legacy_provider
+                        .and_then(|value| value.get("base_url"))
+                        .and_then(toml::Value::as_str)
+                })
+                .or_else(|| parsed.get("baseUrl").and_then(Value::as_str))
+                .or_else(|| parsed.get("base_url").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("https://api.x.ai/v1")
+                .to_string();
+            let token = if is_xai_oauth {
+                let account_id = extract_bound_account_id(&parsed, "xai_oauth");
+                let manager = app_handle.state::<XaiOAuthState>().0.clone();
+                manager
+                    .get_valid_token(account_id.as_deref())
+                    .await
+                    .map_err(|error| {
+                        format!("xAI OAuth is not ready for provider {profile_name}: {error}")
+                    })?
+            } else {
+                selected
+                    .and_then(|value| value.get("api_key"))
+                    .and_then(toml::Value::as_str)
+                    .or_else(|| {
+                        legacy_provider
+                            .and_then(|value| value.get("api_key"))
+                            .and_then(toml::Value::as_str)
+                    })
+                    .or_else(|| parsed.get("apiKey").and_then(Value::as_str))
+                    .or_else(|| {
+                        parsed
+                            .get("auth")
+                            .and_then(|value| value.get("OPENAI_API_KEY"))
+                            .and_then(Value::as_str)
+                    })
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        selected
+                            .and_then(|value| value.get("env_key"))
+                            .and_then(toml::Value::as_str)
+                            .or_else(|| {
+                                legacy_provider
+                                    .and_then(|value| value.get("env_key"))
+                                    .and_then(|value| value.as_str())
+                            })
+                            .and_then(|key| std::env::var(key).ok())
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                    })
+                    .ok_or_else(|| {
+                        format!("Provider {profile_name} does not define a Grok Build API key")
+                    })?
+            };
+            Ok(UpstreamTarget {
+                profile_id,
+                profile_name,
+                candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
+                base_url,
+                use_full_url,
+                headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                request_header_overrides: Vec::new(),
+                request_body_override: None,
+                claude_api_format: None,
+                is_github_copilot: false,
+                is_codex_oauth: false,
                 cost_multiplier,
             })
         }
@@ -156,7 +290,6 @@ pub(super) async fn extract_upstream_target(
                 .ok_or_else(|| {
                     format!("Provider {profile_name} does not define a Gemini API key")
                 })?;
-
             Ok(UpstreamTarget {
                 profile_id,
                 profile_name,
@@ -164,8 +297,11 @@ pub(super) async fn extract_upstream_target(
                 base_url,
                 use_full_url,
                 headers: vec![("x-goog-api-key".to_string(), token.to_string())],
+                request_header_overrides: Vec::new(),
+                request_body_override: None,
                 claude_api_format: None,
                 is_github_copilot: false,
+                is_codex_oauth: false,
                 cost_multiplier,
             })
         }
@@ -199,7 +335,6 @@ pub(super) async fn extract_upstream_target(
                 "google-generative-ai" => vec![("x-goog-api-key".to_string(), token.to_string())],
                 _ => vec![("authorization".to_string(), format!("Bearer {token}"))],
             };
-
             Ok(UpstreamTarget {
                 profile_id,
                 profile_name,
@@ -207,8 +342,11 @@ pub(super) async fn extract_upstream_target(
                 base_url,
                 use_full_url,
                 headers,
+                request_header_overrides: Vec::new(),
+                request_body_override: None,
                 claude_api_format: None,
                 is_github_copilot: false,
+                is_codex_oauth: false,
                 cost_multiplier,
             })
         }
@@ -273,7 +411,6 @@ pub(super) async fn extract_upstream_target(
             } else {
                 vec![("authorization".to_string(), format!("Bearer {token}"))]
             };
-
             Ok(UpstreamTarget {
                 profile_id,
                 profile_name,
@@ -281,8 +418,11 @@ pub(super) async fn extract_upstream_target(
                 base_url,
                 use_full_url,
                 headers,
+                request_header_overrides: Vec::new(),
+                request_body_override: None,
                 claude_api_format: None,
                 is_github_copilot: false,
+                is_codex_oauth: false,
                 cost_multiplier,
             })
         }
@@ -329,7 +469,6 @@ pub(super) async fn extract_upstream_target(
             } else {
                 vec![("authorization".to_string(), format!("Bearer {token}"))]
             };
-
             Ok(UpstreamTarget {
                 profile_id,
                 profile_name,
@@ -337,15 +476,23 @@ pub(super) async fn extract_upstream_target(
                 base_url,
                 use_full_url,
                 headers,
+                request_header_overrides: Vec::new(),
+                request_body_override: None,
                 claude_api_format: None,
                 is_github_copilot: false,
+                is_codex_oauth: false,
                 cost_multiplier,
             })
         }
         _ => Err(format!("Unsupported proxy tool: {tool_id}")),
-    }
+    };
+    target.map(|mut target| {
+        target.headers.extend(transport_headers);
+        target.request_header_overrides = request_header_overrides;
+        target.request_body_override = request_body_override;
+        target
+    })
 }
-
 fn extract_toml_string(content: &str, key: &str) -> Option<String> {
     content.lines().find_map(|line| {
         let trimmed = line.trim();
@@ -360,6 +507,163 @@ fn extract_toml_string(content: &str, key: &str) -> Option<String> {
             Some(value.to_string())
         }
     })
+}
+fn extract_transport_headers(parsed: &Value) -> Vec<(String, String)> {
+    let metadata = parsed.get("metadata").and_then(Value::as_object);
+    let custom_user_agent = metadata
+        .and_then(|value| {
+            value
+                .get("customUserAgent")
+                .or_else(|| value.get("custom_user_agent"))
+        })
+        .or_else(|| {
+            parsed
+                .get("customUserAgent")
+                .or_else(|| parsed.get("custom_user_agent"))
+        })
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+        .filter(|value| {
+            !value
+                .bytes()
+                .any(|byte| byte < 0x20 && byte != b'\t' || byte == 0x7f)
+        })
+        .map(|value| ("user-agent".to_string(), value.to_string()));
+    let mut headers = Vec::new();
+    let request_headers = metadata
+        .and_then(|value| {
+            value
+                .get("requestHeaders")
+                .or_else(|| value.get("request_headers"))
+        })
+        .or_else(|| {
+            parsed
+                .get("requestHeaders")
+                .or_else(|| parsed.get("request_headers"))
+        })
+        .and_then(Value::as_object);
+    if let Some(request_headers) = request_headers {
+        for (name, value) in request_headers {
+            let name = name.trim();
+            if name.is_empty()
+                || name.len() > 128
+                || value.as_str().is_none()
+                || headers.len() >= 64
+            {
+                continue;
+            }
+            let lower = name.to_ascii_lowercase();
+            if matches!(
+                lower.as_str(),
+                "host"
+                    | "connection"
+                    | "keep-alive"
+                    | "proxy-authenticate"
+                    | "proxy-authorization"
+                    | "te"
+                    | "trailer"
+                    | "transfer-encoding"
+                    | "upgrade"
+                    | "content-length"
+                    | "authorization"
+                    | "x-api-key"
+                    | "x-goog-api-key"
+                    | "chatgpt-account-id"
+            ) {
+                continue;
+            }
+            let Ok(name) = reqwest::header::HeaderName::from_bytes(name.as_bytes()) else {
+                continue;
+            };
+            let Some(value) = value.as_str() else {
+                continue;
+            };
+            if value.len() > 4096 || reqwest::header::HeaderValue::from_str(value).is_err() {
+                continue;
+            }
+            if lower == "user-agent" && custom_user_agent.is_some() {
+                continue;
+            }
+            headers.push((name.as_str().to_string(), value.to_string()));
+        }
+    }
+    if let Some(custom_user_agent) = custom_user_agent {
+        headers.push(custom_user_agent);
+    }
+    headers
+}
+
+fn extract_local_proxy_overrides(parsed: &Value) -> (Vec<(String, String)>, Option<Value>) {
+    let overrides = parsed
+        .get("metadata")
+        .and_then(Value::as_object)
+        .and_then(|metadata| {
+            metadata
+                .get("localProxyRequestOverrides")
+                .or_else(|| metadata.get("local_proxy_request_overrides"))
+        })
+        .or_else(|| {
+            parsed
+                .get("localProxyRequestOverrides")
+                .or_else(|| parsed.get("local_proxy_request_overrides"))
+        })
+        .and_then(Value::as_object);
+    let Some(overrides) = overrides else {
+        return (Vec::new(), None);
+    };
+
+    let mut headers = Vec::new();
+    if let Some(values) = overrides.get("headers").and_then(Value::as_object) {
+        for (raw_name, raw_value) in values {
+            let name = raw_name.trim();
+            let Some(value) = raw_value.as_str() else {
+                continue;
+            };
+            if name.is_empty()
+                || name.len() > 128
+                || value.len() > 4096
+                || reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_err()
+                || reqwest::header::HeaderValue::from_str(value).is_err()
+                || headers.len() >= 64
+            {
+                continue;
+            }
+            let lower = name.to_ascii_lowercase();
+            if matches!(
+                lower.as_str(),
+                "host"
+                    | "content-length"
+                    | "transfer-encoding"
+                    | "connection"
+                    | "proxy-authorization"
+                    | "authorization"
+                    | "x-api-key"
+                    | "x-goog-api-key"
+                    | "chatgpt-account-id"
+                    | "content-type"
+            ) || headers
+                .iter()
+                .any(|(existing, _): &(String, String)| existing.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            headers.push((name.to_string(), value.to_string()));
+        }
+    }
+
+    let body = overrides
+        .get("body")
+        .filter(|value| value.is_object())
+        .cloned()
+        .and_then(|mut value| {
+            value.as_object_mut()?.remove("stream");
+            let encoded = serde_json::to_vec(&value).ok()?;
+            (encoded.len() <= 64 * 1024
+                && value.as_object().is_some_and(|object| !object.is_empty()))
+            .then_some(value)
+        });
+    (headers, body)
 }
 
 pub(super) fn build_upstream_request_url(
@@ -469,6 +773,31 @@ pub(super) fn build_forward_response(upstream_response: reqwest::Response) -> Re
     build_forward_response_from_parts(status, &headers, body)
 }
 
+pub(super) async fn read_response_body_limited(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<(StatusCode, reqwest::header::HeaderMap, Bytes), String> {
+    let status = response.status();
+    let headers = response.headers().clone();
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(format!("Upstream response body exceeds {max_bytes} bytes"));
+    }
+
+    let mut body = BytesMut::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("Response body could not be read: {error}"))?;
+        if body.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(format!("Upstream response body exceeds {max_bytes} bytes"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((status, headers, body.freeze()))
+}
+
 pub(super) fn build_json_response_from_value(
     status: StatusCode,
     headers: &reqwest::header::HeaderMap,
@@ -509,9 +838,9 @@ pub(super) fn build_json_response_from_value(
     }
 }
 
-pub(super) fn reqwest_client() -> Result<reqwest::Client, String> {
+pub(super) fn reqwest_client(proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
     crate::shared::http_client::build_http_client_no_timeout(
-        None,
+        proxy_url,
         Some("CCHub Local Provider Proxy"),
     )
 }
@@ -547,52 +876,4 @@ pub(super) fn transform_claude_request_body(
     serde_json::to_vec(&transformed)
         .map(Bytes::from)
         .map_err(|error| format!("Failed to serialize transformed Claude request: {error}"))
-}
-
-fn extract_gemini_model_from_path(relative_path: &str) -> Option<String> {
-    let (_, suffix) = relative_path.split_once("models/")?;
-    let model = suffix
-        .split(':')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .trim_start_matches('/');
-    if model.is_empty() {
-        None
-    } else {
-        Some(model.to_string())
-    }
-}
-
-pub(super) fn extract_request_insights(
-    tool_id: &str,
-    relative_path: &str,
-    body_bytes: &[u8],
-) -> ProxyRequestInsights {
-    let parsed = parse_json_bytes(body_bytes);
-    let request_model = parsed
-        .as_ref()
-        .and_then(|value| value.get("model"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            if tool_id == "gemini" {
-                extract_gemini_model_from_path(relative_path)
-            } else {
-                None
-            }
-        });
-
-    let is_streaming = parsed
-        .as_ref()
-        .and_then(|value| value.get("stream"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-        || relative_path.contains("streamGenerateContent");
-
-    ProxyRequestInsights {
-        request_model,
-        is_streaming,
-    }
 }

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 const STANDARD_PLUGIN_PREFIXES: [&str; 2] = ["oh-my-openagent", "oh-my-opencode"];
 const SLIM_PLUGIN_PREFIXES: [&str; 1] = ["oh-my-opencode-slim"];
+const UNIFIED_CONFIG_FILENAMES: [&str; 2] = ["omo.jsonc", "omo.json"];
+const OPENCODE_SECTION_KEY: &str = "[opencode]";
 
 #[derive(Debug, Clone, Copy)]
 pub struct OmoVariant {
@@ -124,6 +126,22 @@ fn target_variant_config_path(base_dir: &Path, variant: &OmoVariant) -> PathBuf 
         .unwrap_or_else(|| base_dir.join(variant.preferred_filename))
 }
 
+fn find_unified_config_path(variant: &OmoVariant) -> Result<Option<PathBuf>, String> {
+    if variant.id != STANDARD_VARIANT.id {
+        return Ok(None);
+    }
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let config_dir = home.join(".omo");
+    for filename in UNIFIED_CONFIG_FILENAMES {
+        let path = config_dir.join(filename);
+        if path.exists() {
+            read_jsonc_object(&path)?;
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
 fn strip_jsonc_comments(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
     let chars: Vec<char> = input.chars().collect();
@@ -200,14 +218,93 @@ fn strip_jsonc_comments(input: &str) -> String {
     output
 }
 
+fn strip_jsonc_trailing_commas(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut output = String::with_capacity(input.len());
+    let mut index = 0;
+    let mut in_string = false;
+    let mut escape = false;
+
+    while index < chars.len() {
+        let current = chars[index];
+        if in_string {
+            output.push(current);
+            if escape {
+                escape = false;
+            } else if current == '\\' {
+                escape = true;
+            } else if current == '"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if current == '"' {
+            in_string = true;
+            output.push(current);
+            index += 1;
+            continue;
+        }
+
+        if current == ',' {
+            let mut lookahead = index + 1;
+            while chars
+                .get(lookahead)
+                .is_some_and(|value| value.is_whitespace())
+            {
+                lookahead += 1;
+            }
+            if matches!(chars.get(lookahead), Some('}' | ']')) {
+                index += 1;
+                continue;
+            }
+        }
+
+        output.push(current);
+        index += 1;
+    }
+
+    output
+}
+
 fn read_jsonc_object(path: &Path) -> Result<Map<String, Value>, String> {
     let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let cleaned = strip_jsonc_comments(&content);
+    let cleaned = strip_jsonc_trailing_commas(&strip_jsonc_comments(&content));
     let parsed: Value = serde_json::from_str(&cleaned).map_err(|e| e.to_string())?;
     parsed
         .as_object()
         .cloned()
         .ok_or_else(|| format!("OMO config is not a JSON object: {}", path.display()))
+}
+
+fn read_config_object(path: &Path, unified: bool) -> Result<Map<String, Value>, String> {
+    let root = read_jsonc_object(path)?;
+    if !unified {
+        return Ok(root);
+    }
+    match root.get(OPENCODE_SECTION_KEY) {
+        Some(Value::Object(section)) => Ok(section.clone()),
+        Some(_) => Err(format!(
+            "OMO [opencode] section must be an object: {}",
+            path.display()
+        )),
+        None => Ok(Map::new()),
+    }
+}
+
+fn build_config_root(
+    path: &Path,
+    unified: bool,
+    section: Map<String, Value>,
+) -> Result<Map<String, Value>, String> {
+    if !unified {
+        return Ok(section);
+    }
+
+    let mut root = read_jsonc_object(path)?;
+    root.insert(OPENCODE_SECTION_KEY.to_string(), Value::Object(section));
+    Ok(root)
 }
 
 fn extract_other_fields(obj: &Map<String, Value>, variant: &OmoVariant) -> Map<String, Value> {
@@ -297,12 +394,44 @@ fn sync_omo_plugin(opencode_path: &Path, variant: &OmoVariant) -> Result<Vec<Str
     Ok(plugins)
 }
 
+pub fn disable_local_plugin(conn: &Connection, variant: &OmoVariant) -> Result<bool, String> {
+    let opencode_path = opencode_config_path(conn)?;
+    if !opencode_path.exists() {
+        return Ok(false);
+    }
+    let (mut config, plugins) = read_opencode_plugins(&opencode_path)?;
+    let filtered = plugins
+        .into_iter()
+        .filter(|plugin| !matches_any_plugin_prefix(plugin, variant.plugin_prefixes))
+        .collect::<Vec<_>>();
+    if filtered.len()
+        == config
+            .get("plugin")
+            .and_then(Value::as_array)
+            .map(|items| items.len())
+            .unwrap_or(0)
+    {
+        return Ok(false);
+    }
+    config.insert(
+        "plugin".to_string(),
+        Value::Array(filtered.into_iter().map(Value::String).collect()),
+    );
+    let content =
+        serde_json::to_string_pretty(&Value::Object(config)).map_err(|e| e.to_string())?;
+    crate::utils::atomic_write_string(&opencode_path, &content).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 pub fn read_local_config(
     conn: &Connection,
     variant: &OmoVariant,
 ) -> Result<OmoLocalConfigData, String> {
     let config_dir = resolve_opencode_config_dir(conn)?;
-    let config_path = target_variant_config_path(&config_dir, variant);
+    let unified_path = find_unified_config_path(variant)?;
+    let is_unified = unified_path.is_some();
+    let config_path =
+        unified_path.unwrap_or_else(|| target_variant_config_path(&config_dir, variant));
     let opencode_path = opencode_config_path(conn)?;
     let (_, plugins) = read_opencode_plugins(&opencode_path)?;
     let plugin_enabled = plugins
@@ -310,7 +439,7 @@ pub fn read_local_config(
         .any(|plugin| matches_any_plugin_prefix(plugin, variant.plugin_prefixes));
 
     let (agents, categories, other_fields, last_modified) = if config_path.exists() {
-        let obj = read_jsonc_object(&config_path)?;
+        let obj = read_config_object(&config_path, is_unified)?;
         let last_modified = std::fs::metadata(&config_path)
             .ok()
             .and_then(|value| value.modified().ok())
@@ -377,24 +506,29 @@ pub fn write_local_config(
     }
 
     let config_dir = resolve_opencode_config_dir(conn)?;
-    let config_path = target_variant_config_path(&config_dir, variant);
+    let unified_path = find_unified_config_path(variant)?;
+    let is_unified = unified_path.is_some();
+    let config_path =
+        unified_path.unwrap_or_else(|| target_variant_config_path(&config_dir, variant));
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let mut root = Map::new();
+    let mut section = Map::new();
     if let Some(Value::Object(obj)) = other_fields {
         for (key, value) in obj {
-            root.insert(key, value);
+            section.insert(key, value);
         }
     }
-    root.insert("agents".to_string(), agents);
+    section.insert("agents".to_string(), agents);
     if variant.has_categories {
-        root.insert(
+        section.insert(
             "categories".to_string(),
             categories.unwrap_or_else(|| Value::Object(Map::new())),
         );
     }
+
+    let root = build_config_root(&config_path, is_unified, section)?;
 
     let content = serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
     crate::utils::atomic_write_string(&config_path, &content).map_err(|e| e.to_string())?;
@@ -403,4 +537,87 @@ pub fn write_local_config(
     let _ = sync_omo_plugin(&opencode_path, variant)?;
 
     read_local_config(conn, variant)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unified_config_reads_only_the_opencode_section() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("omo.jsonc");
+        std::fs::write(
+            &path,
+            r#"{
+                "[codex]": {"agents": {"planner": {"model": "codex/model"}}},
+                "[opencode]": {"agents": {"sisyphus": {"model": "openai/model"}}},
+                "metadata": {"owner": "local"}
+            }"#,
+        )
+        .expect("write config");
+
+        let section = read_config_object(&path, true).expect("read section");
+        assert!(section.contains_key("agents"));
+        assert!(!section.contains_key("[codex]"));
+    }
+
+    #[test]
+    fn unified_config_without_opencode_section_starts_empty() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("omo.jsonc");
+        std::fs::write(&path, r#"{"[codex]":{"enabled":true}}"#).expect("write config");
+
+        let section = read_config_object(&path, true).expect("read section");
+        assert!(section.is_empty());
+    }
+
+    #[test]
+    fn legacy_config_keeps_top_level_agents() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("oh-my-openagent.jsonc");
+        std::fs::write(&path, r#"{"agents":{"sisyphus":{"model":"openai/model"}}}"#)
+            .expect("write config");
+
+        let config = read_config_object(&path, false).expect("read legacy config");
+        assert!(config.get("agents").is_some());
+    }
+
+    #[test]
+    fn jsonc_reader_accepts_comments_and_trailing_commas() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("omo.jsonc");
+        std::fs::write(&path, "{ // root\n \"[opencode]\": { \"agents\": {}, }, }")
+            .expect("write config");
+
+        let section = read_config_object(&path, true).expect("read jsonc config");
+        assert!(section.get("agents").is_some());
+    }
+
+    #[test]
+    fn unified_writer_preserves_other_top_level_sections() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("omo.jsonc");
+        std::fs::write(&path, r#"{"[codex]":{"enabled":true},"metadata":{"v":1}}"#)
+            .expect("write config");
+        let mut section = Map::new();
+        section.insert("agents".to_string(), serde_json::json!({"new": {}}));
+
+        let root = build_config_root(&path, true, section).expect("build config");
+        assert_eq!(
+            root.get("[codex]")
+                .and_then(Value::as_object)
+                .and_then(|v| v.get("enabled"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            root.get("metadata")
+                .and_then(Value::as_object)
+                .and_then(|v| v.get("v"))
+                .and_then(Value::as_i64),
+            Some(1)
+        );
+        assert!(root.get("[opencode]").is_some());
+    }
 }

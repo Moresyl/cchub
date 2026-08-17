@@ -117,9 +117,9 @@ pub(super) fn manifest_url_for_layout(
     remote_file_url(settings, layout, WEBDAV_MANIFEST_FILE)
 }
 
-pub(super) fn build_client() -> Result<reqwest::Client, String> {
+pub(super) fn build_client(settings: &WebDavSyncSettings) -> Result<reqwest::Client, String> {
     crate::shared::http_client::build_http_client(
-        None,
+        settings.proxy_url.as_deref(),
         Some(&format!("CCHub/{} WebDAV", env!("CARGO_PKG_VERSION"))),
         Duration::from_secs(30),
     )
@@ -263,7 +263,7 @@ pub(super) fn validate_manifest_compatibility(
 }
 
 pub(super) fn device_name() -> String {
-    for key in ["CC_SWITCH_DEVICE_NAME", "COMPUTERNAME", "HOSTNAME"] {
+    for key in ["CCHUB_DEVICE_NAME", "COMPUTERNAME", "HOSTNAME"] {
         if let Ok(value) = std::env::var(key) {
             let trimmed = value.trim();
             if !trimmed.is_empty() {

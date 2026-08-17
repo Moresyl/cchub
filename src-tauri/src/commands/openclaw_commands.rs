@@ -45,6 +45,49 @@ pub fn get_openclaw_status() -> Result<OpenClawStatus, String> {
     })
 }
 
+#[tauri::command]
+pub fn get_openclaw_model_catalog() -> Result<
+    Option<std::collections::HashMap<String, openclaw_config::OpenClawModelCatalogEntry>>,
+    String,
+> {
+    openclaw_config::get_model_catalog()
+}
+
+#[tauri::command]
+pub fn set_openclaw_model_catalog(
+    catalog: std::collections::HashMap<String, openclaw_config::OpenClawModelCatalogEntry>,
+) -> Result<(), String> {
+    openclaw_config::set_model_catalog(&catalog)
+}
+
+#[tauri::command]
+pub fn get_openclaw_default_model() -> Result<Option<openclaw_config::OpenClawDefaultModel>, String>
+{
+    openclaw_config::get_default_model()
+}
+
+#[tauri::command]
+pub fn set_openclaw_default_model(
+    model: openclaw_config::OpenClawDefaultModel,
+) -> Result<(), String> {
+    openclaw_config::set_default_model(model)
+}
+
+#[tauri::command]
+pub fn get_openclaw_live_provider_ids() -> Result<Vec<String>, String> {
+    openclaw_config::get_live_provider_ids()
+}
+
+#[tauri::command]
+pub fn get_openclaw_live_provider(id: String) -> Result<Option<serde_json::Value>, String> {
+    openclaw_config::get_live_provider(&id)
+}
+
+#[tauri::command]
+pub fn remove_provider_from_live_config(id: String) -> Result<bool, String> {
+    openclaw_config::remove_live_provider(&id)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenClawStatus {

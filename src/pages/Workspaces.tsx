@@ -5,6 +5,7 @@ import { FolderOpen, Layers, Plus, X } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import ConfirmDialog from "../components/ConfirmDialog";
 import WorkspaceCard, { type WorkspaceCardWorkspace } from "../components/WorkspaceCard";
+import ProjectProfilePanel from "../components/ProjectProfilePanel";
 import EmptyState from "../components/states/EmptyState";
 import ErrorState from "../components/states/ErrorState";
 import LoadingState from "../components/states/LoadingState";
@@ -88,6 +89,7 @@ export default function Workspaces() {
     async (id: string) => {
       try {
         await switchWorkspaceMutation.mutateAsync({ id });
+        window.dispatchEvent(new Event("cchub-project-profile-refresh"));
         setWorkspaces((current) =>
           current.map((workspace) => ({
             ...workspace,
@@ -258,6 +260,8 @@ export default function Workspaces() {
           {uiText("新建", "New", "新規")}
         </button>
       </div>
+
+      <ProjectProfilePanel />
 
       {loadError ? (
         <ErrorState

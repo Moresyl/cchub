@@ -27,6 +27,7 @@ export const TOOL_ICONS: Record<string, typeof Monitor> = {
   gemini: Sparkles,
   opencode: Globe,
   hermes: Monitor,
+  pi: Monitor,
 };
 
 export const PROMPT_PATTERN = /prompt|提示|template|模板|指令|instruction/i;

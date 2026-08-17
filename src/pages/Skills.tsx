@@ -13,6 +13,7 @@ import {
   Check,
   Trash2,
   Upload,
+  PackagePlus,
 } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
 import type { DetectedTool, FolderNode, SkillCategory } from "../types/skills";
@@ -29,13 +30,13 @@ import {
   useDeletePluginMutation,
   useDeleteSkillBackupMutation,
   useImportSkillFileMutation,
+  useInstallPluginMutation,
   useRemoveSyncedSkillMutation,
   useRestoreSkillBackupMutation,
   useToggleSkillFileMutation,
   useUninstallSkillFileMutation,
   useWriteSkillContentMutation,
 } from "../hooks/mutations";
-
 import {
   TOOL_ICONS,
   hasSkillUpdate,
@@ -51,7 +52,7 @@ import SkillsExplorerView from "./skills/ExplorerView";
 import SkillsDetailPanel from "./skills/DetailPanel";
 import SkillsConfirmDialogs from "./skills/Dialogs";
 import SkillsBackupList from "./skills/BackupList";
-
+import PluginInstallDialog from "./skills/PluginInstallDialog";
 export default function Skills() {
   const queryClient = useQueryClient();
   const cachedSkillsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchSkillsPageData>>>(
@@ -83,14 +84,27 @@ export default function Skills() {
   const [pendingBackupDelete, setPendingBackupDelete] = useState<SkillBackup | null>(null);
   const [skillSyncMethod, setSkillSyncMethod] = useState<string>(cachedSkillsPageData?.skillSyncMethod ?? "copy");
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
-    cachedSkillsPageData?.visibleApps ?? ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"],
+    cachedSkillsPageData?.visibleApps ?? [
+      "claude",
+      "codex",
+      "gemini",
+      "grokbuild",
+      "opencode",
+      "openclaw",
+      "hermes",
+      "pi",
+    ],
   );
   const [checkingSkillIds, setCheckingSkillIds] = useState<string[]>([]);
   const [batchUpdating, setBatchUpdating] = useState(false);
+  const [bulkTogglingSkills, setBulkTogglingSkills] = useState(false);
+  const [pluginInstallOpen, setPluginInstallOpen] = useState(false);
+  const [pluginSource, setPluginSource] = useState("");
   const i = t();
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const importSkillFileMutation = useImportSkillFileMutation();
+  const installPluginMutation = useInstallPluginMutation();
   const writeSkillContentMutation = useWriteSkillContentMutation();
   const uninstallSkillFileMutation = useUninstallSkillFileMutation();
   const toggleSkillFileMutation = useToggleSkillFileMutation();
@@ -100,7 +114,6 @@ export default function Skills() {
   const copySkillBetweenToolsMutation = useCopySkillBetweenToolsMutation();
   const deleteSkillBackupMutation = useDeleteSkillBackupMutation();
   const restoreSkillBackupMutation = useRestoreSkillBackupMutation();
-
   const refreshSkillUpdates = useCallback(async (targetSkills: Skill[]) => {
     const ids = targetSkills.filter((skill) => skill.file_path && skill.source_url).map((skill) => skill.file_path!);
     if (ids.length === 0) return;
@@ -135,7 +148,6 @@ export default function Skills() {
       setCheckingSkillIds([]);
     }
   }, []);
-
   const applySkillsPageData = useCallback(
     (data: Awaited<ReturnType<typeof fetchSkillsPageData>>) => {
       setSkills(data.skills);
@@ -152,7 +164,6 @@ export default function Skills() {
     },
     [refreshSkillUpdates],
   );
-
   const load = useCallback(
     async (options: { force?: boolean } = {}) => {
       const { force = false } = options;
@@ -176,7 +187,19 @@ export default function Skills() {
     },
     [applySkillsPageData, queryClient],
   );
-
+  const handleInstallPlugin = useCallback(async () => {
+    const source = pluginSource.trim();
+    if (!source) return;
+    try {
+      await installPluginMutation.mutateAsync({ sourceUrl: source });
+      setPluginSource("");
+      setPluginInstallOpen(false);
+      await load({ force: true });
+      showToast("success", locale === "zh" ? "插件安装成功" : "Plugin installed");
+    } catch (error) {
+      showToast("error", String(error));
+    }
+  }, [installPluginMutation, load, locale, pluginSource]);
   const handleImportSkill = useCallback(async () => {
     const tool = tools.find((t) => t.id === activeTool);
     if (!tool?.skills_dir) return;
@@ -192,7 +215,6 @@ export default function Skills() {
       if (msg !== "Cancelled") showToast("error", msg);
     }
   }, [activeTool, applySkillsPageData, i.skills.importSuccess, importSkillFileMutation, skillSyncMethod, tools]);
-
   const viewSkill = useCallback(async (skill: Skill) => {
     setSelectedSkill(skill);
     setSkillContent(null);
@@ -209,7 +231,6 @@ export default function Skills() {
       }
     }
   }, []);
-
   const openEditSkill = useCallback(async (skill: Skill) => {
     setSelectedSkill(skill);
     if (skill.file_path) {
@@ -223,7 +244,6 @@ export default function Skills() {
       }
     }
   }, []);
-
   const openExplorer = useCallback(async () => {
     const tool = tools.find((t) => t.id === activeTool);
     if (!tool) return;
@@ -237,7 +257,6 @@ export default function Skills() {
       setFolderTree(null);
     }
   }, [activeTool, tools]);
-
   const previewExplorerFile = useCallback(async (path: string) => {
     setExplorerFile(path);
     try {
@@ -247,7 +266,6 @@ export default function Skills() {
       setExplorerPreview("Failed to load file");
     }
   }, []);
-
   const handleSaveSkill = useCallback(async () => {
     if (!selectedSkill?.file_path) return;
     try {
@@ -258,12 +276,10 @@ export default function Skills() {
       console.error(e);
     }
   }, [editContent, selectedSkill, writeSkillContentMutation]);
-
   const handleDeleteSkill = useCallback((skill: Skill) => {
     if (!skill.file_path) return;
     setPendingDelete({ type: "skill", item: skill });
   }, []);
-
   const doDeleteSkill = useCallback(
     async (skill: Skill) => {
       if (!skill.file_path) return;
@@ -282,7 +298,6 @@ export default function Skills() {
     },
     [applySkillsPageData, locale, selectedSkill, uninstallSkillFileMutation],
   );
-
   const handleToggleSkill = useCallback(
     async (skill: Skill) => {
       if (!skill.file_path) return;
@@ -296,11 +311,9 @@ export default function Skills() {
     },
     [applySkillsPageData, toggleSkillFileMutation],
   );
-
   const handleDeletePlugin = useCallback((plugin: Plugin) => {
     setPendingDelete({ type: "plugin", item: plugin });
   }, []);
-
   const doDeletePlugin = useCallback(
     async (plugin: Plugin) => {
       try {
@@ -312,21 +325,18 @@ export default function Skills() {
     },
     [applySkillsPageData, deletePluginMutation],
   );
-
   const handleViewSkill = useCallback(
     (skill: Skill) => {
       void viewSkill(skill);
     },
     [viewSkill],
   );
-
   const handleOpenEditSkill = useCallback(
     (skill: Skill) => {
       void openEditSkill(skill);
     },
     [openEditSkill],
   );
-
   const handleBatchUpdateSkills = useCallback(async () => {
     const ids = skills
       .filter((skill) => (skill.tool_id ? skill.tool_id === activeTool : activeTool === "claude"))
@@ -345,7 +355,6 @@ export default function Skills() {
       setBatchUpdating(false);
     }
   }, [activeTool, applySkillsPageData, batchUpdateSkillsMutation, locale, skills]);
-
   useEffect(() => {
     void load();
   }, [load]);
@@ -356,6 +365,10 @@ export default function Skills() {
   }, [activeTool, tools, visibleApps]);
   useEffect(() => {
     const handleEscape = () => {
+      if (search.trim()) {
+        setSearch("");
+        return;
+      }
       if (editingSkill) {
         setEditingSkill(false);
         return;
@@ -371,7 +384,7 @@ export default function Skills() {
     };
     window.addEventListener("cchub-shortcut-escape", handleEscape);
     return () => window.removeEventListener("cchub-shortcut-escape", handleEscape);
-  }, [editingSkill, selectedSkill, showExplorer]);
+  }, [editingSkill, search, selectedSkill, showExplorer]);
   useEffect(() => {
     const handleSearchShortcut = () => {
       if (editingSkill || showExplorer) return;
@@ -381,7 +394,6 @@ export default function Skills() {
     window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
     return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
   }, [editingSkill, showExplorer]);
-
   const visibleSkills = useMemo(
     () =>
       skills.filter((skill) => {
@@ -390,10 +402,43 @@ export default function Skills() {
       }),
     [skills, activeTool],
   );
-
   const visiblePlugins = useMemo(() => (activeTool === "claude" ? plugins : []), [activeTool, plugins]);
   const updatableVisibleSkillCount = useMemo(() => visibleSkills.filter(hasSkillUpdate).length, [visibleSkills]);
-
+  const handleToggleAllSkills = useCallback(
+    async (enabled: boolean) => {
+      const targets = visibleSkills.filter((skill) => {
+        if (!skill.file_path) return false;
+        return enabled ? skill.file_path.endsWith(".disabled") : !skill.file_path.endsWith(".disabled");
+      });
+      if (targets.length === 0 || bulkTogglingSkills) return;
+      setBulkTogglingSkills(true);
+      let failed = 0;
+      for (const skill of targets) {
+        try {
+          await toggleSkillFileMutation.mutateAsync({ filePath: skill.file_path!, enabled });
+        } catch {
+          failed += 1;
+        }
+      }
+      await load({ force: true });
+      setBulkTogglingSkills(false);
+      if (failed > 0) {
+        showToast("error", locale === "zh" ? `${failed} 个技能切换失败` : `${failed} skill(s) failed to toggle`);
+      } else {
+        showToast(
+          "success",
+          enabled
+            ? locale === "zh"
+              ? "已全部启用"
+              : "All skills enabled"
+            : locale === "zh"
+              ? "已全部禁用"
+              : "All skills disabled",
+        );
+      }
+    },
+    [bulkTogglingSkills, load, locale, toggleSkillFileMutation, visibleSkills],
+  );
   // 搜索框输入时让过滤跑在低优先级，避免 setState 触发的同步过滤+渲染阻塞键盘输入。
   // useDeferredValue 让 React 在主线程压力大时延后非紧急更新，输入框 echo 始终流畅。
   const deferredSearch = useDeferredValue(search);
@@ -422,7 +467,6 @@ export default function Skills() {
       }
     });
   }, [visibleSkills, deferredSearch, category]);
-
   const filteredPlugins = useMemo(() => {
     if (category !== "all" && category !== "plugin") return [];
     const q = deferredSearch.trim().toLowerCase();
@@ -433,15 +477,12 @@ export default function Skills() {
       return true;
     });
   }, [visiblePlugins, deferredSearch, category]);
-
   const visibleToolIds = new Set(visibleApps);
   const visibleTools = tools.filter((tool) => visibleToolIds.has(tool.id as ManagedAppId));
   const installedTools = visibleTools.filter((t) => t.installed);
-
   if (loading) {
     return <LoadingState label={i.skills.loading} />;
   }
-
   if (loadError) {
     return (
       <ErrorState
@@ -454,10 +495,7 @@ export default function Skills() {
       />
     );
   }
-
   const hasEditChanges = editContent !== (skillContent || "");
-
-  // --- 技能编辑视图 ---
   if (editingSkill && selectedSkill) {
     return (
       <SkillsEditingView
@@ -473,8 +511,6 @@ export default function Skills() {
       />
     );
   }
-
-  // --- 文件浏览器视图 ---
   if (showExplorer) {
     return (
       <SkillsExplorerView
@@ -488,7 +524,6 @@ export default function Skills() {
       />
     );
   }
-
   const catTabs: { key: SkillCategory; label: string; count: number }[] = [
     { key: "all", label: i.skills.categoryAll, count: visibleSkills.length + visiblePlugins.length },
     { key: "skill", label: i.skills.categorySkills, count: visibleSkills.filter(isStandaloneSkill).length },
@@ -496,7 +531,6 @@ export default function Skills() {
     { key: "command", label: i.skills.categoryCommands, count: visibleSkills.filter(isCommandSkill).length },
     { key: "plugin", label: i.skills.categoryPlugins, count: visiblePlugins.length },
   ];
-
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Page Header */}
@@ -524,6 +558,15 @@ export default function Skills() {
             <Upload size={14} />
             {i.skills.importSkill}
           </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => setPluginInstallOpen(true)}
+            style={{ gap: 6 }}
+            title={locale === "zh" ? "安装插件" : "Install plugin"}
+          >
+            <PackagePlus size={14} />
+            {locale === "zh" ? "安装插件" : "Install plugin"}
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={openExplorer} style={{ gap: 6 }}>
             <FolderOpen size={14} />
             {i.skills.explore}
@@ -534,7 +577,6 @@ export default function Skills() {
           </button>
         </div>
       </div>
-
       <SkillsBackupList
         skillBackups={skillBackups}
         backupBusyId={backupBusyId}
@@ -544,7 +586,17 @@ export default function Skills() {
         applySkillsPageData={applySkillsPageData}
         locale={locale}
       />
-
+      <PluginInstallDialog
+        isOpen={pluginInstallOpen}
+        source={pluginSource}
+        setSource={setPluginSource}
+        busy={installPluginMutation.isPending}
+        locale={locale}
+        onConfirm={() => void handleInstallPlugin()}
+        onCancel={() => {
+          if (!installPluginMutation.isPending) setPluginInstallOpen(false);
+        }}
+      />
       {/* Tool Selector */}
       {visibleTools.length > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
@@ -586,7 +638,38 @@ export default function Skills() {
           )}
         </div>
       )}
-
+      {visibleSkills.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            {locale === "zh"
+              ? `${visibleSkills.length} 个技能 · ${activeTool}`
+              : `${visibleSkills.length} skills · ${activeTool}`}
+          </span>
+          <button
+            className="btn btn-secondary btn-xs"
+            type="button"
+            onClick={() => void handleToggleAllSkills(true)}
+            disabled={
+              bulkTogglingSkills ||
+              visibleSkills.every((skill) => !skill.file_path || !skill.file_path.endsWith(".disabled"))
+            }
+          >
+            {bulkTogglingSkills ? <div className="spinner" style={{ width: 11, height: 11 }} /> : <Check size={12} />}
+            {locale === "zh" ? "全部启用" : "Enable all"}
+          </button>
+          <button
+            className="btn btn-secondary btn-xs"
+            type="button"
+            onClick={() => void handleToggleAllSkills(false)}
+            disabled={
+              bulkTogglingSkills ||
+              visibleSkills.every((skill) => !skill.file_path || skill.file_path.endsWith(".disabled"))
+            }
+          >
+            {locale === "zh" ? "全部禁用" : "Disable all"}
+          </button>
+        </div>
+      )}
       {/* Search + Category Tabs */}
       <div style={{ display: "flex", gap: 16, marginBottom: 20, alignItems: "center" }}>
         <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
@@ -642,7 +725,6 @@ export default function Skills() {
           ))}
         </div>
       </div>
-
       {/* Content Area */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 24 }}>
         {/* List */}
@@ -690,7 +772,6 @@ export default function Skills() {
               ))}
             </div>
           )}
-
           {/* Plugins */}
           {filteredPlugins.length > 0 && (
             <div className="stagger">
@@ -772,7 +853,6 @@ export default function Skills() {
               ))}
             </div>
           )}
-
           {/* Empty */}
           {filteredSkills.length === 0 && filteredPlugins.length === 0 && (
             <EmptyState
@@ -798,7 +878,6 @@ export default function Skills() {
             />
           )}
         </div>
-
         {/* Detail Panel */}
         {selectedSkill && (
           <SkillsDetailPanel
@@ -821,7 +900,6 @@ export default function Skills() {
           />
         )}
       </div>
-
       <SkillsConfirmDialogs
         pendingDelete={pendingDelete}
         setPendingDelete={setPendingDelete}

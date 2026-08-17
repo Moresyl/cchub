@@ -403,6 +403,14 @@ function OmoConfigSectionComponent() {
     }
 
     setModelSuggestions([...suggestions].sort((left, right) => left.localeCompare(right)));
+
+    // Runtime discovery can take a few seconds; keep configured suggestions responsive.
+    void invoke<string[]>("get_opencode_runtime_models")
+      .then((runtimeModels) => {
+        runtimeModels.forEach((model) => model.trim() && suggestions.add(model.trim()));
+        setModelSuggestions([...suggestions].sort((left, right) => left.localeCompare(right)));
+      })
+      .catch(() => undefined);
   }, []);
 
   const loadVariant = useCallback(

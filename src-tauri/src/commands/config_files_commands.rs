@@ -35,6 +35,11 @@ const CONFIG_ROOTS: &[ConfigRootCandidate] = &[
         dir: ".gemini",
     },
     ConfigRootCandidate {
+        id: "grokbuild",
+        name: "Grok Build",
+        dir: ".grok",
+    },
+    ConfigRootCandidate {
         id: "opencode",
         name: "OpenCode",
         dir: ".opencode",
@@ -48,6 +53,11 @@ const CONFIG_ROOTS: &[ConfigRootCandidate] = &[
         id: "hermes",
         name: "Hermes",
         dir: ".hermes",
+    },
+    ConfigRootCandidate {
+        id: "pi",
+        name: "Pi",
+        dir: ".pi\\agent",
     },
 ];
 

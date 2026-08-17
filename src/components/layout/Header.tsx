@@ -6,6 +6,7 @@ import { getTheme, setTheme, type Theme } from "../../lib/theme";
 import { checkAppUpdate } from "../../lib/appUpdater";
 import { showToast } from "../Toast";
 import { t } from "../../lib/i18n";
+import ProjectProfileSwitcher from "../ProjectProfileSwitcher";
 
 function HeaderComponent() {
   const navigate = useNavigate();
@@ -40,6 +41,7 @@ function HeaderComponent() {
 
   return (
     <header className="topbar">
+      <ProjectProfileSwitcher />
       <button className="theme-btn" title="GitHub" onClick={handleOpenGithub}>
         <Github size={16} />
       </button>

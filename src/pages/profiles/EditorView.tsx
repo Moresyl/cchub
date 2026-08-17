@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import ProfileEditor from "../../components/ProfileEditor";
+import ProfileTransportSettings from "../../components/ProfileTransportSettings";
 import { type ModelInfo } from "../../components/ModelSelector";
 import {
   type ApiFormat,
@@ -70,6 +71,11 @@ interface ProfileEditorViewProps {
   draftIconUrl: string;
   draftCostMultiplier: string;
   draftEndpointCandidates: string;
+  draftCustomEndpoints: string[];
+  draftCustomUserAgent: string;
+  draftRequestHeaders: Record<string, string>;
+  draftRequestHeaderOverrides: string;
+  draftRequestBodyOverrides: string;
   draftAuthField: ClaudeAuthField;
   draftApiFormat: ApiFormat;
   draftCodexReasoningEffort: CodexReasoningEffort;
@@ -186,6 +192,8 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
             draftIconUrl={props.draftIconUrl}
             draftCostMultiplier={props.draftCostMultiplier}
             draftEndpointCandidates={props.draftEndpointCandidates}
+            draftCustomEndpoints={props.draftCustomEndpoints}
+            providerId={editingProfile?.id}
             draftAuthField={props.draftAuthField}
             draftApiFormat={props.draftApiFormat}
             draftCodexReasoningEffort={props.draftCodexReasoningEffort}
@@ -199,6 +207,15 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
             onDraftChange={props.updateStructuredDraft}
             onAccountSelect={props.handleSelectDraftOauthAccount}
             onToggleApiKeyVisibility={props.handleToggleShowApiKey}
+          />
+
+          <ProfileTransportSettings
+            localeText={localeText}
+            customUserAgent={props.draftCustomUserAgent}
+            requestHeaders={props.draftRequestHeaders}
+            requestHeaderOverrides={props.draftRequestHeaderOverrides}
+            requestBodyOverrides={props.draftRequestBodyOverrides}
+            onChange={(next) => props.updateStructuredDraft(props.draftTool, next)}
           />
 
           <ProfileModelsSection

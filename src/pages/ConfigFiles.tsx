@@ -84,6 +84,7 @@ export default function ConfigFiles() {
     "claude",
     "codex",
     "gemini",
+    "grokbuild",
     "opencode",
     "openclaw",
     "hermes",
@@ -548,7 +549,7 @@ export default function ConfigFiles() {
                         className="input"
                         value={codexStructuredConfig.model}
                         onChange={(event) => updateCodexConfig({ model: event.target.value })}
-                        placeholder="gpt-5.4"
+                        placeholder="gpt-5.6-sol"
                       />
                     </div>
                     <div>

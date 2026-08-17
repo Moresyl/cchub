@@ -25,6 +25,10 @@ export interface DeletePluginInput {
   pluginId: string;
 }
 
+export interface InstallPluginInput {
+  sourceUrl: string;
+}
+
 export interface BatchUpdateSkillsInput {
   ids: string[];
 }
@@ -114,6 +118,15 @@ export function useDeletePluginMutation() {
       await invoke("uninstall_plugin", { pluginId: input.pluginId });
       return fetchUpdatedSkillsPageData();
     },
+    onSuccess: () => invalidateSkills(queryClient),
+  });
+}
+
+export function useInstallPluginMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: InstallPluginInput) => invoke<string>("install_plugin", { sourceUrl: input.sourceUrl }),
     onSuccess: () => invalidateSkills(queryClient),
   });
 }

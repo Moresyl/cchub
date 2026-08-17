@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_arguments)]
+use futures_util::future::join_all;
 use tauri::{AppHandle, State};
 
 use crate::db::DbState;
@@ -137,6 +138,122 @@ pub async fn ping_provider_endpoint(
         &result.message,
     );
     Ok(result)
+}
+
+/// Probe the primary endpoint and every metadata.endpointCandidates entry in parallel.
+///
+/// This intentionally performs a lightweight HEAD/GET request only. It never sends a
+/// model prompt, so scanning failover endpoints is safe and does not consume provider quota.
+#[tauri::command]
+pub async fn scan_provider_endpoints(
+    id: String,
+    app_handle: AppHandle,
+    db: State<'_, DbState>,
+) -> Result<Vec<ProviderEndpointCheckResult>, String> {
+    let (profile, client) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let profile = read_all_config_profiles_from_conn(&conn)?
+            .into_iter()
+            .find(|profile| profile.id == id)
+            .ok_or_else(|| format!("Profile not found: {id}"))?;
+        let client = build_provider_probe_client(&conn)?;
+        (profile, client)
+    };
+
+    let (primary, headers) = extract_probe_target(&app_handle, &profile).await?;
+    let parsed: serde_json::Value = serde_json::from_str(&profile.config_snapshot)
+        .map_err(|error| format!("Invalid profile config: {error}"))?;
+    let mut endpoints = Vec::new();
+    if let Some(value) = primary {
+        push_probe_endpoint(&mut endpoints, value);
+    }
+    if let Some(values) = parsed
+        .get("metadata")
+        .and_then(|value| value.get("endpointCandidates"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for value in values.iter().filter_map(serde_json::Value::as_str) {
+            push_probe_endpoint(&mut endpoints, value.to_string());
+        }
+    }
+    if endpoints.is_empty() {
+        return Err("No endpoint is configured for this profile".to_string());
+    }
+    endpoints.truncate(8);
+
+    let checks = endpoints.into_iter().map(|endpoint| {
+        let client = client.clone();
+        let headers = headers.clone();
+        async move { probe_endpoint(client, endpoint, headers).await }
+    });
+    let results = join_all(checks).await;
+    let successful = results
+        .iter()
+        .filter(|result| result.status != "error")
+        .count();
+    crate::utils::append_runtime_log(
+        "info",
+        "profiles",
+        &format!(
+            "Scanned {} endpoints for profile {}: {successful} reachable",
+            results.len(),
+            profile.name
+        ),
+    );
+    Ok(results)
+}
+
+fn push_probe_endpoint(endpoints: &mut Vec<String>, value: String) {
+    let endpoint = value.trim().trim_end_matches('/').to_string();
+    if (endpoint.starts_with("https://") || endpoint.starts_with("http://"))
+        && !endpoint.is_empty()
+        && !endpoints.iter().any(|existing| existing == &endpoint)
+    {
+        endpoints.push(endpoint);
+    }
+}
+
+async fn probe_endpoint(
+    client: reqwest::Client,
+    endpoint: String,
+    headers: Vec<(String, String)>,
+) -> ProviderEndpointCheckResult {
+    let started_at = std::time::Instant::now();
+    let mut request = client.head(&endpoint);
+    for (name, value) in &headers {
+        request = request.header(name, value);
+    }
+    let mut response = request.send().await;
+    if matches!(response, Ok(ref value) if value.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
+        || value.status() == reqwest::StatusCode::NOT_IMPLEMENTED)
+    {
+        let mut fallback = client.get(&endpoint);
+        for (name, value) in &headers {
+            fallback = fallback.header(name, value);
+        }
+        response = fallback.send().await;
+    }
+
+    let latency_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    match response {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            ProviderEndpointCheckResult {
+                endpoint,
+                status: classify_provider_latency_status(latency_ms),
+                latency_ms: Some(latency_ms),
+                http_status: Some(status),
+                message: format!("Endpoint responded with HTTP {status}"),
+            }
+        }
+        Err(error) => ProviderEndpointCheckResult {
+            endpoint,
+            status: "error".to_string(),
+            latency_ms: None,
+            http_status: None,
+            message: error.to_string(),
+        },
+    }
 }
 
 #[tauri::command]
@@ -410,4 +527,18 @@ pub async fn stream_check_config_profile(
         &result.message,
     );
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::push_probe_endpoint;
+
+    #[test]
+    fn probe_endpoint_candidates_are_normalized_and_deduplicated() {
+        let mut endpoints = Vec::new();
+        push_probe_endpoint(&mut endpoints, " https://example.com/ ".to_string());
+        push_probe_endpoint(&mut endpoints, "https://example.com".to_string());
+        push_probe_endpoint(&mut endpoints, "ftp://example.com".to_string());
+        assert_eq!(endpoints, vec!["https://example.com"]);
+    }
 }

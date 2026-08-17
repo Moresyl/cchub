@@ -224,6 +224,15 @@ pub struct ProviderPingResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderEndpointCheckResult {
+    pub endpoint: String,
+    pub status: String,
+    pub latency_ms: Option<u64>,
+    pub http_status: Option<u16>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeConfigToggles {
     pub hide_attribution: bool,

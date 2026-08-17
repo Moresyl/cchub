@@ -597,8 +597,9 @@ pub fn scan_sessions_from_conn(
         Some("opencode") => vec!["opencode"],
         Some("openclaw") => vec!["openclaw"],
         Some("hermes") => vec!["hermes"],
+        Some("pi") => vec!["pi"],
         _ => vec![
-            "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+            "claude", "codex", "gemini", "opencode", "openclaw", "hermes", "pi",
         ],
     };
 

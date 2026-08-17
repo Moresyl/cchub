@@ -12,7 +12,22 @@ import type {
   OpenCodeThinkingLevel,
   StructuredDraftFields,
 } from "./types";
-import { createDefaultStructuredFields, findTomlValue, parseBooleanLike, stringifyTemplateValues } from "./helpers";
+import {
+  createDefaultStructuredFields,
+  findTomlValue,
+  normalizeCustomUserAgent,
+  normalizeEndpointList,
+  normalizeRequestHeaders,
+  parseBooleanLike,
+  stringifyTemplateValues,
+} from "./helpers";
+
+function stringifyOverrideObject(value: unknown, headers = false): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const normalized = headers ? normalizeRequestHeaders(value) : { ...(value as Record<string, unknown>) };
+  if (!headers) delete normalized.stream;
+  return Object.keys(normalized).length ? JSON.stringify(normalized, null, 2) : "";
+}
 
 export function parseStructuredConfig(toolId: string, content: string): StructuredDraftFields {
   const defaults = createDefaultStructuredFields(toolId);
@@ -20,6 +35,28 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
   try {
     const parsed = JSON.parse(content) as Record<string, any>;
     const metadata = (parsed.metadata || {}) as Record<string, any>;
+    const usageScript =
+      metadata.usageScript && typeof metadata.usageScript === "object" && !Array.isArray(metadata.usageScript)
+        ? (metadata.usageScript as Record<string, unknown>)
+        : undefined;
+    const customEndpoints = normalizeEndpointList(
+      parsed.customEndpoints ?? parsed.custom_endpoints ?? metadata.customEndpoints,
+    );
+    const transportFields = {
+      customUserAgent: normalizeCustomUserAgent(
+        metadata.customUserAgent ?? metadata.custom_user_agent ?? parsed.customUserAgent ?? parsed.custom_user_agent,
+      ),
+      requestHeaders: normalizeRequestHeaders(
+        metadata.requestHeaders ?? metadata.request_headers ?? parsed.requestHeaders ?? parsed.request_headers,
+      ),
+      requestHeaderOverrides: stringifyOverrideObject(
+        (metadata.localProxyRequestOverrides ?? metadata.local_proxy_request_overrides)?.headers,
+        true,
+      ),
+      requestBodyOverrides: stringifyOverrideObject(
+        (metadata.localProxyRequestOverrides ?? metadata.local_proxy_request_overrides)?.body,
+      ),
+    };
 
     if (toolId === "claude") {
       const env = (parsed.env || {}) as Record<string, string>;
@@ -27,6 +64,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       const apiFormat = (env.ANTHROPIC_API_FORMAT as ApiFormat) || "anthropic";
       return {
         ...defaults,
+        customEndpoints,
+        ...transportFields,
+        usageScript,
         baseUrl: env.ANTHROPIC_BASE_URL || defaults.baseUrl,
         apiKey: env[authField] || "",
         model: env.ANTHROPIC_MODEL || defaults.model,
@@ -54,7 +94,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         requiresOAuth: Boolean(metadata.requiresOAuth),
         providerType: metadata.providerType || defaults.providerType,
         oauthAccountId:
-          (metadata.authBinding?.authProvider === "github_copilot" ? metadata.authBinding?.accountId : undefined) ||
+          (["github_copilot", "codex_oauth", "xai_oauth"].includes(metadata.authBinding?.authProvider)
+            ? metadata.authBinding?.accountId
+            : undefined) ||
           metadata.githubAccountId ||
           "",
       };
@@ -65,6 +107,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       const config = typeof parsed.config === "string" ? parsed.config : "";
       return {
         ...defaults,
+        customEndpoints,
+        ...transportFields,
+        usageScript,
         apiKey: auth.OPENAI_API_KEY || "",
         baseUrl: findTomlValue(config, "base_url") || defaults.baseUrl,
         model: findTomlValue(config, "model") || defaults.model,
@@ -96,6 +141,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       const suggestedDefaults = (parsed.suggestedDefaults || {}) as OpenClawSuggestedDefaults;
       return {
         ...defaults,
+        customEndpoints,
+        ...transportFields,
+        usageScript,
         baseUrl,
         apiKey,
         model: firstModel?.id || "",
@@ -129,6 +177,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       const hermesApiKeyEnv = (parsed.metadata?.hermesApiKeyEnv as string) || Object.keys(env)[0] || "";
       return {
         ...defaults,
+        customEndpoints,
+        ...transportFields,
+        usageScript,
         baseUrl: modelConfig.base_url || defaults.baseUrl,
         apiKey: hermesApiKeyEnv ? env[hermesApiKeyEnv] || "" : "",
         model: modelConfig.default || defaults.model,
@@ -147,6 +198,58 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       };
     }
 
+    if (toolId === "grokbuild") {
+      const config = typeof parsed.config === "string" ? parsed.config : "";
+      return {
+        ...defaults,
+        customEndpoints,
+        ...transportFields,
+        usageScript,
+        apiKey: findTomlValue(config, "api_key"),
+        baseUrl: findTomlValue(config, "base_url") || defaults.baseUrl,
+        model: findTomlValue(config, "model") || defaults.model,
+        modelName: findTomlValue(config, "name") || "Grok",
+        websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
+        apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
+        category: metadata.category || defaults.category,
+        endpointCandidates: Array.isArray(metadata.endpointCandidates)
+          ? metadata.endpointCandidates.join("\n")
+          : defaults.endpointCandidates,
+        costMultiplier:
+          metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        useFullUrl: parseBooleanLike(metadata.useFullUrl),
+        iconUrl: metadata.iconUrl || defaults.iconUrl,
+      };
+    }
+
+    if (toolId === "pi") {
+      const providers = (parsed.providers || {}) as Record<string, Record<string, any>>;
+      const firstEntry = Object.entries(providers)[0];
+      const provider = firstEntry?.[1] || {};
+      const firstModel = (Array.isArray(provider.models) ? provider.models[0] : {}) as Record<string, any>;
+      return {
+        ...defaults,
+        customEndpoints,
+        ...transportFields,
+        usageScript,
+        baseUrl: provider.baseUrl || "",
+        apiKey: provider.apiKey || "",
+        model: firstModel.id || "",
+        modelName: provider.name || firstEntry?.[0] || "",
+        apiProtocol: provider.api || defaults.apiProtocol,
+        websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
+        apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,
+        category: metadata.category || defaults.category,
+        endpointCandidates: Array.isArray(metadata.endpointCandidates)
+          ? metadata.endpointCandidates.join("\n")
+          : defaults.endpointCandidates,
+        costMultiplier:
+          metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
+        useFullUrl: parseBooleanLike(metadata.useFullUrl),
+        iconUrl: metadata.iconUrl || defaults.iconUrl,
+      };
+    }
+
     if (toolId === "opencode") {
       const npm = (parsed.npm as OpenCodeNpmPackage) || "@ai-sdk/openai-compatible";
       const options = (parsed.options || {}) as Record<string, string>;
@@ -161,6 +264,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       const modalities = (firstModel.modalities || {}) as { input?: string[]; output?: string[] };
       return {
         ...defaults,
+        customEndpoints,
+        ...transportFields,
+        usageScript,
         npm,
         baseUrl: options.baseURL || "",
         apiKey: options.apiKey || "",
@@ -197,6 +303,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
     const env = (parsed.env || {}) as Record<string, string>;
     return {
       ...defaults,
+      customEndpoints,
+      ...transportFields,
+      usageScript,
       baseUrl: env.GOOGLE_GEMINI_BASE_URL || defaults.baseUrl,
       apiKey: env.GEMINI_API_KEY || "",
       model: env.GEMINI_MODEL || defaults.model,
@@ -212,7 +321,9 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       requiresOAuth: Boolean(metadata.requiresOAuth),
       providerType: metadata.providerType || defaults.providerType,
       oauthAccountId:
-        (metadata.authBinding?.authProvider === "github_copilot" ? metadata.authBinding?.accountId : undefined) ||
+        (["github_copilot", "codex_oauth", "xai_oauth"].includes(metadata.authBinding?.authProvider)
+          ? metadata.authBinding?.accountId
+          : undefined) ||
         metadata.githubAccountId ||
         "",
     };

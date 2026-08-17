@@ -123,10 +123,41 @@ CREATE TABLE IF NOT EXISTS config_profiles (
     updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS project_profiles (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    snapshot TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_applied_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_profiles_updated_at
+ON project_profiles(updated_at DESC, name COLLATE NOCASE ASC);
+
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS prompt_library (
+    app_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    description TEXT,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (app_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prompt_library_app_updated_at
+ON prompt_library(app_id, updated_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_library_one_enabled_per_app
+ON prompt_library(app_id) WHERE enabled = 1;
 
 CREATE TABLE IF NOT EXISTS imported_project_files (
     project_root TEXT NOT NULL,
@@ -159,6 +190,12 @@ ON proxy_request_logs(created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_tool_id_created_at
 ON proxy_request_logs(tool_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_provider_created_at
+ON proxy_request_logs(provider_name, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_request_model_created_at
+ON proxy_request_logs(request_model, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS model_pricing (
     model_id TEXT PRIMARY KEY,
@@ -227,6 +264,58 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN latest_sha256 TEXT;");
     let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN last_checked_at INTEGER;");
 
+    seed_builtin_model_pricing(conn)?;
+
+    Ok(())
+}
+
+fn seed_builtin_model_pricing(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let builtins = [
+        (
+            "qwen3.8-max",
+            "2.000000",
+            "6.000000",
+            "0.250000",
+            "2.500000",
+        ),
+        (
+            "claude-opus-5",
+            "5.000000",
+            "25.000000",
+            "0.500000",
+            "6.250000",
+        ),
+        (
+            "gemini-3.6-flash",
+            "1.500000",
+            "7.500000",
+            "0.150000",
+            "0.000000",
+        ),
+        (
+            "grok-4.5-build",
+            "2.000000",
+            "6.000000",
+            "0.300000",
+            "0.000000",
+        ),
+    ];
+    for (model_id, input, output, cache_read, cache_write) in builtins {
+        conn.execute(
+            "INSERT OR IGNORE INTO model_pricing (
+                model_id,
+                normalized_model_id,
+                input_cost_per_million,
+                output_cost_per_million,
+                cache_read_cost_per_million,
+                cache_write_cost_per_million,
+                created_at,
+                updated_at
+            ) VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            rusqlite::params![model_id, input, output, cache_read, cache_write, now],
+        )?;
+    }
     Ok(())
 }
 
@@ -265,9 +354,63 @@ mod tests {
 
         assert!(table_exists(&conn, "app_settings"));
         assert!(table_exists(&conn, "config_profiles"));
+        assert!(table_exists(&conn, "project_profiles"));
         assert!(table_exists(&conn, "proxy_request_logs"));
         assert!(column_exists(&conn, "mcp_servers", "config_path"));
         assert!(column_exists(&conn, "config_profiles", "source_type"));
         assert!(column_exists(&conn, "skills", "last_checked_at"));
+    }
+
+    #[test]
+    fn builtin_pricing_is_seeded_without_overwriting_custom_values() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        let initial: (String, String, String, String) = conn
+            .query_row(
+                "SELECT input_cost_per_million, output_cost_per_million, cache_read_cost_per_million, cache_write_cost_per_million FROM model_pricing WHERE model_id = 'qwen3.8-max'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            initial,
+            (
+                "2.000000".into(),
+                "6.000000".into(),
+                "0.250000".into(),
+                "2.500000".into()
+            )
+        );
+
+        for (model_id, input, output) in [
+            ("claude-opus-5", "5.000000", "25.000000"),
+            ("gemini-3.6-flash", "1.500000", "7.500000"),
+            ("grok-4.5-build", "2.000000", "6.000000"),
+        ] {
+            let costs: (String, String) = conn
+                .query_row(
+                    "SELECT input_cost_per_million, output_cost_per_million FROM model_pricing WHERE model_id = ?1",
+                    [model_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(costs, (input.to_string(), output.to_string()));
+        }
+
+        conn.execute(
+            "UPDATE model_pricing SET input_cost_per_million = '9.000000' WHERE model_id = 'qwen3.8-max'",
+            [],
+        )
+        .unwrap();
+        run_migrations(&conn).unwrap();
+        let custom: String = conn
+            .query_row(
+                "SELECT input_cost_per_million FROM model_pricing WHERE model_id = 'qwen3.8-max'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(custom, "9.000000");
     }
 }

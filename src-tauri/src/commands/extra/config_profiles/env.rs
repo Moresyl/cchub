@@ -81,6 +81,18 @@ pub fn bootstrap_tool_environment_from_conn(
             )?;
             notes.push("Hermes 仅支持 Linux / macOS / WSL2；Windows 请把根目录覆盖指向 WSL2 内的 ~/.hermes".to_string());
         }
+        "pi" => {
+            write_default_file_if_missing(
+                &config_dir.join("models.json"),
+                "{\n  \"providers\": {}\n}\n",
+                &mut created_files,
+            )?;
+            write_default_file_if_missing(
+                &config_dir.join("settings.json"),
+                "{}\n",
+                &mut created_files,
+            )?;
+        }
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     }
 
@@ -294,8 +306,15 @@ pub fn get_text_app_setting(
         .ok())
 }
 
-pub const MANAGED_APP_IDS: [&str; 6] = [
-    "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+pub const MANAGED_APP_IDS: [&str; 8] = [
+    "claude",
+    "codex",
+    "gemini",
+    "grokbuild",
+    "opencode",
+    "openclaw",
+    "hermes",
+    "pi",
 ];
 pub const VISIBLE_APPS_SETTING_KEY: &str = "visible_apps";
 pub const WINDOW_PREFERENCES_SETTING_KEY: &str = "window_preferences";

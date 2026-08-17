@@ -10,7 +10,7 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         .map_err(|error| AppError::Custom(format!("Invalid deep link URL: {error}")))?;
 
     let scheme = url.scheme();
-    if scheme != "cchub" && scheme != "ccswitch" {
+    if scheme != "cchub" {
         return Err(AppError::Custom(format!(
             "Unsupported deep link scheme: {scheme}"
         )));
@@ -280,7 +280,7 @@ fn parse_bool(value: Option<&String>) -> Option<bool> {
 
 fn validate_provider_app(app: &str) -> Result<(), AppError> {
     match app {
-        "claude" | "codex" | "gemini" | "opencode" | "openclaw" | "hermes" => Ok(()),
+        "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes" => Ok(()),
         other => Err(AppError::Custom(format!(
             "Unsupported provider app in deep link: {other}"
         ))),
@@ -289,7 +289,8 @@ fn validate_provider_app(app: &str) -> Result<(), AppError> {
 
 fn validate_mcp_app(app: &str) -> Result<(), AppError> {
     match app {
-        "claude" | "codex" | "gemini" | "opencode" | "openclaw" | "hermes" => Ok(()),
+        "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode"
+        | "openclaw" | "hermes" => Ok(()),
         other => Err(AppError::Custom(format!(
             "Unsupported MCP target app in deep link: {other}"
         ))),

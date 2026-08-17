@@ -309,6 +309,9 @@ pub fn update_config_profile(
 
     if active_profile_id.as_deref() == Some(id.as_str()) {
         apply_tool_snapshot(&conn, &tool_id, &config_snapshot)?;
+        if tool_id == "claude" {
+            crate::commands::claude_extension::sync_for_profile(&conn, &config_snapshot)?;
+        }
     }
 
     Ok(())
@@ -328,6 +331,9 @@ pub fn apply_config_profile_from_conn(
         .map_err(|e| format!("Profile not found: {}", e))?;
 
     apply_tool_snapshot_with_options(conn, &tool_id, &snapshot, preserve_user_edits)?;
+    if tool_id == "claude" {
+        crate::commands::claude_extension::sync_for_profile(conn, &snapshot)?;
+    }
 
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
@@ -468,7 +474,7 @@ pub fn get_active_config_profile_ids(db: State<'_, DbState>) -> Result<Vec<Strin
 
 #[tauri::command]
 pub fn refresh_tray_provider_menu(app_handle: tauri::AppHandle) -> Result<(), String> {
-    crate::refresh_tray_menu(&app_handle).map_err(|e| e.to_string())
+    crate::tray::refresh_menu(&app_handle).map_err(|e| e.to_string())
 }
 
 pub fn parse_toml_assignment(content: &str, key: &str) -> Option<String> {

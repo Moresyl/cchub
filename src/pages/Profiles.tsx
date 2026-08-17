@@ -27,12 +27,15 @@ import { type ModelInfo } from "../components/ModelSelector";
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
 import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
-
 import {
   prettyJson,
+  buildProviderPingResult,
+  countProfilesByTool,
+  countSharedProfileGroups,
   type ConfigProfile,
   type DetectedTool,
   type ProviderConfigFragment,
+  type ProviderEndpointCheckResult,
   type ProviderPingResult,
   type ProviderStreamCheckResult,
 } from "./profiles/helpers";
@@ -40,16 +43,18 @@ import { mergeDraftFields, mergeSharedDraftFields, type DraftFieldsStateUpdate }
 import { buildEditorViewProps } from "./profiles/editorProps";
 import {
   performCloseModal,
+  performBatchStreamCheck,
   performFetchModels,
   performOpenEditModal,
   useFilteredProfiles,
   useProfileCardText,
+  useProfileDragHandlers,
   useProfilesKeyboardShortcuts,
 } from "./profiles/hooks";
 import ProfilesConfirmDialogs from "./profiles/Dialogs";
 import ProfileEditorView from "./profiles/EditorView";
 import ProfilesListView from "./profiles/ListView";
-
+import UsageDetailsDialog from "../components/UsageDetailsDialog";
 export default function Profiles() {
   const queryClient = useQueryClient();
   const cachedProfilesPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchProfilesPageData>>>(
@@ -92,15 +97,21 @@ export default function Profiles() {
   const [pingingId, setPingingId] = useState<string | null>(null);
   const [pingResults, setPingResults] = useState<Record<string, ProviderPingResult>>({});
   const [streamCheckingId, setStreamCheckingId] = useState<string | null>(null);
+  const [batchStreamChecking, setBatchStreamChecking] = useState(false);
   const [streamCheckResults, setStreamCheckResults] = useState<Record<string, ProviderStreamCheckResult>>({});
   const [streamCheckConfirmProfile, setStreamCheckConfirmProfile] = useState<ConfigProfile | null>(null);
+  const [usageProfile, setUsageProfile] = useState<ConfigProfile | null>(null);
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchedModelDetails, setFetchedModelDetails] = useState<ModelInfo[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelFetchError, setModelFetchError] = useState<string | null>(null);
-
-  const { baseUrl: draftBaseUrl, useFullUrl: draftUseFullUrl, apiKey: draftApiKey } = draftFields;
-
+  const {
+    baseUrl: draftBaseUrl,
+    useFullUrl: draftUseFullUrl,
+    apiKey: draftApiKey,
+    customUserAgent: draftCustomUserAgent,
+    requestHeaders: draftRequestHeaders,
+  } = draftFields;
   const [confirmAction, setConfirmAction] = useState<{ type: string; profile: ConfigProfile } | null>(null);
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -120,11 +131,9 @@ export default function Profiles() {
     [locale],
   );
   const installedTools = useMemo(() => tools.filter((tool) => tool.installed), [tools]);
-
   useEffect(() => {
     draftFieldsRef.current = draftFields;
   }, [draftFields]);
-
   const applyProfilesPageData = useCallback((data: Awaited<ReturnType<typeof fetchProfilesPageData>>) => {
     setProfiles(data.profiles);
     setTools(data.tools);
@@ -136,7 +145,6 @@ export default function Profiles() {
       return installed[0]?.id || data.tools[0]?.id || "claude";
     });
   }, []);
-
   const load = useCallback(
     async (options: { force?: boolean } = {}) => {
       const { force = false } = options;
@@ -161,7 +169,6 @@ export default function Profiles() {
     },
     [applyProfilesPageData, locale, queryClient],
   );
-
   const updateDraftFieldsState = useCallback((next: DraftFieldsStateUpdate) => {
     setDraftFieldsState((current) => {
       const resolved = typeof next === "function" ? next(current) : next;
@@ -169,18 +176,15 @@ export default function Profiles() {
       return resolved;
     });
   }, []);
-
   const setDraftFields = useCallback(
     (fields: StructuredDraftFields) => {
       updateDraftFieldsState(fields);
     },
     [updateDraftFieldsState],
   );
-
   const buildCurrentFields = useCallback((next: Partial<StructuredDraftFields> = {}): StructuredDraftFields => {
     return mergeDraftFields(draftFieldsRef.current, next);
   }, []);
-
   const updateStructuredDraft = useCallback(
     (toolId: string, next: Partial<StructuredDraftFields>) => {
       const fields = buildCurrentFields(next);
@@ -189,18 +193,15 @@ export default function Profiles() {
     },
     [buildCurrentFields],
   );
-
   function sortProviderFragments(fragments: ProviderConfigFragment[]) {
     return [...fragments].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name));
   }
-
   function normalizeFragmentFields(fragment: ProviderConfigFragment): StructuredDraftFields {
     return {
       ...createDefaultStructuredFields(draftTool),
       ...(fragment.fields || {}),
     };
   }
-
   const resetStructuredDraft = useCallback(
     (toolId: string) => {
       const defaults = createDefaultStructuredFields(toolId);
@@ -210,7 +211,6 @@ export default function Profiles() {
     },
     [setDraftFields],
   );
-
   const openCreateModal = useCallback(
     async (toolId?: string) => {
       const selectedTool = toolId || newTool;
@@ -250,7 +250,6 @@ export default function Profiles() {
     },
     [installedTools.length, locale, newTool, resetStructuredDraft, updateDraftFieldsState],
   );
-
   const openEditModal = useCallback(
     (profile: ConfigProfile) => {
       performOpenEditModal({
@@ -274,7 +273,6 @@ export default function Profiles() {
     },
     [profiles, resetStructuredDraft, setDraftFields],
   );
-
   const closeModal = useCallback(() => {
     performCloseModal({
       setShowCreateModal,
@@ -293,7 +291,6 @@ export default function Profiles() {
       setModelFetchError,
     });
   }, [setDraftFields]);
-
   const doDeleteFragment = useCallback(
     async (fragment: ProviderConfigFragment) => {
       setDeletingFragmentId(fragment.id);
@@ -316,7 +313,6 @@ export default function Profiles() {
     },
     [deleteProviderConfigFragmentMutation, localeText],
   );
-
   const handleSaveModal = useCallback(async () => {
     if (!draftName.trim() || saving) return;
     setSaving(true);
@@ -378,7 +374,6 @@ export default function Profiles() {
     saveSharedConfigProfilesMutation,
     updateConfigProfileMutation,
   ]);
-
   useProfilesKeyboardShortcuts({
     canSave: (showCreateModal || !!editingProfile) && draftName.trim().length > 0 && !saving,
     isEditing: showCreateModal || !!editingProfile,
@@ -386,7 +381,6 @@ export default function Profiles() {
     onCreate: openCreateModal,
     searchInputRef,
   });
-
   const doApply = useCallback(
     async (profile: ConfigProfile) => {
       setApplying(profile.id);
@@ -406,11 +400,9 @@ export default function Profiles() {
     },
     [applyConfigProfileMutation, locale],
   );
-
   const handleDelete = useCallback(async (profile: ConfigProfile) => {
     setConfirmAction({ type: "delete", profile });
   }, []);
-
   const doDelete = useCallback(
     async (profile: ConfigProfile) => {
       try {
@@ -446,7 +438,6 @@ export default function Profiles() {
     },
     [applyProfilesPageData, deleteConfigProfileGroupMutation, deleteConfigProfileMutation, locale, localeText],
   );
-
   const handleDuplicate = useCallback(
     async (profile: ConfigProfile) => {
       try {
@@ -465,12 +456,12 @@ export default function Profiles() {
     },
     [applyProfilesPageData, locale, saveConfigProfileMutation],
   );
-
   const handlePing = useCallback(
     async (profile: ConfigProfile) => {
       setPingingId(profile.id);
       try {
-        const result = await invoke<ProviderPingResult>("ping_provider_endpoint", { id: profile.id });
+        const checks = await invoke<ProviderEndpointCheckResult[]>("scan_provider_endpoints", { id: profile.id });
+        const result = buildProviderPingResult(profile, checks);
         setPingResults((current) => ({ ...current, [profile.id]: result }));
         if (result.status !== "error") {
           showToast(
@@ -491,7 +482,6 @@ export default function Profiles() {
     },
     [locale],
   );
-
   const runStreamCheck = useCallback(
     async (profile: ConfigProfile) => {
       setStreamCheckingId(profile.id);
@@ -517,7 +507,6 @@ export default function Profiles() {
     },
     [locale],
   );
-
   const handleStreamCheck = useCallback(
     (profile: ConfigProfile) => {
       if (localStorage.getItem("cchub-stream-check-confirmed") === "1") {
@@ -528,7 +517,13 @@ export default function Profiles() {
     },
     [runStreamCheck],
   );
-
+  const handleStreamCheckAll = useCallback(() => {
+    void performBatchStreamCheck({
+      localeText,
+      setChecking: setBatchStreamChecking,
+      setResults: setStreamCheckResults,
+    });
+  }, [localeText]);
   const reorderProfiles = useCallback(
     async (sourceId: string, targetId: string) => {
       if (!filterTool || sourceId === targetId || search.trim()) return;
@@ -544,12 +539,10 @@ export default function Profiles() {
       const fromIndex = orderedProfiles.findIndex((profile) => profile.id === sourceId);
       const toIndex = orderedProfiles.findIndex((profile) => profile.id === targetId);
       if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
-
       const nextOrdered = [...orderedProfiles];
       const [moved] = nextOrdered.splice(fromIndex, 1);
       nextOrdered.splice(toIndex, 0, moved);
       const nextOrderMap = new Map(nextOrdered.map((profile, index) => [profile.id, index]));
-
       setProfiles((current) =>
         current.map((profile) =>
           profile.tool_id === filterTool && nextOrderMap.has(profile.id)
@@ -557,7 +550,6 @@ export default function Profiles() {
             : profile,
         ),
       );
-
       try {
         await reorderConfigProfilesMutation.mutateAsync({
           toolId: filterTool,
@@ -574,11 +566,9 @@ export default function Profiles() {
     },
     [filterTool, load, locale, profiles, reorderConfigProfilesMutation, search],
   );
-
   useEffect(() => {
     void load();
   }, [load]);
-
   const activeIdSet = useMemo(() => new Set(activeIds), [activeIds]);
   const presetCategories = useMemo(() => getPresetCategories(draftTool), [draftTool]);
   const reorderEnabled = Boolean(filterTool) && search.trim().length === 0;
@@ -594,17 +584,14 @@ export default function Profiles() {
       if (alreadySelected && draftTargetTools.length === 1) {
         return;
       }
-
       const structuredToolIds = structuredInstalledTools.map((tool) => tool.id);
       const nextTargets = structuredToolIds.filter((id) => {
         if (id === toolId) return !alreadySelected;
         return draftTargetTools.includes(id);
       });
-
       if (nextTargets.length === 0) {
         return;
       }
-
       setDraftTargetTools(nextTargets);
       if (!nextTargets.includes(draftTool)) {
         setDraftTool(nextTargets[0]);
@@ -689,16 +676,31 @@ export default function Profiles() {
       performFetchModels({
         fetchingModels,
         draftTool,
+        draftProviderType: draftFields.providerType,
+        draftOAuthAccountId: draftFields.oauthAccountId,
         draftApiKey,
         draftUseFullUrl,
         draftBaseUrl,
+        draftCustomUserAgent,
+        draftRequestHeaders,
         localeText,
         setFetchingModels,
         setModelFetchError,
         setFetchedModelDetails,
         setFetchedModels,
       }),
-    [draftApiKey, draftBaseUrl, draftTool, draftUseFullUrl, fetchingModels, localeText],
+    [
+      draftApiKey,
+      draftBaseUrl,
+      draftCustomUserAgent,
+      draftFields.oauthAccountId,
+      draftFields.providerType,
+      draftRequestHeaders,
+      draftTool,
+      draftUseFullUrl,
+      fetchingModels,
+      localeText,
+    ],
   );
   const handleRequestFragmentDelete = useCallback(
     (fragmentId: string) => {
@@ -771,54 +773,20 @@ export default function Profiles() {
     [buildCurrentFields, draftTargetTools, editingProfile?.source_type, resetStructuredDraft, updateDraftFieldsState],
   );
   const profileCardText = useProfileCardText(locale);
-
-  const toolCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const profile of profiles) {
-      counts[profile.tool_id] = (counts[profile.tool_id] || 0) + 1;
-    }
-    return counts;
-  }, [profiles]);
-
-  const sharedGroupCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const profile of profiles) {
-      if (profile.source_type === "shared" && profile.source_key) {
-        counts[profile.source_key] = (counts[profile.source_key] || 0) + 1;
-      }
-    }
-    return counts;
-  }, [profiles]);
-
-  // search 输入触发的 filter 涉及对每个 profile 的 config_snapshot（可能 KB 级 JSON）
-  // 做 toLowerCase + includes，搜索框敲键阶段交给 deferredValue 跑在低优先级。
+  const toolCounts = useMemo(() => countProfilesByTool(profiles), [profiles]);
+  const sharedGroupCounts = useMemo(() => countSharedProfileGroups(profiles), [profiles]);
   const deferredSearch = useDeferredValue(search);
   const filteredProfiles = useFilteredProfiles(profiles, filterTool, deferredSearch, activeIdSet);
-
-  function handleCardDragStart(profileId: string) {
-    setDraggingProfileId(profileId);
-  }
-
-  function handleCardDragEnter(profileId: string) {
-    if (reorderEnabled && draggingProfileId && draggingProfileId !== profileId) {
-      setDragOverProfileId(profileId);
-    }
-  }
-
-  function handleCardDragEnd() {
-    setDraggingProfileId(null);
-    setDragOverProfileId(null);
-  }
-
-  function handleCardDrop(profileId: string) {
-    if (!reorderEnabled || !draggingProfileId) return;
-    void reorderProfiles(draggingProfileId, profileId);
-  }
-
+  const { handleCardDragStart, handleCardDragEnter, handleCardDragEnd, handleCardDrop } = useProfileDragHandlers({
+    reorderEnabled,
+    draggingProfileId,
+    setDraggingProfileId,
+    setDragOverProfileId,
+    reorderProfiles,
+  });
   if (loading) {
     return <LoadingState label={localeText("加载中...", "Loading...", "読み込み中...")} />;
   }
-
   if (loadError) {
     return (
       <ErrorState
@@ -831,10 +799,8 @@ export default function Profiles() {
       />
     );
   }
-
   const isEditing = showCreateModal || !!editingProfile;
   const isStructured = supportsStructuredConfig(draftTool);
-
   if (isEditing) {
     const editorProps = buildEditorViewProps({
       locale,
@@ -879,7 +845,6 @@ export default function Profiles() {
     });
     return <ProfileEditorView {...editorProps} />;
   }
-
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <ProfilesListView
@@ -903,6 +868,7 @@ export default function Profiles() {
         dragOverProfileId={dragOverProfileId}
         pingingId={pingingId}
         streamCheckingId={streamCheckingId}
+        batchStreamChecking={batchStreamChecking}
         applying={applying}
         profileCardText={profileCardText}
         handleRefreshProfiles={handleRefreshProfiles}
@@ -916,12 +882,13 @@ export default function Profiles() {
         handleCardDrop={handleCardDrop}
         handlePing={handlePing}
         handleStreamCheck={handleStreamCheck}
+        handleUsage={(profile) => setUsageProfile(profile)}
+        handleStreamCheckAll={handleStreamCheckAll}
         doApply={doApply}
         handleDuplicate={handleDuplicate}
         openEditModal={openEditModal}
         handleDelete={handleDelete}
       />
-
       <ProfilesConfirmDialogs
         locale={locale}
         localeText={localeText}
@@ -936,6 +903,7 @@ export default function Profiles() {
         setStreamCheckConfirmProfile={setStreamCheckConfirmProfile}
         runStreamCheck={runStreamCheck}
       />
+      <UsageDetailsDialog profile={usageProfile} locale={locale} onClose={() => setUsageProfile(null)} />
     </div>
   );
 }

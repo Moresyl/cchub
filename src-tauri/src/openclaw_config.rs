@@ -176,6 +176,63 @@ pub fn set_agents_defaults(defaults: &OpenClawAgentsDefaults) -> Result<(), Stri
     write_config(&config)
 }
 
+pub fn get_model_catalog() -> Result<Option<HashMap<String, OpenClawModelCatalogEntry>>, String> {
+    Ok(get_agents_defaults()?.models)
+}
+
+pub fn set_model_catalog(
+    catalog: &HashMap<String, OpenClawModelCatalogEntry>,
+) -> Result<(), String> {
+    let mut defaults = get_agents_defaults()?;
+    defaults.models = Some(catalog.clone());
+    set_agents_defaults(&defaults)
+}
+
+pub fn get_default_model() -> Result<Option<OpenClawDefaultModel>, String> {
+    Ok(get_agents_defaults()?.model)
+}
+
+pub fn set_default_model(model: OpenClawDefaultModel) -> Result<(), String> {
+    let mut defaults = get_agents_defaults()?;
+    defaults.model = Some(model);
+    set_agents_defaults(&defaults)
+}
+
+pub fn get_live_provider_ids() -> Result<Vec<String>, String> {
+    let config = read_config()?;
+    Ok(config
+        .pointer("/models/providers")
+        .and_then(Value::as_object)
+        .map(|providers| providers.keys().cloned().collect())
+        .unwrap_or_default())
+}
+
+pub fn get_live_provider(id: &str) -> Result<Option<Value>, String> {
+    let config = read_config()?;
+    Ok(config
+        .get("models")
+        .and_then(Value::as_object)
+        .and_then(|models| models.get("providers"))
+        .and_then(Value::as_object)
+        .and_then(|providers| providers.get(id))
+        .cloned())
+}
+
+pub fn remove_live_provider(id: &str) -> Result<bool, String> {
+    let mut config = read_config()?;
+    let Some(models) = config.get_mut("models").and_then(Value::as_object_mut) else {
+        return Ok(false);
+    };
+    let Some(providers) = models.get_mut("providers").and_then(Value::as_object_mut) else {
+        return Ok(false);
+    };
+    let removed = providers.remove(id).is_some();
+    if removed {
+        write_config(&config)?;
+    }
+    Ok(removed)
+}
+
 pub fn scan_health() -> Result<Vec<OpenClawHealthWarning>, String> {
     let path = get_openclaw_config_path();
     if !path.exists() {

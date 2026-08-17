@@ -2,7 +2,7 @@
 use axum::http::StatusCode;
 use rusqlite::Connection;
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::DbState;
 use crate::provider_proxy_transform::{
@@ -32,7 +32,7 @@ pub(super) fn transform_claude_response_body(
             ClaudeApiFormat::OpenAiChat => openai_to_anthropic(body),
             ClaudeApiFormat::OpenAiResponses => responses_to_anthropic(body),
             ClaudeApiFormat::GeminiNative => {
-                let model = request_model.unwrap_or("gemini-2.5-flash");
+                let model = request_model.unwrap_or("gemini-3.6-flash");
                 crate::gemini_transform::gemini_to_anthropic(body, model)
             }
         }
@@ -275,4 +275,11 @@ pub(super) fn log_proxy_request(
             &format!("Failed to update proxy usage rollup: {error}"),
         );
     }
+    let _ = app_handle.emit(
+        "usage-log-recorded",
+        serde_json::json!({
+            "toolId": tool_id,
+            "statusCode": status_code,
+        }),
+    );
 }

@@ -10,6 +10,8 @@ use serde_json::Value;
 
 use crate::error::AppError;
 
+const MAX_REMOTE_CONFIG_BYTES: usize = 4 * 1024 * 1024;
+
 pub use parser::parse_deeplink_url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,8 +210,16 @@ pub fn decode_text_payload(value: &str) -> Result<String, AppError> {
         return Ok(trimmed.to_string());
     }
 
+    // `url::Url::query_pairs()` converts a literal '+' into a space. Restore
+    // it before trying both standard and URL-safe Base64 alphabets so the
+    // backend decodes exactly what the confirmation dialog displayed.
+    // Keep spaces at the edges: a Base64 '+' can be the final character and
+    // `str::trim()` would erase it after URL query parsing.
+    let normalized = value
+        .trim_matches(|character| character == '\r' || character == '\n')
+        .replace(' ', "+");
     for engine in [STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD] {
-        if let Ok(decoded) = engine.decode(trimmed) {
+        if let Ok(decoded) = engine.decode(&normalized) {
             if let Ok(text) = String::from_utf8(decoded) {
                 return Ok(text);
             }
@@ -246,11 +256,27 @@ async fn fetch_remote_config(config_url: &str) -> Result<String, AppError> {
     let response = response
         .error_for_status()
         .map_err(|error| AppError::Custom(format!("Config URL returned error: {error}")))?;
-
-    response
-        .text()
-        .await
-        .map_err(|error| AppError::Custom(format!("Failed to read config URL response: {error}")))
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_REMOTE_CONFIG_BYTES as u64)
+    {
+        return Err(AppError::Custom(format!(
+            "Config URL response exceeds the {} MiB limit",
+            MAX_REMOTE_CONFIG_BYTES / (1024 * 1024)
+        )));
+    }
+    let bytes = response.bytes().await.map_err(|error| {
+        AppError::Custom(format!("Failed to read config URL response: {error}"))
+    })?;
+    if bytes.len() > MAX_REMOTE_CONFIG_BYTES {
+        return Err(AppError::Custom(format!(
+            "Config URL response exceeds the {} MiB limit",
+            MAX_REMOTE_CONFIG_BYTES / (1024 * 1024)
+        )));
+    }
+    String::from_utf8(bytes.to_vec()).map_err(|error| {
+        AppError::Custom(format!("Config URL response is not valid UTF-8: {error}"))
+    })
 }
 
 fn merge_claude_config(
@@ -676,4 +702,17 @@ pub fn infer_homepage_from_endpoint(endpoint: Option<&str>) -> Option<String> {
     let parsed = url::Url::parse(endpoint).ok()?;
     let host = parsed.host_str()?;
     Some(format!("{}://{}", parsed.scheme(), host))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_text_payload;
+
+    #[test]
+    fn restores_plus_signs_from_query_decoding() {
+        let encoded = "4KC+";
+        let with_query_space = encoded.replace('+', " ");
+        let expected = String::from_utf8(vec![0xe0, 0xa0, 0xbe]).unwrap();
+        assert_eq!(decode_text_payload(&with_query_space).unwrap(), expected);
+    }
 }

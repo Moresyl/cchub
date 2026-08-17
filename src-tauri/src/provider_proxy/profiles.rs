@@ -67,7 +67,39 @@ pub(super) fn read_profile_candidates_for_tool(
         ));
     }
 
+    apply_failover_queue(conn, tool_id, &mut profiles);
     Ok(profiles)
+}
+
+fn apply_failover_queue(conn: &Connection, tool_id: &str, profiles: &mut Vec<ProfileCandidate>) {
+    if profiles.len() < 2 {
+        return;
+    }
+    let queue_key = format!("proxy_failover_queue:{tool_id}");
+    let queue = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            rusqlite::params![queue_key],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+        .unwrap_or_default();
+    if queue.is_empty() {
+        return;
+    }
+    let primary = profiles.remove(0);
+    let mut ordered = vec![primary];
+    for profile_id in queue {
+        if let Some(index) = profiles
+            .iter()
+            .position(|profile| profile.profile_id == profile_id)
+        {
+            ordered.push(profiles.remove(index));
+        }
+    }
+    ordered.append(profiles);
+    *profiles = ordered;
 }
 
 pub(super) fn default_base_url_for_claude(api_format: &str) -> Option<String> {
@@ -117,6 +149,7 @@ pub(super) fn rewrite_claude_request_target(
     query: Option<&str>,
     api_format: ClaudeApiFormat,
     is_github_copilot: bool,
+    is_codex_oauth: bool,
     body_bytes: Option<&[u8]>,
 ) -> (String, Option<String>) {
     if !api_format.needs_transform() || !is_claude_messages_path(relative_path) {
@@ -126,12 +159,13 @@ pub(super) fn rewrite_claude_request_target(
     let target_path = match api_format {
         ClaudeApiFormat::OpenAiChat if is_github_copilot => "chat/completions".to_string(),
         ClaudeApiFormat::OpenAiChat => "v1/chat/completions".to_string(),
+        ClaudeApiFormat::OpenAiResponses if is_codex_oauth => "responses".to_string(),
         ClaudeApiFormat::OpenAiResponses => "v1/responses".to_string(),
         ClaudeApiFormat::GeminiNative => {
             let model = body_bytes
                 .and_then(|b| serde_json::from_slice::<Value>(b).ok())
                 .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(String::from))
-                .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+                .unwrap_or_else(|| "gemini-3.6-flash".to_string());
             let model_id = model
                 .strip_prefix('/')
                 .unwrap_or(&model)
@@ -222,6 +256,16 @@ pub(super) fn extract_cost_multiplier(parsed: &Value) -> f64 {
 }
 
 pub(super) fn extract_copilot_account_id(parsed: &Value) -> Option<String> {
+    extract_bound_account_id(parsed, "github_copilot").or_else(|| {
+        extract_metadata_object(parsed)
+            .get("githubAccountId")
+            .and_then(|value| value.as_str())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+pub(super) fn extract_bound_account_id(parsed: &Value, provider_name: &str) -> Option<String> {
     let metadata = extract_metadata_object(parsed);
     metadata
         .get("authBinding")
@@ -232,7 +276,7 @@ pub(super) fn extract_copilot_account_id(parsed: &Value) -> Option<String> {
                 .map(|provider| (value, provider))
         })
         .and_then(|(value, provider)| {
-            if provider == "github_copilot" {
+            if provider == provider_name {
                 value
                     .get("accountId")
                     .and_then(|item| item.as_str())
@@ -241,13 +285,6 @@ pub(super) fn extract_copilot_account_id(parsed: &Value) -> Option<String> {
             } else {
                 None
             }
-        })
-        .or_else(|| {
-            metadata
-                .get("githubAccountId")
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
         })
 }
 

@@ -3,6 +3,9 @@ import { memo } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 import CopilotAuthSection from "../../components/CopilotAuthSection";
+import CodexOAuthAuthSection from "../../components/CodexOAuthAuthSection";
+import XaiOAuthAuthSection from "../../components/XaiOAuthAuthSection";
+import ProfileEndpointProbePanel from "../../components/ProfileEndpointProbePanel";
 import {
   type ApiFormat,
   type ClaudeAuthField,
@@ -30,6 +33,7 @@ interface ProfileConnectionSectionProps {
   locale: string;
   localeText: (zhText: string, enText: string, jaText?: string) => string;
   draftTool: string;
+  providerId?: string | null;
   draftProviderType: PresetProviderType | "";
   draftRequiresOAuth: boolean;
   draftOauthAccountId: string;
@@ -40,6 +44,7 @@ interface ProfileConnectionSectionProps {
   draftIconUrl: string;
   draftCostMultiplier: string;
   draftEndpointCandidates: string;
+  draftCustomEndpoints: string[];
   draftAuthField: ClaudeAuthField;
   draftApiFormat: ApiFormat;
   draftCodexReasoningEffort: CodexReasoningEffort;
@@ -96,6 +101,7 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
   locale,
   localeText,
   draftTool,
+  providerId,
   draftProviderType,
   draftRequiresOAuth,
   draftOauthAccountId,
@@ -106,6 +112,7 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
   draftIconUrl,
   draftCostMultiplier,
   draftEndpointCandidates,
+  draftCustomEndpoints,
   draftAuthField,
   draftApiFormat,
   draftCodexReasoningEffort,
@@ -131,6 +138,8 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
             showDescription={false}
           />
         )}
+        {draftProviderType === "codex_oauth" && <CodexOAuthAuthSection localeText={localeText} />}
+        {draftProviderType === "xai_oauth" && <XaiOAuthAuthSection localeText={localeText} />}
         {draftRequiresOAuth && (
           <div className="card" style={{ padding: 12, fontSize: 12, color: "var(--text-muted)" }}>
             {draftProviderType === "github_copilot"
@@ -139,11 +148,23 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
                   "This preset uses GitHub Copilot OAuth. No API key is required; sign in with GitHub and optionally bind a specific account. Enable the Claude local proxy in Settings when using the provider.",
                   "このプリセットは GitHub Copilot OAuth を使用します。API Key は不要です。GitHub にログインし、必要なら特定アカウントを紐付けてください。利用時は Settings で Claude のローカルプロキシを有効にすることを推奨します。",
                 )
-              : localeText(
-                  "当前预设使用 OAuth 模式，无需填写 API Key。",
-                  "This preset uses OAuth mode and does not require an API key.",
-                  "このプリセットは OAuth モードのため API Key は不要です。",
-                )}
+              : draftProviderType === "codex_oauth"
+                ? localeText(
+                    "当前预设使用 Codex OAuth。无需填写 API Key；请先完成 Codex OAuth 登录。",
+                    "This preset uses Codex OAuth. No API key is required; complete Codex OAuth sign-in first.",
+                    "このプリセットは Codex OAuth を使用します。API Key は不要です。先に Codex OAuth ログインを完了してください。",
+                  )
+                : draftProviderType === "xai_oauth"
+                  ? localeText(
+                      "当前预设使用 xAI OAuth。无需填写 API Key；请先完成 xAI OAuth 登录。",
+                      "This preset uses xAI OAuth. No API key is required; complete xAI OAuth sign-in first.",
+                      "このプリセットは xAI OAuth を使用します。API Key は不要です。先に xAI OAuth ログインを完了してください。",
+                    )
+                  : localeText(
+                      "当前预设使用 OAuth 模式，无需填写 API Key。",
+                      "This preset uses OAuth mode and does not require an API key.",
+                      "このプリセットは OAuth モードのため API Key は不要です。",
+                    )}
           </div>
         )}
         {!draftRequiresOAuth && (
@@ -241,6 +262,17 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
             style={{ minHeight: 88, resize: "vertical", fontSize: 13 }}
           />
         </Field>
+
+        <ProfileEndpointProbePanel
+          locale={locale}
+          localeText={localeText}
+          appId={draftTool}
+          providerId={providerId}
+          baseUrl={draftBaseUrl}
+          candidates={draftEndpointCandidates}
+          customEndpoints={draftCustomEndpoints}
+          onCustomEndpointsChange={(urls) => onDraftChange(draftTool, { customEndpoints: urls })}
+        />
 
         {draftTool === "claude" && (
           <div style={TWO_COLUMN_GRID_STYLE}>

@@ -73,9 +73,14 @@ export interface ParsedMcpPreviewServer {
   name: string;
   command: string;
   args: string[];
+  url?: string;
   envKeys: string[];
+  env: Record<string, string>;
+  headers: Record<string, string>;
   transport: string;
 }
+
+export type DeepLinkRiskKind = "envHijack" | "privateEndpoint" | "shellCommand";
 
 const CLAUDE_AUTH_FIELDS: ClaudeAuthField[] = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 const API_FORMATS: ApiFormat[] = ["anthropic", "openai_chat", "openai_responses"];
@@ -99,8 +104,10 @@ const OPENCODE_NPMS: OpenCodeNpmPackage[] = [
 export const deeplinkApi = {
   takePendingImports: () => invoke<DeepLinkImportRequest[]>("take_pending_deeplink_imports"),
   takePendingErrors: () => invoke<DeepLinkErrorPayload[]>("take_pending_deeplink_errors"),
-  mergeRequest: (request: DeepLinkImportRequest) => invoke<DeepLinkImportRequest>("merge_deeplink_request", { request }),
-  importMcp: (request: DeepLinkImportRequest) => invoke<DeepLinkMcpImportResult>("import_mcp_servers_from_deeplink", { request }),
+  mergeRequest: (request: DeepLinkImportRequest) =>
+    invoke<DeepLinkImportRequest>("merge_deeplink_request", { request }),
+  importMcp: (request: DeepLinkImportRequest) =>
+    invoke<DeepLinkMcpImportResult>("import_mcp_servers_from_deeplink", { request }),
 };
 
 export function splitDeepLinkEndpoints(endpoint: string | undefined): string[] {
@@ -127,8 +134,10 @@ export function decodeDeepLinkText(value: string | undefined): string {
   if (!trimmed) return "";
   if (looksLikePlainText(trimmed)) return trimmed;
 
-  const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+  // URL query parsing turns '+' into a space. Restore it before accepting both
+  // standard and RFC 4648 URL-safe Base64 payloads.
+  const normalized = trimmed.replace(/ /g, "+").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
   try {
     const binary = atob(padded);
     const bytes = Uint8Array.from(binary, (char) => char.codePointAt(0) || 0);
@@ -140,14 +149,16 @@ export function decodeDeepLinkText(value: string | undefined): string {
 
 function looksLikePlainText(value: string): boolean {
   const trimmed = value.trimStart();
-  return trimmed.startsWith("{")
-    || trimmed.startsWith("[")
-    || trimmed.startsWith("#")
-    || trimmed.includes("\n")
-    || trimmed.includes("\r\n")
-    || trimmed.includes(" = ")
-    || trimmed.includes("=\"")
-    || trimmed.includes("[model_providers");
+  return (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    trimmed.startsWith("#") ||
+    trimmed.includes("\n") ||
+    trimmed.includes("\r\n") ||
+    trimmed.includes(" = ") ||
+    trimmed.includes('="') ||
+    trimmed.includes("[model_providers")
+  );
 }
 
 export function parseMcpPreviewServers(request: DeepLinkImportRequest): ParsedMcpPreviewServer[] {
@@ -163,7 +174,7 @@ export function parseMcpPreviewServers(request: DeepLinkImportRequest): ParsedMc
       });
     }
 
-    if (typeof parsed.command === "string") {
+    if (typeof parsed.command === "string" || typeof parsed.url === "string") {
       const server = parseMcpServer(request.name || "imported-mcp", parsed);
       return server ? [server] : [];
     }
@@ -180,14 +191,159 @@ export function parseMcpPreviewServers(request: DeepLinkImportRequest): ParsedMc
 function parseMcpServer(name: string, value: unknown): ParsedMcpPreviewServer | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  if (typeof record.command !== "string") return null;
+  const command = typeof record.command === "string" ? record.command : "";
+  const url = typeof record.url === "string" ? record.url : undefined;
+  if (!command && !url) return null;
+  const env = parseStringMap(record.env);
+  const headers = parseStringMap(record.headers);
   return {
     name,
-    command: record.command,
+    command,
     args: Array.isArray(record.args) ? record.args.filter((item): item is string => typeof item === "string") : [],
-    envKeys: record.env && typeof record.env === "object" ? Object.keys(record.env as Record<string, unknown>) : [],
-    transport: typeof record.type === "string" ? record.type : "stdio",
+    url,
+    envKeys: [...new Set([...Object.keys(env), ...Object.keys(headers)])],
+    env,
+    headers,
+    transport: typeof record.type === "string" ? record.type : url ? "http" : "stdio",
   };
+}
+
+function parseStringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => typeof item === "string")
+      .map(([key, item]) => [key, item as string]),
+  );
+}
+
+const SENSITIVE_CONFIG_KEY_MARKERS = ["TOKEN", "KEY", "SECRET", "PASSWORD", "AUTHORIZATION", "COOKIE", "CREDENTIAL"];
+const ENV_HIJACK_PATTERNS = [
+  /^LD_/i,
+  /^DYLD_/i,
+  /^NODE_OPTIONS$/i,
+  /^NODE_EXTRA_CA_CERTS$/i,
+  /^PYTHONPATH$/i,
+  /^PYTHONSTARTUP$/i,
+  /^RUBYOPT$/i,
+  /^PERL5OPT$/i,
+  /^JAVA_TOOL_OPTIONS$/i,
+  /^BASH_ENV$/i,
+  /^ENV$/i,
+  /^IFS$/i,
+  /^PATH$/i,
+  /^HTTPS?_PROXY$/i,
+];
+const SHELL_INTERPRETERS = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ksh",
+  "fish",
+  "csh",
+  "tcsh",
+  "cmd",
+  "cmd.exe",
+  "powershell",
+  "powershell.exe",
+  "pwsh",
+  "pwsh.exe",
+]);
+
+export function isSensitiveConfigKey(key: string): boolean {
+  const normalized = key.toUpperCase();
+  return (
+    normalized === "AUTH" ||
+    normalized === "BEARER" ||
+    SENSITIVE_CONFIG_KEY_MARKERS.some((marker) => normalized.includes(marker))
+  );
+}
+
+export function maskConfigValue(key: string, value: string): string {
+  if (!isSensitiveConfigKey(key)) return value;
+  return value.length > 8 ? `${value.slice(0, 4)}${"*".repeat(12)}` : "****";
+}
+
+export function classifyDeepLinkEndpoint(value: string): DeepLinkRiskKind | null {
+  try {
+    const host = new URL(value).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal") ||
+      host === "::1" ||
+      host === "::" ||
+      host === "0.0.0.0"
+    )
+      return "privateEndpoint";
+    const parts = host.split(".").map(Number);
+    if (parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+      const [a, b] = parts;
+      if (
+        a === 0 ||
+        a === 10 ||
+        a === 127 ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        (a === 169 && b === 254)
+      )
+        return "privateEndpoint";
+    }
+    if (/^f[cd][0-9a-f]{2}:|^fe[89ab][0-9a-f]:/.test(host)) return "privateEndpoint";
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function classifyDeepLinkEnvKey(key: string): DeepLinkRiskKind | null {
+  return ENV_HIJACK_PATTERNS.some((pattern) => pattern.test(key)) ? "envHijack" : null;
+}
+
+export function classifyDeepLinkCommand(command: string, args: string[]): DeepLinkRiskKind | null {
+  const base = command.split(/[\\/]/).pop()?.toLowerCase() || "";
+  if (!SHELL_INTERPRETERS.has(base)) return null;
+  return args.some(
+    (arg) =>
+      /^\/[ck]\b/i.test(arg) ||
+      /^-[a-z]*c[a-z]*$/i.test(arg) ||
+      ["-command", "-encodedcommand", "-e", "-ec"].includes(arg.toLowerCase()),
+  )
+    ? "shellCommand"
+    : null;
+}
+
+function addUsageMetadata(snapshot: string, request: DeepLinkImportRequest): string {
+  const hasUsage =
+    request.usageScript !== undefined ||
+    request.usageEnabled !== undefined ||
+    request.usageApiKey !== undefined ||
+    request.usageBaseUrl !== undefined ||
+    request.usageAccessToken !== undefined ||
+    request.usageUserId !== undefined ||
+    request.usageAutoInterval !== undefined;
+  if (!hasUsage) return snapshot;
+  try {
+    const document = JSON.parse(snapshot) as Record<string, unknown>;
+    const metadata =
+      document.metadata && typeof document.metadata === "object" ? (document.metadata as Record<string, unknown>) : {};
+    metadata.usageScript = {
+      enabled: request.usageEnabled === true,
+      language: "javascript",
+      code: decodeDeepLinkText(request.usageScript),
+      apiKey: request.usageApiKey?.trim() || undefined,
+      baseUrl: request.usageBaseUrl?.trim() || undefined,
+      accessToken: request.usageAccessToken?.trim() || undefined,
+      userId: request.usageUserId?.trim() || undefined,
+      autoQueryInterval: request.usageAutoInterval,
+    };
+    document.metadata = metadata;
+    return JSON.stringify(document, null, 2);
+  } catch {
+    return snapshot;
+  }
 }
 
 export function buildProviderProfileFromDeepLink(request: DeepLinkImportRequest) {
@@ -225,7 +381,10 @@ export function buildProviderProfileFromDeepLink(request: DeepLinkImportRequest)
     if (request.codexWireApi && CODEX_WIRE_APIS.includes(request.codexWireApi as CodexWireApi)) {
       fields.codexWireApi = request.codexWireApi as CodexWireApi;
     }
-    if (request.codexReasoningEffort && CODEX_REASONING.includes(request.codexReasoningEffort as CodexReasoningEffort)) {
+    if (
+      request.codexReasoningEffort &&
+      CODEX_REASONING.includes(request.codexReasoningEffort as CodexReasoningEffort)
+    ) {
       fields.codexReasoningEffort = request.codexReasoningEffort as CodexReasoningEffort;
     }
   }
@@ -250,6 +409,6 @@ export function buildProviderProfileFromDeepLink(request: DeepLinkImportRequest)
   return {
     toolId,
     name: request.name?.trim() || "Imported Provider",
-    configSnapshot: buildStructuredConfig(toolId, fields),
+    configSnapshot: addUsageMetadata(buildStructuredConfig(toolId, fields), request),
   };
 }

@@ -20,6 +20,15 @@ pub fn set_webdav_sync_settings(
 }
 
 #[tauri::command]
+pub fn webdav_sync_save_settings(
+    settings: WebDavSyncSettings,
+    password_touched: Option<bool>,
+    db: State<'_, DbState>,
+) -> Result<WebDavSyncSettings, String> {
+    set_webdav_sync_settings(settings, password_touched, db)
+}
+
+#[tauri::command]
 pub async fn webdav_test_connection(
     settings: WebDavSyncSettings,
     preserve_empty_password: Option<bool>,

@@ -137,6 +137,17 @@ pub fn delete_workspace(id: String, db: State<'_, DbState>) -> Result<(), String
         return Err("Cannot delete active workspace".to_string());
     }
 
+    let referenced: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM project_profiles WHERE instr(snapshot, ?1) > 0",
+            rusqlite::params![format!("\"workspaceId\":\"{}\"", id)],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if referenced > 0 {
+        return Err("Cannot delete workspace referenced by a project profile".to_string());
+    }
+
     conn.execute(
         "DELETE FROM workspaces WHERE id = ?1",
         rusqlite::params![id],

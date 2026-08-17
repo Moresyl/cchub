@@ -23,15 +23,18 @@ mod usage;
 use cost::{calculate_proxy_total_cost, parse_cost_text};
 use forward::forward_proxy_request;
 pub(crate) use optimizer::{update_optimizer_config_cache, update_rectifier_config_cache};
+use profiles::profile_circuit_key;
 use rewriters::{
     rewrite_claude_snapshot, rewrite_codex_snapshot, rewrite_gemini_snapshot,
-    rewrite_hermes_snapshot, rewrite_openclaw_snapshot, rewrite_opencode_snapshot,
+    rewrite_grok_snapshot, rewrite_hermes_snapshot, rewrite_openclaw_snapshot,
+    rewrite_opencode_snapshot,
 };
 use upstream::{
     build_forward_response, build_forward_response_from_parts, build_json_response_from_value,
     build_proxy_error, build_upstream_request_url, extract_request_insights,
     extract_upstream_target, is_hop_by_hop_header, is_retryable_upstream_status,
-    next_proxy_request_id, parse_json_bytes, reqwest_client, transform_claude_request_body,
+    next_proxy_request_id, parse_json_bytes, read_response_body_limited, reqwest_client,
+    transform_claude_request_body,
 };
 
 use crate::db::DbState;
@@ -41,8 +44,15 @@ const LOCAL_PROVIDER_PROXY_HOST: &str = "127.0.0.1";
 const LOCAL_PROVIDER_PROXY_TOKEN: &str = "cchub-local-proxy";
 const DEFAULT_LOCAL_PROVIDER_PROXY_PORT: u16 = 34567;
 const MAX_PROXY_BODY_BYTES: usize = 64 * 1024 * 1024;
-const MANAGED_PROXY_TOOLS: [&str; 6] = [
-    "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+const MAX_PROXY_RESPONSE_BODY_BYTES: usize = 128 * 1024 * 1024;
+const MANAGED_PROXY_TOOLS: [&str; 7] = [
+    "claude",
+    "codex",
+    "gemini",
+    "grokbuild",
+    "opencode",
+    "openclaw",
+    "hermes",
 ];
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -157,6 +167,117 @@ pub(super) struct LocalProviderProxyRuntimeInner {
 
 pub(crate) struct LocalProviderProxyRuntime(pub(super) Mutex<LocalProviderProxyRuntimeInner>);
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitBreakerEntry {
+    pub scope: String,
+    pub key: String,
+    pub state: String,
+    pub consecutive_failures: u32,
+    pub consecutive_successes: u32,
+    pub retry_after_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitBreakerStats {
+    pub entries: Vec<CircuitBreakerEntry>,
+    pub open_count: usize,
+    pub half_open_count: usize,
+}
+
+fn circuit_state_label(state: CircuitState) -> &'static str {
+    match state {
+        CircuitState::Closed => "closed",
+        CircuitState::Open => "open",
+        CircuitState::HalfOpen => "half_open",
+    }
+}
+
+fn circuit_entry(scope: &str, key: &str, state: &EndpointCircuitState) -> CircuitBreakerEntry {
+    CircuitBreakerEntry {
+        scope: scope.to_string(),
+        key: key.to_string(),
+        state: circuit_state_label(state.state).to_string(),
+        consecutive_failures: state.consecutive_failures,
+        consecutive_successes: state.consecutive_successes,
+        retry_after_ms: state.open_until.map(|until| {
+            until
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64
+        }),
+    }
+}
+
+pub fn get_circuit_breaker_stats(app_handle: &AppHandle) -> Result<CircuitBreakerStats, String> {
+    let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
+    let runtime = runtime_state
+        .0
+        .lock()
+        .map_err(|_| "Local provider proxy runtime lock is poisoned".to_string())?;
+    let mut entries = runtime
+        .profile_circuits
+        .iter()
+        .map(|(key, state)| circuit_entry("profile", key, state))
+        .chain(
+            runtime
+                .endpoint_circuits
+                .iter()
+                .map(|(key, state)| circuit_entry("endpoint", key, state)),
+        )
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.scope.cmp(&right.scope).then(left.key.cmp(&right.key)));
+    let open_count = entries.iter().filter(|entry| entry.state == "open").count();
+    let half_open_count = entries
+        .iter()
+        .filter(|entry| entry.state == "half_open")
+        .count();
+    Ok(CircuitBreakerStats {
+        entries,
+        open_count,
+        half_open_count,
+    })
+}
+
+pub fn reset_circuit_breakers(app_handle: &AppHandle) -> Result<usize, String> {
+    let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
+    let mut runtime = runtime_state
+        .0
+        .lock()
+        .map_err(|_| "Local provider proxy runtime lock is poisoned".to_string())?;
+    let reset_count = runtime.profile_circuits.len() + runtime.endpoint_circuits.len();
+    runtime.profile_circuits.clear();
+    runtime.endpoint_circuits.clear();
+    Ok(reset_count)
+}
+
+pub fn reset_circuit_breaker_for_profile(
+    app_handle: &AppHandle,
+    tool_id: &str,
+    profile_id: &str,
+) -> Result<usize, String> {
+    let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
+    let mut runtime = runtime_state
+        .0
+        .lock()
+        .map_err(|_| "Local provider proxy runtime lock is poisoned".to_string())?;
+    let profile_key = profile_circuit_key(tool_id, profile_id);
+    let mut reset_count = usize::from(runtime.profile_circuits.remove(&profile_key).is_some());
+    let endpoint_prefix = format!("{profile_id}::");
+    let endpoint_keys = runtime
+        .endpoint_circuits
+        .keys()
+        .filter(|key| key.starts_with(&endpoint_prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    reset_count += endpoint_keys
+        .into_iter()
+        .filter(|key| runtime.endpoint_circuits.remove(key).is_some())
+        .count();
+    Ok(reset_count)
+}
+
 #[derive(Clone)]
 struct ProxyRouterState {
     app_handle: AppHandle,
@@ -196,8 +317,11 @@ pub(super) struct UpstreamTarget {
     pub(super) use_full_url: bool,
     pub(super) candidate_base_urls: Vec<String>,
     pub(super) headers: Vec<(String, String)>,
+    pub(super) request_header_overrides: Vec<(String, String)>,
+    pub(super) request_body_override: Option<serde_json::Value>,
     pub(super) claude_api_format: Option<ClaudeApiFormat>,
     pub(super) is_github_copilot: bool,
+    pub(super) is_codex_oauth: bool,
     pub(super) cost_multiplier: f64,
 }
 
@@ -310,6 +434,7 @@ pub(crate) fn materialize_tool_snapshot_for_runtime(
         "claude" => rewrite_claude_snapshot(snapshot, settings.port),
         "codex" => rewrite_codex_snapshot(snapshot, settings.port),
         "gemini" => rewrite_gemini_snapshot(snapshot, settings.port),
+        "grokbuild" => rewrite_grok_snapshot(snapshot, settings.port),
         "openclaw" => rewrite_openclaw_snapshot(snapshot, settings.port),
         "hermes" => rewrite_hermes_snapshot(snapshot, settings.port),
         "opencode" => rewrite_opencode_snapshot(snapshot, settings.port),
@@ -552,4 +677,53 @@ pub fn set_local_provider_proxy_settings(
     );
 
     build_local_provider_proxy_status(&app_handle, normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CircuitState, EndpointCircuitState};
+    use std::time::Duration;
+
+    #[test]
+    fn circuit_opens_after_threshold_and_exposes_retry_window() {
+        let mut state = EndpointCircuitState::default();
+        state.record_failure(2, 30);
+        assert_eq!(state.state, CircuitState::Closed);
+        assert_eq!(state.consecutive_failures, 1);
+
+        state.record_failure(2, 30);
+        assert_eq!(state.state, CircuitState::Open);
+        assert!(state.open_until.is_some());
+        assert!(state.open_until.unwrap() > std::time::Instant::now());
+    }
+
+    #[test]
+    fn half_open_requires_recovery_threshold() {
+        let mut state = EndpointCircuitState {
+            state: CircuitState::Open,
+            open_until: Some(std::time::Instant::now() - Duration::from_secs(1)),
+            ..Default::default()
+        };
+        assert!(state.is_available());
+        assert_eq!(state.state, CircuitState::HalfOpen);
+        assert!(!state.is_available(), "only one half-open probe may run");
+
+        state.record_success(2);
+        assert_eq!(state.state, CircuitState::HalfOpen);
+        state.record_success(2);
+        assert_eq!(state.state, CircuitState::Closed);
+        assert!(state.open_until.is_none());
+    }
+
+    #[test]
+    fn half_open_failure_reopens_circuit() {
+        let mut state = EndpointCircuitState {
+            state: CircuitState::HalfOpen,
+            ..Default::default()
+        };
+        state.record_failure(3, 10);
+        assert_eq!(state.state, CircuitState::Open);
+        assert!(state.open_until.is_some());
+        assert_eq!(state.consecutive_failures, 0);
+    }
 }

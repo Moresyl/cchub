@@ -1,5 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export type StructuredConfigTool = "claude" | "codex" | "gemini" | "openclaw" | "opencode" | "hermes";
+export type StructuredConfigTool =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "grokbuild"
+  | "openclaw"
+  | "opencode"
+  | "hermes"
+  | "pi";
 export type ClaudeAuthField = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 export type ApiFormat = "anthropic" | "openai_chat" | "openai_responses";
 export type OpenClawApiProtocol =
@@ -18,7 +26,7 @@ export type OpenCodeNpmPackage =
   | "@ai-sdk/google";
 export type OpenCodeThinkingLevel = "minimal" | "low" | "medium" | "high";
 export type OpenCodeReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
-export type PresetProviderType = "github_copilot" | "google_oauth";
+export type PresetProviderType = "github_copilot" | "google_oauth" | "codex_oauth" | "xai_oauth";
 
 export interface TemplateValueConfig {
   label: string;
@@ -102,6 +110,11 @@ export interface StructuredDraftFields {
   apiKeyUrl: string;
   category: string;
   endpointCandidates: string;
+  customEndpoints: string[];
+  customUserAgent: string;
+  requestHeaders: Record<string, string>;
+  requestHeaderOverrides: string;
+  requestBodyOverrides: string;
   costMultiplier: string;
   templateValues: string;
   requiresOAuth: boolean;
@@ -130,4 +143,6 @@ export interface StructuredDraftFields {
   openCodeEffort: OpenCodeReasoningEffort | "";
   hermesProvider: string;
   hermesApiKeyEnv: string;
+  /** Imported usage scripts are preserved while editing structured fields. */
+  usageScript?: Record<string, unknown>;
 }

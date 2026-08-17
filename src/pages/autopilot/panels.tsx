@@ -109,7 +109,7 @@ export function RunSetupPanel(props: {
           label={uiText("模型", "Model", "モデル")}
           value={form.model}
           onChange={(value) => props.updateField("model", value)}
-          placeholder="gpt-5.4"
+          placeholder="gpt-5.6-sol"
         />
         <TextField
           label={uiText("Profile", "Profile", "プロファイル")}

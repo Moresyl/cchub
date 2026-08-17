@@ -1,8 +1,32 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { StructuredDraftFields } from "./types";
-import { parseNumberLike, parseTemplateValues, splitList } from "./helpers";
+import {
+  normalizeCustomUserAgent,
+  normalizeEndpointList,
+  normalizeRequestHeaders,
+  parseNumberLike,
+  parseTemplateValues,
+  splitList,
+} from "./helpers";
 
 export function buildStructuredConfig(toolId: string, fields: StructuredDraftFields): string {
+  const customEndpoints = normalizeEndpointList(fields.customEndpoints);
+  const customUserAgent = normalizeCustomUserAgent(fields.customUserAgent);
+  const requestHeaders = normalizeRequestHeaders(fields.requestHeaders);
+  const requestHeaderOverrides = normalizeRequestHeaders(parseObject(fields.requestHeaderOverrides));
+  const requestBodyOverrides = parseObject(fields.requestBodyOverrides);
+  if (requestBodyOverrides) delete requestBodyOverrides.stream;
+  const localProxyRequestOverrides = {
+    headers: Object.keys(requestHeaderOverrides).length ? requestHeaderOverrides : undefined,
+    body: requestBodyOverrides && Object.keys(requestBodyOverrides).length ? requestBodyOverrides : undefined,
+  };
+  const transportMetadata = {
+    customUserAgent: customUserAgent || undefined,
+    requestHeaders: Object.keys(requestHeaders).length ? requestHeaders : undefined,
+    localProxyRequestOverrides:
+      localProxyRequestOverrides.headers || localProxyRequestOverrides.body ? localProxyRequestOverrides : undefined,
+  };
+  const usageMetadata = fields.usageScript ? { usageScript: fields.usageScript } : {};
   if (toolId === "claude") {
     const env: Record<string, string | number> = {};
     if (fields.apiKey.trim() && !fields.requiresOAuth) {
@@ -34,8 +58,11 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     }
     const result: Record<string, any> = {
       env,
+      customEndpoints,
       includeCoAuthoredBy: false,
       metadata: {
+        ...transportMetadata,
+        ...usageMetadata,
         category: fields.category,
         websiteUrl: fields.websiteUrl,
         apiKeyUrl: fields.apiKeyUrl,
@@ -46,11 +73,14 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
         templateValues: parseTemplateValues(fields.templateValues),
         requiresOAuth: fields.requiresOAuth,
         providerType: fields.providerType || undefined,
+        authField: fields.authField,
         authBinding:
-          fields.providerType === "github_copilot"
+          fields.providerType === "github_copilot" ||
+          fields.providerType === "codex_oauth" ||
+          fields.providerType === "xai_oauth"
             ? {
                 source: "managed_account",
-                authProvider: "github_copilot",
+                authProvider: fields.providerType,
                 accountId: fields.oauthAccountId.trim() || undefined,
               }
             : undefined,
@@ -73,7 +103,7 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     const providerName = "custom";
     const config = [
       `model_provider = "${providerName}"`,
-      `model = "${fields.model.trim() || "gpt-5.3-codex"}"`,
+      `model = "${fields.model.trim() || "gpt-5.6-sol"}"`,
       `model_reasoning_effort = "${fields.codexReasoningEffort}"`,
       "disable_response_storage = true",
       "",
@@ -90,7 +120,10 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           OPENAI_API_KEY: fields.apiKey.trim(),
         },
         config,
+        customEndpoints,
         metadata: {
+          ...transportMetadata,
+          ...usageMetadata,
           category: fields.category,
           websiteUrl: fields.websiteUrl,
           apiKeyUrl: fields.apiKeyUrl,
@@ -137,9 +170,12 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
         apiKey: fields.apiKey.trim(),
         api: fields.apiProtocol || "openai-completions",
         models: fields.model.trim() ? [model] : [],
+        customEndpoints,
         modelCatalog,
         suggestedDefaults,
         metadata: {
+          ...transportMetadata,
+          ...usageMetadata,
           category: fields.category,
           websiteUrl: fields.websiteUrl,
           apiKeyUrl: fields.apiKeyUrl,
@@ -172,7 +208,10 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           },
         },
         env,
+        customEndpoints,
         metadata: {
+          ...transportMetadata,
+          ...usageMetadata,
           category: fields.category,
           websiteUrl: fields.websiteUrl,
           apiKeyUrl: fields.apiKeyUrl,
@@ -182,6 +221,73 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           iconUrl: fields.iconUrl.trim() || undefined,
           hermesProvider: provider,
           hermesApiKeyEnv: envKey || undefined,
+        },
+      },
+      null,
+      2,
+    );
+  }
+
+  if (toolId === "pi") {
+    const provider = {
+      name: fields.modelName.trim() || "Custom",
+      baseUrl: fields.baseUrl.trim(),
+      api: fields.apiProtocol || "openai-completions",
+      apiKey: fields.apiKey.trim() || undefined,
+      models: fields.model.trim()
+        ? [{ id: fields.model.trim(), name: fields.modelName.trim() || fields.model.trim() }]
+        : [],
+    };
+    return JSON.stringify(
+      {
+        providers: { custom: provider },
+        customEndpoints,
+        metadata: {
+          ...transportMetadata,
+          ...usageMetadata,
+          category: fields.category,
+          websiteUrl: fields.websiteUrl,
+          apiKeyUrl: fields.apiKeyUrl,
+          endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+          costMultiplier: fields.costMultiplier.trim() || undefined,
+          useFullUrl: fields.useFullUrl || undefined,
+          iconUrl: fields.iconUrl.trim() || undefined,
+        },
+      },
+      null,
+      2,
+    );
+  }
+
+  if (toolId === "grokbuild") {
+    const model = fields.model.trim() || "grok-4.5";
+    const quote = (value: string) => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const config = [
+      "[models]",
+      `default = "${quote(model)}"`,
+      "",
+      `[model."${quote(model)}"]`,
+      `model = "${quote(model)}"`,
+      `base_url = "${quote(fields.baseUrl.trim() || "https://api.x.ai/v1")}"`,
+      `name = "${quote(fields.modelName.trim() || "Grok")}"`,
+      'api_backend = "responses"',
+      "context_window = 500000",
+      ...(fields.apiKey.trim() ? [`api_key = "${quote(fields.apiKey.trim())}"`] : []),
+    ].join("\n");
+    return JSON.stringify(
+      {
+        config,
+        customEndpoints,
+        metadata: {
+          ...transportMetadata,
+          ...usageMetadata,
+          category: fields.category,
+          websiteUrl: fields.websiteUrl,
+          apiKeyUrl: fields.apiKeyUrl,
+          endpointCandidates: splitList(fields.endpointCandidates.replace(/\n/g, ",")),
+          costMultiplier: fields.costMultiplier.trim() || undefined,
+          useFullUrl: fields.useFullUrl || undefined,
+          iconUrl: fields.iconUrl.trim() || undefined,
         },
       },
       null,
@@ -232,8 +338,11 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     return JSON.stringify(
       {
         npm: fields.npm.trim() || "@ai-sdk/openai-compatible",
+        customEndpoints,
         name: "custom",
         metadata: {
+          ...transportMetadata,
+          ...usageMetadata,
           category: fields.category,
           websiteUrl: fields.websiteUrl,
           apiKeyUrl: fields.apiKeyUrl,
@@ -262,9 +371,12 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
       env: {
         GOOGLE_GEMINI_BASE_URL: fields.baseUrl.trim(),
         ...(fields.requiresOAuth ? {} : { GEMINI_API_KEY: fields.apiKey.trim() }),
-        GEMINI_MODEL: fields.model.trim() || "gemini-2.5-pro",
+        GEMINI_MODEL: fields.model.trim() || "gemini-3.6-flash",
       },
+      customEndpoints,
       metadata: {
+        ...transportMetadata,
+        ...usageMetadata,
         category: fields.category,
         websiteUrl: fields.websiteUrl,
         apiKeyUrl: fields.apiKeyUrl,
@@ -280,4 +392,15 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     null,
     2,
   );
+}
+
+function parseObject(value: string): Record<string, any> | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }

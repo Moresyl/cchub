@@ -1,6 +1,6 @@
 use crate::db::models::{Plugin, Skill};
 use crate::db::{record_activity, DbState};
-use crate::skills::{installer, scanner, tools, updater};
+use crate::skills::{installer, plugin_installer, scanner, tools, updater};
 use tauri::State;
 
 fn log_command_timing(command: &str, started_at: std::time::Instant) {
@@ -89,12 +89,43 @@ pub fn get_plugins(db: State<'_, DbState>) -> Result<Vec<Plugin>, String> {
     Ok(plugins)
 }
 
-#[tauri::command]
-pub fn install_plugin(source_url: String) -> Result<String, String> {
-    Err(format!(
-        "Plugin installation from {} not yet implemented",
-        source_url
-    ))
+#[tauri::command(rename_all = "camelCase")]
+pub async fn install_plugin(source_url: String, db: State<'_, DbState>) -> Result<String, String> {
+    let installed = plugin_installer::install_plugin(&source_url).await?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO plugins (id, name, description, source_url, version, installed_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            description = excluded.description,
+            source_url = excluded.source_url,
+            version = excluded.version,
+            updated_at = excluded.updated_at",
+        rusqlite::params![
+            &installed.id,
+            &installed.name,
+            &installed.description,
+            &installed.source_url,
+            &installed.version,
+            now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM skills WHERE plugin_id = ?1",
+        rusqlite::params![&installed.id],
+    )
+    .map_err(|e| e.to_string())?;
+    for skill in scanner::scan_local_skills_for_conn(&conn)
+        .into_iter()
+        .filter(|skill| skill.plugin_id.as_deref() == Some(installed.id.as_str()))
+    {
+        updater::persist_skill_metadata(&conn, &skill)?;
+    }
+    record_activity(&conn, &installed.id, "plugin_install", "success", None);
+    Ok(installed.path)
 }
 
 #[tauri::command]
@@ -104,6 +135,18 @@ pub fn read_skill_content(file_path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn uninstall_plugin(plugin_id: String, db: State<'_, DbState>) -> Result<(), String> {
+    let plugin_id = plugin_installer::validate_plugin_id(&plugin_id)?;
+    let plugins_dir = scanner::get_plugins_dir().ok_or("Cannot find plugins directory")?;
+    let plugin_path = plugins_dir.join(&plugin_id);
+    if plugin_path.exists() {
+        let backup_dir = dirs::home_dir()
+            .ok_or("Cannot find home directory")?
+            .join(".cchub")
+            .join("plugin-backups");
+        std::fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+        let backup_path = backup_dir.join(format!("{}-{}", plugin_id, uuid::Uuid::new_v4()));
+        std::fs::rename(&plugin_path, backup_path).map_err(|e| e.to_string())?;
+    }
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM skills WHERE plugin_id = ?1",
@@ -415,8 +458,9 @@ pub async fn batch_update_skills(
 
 #[tauri::command]
 pub fn delete_plugin_dir(plugin_name: String) -> Result<(), String> {
+    let plugin_name = plugin_installer::validate_plugin_id(&plugin_name)?;
     let plugins_dir = scanner::get_plugins_dir().ok_or("Cannot find plugins directory")?;
-    let plugin_path = plugins_dir.join(&plugin_name);
+    let plugin_path = plugins_dir.join(plugin_name);
     if plugin_path.exists() && plugin_path.is_dir() {
         std::fs::remove_dir_all(&plugin_path)
             .map_err(|e| format!("Failed to delete plugin directory: {}", e))?;

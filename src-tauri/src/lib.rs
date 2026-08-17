@@ -541,6 +541,7 @@ pub fn run() {
             commands::deeplink_commands::import_from_deeplink_unified,
             commands::deeplink_commands::take_pending_deeplink_imports,
             commands::deeplink_commands::take_pending_deeplink_errors,
+            commands::deeplink_commands::has_pending_deeplinks,
             commands::deeplink_commands::import_mcp_servers_from_deeplink,
             commands::failover_commands::get_failover_queue,
             commands::failover_commands::get_available_providers_for_failover,

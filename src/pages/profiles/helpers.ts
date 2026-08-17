@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Monitor, Code, Sparkles, Globe, Cat, Terminal } from "lucide-react";
-import { findTomlValue } from "../../lib/configProfiles";
+import { createDefaultStructuredFields, findTomlValue } from "../../lib/configProfiles";
 import type {
   CodexReasoningEffort,
   CodexWireApi,
@@ -31,6 +31,17 @@ export interface ProviderConfigFragment {
   fields: Partial<StructuredDraftFields>;
   createdAt: string;
   updatedAt: string;
+}
+
+export function sortProviderFragments(fragments: ProviderConfigFragment[]) {
+  return [...fragments].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name));
+}
+
+export function normalizeFragmentFields(fragment: ProviderConfigFragment, toolId: string): StructuredDraftFields {
+  return {
+    ...createDefaultStructuredFields(toolId),
+    ...(fragment.fields || {}),
+  };
 }
 
 export interface ProviderPingResult {

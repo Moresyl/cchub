@@ -1,4 +1,4 @@
-import type { ManagedAppId } from "../../lib/appPreferences";
+import { getAppLabel, type ManagedAppId } from "../../lib/appPreferences";
 
 export interface SessionSummary {
   id: string;
@@ -32,6 +32,16 @@ export interface SessionEntry {
 export interface SessionDetail {
   session: SessionSummary;
   entries: SessionEntry[];
+}
+
+export function buildSessionToolFilters(visibleApps: ManagedAppId[], allAppsLabel: string) {
+  return [
+    { id: "all" as const, label: allAppsLabel },
+    ...TOOL_ORDER.filter((toolId) => visibleApps.includes(toolId)).map((toolId) => ({
+      id: toolId,
+      label: getAppLabel(toolId),
+    })),
+  ];
 }
 
 export interface SessionDeleteTarget {

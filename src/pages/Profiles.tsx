@@ -32,6 +32,8 @@ import {
   buildProviderPingResult,
   countProfilesByTool,
   countSharedProfileGroups,
+  normalizeFragmentFields,
+  sortProviderFragments,
   type ConfigProfile,
   type DetectedTool,
   type ProviderConfigFragment,
@@ -193,15 +195,6 @@ export default function Profiles() {
     },
     [buildCurrentFields],
   );
-  function sortProviderFragments(fragments: ProviderConfigFragment[]) {
-    return [...fragments].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name));
-  }
-  function normalizeFragmentFields(fragment: ProviderConfigFragment): StructuredDraftFields {
-    return {
-      ...createDefaultStructuredFields(draftTool),
-      ...(fragment.fields || {}),
-    };
-  }
   const resetStructuredDraft = useCallback(
     (toolId: string) => {
       const defaults = createDefaultStructuredFields(toolId);
@@ -643,7 +636,7 @@ export default function Profiles() {
       const merged = mergeSharedDraftFields(
         buildCurrentFields(),
         draftTool,
-        normalizeFragmentFields(fragment),
+        normalizeFragmentFields(fragment, draftTool),
         true,
         includeToolSpecific,
       );
@@ -719,9 +712,7 @@ export default function Profiles() {
   const handleSearchChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
   }, []);
-  const handleClearSearch = useCallback(() => {
-    setSearch("");
-  }, []);
+  const handleClearSearch = useCallback(() => setSearch(""), []);
   const handleDraftNameChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setDraftName(event.target.value);
   }, []);

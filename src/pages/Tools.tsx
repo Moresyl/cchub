@@ -32,6 +32,7 @@ import {
 import {
   DEFAULT_HELLO2CC_CONFIG,
   DEFAULT_HUD_CONFIG,
+  migrateHudConfig,
   PERM_DESC_EN,
   PERM_DESC_JA,
   PERM_DESC_ZH,
@@ -377,23 +378,6 @@ export default function Tools() {
       showToast("error", `${e}`);
     }
   }, [hello2ccDraft, setHello2ccConfigMutation, uiText]);
-
-  /** Migrate legacy `layout` field to `lineLayout` + `showSeparators` */
-  function migrateHudConfig(status: HudStatus | null): HudStatus | null {
-    if (!status?.hudConfig) return status;
-    const cfg = status.hudConfig as HudConfig & { layout?: string };
-    if ("layout" in cfg && !cfg.lineLayout) {
-      if (cfg.layout === "separators") {
-        cfg.lineLayout = "compact";
-        cfg.showSeparators = true;
-      } else {
-        cfg.lineLayout = "compact";
-        cfg.showSeparators = false;
-      }
-      delete cfg.layout;
-    }
-    return { ...status, hudConfig: cfg };
-  }
 
   const toggleStatusLine = useCallback(
     async (enabled: boolean) => {

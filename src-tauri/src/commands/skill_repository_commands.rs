@@ -283,10 +283,11 @@ pub fn toggle_skill_app(
 pub fn get_installed_skills(
     db: State<'_, DbState>,
 ) -> Result<Vec<crate::db::models::Skill>, String> {
-    let scanned = {
+    let plan = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        crate::skills::scanner::scan_local_skills_for_conn(&conn)
+        crate::skills::scanner::prepare_local_skill_scan(&conn)
     };
+    let scanned = crate::skills::scanner::scan_local_skills_from_plan(&plan);
     if !scanned.is_empty() {
         return Ok(scanned);
     }
@@ -302,8 +303,11 @@ pub fn get_skills_for_app(
     if app.is_empty() {
         return Err("Application id is required".to_string());
     }
-    let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let scanned = crate::skills::scanner::scan_local_skills_for_conn(&conn);
+    let plan = {
+        let conn = db.0.lock().map_err(|error| error.to_string())?;
+        crate::skills::scanner::prepare_local_skill_scan(&conn)
+    };
+    let scanned = crate::skills::scanner::scan_local_skills_from_plan(&plan);
     Ok(scanned
         .into_iter()
         .filter(|skill| skill.tool_id.as_deref() == Some(app.as_str()))

@@ -18,55 +18,19 @@ import Sidebar from "./components/layout/Sidebar";
 import Header from "./components/layout/Header";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { showToast, ToastContainer } from "./components/Toast";
-import DeepLinkImportDialog from "./components/DeepLinkImportDialog";
-import WelcomeDialog from "./components/WelcomeDialog";
+import DeepLinkImportHost from "./components/DeepLinkImportHost";
 import NavigationProgress from "./components/NavigationProgress";
 
 // CommandPalette 仅在 Ctrl+K 时显示，懒加载避免 cmdk 进入主 bundle。
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
+const WelcomeDialog = lazy(() => import("./components/WelcomeDialog"));
 import { getLocale, setLocale, type Locale } from "./lib/i18n";
 import { getTheme, setTheme, type Theme } from "./lib/theme";
 import type { EnvironmentConflict } from "./lib/appPreferences";
 import { queryClient } from "./lib/queryClient";
-import {
-  fetchClaudeMdPageData,
-  fetchLogsPageData,
-  fetchMarketplaceLocalData,
-  fetchMcpServersPageData,
-  fetchProfilesPageData,
-  fetchSkillsPageData,
-  fetchToolsPageData,
-  queryKeys,
-} from "./hooks/queries";
+import { scheduleIdleTask } from "./lib/idleTask";
+import { pageImports, type RoutePath } from "./lib/routes";
 import { useSetWelcomeCompletedMutation } from "./hooks/mutations";
-
-const pageImports = {
-  "/": () => import("./pages/Dashboard"),
-  "/mcp-servers": () => import("./pages/McpServers"),
-  "/mcp-clients": () => import("./pages/McpClients"),
-  "/logs": () => import("./pages/Logs"),
-  "/usage": () => import("./pages/Usage"),
-  "/prompts": () => import("./pages/Prompts"),
-  "/skills": () => import("./pages/Skills"),
-  "/workflows": () => import("./pages/Workflows"),
-  "/autopilot": () => import("./pages/Autopilot"),
-  "/marketplace": () => import("./pages/Marketplace"),
-  "/hooks": () => import("./pages/Hooks"),
-  "/workspaces": () => import("./pages/Workspaces"),
-  "/profiles": () => import("./pages/Profiles"),
-  "/sessions": () => import("./pages/Sessions"),
-  "/hermes-memory": () => import("./pages/HermesMemory"),
-  "/hermes-providers": () => import("./pages/HermesProviders"),
-  "/openclaw": () => import("./pages/OpenClaw"),
-  "/proxy-advanced": () => import("./pages/ProxyAdvanced"),
-  "/claude-md": () => import("./pages/ClaudeMd"),
-  "/config-files": () => import("./pages/ConfigFiles"),
-  "/tools": () => import("./pages/Tools"),
-  "/security": () => import("./pages/Security"),
-  "/settings": () => import("./pages/Settings"),
-} as const;
-
-type RoutePath = keyof typeof pageImports;
 
 const routeComponents: ReadonlyArray<{
   path: RoutePath;
@@ -75,51 +39,6 @@ const routeComponents: ReadonlyArray<{
   path,
   Component: lazy(pageImports[path]),
 }));
-
-const highFrequencyRoutePreloads: RoutePath[] = ["/", "/mcp-servers", "/logs", "/skills", "/profiles"];
-
-// App 模块加载后只预加载高频页面 chunk，避免冷启动一次性拉起所有页面。
-highFrequencyRoutePreloads.forEach((path) => void pageImports[path]());
-
-async function runWithConcurrencyLimit(tasks: Array<() => Promise<unknown>>, limit: number) {
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async (_, workerIndex) => {
-    for (let index = workerIndex; index < tasks.length; index += limit) {
-      await tasks[index]();
-    }
-  });
-  await Promise.all(workers);
-}
-
-// 空闲时预热后端数据缓存，不与首屏数据请求抢后端
-{
-  const preloadData = () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const prefetchers: Array<{ key: readonly unknown[]; fn: () => Promise<unknown> }> = [
-      { key: queryKeys.mcpServersPage, fn: fetchMcpServersPageData },
-      { key: queryKeys.skillsPage, fn: fetchSkillsPageData },
-      { key: queryKeys.profilesPage, fn: fetchProfilesPageData },
-      { key: queryKeys.marketplaceLocal, fn: fetchMarketplaceLocalData },
-      { key: queryKeys.toolsPage, fn: fetchToolsPageData },
-      { key: queryKeys.claudeMdPage, fn: fetchClaudeMdPageData },
-      { key: queryKeys.logsPage(today), fn: () => fetchLogsPageData(today) },
-    ];
-    void runWithConcurrencyLimit(
-      prefetchers.map(
-        ({ key, fn }) =>
-          () =>
-            queryClient.prefetchQuery({ queryKey: key, queryFn: fn }).catch((error) => {
-              console.debug("Background query prefetch failed", key, error);
-            }),
-      ),
-      2,
-    );
-  };
-  if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(preloadData, { timeout: 5000 });
-  } else {
-    setTimeout(preloadData, 2500);
-  }
-}
 
 function RouteFallback() {
   return (
@@ -186,6 +105,7 @@ function AppShell() {
   const [welcomeTheme, setWelcomeTheme] = useState<Theme>(getTheme());
   const [installedToolCount, setInstalledToolCount] = useState(0);
   const [profileCount, setProfileCount] = useState(0);
+  const lastEnvConflictLoadAtRef = useRef(0);
   const uiText = (zhText: string, enText: string, jaText?: string) =>
     locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 
@@ -198,9 +118,14 @@ function AppShell() {
   useEffect(() => {
     void loadEnvConflicts();
     void loadWelcomeState();
-    void invoke("sync_models_dev_pricing", { force: false }).catch((error) => {
-      console.debug("Automatic model pricing sync skipped or failed", error);
-    });
+    const cancelPricingSync = scheduleIdleTask(
+      () => {
+        void invoke("sync_models_dev_pricing", { force: false }).catch((error) => {
+          console.debug("Automatic model pricing sync skipped or failed", error);
+        });
+      },
+      { delay: 4_000, timeout: 12_000 },
+    );
     const handleFocus = () => void loadEnvConflicts();
     const handleKeyDown = (event: KeyboardEvent) => {
       // 快速路径：非修饰键/非 Escape 直接返回，避免每次按键都走完整流程。
@@ -256,6 +181,7 @@ function AppShell() {
     return () => {
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("keydown", handleKeyDown);
+      cancelPricingSync();
       void unlistenFailover.then((fn) => fn());
     };
     // 该 effect 只需在组件挂载时执行一次，handler 通过 navigateRef 读取最新值。
@@ -273,6 +199,9 @@ function AppShell() {
   }, [location.pathname]);
 
   async function loadEnvConflicts() {
+    const now = Date.now();
+    if (now - lastEnvConflictLoadAtRef.current < 5_000) return;
+    lastEnvConflictLoadAtRef.current = now;
     try {
       const conflicts = await invoke<EnvironmentConflict[]>("get_environment_conflicts");
       setEnvConflicts(conflicts);
@@ -328,17 +257,21 @@ function AppShell() {
   return (
     <>
       <ToastContainer />
-      <DeepLinkImportDialog />
-      <WelcomeDialog
-        open={welcomeOpen}
-        locale={locale}
-        theme={welcomeTheme}
-        installedToolCount={installedToolCount}
-        profileCount={profileCount}
-        onSelectLocale={handleWelcomeLocaleChange}
-        onSelectTheme={handleWelcomeThemeChange}
-        onFinish={() => void handleWelcomeFinish()}
-      />
+      <DeepLinkImportHost />
+      {welcomeOpen && (
+        <Suspense fallback={null}>
+          <WelcomeDialog
+            open
+            locale={locale}
+            theme={welcomeTheme}
+            installedToolCount={installedToolCount}
+            profileCount={profileCount}
+            onSelectLocale={handleWelcomeLocaleChange}
+            onSelectTheme={handleWelcomeThemeChange}
+            onFinish={() => void handleWelcomeFinish()}
+          />
+        </Suspense>
+      )}
       {commandPaletteOpen && (
         <Suspense fallback={null}>
           <CommandPalette

@@ -227,6 +227,11 @@ pub fn take_pending_deeplink_errors(
 }
 
 #[tauri::command]
+pub fn has_pending_deeplinks(state: State<'_, DeepLinkState>) -> Result<bool, String> {
+    state.has_pending().map_err(String::from)
+}
+
+#[tauri::command]
 pub fn import_mcp_servers_from_deeplink(
     request: DeepLinkImportRequest,
     db: State<'_, DbState>,

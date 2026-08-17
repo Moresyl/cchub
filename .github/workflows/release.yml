@@ -3,11 +3,44 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  RELEASE_BODY: |
+    ## 更新内容 / Highlights
+
+    ### 新功能
+    - 新增用量与成本仪表盘、模型定价同步、会话用量重建和请求详情分析
+    - 新增 Codex、Copilot 与 xAI OAuth 多账号管理，以及 Claude Desktop/扩展集成
+    - 新增项目 Profile、统一 Provider、端点探测、健康监控、熔断与自动故障转移
+    - 新增 Prompt 管理、技能仓库与插件安装、MCP/Skills 搜索和批量应用切换
+    - 新增 S3 云同步、Codex 历史迁移、OpenCode/OMO 运行时模型和 PI 配置支持
+
+    ### 问题修复
+    - 修复 Codex 累计 Token 交错时的重复计费，并提升大批量会话导入性能
+    - 修复无名称工具调用被静默丢弃、Copilot 接管认证字段和 1M 模型标记问题
+    - 修复 OMO 统一配置、Hermes Prompt 路径和嵌套技能仓库解析
+    - 修复 WebDAV/S3 导入后的本地数据恢复事务与 SQL 备份批处理
+
+    ### 安全与体验
+    - 为代理响应、会话日志、目录递归和外部脚本执行增加资源上限
+    - Deep Link 导入完整展示并遮罩敏感字段，URL 日志统一脱敏
+    - 优化窗口、托盘、启动恢复、网络代理和配置目录偏好
+
+    ## 下载 / Download
+
+    | 文件 | 说明 |
+    |------|------|
+    | `CCHub_*_x64-setup.exe` | Windows NSIS 安装包 |
+    | `CCHub_*_x64_en-US.msi` | Windows MSI 安装包 |
+    | `CCHub_*_aarch64.dmg` | macOS Apple Silicon |
+    | `CCHub_*_x64.dmg` | macOS Intel |
+    | `CCHub_*_amd64.deb` | Linux deb 包 |
+    | `CCHub_*_amd64.AppImage` | Linux AppImage |
 
 jobs:
   build-windows:
@@ -40,39 +73,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'CCHub ${{ github.ref_name }}'
-          releaseBody: |
-            ## 更新内容 / Highlights
-
-            ### 新功能
-            - 新增用量与成本仪表盘、模型定价同步、会话用量重建和请求详情分析
-            - 新增 Codex、Copilot 与 xAI OAuth 多账号管理，以及 Claude Desktop/扩展集成
-            - 新增项目 Profile、统一 Provider、端点探测、健康监控、熔断与自动故障转移
-            - 新增 Prompt 管理、技能仓库与插件安装、MCP/Skills 搜索和批量应用切换
-            - 新增 S3 云同步、Codex 历史迁移、OpenCode/OMO 运行时模型和 PI 配置支持
-
-            ### 问题修复
-            - 修复 Codex 累计 Token 交错时的重复计费，并提升大批量会话导入性能
-            - 修复无名称工具调用被静默丢弃、Copilot 接管认证字段和 1M 模型标记问题
-            - 修复 OMO 统一配置、Hermes Prompt 路径和嵌套技能仓库解析
-            - 修复 WebDAV/S3 导入后的本地数据恢复事务与 SQL 备份批处理
-
-            ### 安全与体验
-            - 为代理响应、会话日志、目录递归和外部脚本执行增加资源上限
-            - Deep Link 导入完整展示并遮罩敏感字段，URL 日志统一脱敏
-            - 优化窗口、托盘、启动恢复、网络代理和配置目录偏好
-
-            ## 下载 / Download
-
-            | 文件 | 说明 |
-            |------|------|
-            | `CCHub_*_x64-setup.exe` | Windows NSIS 安装包 |
-            | `CCHub_*_x64_en-US.msi` | Windows MSI 安装包 |
-            | `CCHub_*_x64_portable.exe` | Windows 便携版 |
-            | `CCHub_*_aarch64.dmg` | macOS Apple Silicon |
-            | `CCHub_*_x64.dmg` | macOS Intel |
-            | `CCHub_*_amd64.deb` | Linux deb 包 |
-            | `CCHub_*_amd64.AppImage` | Linux AppImage |
+          releaseName: "CCHub ${{ github.ref_name }}"
+          releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
 
@@ -122,7 +124,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'CCHub ${{ github.ref_name }}'
+          releaseName: "CCHub ${{ github.ref_name }}"
+          releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
@@ -169,7 +172,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'CCHub ${{ github.ref_name }}'
+          releaseName: "CCHub ${{ github.ref_name }}"
+          releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
 

@@ -29,7 +29,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { checkAppUpdate } from "../lib/appUpdater";
+import { requestAppUpdateDialog } from "./AppUpdateHost";
 import { t, getLocale, setLocale, type Locale } from "../lib/i18n";
 import { getTheme, setTheme } from "../lib/theme";
 import { useAutopilotFormStore } from "../stores/autopilotForm";
@@ -588,20 +588,7 @@ function CommandPaletteComponent({ open, onOpenChange, navigate, currentPath }: 
         }
 
         if (effect === "check-update") {
-          const { result } = await checkAppUpdate();
-          if (result.update_available && result.latest_version) {
-            showToast(
-              "info",
-              uiText(
-                `发现新版本 v${result.latest_version}`,
-                `Update available: v${result.latest_version}`,
-                `新しいバージョン v${result.latest_version} があります`,
-              ),
-              8000,
-            );
-          } else {
-            showToast("success", uiText("当前已是最新版本", "You are up to date", "最新版です"));
-          }
+          requestAppUpdateDialog();
           return;
         }
 

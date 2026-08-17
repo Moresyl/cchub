@@ -15,7 +15,6 @@ import { fetchMcpServersPageData, queryKeys } from "../hooks/queries";
 import {
   useInstallMcpServerMutation,
   useBulkToggleMcpAppMutation,
-  useToggleMcpServerMutation,
   useUninstallMcpServerMutation,
   useUpdateMcpServerConfigMutation,
 } from "../hooks/mutations";
@@ -87,7 +86,6 @@ export default function McpServers() {
   const zh = getLocale() === "zh";
   const wizardValidation = useMcpValidation(wizardDraft);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
-  const toggleMcpServerMutation = useToggleMcpServerMutation();
   const bulkToggleMcpAppMutation = useBulkToggleMcpAppMutation();
   const uninstallMcpServerMutation = useUninstallMcpServerMutation();
   const updateMcpServerConfigMutation = useUpdateMcpServerConfigMutation();
@@ -167,21 +165,6 @@ export default function McpServers() {
       setCheckingHealth(false);
     }
   }, []);
-
-  const handleToggle = useCallback(
-    async (server: McpServer) => {
-      const newEnabled = server.status === "disabled";
-      try {
-        await toggleMcpServerMutation.mutateAsync({ id: server.id, enabled: newEnabled });
-        const newStatus = newEnabled ? "active" : "disabled";
-        setServers((prev) => prev.map((s) => (s.id === server.id ? { ...s, status: newStatus } : s)));
-        if (selected?.id === server.id) setSelected({ ...server, status: newStatus });
-      } catch (e) {
-        console.error(e);
-      }
-    },
-    [selected, toggleMcpServerMutation],
-  );
 
   const handleDelete = useCallback((server: McpServer) => {
     setPendingDelete(server);
@@ -402,6 +385,21 @@ export default function McpServers() {
     (count, server) => count + (serverAppStatus[server.id]?.[bulkApp] ? 1 : 0),
     0,
   );
+  const availableMcpApps = useMemo(() => {
+    const installedIds = new Set(installedTools.map((tool) => tool.id));
+    return MCP_SYNCABLE_APPS.filter((app) => {
+      if (app.id === "claude-desktop") {
+        return Object.values(serverAppStatus).some((status) => status[app.id]);
+      }
+      return installedIds.has(app.id);
+    });
+  }, [installedTools, serverAppStatus]);
+
+  useEffect(() => {
+    if (availableMcpApps.length > 0 && !availableMcpApps.some((app) => app.id === bulkApp)) {
+      setBulkApp(availableMcpApps[0].id);
+    }
+  }, [availableMcpApps, bulkApp]);
 
   const handleEditServer = useCallback(
     (server: McpServer) => {
@@ -575,42 +573,44 @@ export default function McpServers() {
             style={{ width: "100%", paddingLeft: 32 }}
           />
         </div>
-        <div
-          className="section-card"
-          style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", flex: "0 1 auto" }}
-        >
-          <span style={{ fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{i.mcp.bulkApp}</span>
-          <select
-            className="input"
-            value={bulkApp}
-            onChange={(event) => setBulkApp(event.target.value)}
-            disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending}
-            style={{ minWidth: 130, width: "auto", padding: "5px 8px" }}
+        {availableMcpApps.length > 0 && (
+          <div
+            className="section-card"
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", flex: "0 1 auto" }}
           >
-            {MCP_SYNCABLE_APPS.map((app) => (
-              <option key={app.id} value={app.id}>
-                {app.label}
-              </option>
-            ))}
-          </select>
-          <span className="badge badge-muted" title={zh ? "已同步数量 / 总数量" : "Synced / total"}>
-            {appStatusLoading ? "..." : `${bulkEnabledCount}/${servers.length}`}
-          </span>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => void handleBulkToggle(true)}
-            disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
-          >
-            {bulkToggleMcpAppMutation.isPending ? i.mcp.bulkRunning : i.mcp.bulkEnable}
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => void handleBulkToggle(false)}
-            disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
-          >
-            {i.mcp.bulkDisable}
-          </button>
-        </div>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{i.mcp.bulkApp}</span>
+            <select
+              className="input"
+              value={bulkApp}
+              onChange={(event) => setBulkApp(event.target.value)}
+              disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending}
+              style={{ minWidth: 130, width: "auto", padding: "5px 8px" }}
+            >
+              {availableMcpApps.map((app) => (
+                <option key={app.id} value={app.id}>
+                  {app.label}
+                </option>
+              ))}
+            </select>
+            <span className="badge badge-muted" title={zh ? "已同步数量 / 总数量" : "Synced / total"}>
+              {appStatusLoading ? "..." : `${bulkEnabledCount}/${servers.length}`}
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => void handleBulkToggle(true)}
+              disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
+            >
+              {bulkToggleMcpAppMutation.isPending ? i.mcp.bulkRunning : i.mcp.bulkEnable}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => void handleBulkToggle(false)}
+              disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
+            >
+              {i.mcp.bulkDisable}
+            </button>
+          </div>
+        )}
       </div>
       {search.trim() && (
         <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
@@ -726,11 +726,9 @@ export default function McpServers() {
                         : i.mcp.unknown
                     : null
                 }
-                toggleTitle={server.status === "disabled" ? i.mcp.enable : i.mcp.disable}
                 editTitle={i.mcp.edit}
                 deleteTitle={i.mcp.remove}
                 onSelect={handleSelectServer}
-                onToggle={handleToggle}
                 onEdit={handleEditServer}
                 onDelete={handleDeleteServer}
               />

@@ -172,10 +172,15 @@ export async function checkAppUpdate(): Promise<{
     const { check } = await import("@tauri-apps/plugin-updater");
     const update = await check();
     if (!update) {
-      return {
-        result: buildNoUpdateResult(currentVersion),
-        handle: null,
-      };
+      try {
+        return await checkGitHubRelease(currentVersion);
+      } catch (fallbackError) {
+        console.warn("GitHub release fallback failed", fallbackError);
+        return {
+          result: buildNoUpdateResult(currentVersion),
+          handle: null,
+        };
+      }
     }
 
     return {
@@ -198,12 +203,17 @@ export async function checkAppUpdate(): Promise<{
   } catch (error) {
     const message = String(error);
     if (isUpdaterNotConfigured(message)) {
-      return {
-        result: buildNoUpdateResult(currentVersion, {
-          not_configured: true,
-        }),
-        handle: null,
-      };
+      try {
+        return await checkGitHubRelease(currentVersion);
+      } catch (fallbackError) {
+        console.warn("GitHub release fallback failed", fallbackError);
+        return {
+          result: buildNoUpdateResult(currentVersion, {
+            not_configured: true,
+          }),
+          handle: null,
+        };
+      }
     }
 
     if (isRemoteReleaseManifestError(message)) {

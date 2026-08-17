@@ -192,6 +192,20 @@ pub fn check_server_health(
         };
     }
 
+    if command.starts_with("https://") || command.starts_with("http://") {
+        let valid_url = url::Url::parse(command).is_ok();
+        return HealthCheckResult {
+            server_id: server_id.to_string(),
+            server_name: server_name.to_string(),
+            status: if valid_url { "healthy" } else { "unhealthy" }.to_string(),
+            command_exists: valid_url,
+            can_start: valid_url,
+            error_message: (!valid_url).then(|| "Invalid remote MCP URL".to_string()),
+            latency_ms: None,
+            checked_at: now,
+        };
+    }
+
     let cmd_exists = check_command_exists(command);
 
     if !cmd_exists {
@@ -223,5 +237,20 @@ pub fn check_server_health(
         error_message: error,
         latency_ms: latency,
         checked_at: now,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_server_health;
+
+    #[test]
+    fn remote_mcp_url_is_not_treated_as_a_local_executable() {
+        let result = check_server_health("remote", "Remote", "https://example.com/mcp", "[]", "{}");
+
+        assert_eq!(result.status, "healthy");
+        assert!(result.command_exists);
+        assert!(result.can_start);
+        assert!(result.error_message.is_none());
     }
 }

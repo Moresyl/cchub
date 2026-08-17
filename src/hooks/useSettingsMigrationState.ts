@@ -35,6 +35,7 @@ import {
 } from "../types/settings";
 
 interface UseSettingsMigrationStateOptions {
+  enabled: boolean;
   locale: Locale;
   settingsText: Record<string, string>;
   toolsLength: number;
@@ -45,6 +46,7 @@ interface UseSettingsMigrationStateOptions {
 }
 
 export function useSettingsMigrationState({
+  enabled,
   locale,
   settingsText,
   toolsLength,
@@ -555,6 +557,7 @@ export function useSettingsMigrationState({
   const manualSetupReports = toolReports.filter((report) => !!report.manual_setup_kind);
 
   useEffect(() => {
+    if (!enabled) return;
     void loadToolReports();
     void loadPendingProjectRoots();
     void loadLastImportSummary();
@@ -562,6 +565,7 @@ export function useSettingsMigrationState({
     void loadBackupPreferences();
     void runScheduledBackupCheck();
   }, [
+    enabled,
     loadBackupPreferences,
     loadLastImportSummary,
     loadManagedBackups,
@@ -571,6 +575,7 @@ export function useSettingsMigrationState({
   ]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (migrationPanelsInitialized.current) return;
     if (toolsLength === 0 && !lastImportSummary && pendingProjectRoots.length === 0 && toolReports.length === 0) return;
     setMigrationPanelsOpen({
@@ -581,6 +586,7 @@ export function useSettingsMigrationState({
     });
     migrationPanelsInitialized.current = true;
   }, [
+    enabled,
     lastImportSummary,
     manualSetupReports.length,
     pendingProjectRoots.length,

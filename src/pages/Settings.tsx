@@ -13,7 +13,6 @@ import WebDavSyncSection from "../components/WebDavSyncSection";
 import S3SyncSection from "../components/S3SyncSection";
 import SettingsAppearanceSection from "../components/SettingsAppearanceSection";
 import SettingsBackupManagementSection from "../components/SettingsBackupManagementSection";
-import SettingsAppUpdateSection from "../components/SettingsAppUpdateSection";
 import SettingsEnvironmentConflictSection from "../components/SettingsEnvironmentConflictSection";
 import SettingsGeneralSection from "../components/SettingsGeneralSection";
 import SettingsKeyboardShortcutsSection from "../components/SettingsKeyboardShortcutsSection";
@@ -26,17 +25,11 @@ import SettingsToolPathSection from "../components/SettingsToolPathSection";
 import SettingsWindowBehaviorSection from "../components/SettingsWindowBehaviorSection";
 import SettingsSkillStorageSection from "../components/SettingsSkillStorageSection";
 import SettingsImportExportSection from "../components/SettingsImportExportSection";
-import { buildAppUpdateLabels, buildMigrationCenterLabels } from "./settings/labels";
+import { buildMigrationCenterLabels } from "./settings/labels";
+import SettingsCategoryNav, { type SettingsCategory } from "./settings/CategoryNav";
 import { useSettingsMigrationState } from "../hooks/useSettingsMigrationState";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
-import {
-  checkAppUpdate,
-  getUpdaterEnvironmentState,
-  installAppUpdate,
-  type AppUpdateHandle,
-  type AppUpdateResult,
-  type UpdaterEnvironmentState,
-} from "../lib/appUpdater";
+import { requestAppUpdateDialog } from "../components/AppUpdateHost";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   fetchVisibleApps,
@@ -66,14 +59,7 @@ import {
 export default function Settings() {
   const [locale, setLoc] = useState<Locale>(getLocale());
   const [theme, setThm] = useState<Theme>(getTheme());
-  const [autoScan, setAutoScan] = useState(true);
-  const [checkUpdates, setCheckUpdates] = useState(true);
-  const [appUpdate, setAppUpdate] = useState<AppUpdateResult | null>(null);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [installing, setInstalling] = useState(false);
-  const [updateError, setUpdateError] = useState<string | null>(null);
-  const [updateHandle, setUpdateHandle] = useState<AppUpdateHandle | null>(null);
-  const [updaterEnvironmentState, setUpdaterEnvironmentState] = useState<UpdaterEnvironmentState | null>(null);
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
   const [appVersion, setAppVersion] = useState("");
   const [tools, setTools] = useState<DetectedTool[]>([]);
   const [customPaths, setCustomPaths] = useState<CustomPath[]>([]);
@@ -155,7 +141,6 @@ export default function Settings() {
         nextEnvironmentConflicts,
         nextLogPreferences,
         nextLogFileTargets,
-        nextUpdaterEnvironmentState,
       ] = await Promise.all([
         fetchVisibleApps(),
         invoke<LocalProviderProxySettings>("get_local_provider_proxy_settings"),
@@ -165,7 +150,6 @@ export default function Settings() {
         invoke<EnvironmentConflict[]>("get_environment_conflicts"),
         invoke<LogPreferences>("get_log_preferences"),
         invoke<LogFileTargets>("get_log_file_targets"),
-        getUpdaterEnvironmentState(),
       ]);
       setVisibleApps(nextVisibleApps);
       setLocalProviderProxySettingsState(nextLocalProviderProxySettings);
@@ -175,7 +159,6 @@ export default function Settings() {
       setEnvironmentConflicts(nextEnvironmentConflicts);
       setLogPreferencesState(nextLogPreferences);
       setLogFileTargets(nextLogFileTargets);
-      setUpdaterEnvironmentState(nextUpdaterEnvironmentState);
     } catch (e) {
       console.error(e);
     }
@@ -412,6 +395,7 @@ export default function Settings() {
     handleRestoreManagedBackup,
     handleDeleteManagedBackup,
   } = useSettingsMigrationState({
+    enabled: activeCategory === "data",
     locale: loc,
     settingsText: migrationStateText,
     toolsLength: tools.length,
@@ -553,14 +537,6 @@ export default function Settings() {
     setThm(newTheme);
   }, []);
 
-  const handleToggleAutoScan = useCallback(() => {
-    setAutoScan((current) => !current);
-  }, []);
-
-  const handleToggleCheckUpdates = useCallback(() => {
-    setCheckUpdates((current) => !current);
-  }, []);
-
   const handleToggleLaunchAtLogin = useCallback(() => {
     void updateWindowPreference("launch_at_login", !windowPreferences.launch_at_login);
   }, [windowPreferences.launch_at_login]);
@@ -577,65 +553,9 @@ export default function Settings() {
     void updateWindowPreference("lightweight_mode", !windowPreferences.lightweight_mode);
   }, [windowPreferences.lightweight_mode]);
 
-  const handleCheckUpdate = useCallback(async () => {
-    if (updaterEnvironmentState?.disabled_by_env) {
-      let currentVersion: string | null = null;
-      try {
-        currentVersion = await getVersion();
-      } catch {
-        currentVersion = appVersion ? appVersion.replace(/^v/i, "") : null;
-      }
-      setAppUpdate({
-        update_available: false,
-        latest_version: null,
-        current_version: currentVersion,
-        body: null,
-        not_configured: false,
-        can_install: false,
-        release_url: null,
-        source: null,
-        disabled_by_env: true,
-      });
-      setUpdateHandle(null);
-      setUpdateError(null);
-      return;
-    }
-
-    setCheckingUpdate(true);
-    setUpdateError(null);
-    try {
-      const { result, handle } = await checkAppUpdate();
-      setAppUpdate(result);
-      setUpdateHandle(handle);
-    } catch (e) {
-      setUpdateError(String(e));
-      setUpdateHandle(null);
-    } finally {
-      setCheckingUpdate(false);
-    }
-  }, [appVersion, updaterEnvironmentState?.disabled_by_env]);
-
-  const handleInstallUpdate = useCallback(async () => {
-    if (!updateHandle) return;
-    setInstalling(true);
-    setUpdateError(null);
-    try {
-      await installAppUpdate(updateHandle);
-    } catch (e) {
-      setUpdateError(String(e));
-    } finally {
-      setInstalling(false);
-    }
-  }, [updateHandle]);
-
   const visibleToolIds = new Set(visibleApps);
   const visibleTools = tools.filter((tool) => visibleToolIds.has(tool.id as ManagedAppId));
-  const updaterDisabledByEnv =
-    (updaterEnvironmentState?.disabled_by_env ?? false) || (appUpdate?.disabled_by_env ?? false);
-  const updaterEnvValue = updaterEnvironmentState?.env_var_value ?? null;
-
   const migrationCenterLabels = useMemo(() => buildMigrationCenterLabels(i, loc), [i, loc]);
-  const appUpdateLabels = useMemo(() => buildAppUpdateLabels(i, loc), [i, loc]);
 
   return (
     <div className="animate-in">
@@ -645,248 +565,257 @@ export default function Settings() {
         </div>
       </div>
 
+      <SettingsCategoryNav active={activeCategory} locale={loc} onChange={setActiveCategory} />
+
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        <SettingsAppearanceSection
-          title={i.settings.appearance}
-          themeLabel={i.settings.theme}
-          languageLabel={i.settings.language}
-          darkLabel={i.settings.dark}
-          lightLabel={i.settings.light}
-          theme={theme}
-          locale={locale}
-          onThemeChange={handleThemeChange}
-          onLocaleChange={handleLocaleChange}
-        />
+        {activeCategory === "general" && (
+          <SettingsAppearanceSection
+            title={i.settings.appearance}
+            themeLabel={i.settings.theme}
+            languageLabel={i.settings.language}
+            darkLabel={i.settings.dark}
+            lightLabel={i.settings.light}
+            theme={theme}
+            locale={locale}
+            onThemeChange={handleThemeChange}
+            onLocaleChange={handleLocaleChange}
+          />
+        )}
 
-        <SettingsGeneralSection
-          title={i.settings.general}
-          autoScanTitle={i.settings.autoScan}
-          autoScanDescription={i.settings.autoScanDesc}
-          autoScanEnabled={autoScan}
-          checkUpdatesTitle={i.settings.checkUpdates}
-          checkUpdatesDescription={i.settings.checkUpdatesDesc}
-          checkUpdatesEnabled={checkUpdates}
-          skillSyncTitle={i.settings.skillSyncMethod}
-          skillSyncDescription={i.settings.skillSyncDesc}
-          skillSyncMethod={skillSyncMethod}
-          skillSyncSymlinkLabel={i.settings.skillSyncSymlink}
-          skillSyncCopyLabel={i.settings.skillSyncCopy}
-          skillSyncSymlinkHint={i.settings.skillSyncSymlinkHint}
-          onToggleAutoScan={handleToggleAutoScan}
-          onToggleCheckUpdates={handleToggleCheckUpdates}
-          onSkillSyncMethodChange={handleSyncMethodChange}
-        />
+        {activeCategory === "general" && (
+          <SettingsGeneralSection
+            title={i.settings.general}
+            skillSyncTitle={i.settings.skillSyncMethod}
+            skillSyncDescription={i.settings.skillSyncDesc}
+            skillSyncMethod={skillSyncMethod}
+            skillSyncSymlinkLabel={i.settings.skillSyncSymlink}
+            skillSyncCopyLabel={i.settings.skillSyncCopy}
+            skillSyncSymlinkHint={i.settings.skillSyncSymlinkHint}
+            onSkillSyncMethodChange={handleSyncMethodChange}
+          />
+        )}
 
-        <SettingsSkillStorageSection />
-        <SettingsImportExportSection />
+        {activeCategory === "data" && <SettingsSkillStorageSection />}
+        {activeCategory === "data" && <SettingsImportExportSection />}
 
-        <SettingsEnvironmentConflictSection
-          locale={loc}
-          conflicts={environmentConflicts}
-          refreshing={refreshingEnvConflicts}
-          checkingLabel={i.settings.checking}
-          refreshLabel={i.settings.migrationHealthRefresh}
-          onRefresh={refreshEnvironmentConflicts}
-        />
+        {activeCategory === "diagnostics" && (
+          <SettingsEnvironmentConflictSection
+            locale={loc}
+            conflicts={environmentConflicts}
+            refreshing={refreshingEnvConflicts}
+            checkingLabel={i.settings.checking}
+            refreshLabel={i.settings.migrationHealthRefresh}
+            onRefresh={refreshEnvironmentConflicts}
+          />
+        )}
 
-        <SettingsWindowBehaviorSection
-          title={uiText("窗口设置", "Window Behavior", "ウィンドウ動作")}
-          launchAtLoginTitle={uiText("开机自启", "Launch at login", "ログイン時に起動")}
-          launchAtLoginDescription={uiText(
-            "写入当前平台的自启动项，随系统登录自动拉起 CCHub。",
-            "Create a platform-specific autostart entry and launch CCHub when you sign in.",
-            "現在のプラットフォーム向け自動起動項目を作成し、サインイン時に CCHub を起動します。",
-          )}
-          launchAtLoginEnabled={windowPreferences.launch_at_login}
-          launchHiddenTitle={uiText("静默启动", "Launch hidden", "非表示で起動")}
-          launchHiddenDescription={uiText(
-            "启动后先隐藏到托盘，适合配合开机自启使用。",
-            "Hide the main window immediately after launch. Useful together with autostart.",
-            "起動直後にメインウィンドウをトレイへ隠します。自動起動との併用に向いています。",
-          )}
-          launchHiddenEnabled={windowPreferences.launch_hidden}
-          closeToTrayTitle={uiText("关闭到托盘", "Close to tray", "閉じるとトレイへ")}
-          closeToTrayDescription={uiText(
-            "关闭主窗口时不退出进程，而是最小化留在系统托盘。",
-            "Hide to the tray instead of quitting when the main window is closed.",
-            "メインウィンドウを閉じたときに終了せず、システムトレイへ隠します。",
-          )}
-          closeToTrayEnabled={windowPreferences.close_to_tray}
-          lightweightModeTitle={uiText("轻量模式", "Lightweight mode", "軽量モード")}
-          lightweightModeDescription={uiText(
-            "关闭主窗口时直接销毁窗口，仅保留托盘常驻；下次从托盘打开时会重建主窗口，以换取更低后台内存占用。",
-            "Destroy the main window when it is closed and keep only the tray resident. Opening from the tray will recreate the window to reduce background memory usage.",
-            "メインウィンドウを閉じると破棄し、トレイのみ常駐させます。トレイから再度開く際にウィンドウを再生成し、バックグラウンドのメモリ使用量を抑えます。",
-          )}
-          lightweightModeEnabled={windowPreferences.lightweight_mode}
-          savingWindowKey={savingWindowKey}
-          onToggleLaunchAtLogin={handleToggleLaunchAtLogin}
-          onToggleLaunchHidden={handleToggleLaunchHidden}
-          onToggleCloseToTray={handleToggleCloseToTray}
-          onToggleLightweightMode={handleToggleLightweightMode}
-        />
+        {activeCategory === "general" && (
+          <SettingsWindowBehaviorSection
+            title={uiText("窗口设置", "Window Behavior", "ウィンドウ動作")}
+            launchAtLoginTitle={uiText("开机自启", "Launch at login", "ログイン時に起動")}
+            launchAtLoginDescription={uiText(
+              "写入当前平台的自启动项，随系统登录自动拉起 CCHub。",
+              "Create a platform-specific autostart entry and launch CCHub when you sign in.",
+              "現在のプラットフォーム向け自動起動項目を作成し、サインイン時に CCHub を起動します。",
+            )}
+            launchAtLoginEnabled={windowPreferences.launch_at_login}
+            launchHiddenTitle={uiText("静默启动", "Launch hidden", "非表示で起動")}
+            launchHiddenDescription={uiText(
+              "启动后先隐藏到托盘，适合配合开机自启使用。",
+              "Hide the main window immediately after launch. Useful together with autostart.",
+              "起動直後にメインウィンドウをトレイへ隠します。自動起動との併用に向いています。",
+            )}
+            launchHiddenEnabled={windowPreferences.launch_hidden}
+            closeToTrayTitle={uiText("关闭到托盘", "Close to tray", "閉じるとトレイへ")}
+            closeToTrayDescription={uiText(
+              "关闭主窗口时不退出进程，而是最小化留在系统托盘。",
+              "Hide to the tray instead of quitting when the main window is closed.",
+              "メインウィンドウを閉じたときに終了せず、システムトレイへ隠します。",
+            )}
+            closeToTrayEnabled={windowPreferences.close_to_tray}
+            lightweightModeTitle={uiText("轻量模式", "Lightweight mode", "軽量モード")}
+            lightweightModeDescription={uiText(
+              "关闭主窗口时直接销毁窗口，仅保留托盘常驻；下次从托盘打开时会重建主窗口，以换取更低后台内存占用。",
+              "Destroy the main window when it is closed and keep only the tray resident. Opening from the tray will recreate the window to reduce background memory usage.",
+              "メインウィンドウを閉じると破棄し、トレイのみ常駐させます。トレイから再度開く際にウィンドウを再生成し、バックグラウンドのメモリ使用量を抑えます。",
+            )}
+            lightweightModeEnabled={windowPreferences.lightweight_mode}
+            savingWindowKey={savingWindowKey}
+            onToggleLaunchAtLogin={handleToggleLaunchAtLogin}
+            onToggleLaunchHidden={handleToggleLaunchHidden}
+            onToggleCloseToTray={handleToggleCloseToTray}
+            onToggleLightweightMode={handleToggleLightweightMode}
+          />
+        )}
 
-        <SettingsPreferredTerminalSection
-          locale={loc}
-          terminalPreferences={terminalPreferences}
-          savingTerminal={savingTerminal}
-          onSelectTerminal={handleSelectTerminal}
-          onOpenHomeInTerminal={handleOpenHomeInTerminal}
-        />
+        {activeCategory === "general" && (
+          <SettingsPreferredTerminalSection
+            locale={loc}
+            terminalPreferences={terminalPreferences}
+            savingTerminal={savingTerminal}
+            onSelectTerminal={handleSelectTerminal}
+            onOpenHomeInTerminal={handleOpenHomeInTerminal}
+          />
+        )}
 
-        <SettingsAppVisibilitySection
-          locale={loc}
-          visibleApps={visibleApps}
-          savingVisibleApps={savingVisibleApps}
-          onToggleVisibleApp={handleToggleVisibleApp}
-        />
+        {activeCategory === "general" && (
+          <SettingsAppVisibilitySection
+            locale={loc}
+            visibleApps={visibleApps}
+            savingVisibleApps={savingVisibleApps}
+            onToggleVisibleApp={handleToggleVisibleApp}
+          />
+        )}
 
-        <SettingsLocalProviderProxySection
-          locale={loc}
-          settings={localProviderProxySettings}
-          status={localProviderProxyStatus}
-          saving={savingLocalProviderProxy}
-          onPortChange={handleLocalProviderProxyPortChange}
-          onSave={handleSaveCurrentLocalProviderProxySettings}
-          onToggleApp={handleToggleLocalProviderProxyApp}
-          onCopyEndpoint={copyText}
-        />
+        {activeCategory === "integrations" && (
+          <SettingsLocalProviderProxySection
+            locale={loc}
+            settings={localProviderProxySettings}
+            status={localProviderProxyStatus}
+            saving={savingLocalProviderProxy}
+            onPortChange={handleLocalProviderProxyPortChange}
+            onSave={handleSaveCurrentLocalProviderProxySettings}
+            onToggleApp={handleToggleLocalProviderProxyApp}
+            onCopyEndpoint={copyText}
+          />
+        )}
 
-        <SettingsLoggingSection
-          locale={loc}
-          level={logPreferences.level}
-          saving={savingLogPreferences}
-          logFileTargets={logFileTargets}
-          onSaveLogLevel={handleSaveLogLevel}
-          onCopy={copyText}
-          onOpen={openInSystemWithLabel}
-        />
+        {activeCategory === "diagnostics" && (
+          <SettingsLoggingSection
+            locale={loc}
+            level={logPreferences.level}
+            saving={savingLogPreferences}
+            logFileTargets={logFileTargets}
+            onSaveLogLevel={handleSaveLogLevel}
+            onCopy={copyText}
+            onOpen={openInSystemWithLabel}
+          />
+        )}
 
-        <SettingsKeyboardShortcutsSection locale={loc} />
+        {activeCategory === "general" && <SettingsKeyboardShortcutsSection locale={loc} />}
 
-        <SettingsToolPathSection
-          locale={loc}
-          visibleTools={visibleTools}
-          customPaths={customPaths}
-          pathSaved={pathSaved}
-          onSaveMcpPath={handleToolMcpPathBlur}
-          onPickMcpPath={handlePickToolMcpPath}
-          onSaveSkillsDir={handleToolSkillsDirBlur}
-          onPickSkillsDir={handlePickToolSkillsDir}
-          onCopyInstallCommand={handleCopyToolInstallCommand}
-        />
+        {activeCategory === "integrations" && (
+          <SettingsToolPathSection
+            locale={loc}
+            visibleTools={visibleTools}
+            customPaths={customPaths}
+            pathSaved={pathSaved}
+            onSaveMcpPath={handleToolMcpPathBlur}
+            onPickMcpPath={handlePickToolMcpPath}
+            onSaveSkillsDir={handleToolSkillsDirBlur}
+            onPickSkillsDir={handlePickToolSkillsDir}
+            onCopyInstallCommand={handleCopyToolInstallCommand}
+          />
+        )}
 
-        <SettingsAuthCenterSection locale={loc} />
-        <SettingsClaudeDesktopSection locale={loc} />
-        <SettingsClaudeExtensionSection />
-        <SettingsCodexHistorySection />
+        {activeCategory === "integrations" && <SettingsAuthCenterSection locale={loc} />}
+        {activeCategory === "integrations" && <SettingsClaudeDesktopSection locale={loc} />}
+        {activeCategory === "integrations" && <SettingsClaudeExtensionSection />}
+        {activeCategory === "integrations" && <SettingsCodexHistorySection />}
 
-        <WebDavSyncSection />
-        <S3SyncSection />
+        {activeCategory === "data" && <WebDavSyncSection />}
+        {activeCategory === "data" && <S3SyncSection />}
 
-        <SettingsMigrationCenterSection
-          labels={migrationCenterLabels}
-          locale={loc}
-          tools={tools}
-          pendingProjectRoots={pendingProjectRoots}
-          toolReports={toolReports}
-          lastImportSummary={lastImportSummary}
-          lastRescan={lastRescan}
-          remapTargets={remapTargets}
-          remappingRoot={remappingRoot}
-          autoMatchingPending={autoMatchingPending}
-          bootstrappingToolId={bootstrappingToolId}
-          repairingAll={repairingAll}
-          rescanningAll={rescanningAll}
-          refreshingMigrationHealth={refreshingMigrationHealth}
-          exportingBackup={exportingBackup}
-          importingBackup={importingBackup}
-          migrationPanelsOpen={migrationPanelsOpen}
-          migrationPanelRefs={migrationPanelRefs}
-          onSummaryToggle={handleSummaryPanelToggle}
-          onPendingToggle={handlePendingPanelToggle}
-          onHealthToggle={handleHealthPanelToggle}
-          onAuthToggle={handleAuthPanelToggle}
-          onFocusPanel={handleFocusMigrationPanel}
-          onExportBackup={handleExportBackup}
-          onImportBackup={handleImportBackup}
-          onRepairAll={handleRepairAll}
-          onFullRescan={handleFullRescan}
-          onOpenBackupPath={handleOpenSafetyBackupPath}
-          onAutoMatchPending={handleAutoMatchPending}
-          onPendingTargetChange={handlePendingTargetChange}
-          onPickPendingTarget={handlePickPendingTarget}
-          onApplyPendingTarget={handleApplyPendingTarget}
-          onRefreshMigrationHealth={handleRefreshMigrationHealth}
-          onCopy={copyText}
-          onOpen={openInSystemWithLabel}
-          onBootstrapTool={runBootstrapForTool}
-        />
+        {activeCategory === "data" && (
+          <SettingsMigrationCenterSection
+            labels={migrationCenterLabels}
+            locale={loc}
+            tools={tools}
+            pendingProjectRoots={pendingProjectRoots}
+            toolReports={toolReports}
+            lastImportSummary={lastImportSummary}
+            lastRescan={lastRescan}
+            remapTargets={remapTargets}
+            remappingRoot={remappingRoot}
+            autoMatchingPending={autoMatchingPending}
+            bootstrappingToolId={bootstrappingToolId}
+            repairingAll={repairingAll}
+            rescanningAll={rescanningAll}
+            refreshingMigrationHealth={refreshingMigrationHealth}
+            exportingBackup={exportingBackup}
+            importingBackup={importingBackup}
+            migrationPanelsOpen={migrationPanelsOpen}
+            migrationPanelRefs={migrationPanelRefs}
+            onSummaryToggle={handleSummaryPanelToggle}
+            onPendingToggle={handlePendingPanelToggle}
+            onHealthToggle={handleHealthPanelToggle}
+            onAuthToggle={handleAuthPanelToggle}
+            onFocusPanel={handleFocusMigrationPanel}
+            onExportBackup={handleExportBackup}
+            onImportBackup={handleImportBackup}
+            onRepairAll={handleRepairAll}
+            onFullRescan={handleFullRescan}
+            onOpenBackupPath={handleOpenSafetyBackupPath}
+            onAutoMatchPending={handleAutoMatchPending}
+            onPendingTargetChange={handlePendingTargetChange}
+            onPickPendingTarget={handlePickPendingTarget}
+            onApplyPendingTarget={handleApplyPendingTarget}
+            onRefreshMigrationHealth={handleRefreshMigrationHealth}
+            onCopy={copyText}
+            onOpen={openInSystemWithLabel}
+            onBootstrapTool={runBootstrapForTool}
+          />
+        )}
 
-        <SettingsBackupManagementSection
-          locale={loc}
-          autoBackupEnabled={backupPreferences.auto_backup_enabled}
-          retentionCount={backupPreferences.retention_count}
-          savingBackupPreferences={savingBackupPreferences}
-          creatingManagedBackup={creatingManagedBackup}
-          loadingManagedBackups={loadingManagedBackups}
-          managedBackups={managedBackups}
-          restoringBackupPath={restoringBackupPath}
-          deletingBackupPath={deletingBackupPath}
-          onToggleAutoBackup={handleToggleAutoBackup}
-          onRetentionChange={handleBackupRetentionChange}
-          onSavePreferences={handleSaveCurrentBackupPreferences}
-          onCreateManagedBackup={handleCreateManagedBackup}
-          onRefreshManagedBackups={handleRefreshManagedBackups}
-          onRenameManagedBackup={handleRenameManagedBackup}
-          onOpenBackup={openInSystemWithLabel}
-          onRestoreManagedBackup={handleRestoreManagedBackup}
-          onDeleteManagedBackup={handleDeleteManagedBackup}
-        />
+        {activeCategory === "data" && (
+          <SettingsBackupManagementSection
+            locale={loc}
+            autoBackupEnabled={backupPreferences.auto_backup_enabled}
+            retentionCount={backupPreferences.retention_count}
+            savingBackupPreferences={savingBackupPreferences}
+            creatingManagedBackup={creatingManagedBackup}
+            loadingManagedBackups={loadingManagedBackups}
+            managedBackups={managedBackups}
+            restoringBackupPath={restoringBackupPath}
+            deletingBackupPath={deletingBackupPath}
+            onToggleAutoBackup={handleToggleAutoBackup}
+            onRetentionChange={handleBackupRetentionChange}
+            onSavePreferences={handleSaveCurrentBackupPreferences}
+            onCreateManagedBackup={handleCreateManagedBackup}
+            onRefreshManagedBackups={handleRefreshManagedBackups}
+            onRenameManagedBackup={handleRenameManagedBackup}
+            onOpenBackup={openInSystemWithLabel}
+            onRestoreManagedBackup={handleRestoreManagedBackup}
+            onDeleteManagedBackup={handleDeleteManagedBackup}
+          />
+        )}
 
-        <SettingsAppUpdateSection
-          labels={appUpdateLabels}
-          appVersion={appVersion}
-          checkingUpdate={checkingUpdate}
-          installing={installing}
-          updaterDisabledByEnv={updaterDisabledByEnv}
-          updaterEnvValue={updaterEnvValue}
-          appUpdate={appUpdate}
-          updateError={updateError}
-          onCheckUpdate={handleCheckUpdate}
-          onInstallUpdate={handleInstallUpdate}
-        />
+        {activeCategory === "diagnostics" && (
+          <SettingsNetworkProxySection
+            title={loc === "zh" ? "网络代理" : "Network Proxy"}
+            description={
+              loc === "zh"
+                ? "设置 HTTP/HTTPS 代理地址，用于访问 GitHub 等外部服务。留空则使用系统默认网络。"
+                : "Set HTTP/HTTPS proxy for accessing GitHub and external services. Leave empty for system default."
+            }
+            hint={
+              loc === "zh"
+                ? "提示：也可以在 VPN 软件中开启 TUN 模式让所有流量走代理，无需在此设置。"
+                : "Tip: You can also enable TUN mode in your VPN client to proxy all traffic without setting this."
+            }
+            proxyUrl={proxyUrl}
+            proxySaved={proxySaved}
+            saveLabel={loc === "zh" ? "保存" : "Save"}
+            testLabel={loc === "zh" ? "测试连接" : loc === "ja" ? "接続テスト" : "Test"}
+            scanLabel={loc === "zh" ? "扫描本机" : loc === "ja" ? "ローカルをスキャン" : "Scan local"}
+            detectedLabel={loc === "zh" ? "已检测" : loc === "ja" ? "検出" : "Detected"}
+            placeholder="http://127.0.0.1:7890"
+            onProxyChange={handleProxyInputChange}
+            onProxyKeyDown={handleProxyInputKeyDown}
+            onSave={handleSaveProxy}
+          />
+        )}
 
-        <SettingsNetworkProxySection
-          title={loc === "zh" ? "网络代理" : "Network Proxy"}
-          description={
-            loc === "zh"
-              ? "设置 HTTP/HTTPS 代理地址，用于访问 GitHub 等外部服务。留空则使用系统默认网络。"
-              : "Set HTTP/HTTPS proxy for accessing GitHub and external services. Leave empty for system default."
-          }
-          hint={
-            loc === "zh"
-              ? "提示：也可以在 VPN 软件中开启 TUN 模式让所有流量走代理，无需在此设置。"
-              : "Tip: You can also enable TUN mode in your VPN client to proxy all traffic without setting this."
-          }
-          proxyUrl={proxyUrl}
-          proxySaved={proxySaved}
-          saveLabel={loc === "zh" ? "保存" : "Save"}
-          testLabel={loc === "zh" ? "测试连接" : loc === "ja" ? "接続テスト" : "Test"}
-          scanLabel={loc === "zh" ? "扫描本机" : loc === "ja" ? "ローカルをスキャン" : "Scan local"}
-          detectedLabel={loc === "zh" ? "已检测" : loc === "ja" ? "検出" : "Detected"}
-          placeholder="http://127.0.0.1:7890"
-          onProxyChange={handleProxyInputChange}
-          onProxyKeyDown={handleProxyInputKeyDown}
-          onSave={handleSaveProxy}
-        />
-
-        <SettingsAboutSection
-          title={i.settings.about}
-          description={i.settings.aboutDesc}
-          appVersion={appVersion}
-          license={i.settings.license}
-        />
+        {activeCategory === "about" && (
+          <SettingsAboutSection
+            title={i.settings.about}
+            description={i.settings.aboutDesc}
+            appVersion={appVersion}
+            license={i.settings.license}
+            checkUpdateLabel={i.settings.checkForUpdate}
+            onCheckUpdate={requestAppUpdateDialog}
+          />
+        )}
       </div>
     </div>
   );

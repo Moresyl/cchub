@@ -1,10 +1,6 @@
 // Settings 页面中两个大型 useMemo 标签字典工厂，原本占用 ~110 行内联代码。
 import type { I18n, Locale } from "../../lib/i18n";
 
-function localize(loc: Locale, zh: string, en: string, ja?: string) {
-  return loc === "zh" ? zh : loc === "ja" ? (ja ?? en) : en;
-}
-
 export function buildMigrationCenterLabels(i: I18n, loc: Locale) {
   return {
     title: i.settings.migrationCenter,
@@ -80,43 +76,5 @@ export function buildMigrationCenterLabels(i: I18n, loc: Locale) {
     rescanDocs: i.settings.rescanDocs,
     rescanWorkflows: i.settings.rescanWorkflows,
     rescanConfigRoots: i.settings.rescanConfigRoots,
-  };
-}
-
-export function buildAppUpdateLabels(i: I18n, loc: Locale) {
-  return {
-    appUpdate: i.settings.appUpdate,
-    currentVersion: i.settings.currentVersion,
-    checkForUpdate: i.settings.checkForUpdate,
-    checking: i.settings.checking,
-    updateAvailable: i.settings.updateAvailable,
-    downloading: i.settings.downloading,
-    installUpdate: i.settings.installUpdate,
-    updateNotConfigured: i.settings.updateNotConfigured,
-    noUpdate: i.settings.noUpdate,
-    updateFailed: i.settings.updateFailed,
-    disabledTitle: localize(
-      loc,
-      "已被 DISABLE_AUTOUPDATER 环境变量禁用",
-      "Disabled by the DISABLE_AUTOUPDATER environment variable",
-      "DISABLE_AUTOUPDATER 環境変数により無効化されています",
-    ),
-    disabledDescription: localize(
-      loc,
-      "当前会跳过应用更新检查与在线安装。移除该环境变量后重新启动 CCHub，即可恢复正常更新流程。",
-      "App update checks and in-app install are skipped while this environment variable is set. Remove it and restart CCHub to restore normal updates.",
-      "この環境変数が設定されている間、アプリ更新確認とアプリ内インストールはスキップされます。削除して CCHub を再起動すると通常の更新に戻ります。",
-    ),
-    disabledCheckDescription: localize(
-      loc,
-      "更新检查已被环境变量短路",
-      "Update checks are short-circuited by environment configuration",
-      "環境設定により更新確認は短絡されています",
-    ),
-    openDownloadsLabel: loc === "zh" ? "前往下载页" : "Open Downloads",
-    releaseOnlyDescription:
-      loc === "zh"
-        ? "已通过发布页检测到新版本。当前构建未提供在线安装清单，将打开下载页手动更新。"
-        : "A newer release was found from GitHub. This build does not have an online install manifest, so the download page will be opened.",
   };
 }

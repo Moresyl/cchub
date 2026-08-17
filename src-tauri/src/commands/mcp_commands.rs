@@ -14,7 +14,7 @@ pub struct McpConfigResponse {
 
 /// Compatibility view of the unified MCP store for one application.
 #[tauri::command]
-pub fn get_mcp_config(app: String, db: State<'_, DbState>) -> Result<McpConfigResponse, String> {
+pub fn get_mcp_config(app: String, _db: State<'_, DbState>) -> Result<McpConfigResponse, String> {
     let config_path = if app.eq_ignore_ascii_case("claude-desktop") {
         config::claude_desktop_config_path()
     } else {
@@ -22,50 +22,26 @@ pub fn get_mcp_config(app: String, db: State<'_, DbState>) -> Result<McpConfigRe
     }
     .map(|path| path.to_string_lossy().into_owned())
     .unwrap_or_default();
-    let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, command, args, env, transport, status FROM mcp_servers ORDER BY name")
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            let args: Vec<String> =
-                serde_json::from_str(&row.get::<_, String>(2)?).unwrap_or_default();
-            let env: HashMap<String, String> =
-                serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default();
-            Ok((
-                row.get::<_, String>(0)?,
-                serde_json::json!({
-                    "command": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    "args": args,
-                    "env": env,
-                    "type": row.get::<_, String>(4)?,
-                    "enabled": row.get::<_, String>(5)? != "disabled",
-                }),
-            ))
-        })
-        .map_err(|error| error.to_string())?;
     let mut servers = HashMap::new();
-    for row in rows {
-        let (id, value) = row.map_err(|error| error.to_string())?;
-        servers.insert(id, value);
+    for server in config::scan_all_mcp_servers()
+        .into_iter()
+        .filter(|server| config::check_server_in_tool(&server.name, &app))
+    {
+        servers.insert(
+            server.name,
+            serde_json::json!({
+                "command": server.command,
+                "args": server.args,
+                "env": server.env,
+                "type": server.transport,
+                "enabled": true,
+            }),
+        );
     }
     Ok(McpConfigResponse {
         config_path,
         servers,
     })
-}
-
-/// Toggle a server in the local MCP registry. The application argument is
-/// retained for compatibility; the registry status is shared by all targets.
-#[tauri::command(rename_all = "camelCase")]
-pub fn set_mcp_enabled(
-    _app: String,
-    id: String,
-    enabled: bool,
-    db: State<'_, DbState>,
-) -> Result<bool, String> {
-    toggle_mcp_server(id, enabled, db)?;
-    Ok(true)
 }
 
 /// Rescan all supported application config files and import their MCP entries.
@@ -144,6 +120,10 @@ pub fn scan_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String
 
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         let now = chrono::Utc::now().to_rfc3339();
+        let scanned_ids = scanned
+            .iter()
+            .map(|server| server.name.clone())
+            .collect::<std::collections::HashSet<_>>();
 
         let mut all_servers = Vec::new();
 
@@ -151,15 +131,7 @@ pub fn scan_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String
             let args_json = serde_json::to_string(&s.args).unwrap_or_else(|_| "[]".to_string());
             let env_json = serde_json::to_string(&s.env).unwrap_or_else(|_| "{}".to_string());
 
-            let existing_status: Option<String> = conn
-                .query_row(
-                    "SELECT status FROM mcp_servers WHERE id = ?1",
-                    rusqlite::params![s.name],
-                    |row| row.get(0),
-                )
-                .ok();
-
-            let status = existing_status.unwrap_or_else(|| "active".to_string());
+            let status = "active".to_string();
 
             conn.execute(
                 "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
@@ -182,6 +154,26 @@ pub fn scan_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String
                 installed_at: Some(now.clone()),
                 updated_at: Some(now.clone()),
             });
+        }
+
+        let stale_ids = {
+            let mut stmt = conn
+                .prepare("SELECT id FROM mcp_servers")
+                .map_err(|error| error.to_string())?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?
+                .filter_map(Result::ok)
+                .filter(|id| !scanned_ids.contains(id))
+                .collect::<Vec<_>>();
+            rows
+        };
+        for id in stale_ids {
+            conn.execute(
+                "DELETE FROM mcp_servers WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .map_err(|error| error.to_string())?;
         }
 
         Ok(all_servers)
@@ -220,25 +212,6 @@ pub fn get_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String>
         .collect();
 
     Ok(servers)
-}
-
-#[tauri::command]
-pub fn toggle_mcp_server(id: String, enabled: bool, db: State<'_, DbState>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let status = if enabled { "active" } else { "disabled" };
-    conn.execute(
-        "UPDATE mcp_servers SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        rusqlite::params![status, chrono::Utc::now().to_rfc3339(), id],
-    )
-    .map_err(|e| e.to_string())?;
-    record_activity(
-        &conn,
-        &id,
-        if enabled { "enable" } else { "disable" },
-        "success",
-        None,
-    );
-    Ok(())
 }
 
 #[tauri::command]
@@ -299,23 +272,21 @@ pub fn install_mcp_server(
 
 #[tauri::command]
 pub fn uninstall_mcp_server(name: String, db: State<'_, DbState>) -> Result<(), String> {
-    // Get config_path from DB to know which file to edit
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let config_path: Option<String> = conn
-        .query_row(
-            "SELECT config_path FROM mcp_servers WHERE id = ?1",
-            rusqlite::params![name],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if let Some(ref path) = config_path {
-        config::remove_mcp_server_from_config(&name, path)?;
-    } else {
-        config::remove_claude_mcp_server(&name)?;
+    for tool in [
+        "claude",
+        "claude-desktop",
+        "codex",
+        "gemini",
+        "grokbuild",
+        "opencode",
+        "hermes",
+    ] {
+        if config::check_server_in_tool(&name, tool) {
+            config::unsync_mcp_from_tool(&name, tool)?;
+        }
     }
 
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM mcp_servers WHERE id = ?1",
         rusqlite::params![name],
@@ -341,15 +312,16 @@ pub fn update_mcp_server_config(
     };
 
     // Get config_path from DB to write back to the correct file
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let config_path: Option<String> = conn
-        .query_row(
+    let config_path: Option<String> = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
             "SELECT config_path FROM mcp_servers WHERE id = ?1",
             rusqlite::params![name],
             |row| row.get(0),
         )
         .ok()
-        .flatten();
+        .flatten()
+    };
 
     if let Some(ref path) = config_path {
         config::write_mcp_server_to_config(&name, &server_config, path)?;
@@ -361,6 +333,7 @@ pub fn update_mcp_server_config(
     let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".to_string());
     let env_json = serde_json::to_string(&env).unwrap_or_else(|_| "{}".to_string());
 
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE mcp_servers SET command = ?1, args = ?2, env = ?3, updated_at = ?4 WHERE id = ?5",
         rusqlite::params![command, args_json, env_json, now, name],

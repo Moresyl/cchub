@@ -466,8 +466,8 @@ export default function Skills() {
     });
   }, [visiblePlugins, deferredSearch, category]);
   const visibleToolIds = new Set(visibleApps);
-  const visibleTools = tools.filter((tool) => visibleToolIds.has(tool.id as ManagedAppId));
-  const installedTools = visibleTools.filter((t) => t.installed);
+  const visibleTools = tools.filter((tool) => tool.installed && visibleToolIds.has(tool.id as ManagedAppId));
+  const installedTools = visibleTools;
   if (loading) {
     return <LoadingState label={i.skills.loading} />;
   }
@@ -573,36 +573,22 @@ export default function Skills() {
             return (
               <div key={tool.id} style={{ position: "relative" }}>
                 <button
-                  className={`btn btn-sm ${isActive ? "btn-primary" : tool.installed ? "btn-secondary" : "btn-ghost"}`}
+                  className={`btn btn-sm ${isActive ? "btn-primary" : "btn-secondary"}`}
                   onClick={() => {
-                    if (!tool.installed) return;
                     setActiveTool(tool.id);
                     setSelectedSkill(null);
                     setSkillContent(null);
                     setEditingSkill(false);
                   }}
-                  style={{ gap: 6, opacity: tool.installed ? 1 : 0.5, cursor: tool.installed ? "pointer" : "default" }}
-                  title={
-                    tool.installed ? tool.name : locale === "zh" ? `${tool.name} 未安装` : `${tool.name} not installed`
-                  }
+                  style={{ gap: 6 }}
+                  title={tool.name}
                 >
                   <Icon size={14} />
                   {tool.name}
-                  {!tool.installed && (
-                    <span
-                      style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0 }}
-                    />
-                  )}
                 </button>
               </div>
             );
           })}
-          {/* Uninstalled tool hints */}
-          {visibleTools.filter((t) => !t.installed).length > 0 && (
-            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
-              {locale === "zh" ? "红点 = 未安装" : "red dot = not installed"}
-            </span>
-          )}
         </div>
       )}
       {visibleSkills.length > 0 && (
@@ -807,13 +793,15 @@ export default function Skills() {
                           GitHub
                         </span>
                       )}
-                      <button
-                        className="btn btn-danger-ghost btn-icon-sm"
-                        onClick={() => handleDeletePlugin(plugin)}
-                        title={locale === "zh" ? "删除" : "Delete"}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {!plugin.id.includes("@") && (
+                        <button
+                          className="btn btn-danger-ghost btn-icon-sm"
+                          onClick={() => handleDeletePlugin(plugin)}
+                          title={locale === "zh" ? "删除" : "Delete"}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -60,34 +60,8 @@ pub fn get_skills(db: State<'_, DbState>) -> Result<Vec<Skill>, String> {
 }
 
 #[tauri::command]
-pub fn get_plugins(db: State<'_, DbState>) -> Result<Vec<Plugin>, String> {
-    let plugins = scanner::scan_local_plugins();
-    if !plugins.is_empty() {
-        return Ok(plugins);
-    }
-
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, description, source_url, version, installed_at, updated_at FROM plugins")
-        .map_err(|e| e.to_string())?;
-
-    let plugins = stmt
-        .query_map([], |row| {
-            Ok(Plugin {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                source_url: row.get(3)?,
-                version: row.get(4)?,
-                installed_at: row.get(5)?,
-                updated_at: row.get(6)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(plugins)
+pub fn get_plugins(_db: State<'_, DbState>) -> Result<Vec<Plugin>, String> {
+    Ok(scanner::scan_local_plugins())
 }
 
 #[tauri::command(rename_all = "camelCase")]

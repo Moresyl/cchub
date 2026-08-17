@@ -264,13 +264,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::mcp_commands::scan_mcp_servers,
             commands::mcp_commands::get_mcp_config,
-            commands::mcp_commands::set_mcp_enabled,
             commands::mcp_commands::import_mcp_from_apps,
             commands::mcp_commands::get_mcp_servers,
             commands::mcp_commands::install_mcp_server,
             commands::mcp_commands::uninstall_mcp_server,
             commands::mcp_commands::update_mcp_server_config,
-            commands::mcp_commands::toggle_mcp_server,
             commands::mcp_commands::check_mcp_server_health,
             commands::mcp_commands::check_all_mcp_health,
             commands::mcp_commands::sync_mcp_server_to_tool,

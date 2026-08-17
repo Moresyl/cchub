@@ -20,6 +20,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { showToast, ToastContainer } from "./components/Toast";
 import DeepLinkImportHost from "./components/DeepLinkImportHost";
 import NavigationProgress from "./components/NavigationProgress";
+import AppUpdateHost from "./components/AppUpdateHost";
 
 // CommandPalette 仅在 Ctrl+K 时显示，懒加载避免 cmdk 进入主 bundle。
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
@@ -87,7 +88,9 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AppShell />
+        <AppUpdateHost>
+          <AppShell />
+        </AppUpdateHost>
       </BrowserRouter>
     </QueryClientProvider>
   );

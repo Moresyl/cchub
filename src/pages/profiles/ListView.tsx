@@ -151,6 +151,8 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
           {props.search && (
             <button
               className="btn btn-ghost btn-icon-sm"
+              aria-label={locale === "zh" ? "清除搜索" : "Clear search"}
+              title={locale === "zh" ? "清除搜索" : "Clear search"}
               style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
               onClick={props.handleClearSearch}
             >

@@ -264,7 +264,12 @@ export default function Hooks() {
       <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <div className="page-header">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button className="btn btn-ghost btn-icon-sm" onClick={cancelEdit}>
+            <button
+              className="btn btn-ghost btn-icon-sm"
+              aria-label={i.common.close}
+              title={i.common.close}
+              onClick={cancelEdit}
+            >
               <X size={16} />
             </button>
             <h2 className="page-title">{editIndex !== null ? i.hooks.editHook : i.hooks.createHook}</h2>
@@ -323,6 +328,7 @@ export default function Hooks() {
                     className="btn btn-secondary btn-icon-sm"
                     onClick={handlePickProjectPathClick}
                     type="button"
+                    aria-label={i.hooks.projectPath}
                     title={i.hooks.projectPath}
                   >
                     <FolderOpen size={14} />

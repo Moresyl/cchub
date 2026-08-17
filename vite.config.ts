@@ -17,19 +17,11 @@ function manualChunks(id: string) {
   }
 
   if (
-    normalized.includes("/node_modules/react-markdown/")
-    || normalized.includes("/node_modules/remark-gfm/")
-    || normalized.includes("/node_modules/prismjs/")
+    normalized.includes("/node_modules/react-markdown/") ||
+    normalized.includes("/node_modules/remark-gfm/") ||
+    normalized.includes("/node_modules/prismjs/")
   ) {
     return "markdown-rendering";
-  }
-
-  if (
-    normalized.includes("/node_modules/codemirror/")
-    || normalized.includes("/node_modules/@codemirror/")
-    || normalized.includes("/node_modules/@lezer/")
-  ) {
-    return "codemirror";
   }
 
   if (normalized.includes("/node_modules/cmdk/")) {
@@ -63,10 +55,7 @@ function manualChunks(id: string) {
     return "mdxeditor-ui";
   }
 
-  if (
-    normalized.includes("/node_modules/@lexical/")
-    || normalized.includes("/node_modules/lexical/")
-  ) {
+  if (normalized.includes("/node_modules/@lexical/") || normalized.includes("/node_modules/lexical/")) {
     return "mdxeditor-lexical";
   }
 
@@ -75,10 +64,10 @@ function manualChunks(id: string) {
   }
 
   if (
-    normalized.includes("/node_modules/react/")
-    || normalized.includes("/node_modules/react-dom/")
-    || normalized.includes("/node_modules/react-router-dom/")
-    || normalized.includes("/node_modules/scheduler/")
+    normalized.includes("/node_modules/react/") ||
+    normalized.includes("/node_modules/react-dom/") ||
+    normalized.includes("/node_modules/react-router-dom/") ||
+    normalized.includes("/node_modules/scheduler/")
   ) {
     return "react-vendor";
   }
@@ -108,19 +97,19 @@ export default defineConfig(async () => ({
     chunkSizeWarningLimit: 1024,
     assetsInlineLimit: 4096,
     // Vite 默认对所有动态 import 的依赖链都会注入 <link rel="modulepreload">，
-    // 这会让 codemirror（1.66MB）、mdxeditor 等纯按需 chunk 在冷启动就被下载，
+    // 这会让 CodeMirror、语言包和 MDXEditor 等纯按需模块在冷启动就被下载，
     // 拖累首屏可交互时间。这里过滤掉重型 chunk，让它们真正按需加载。
     modulePreload: {
       resolveDependencies: (_filename, deps) =>
         deps.filter((dep) => {
           const normalized = dep.replace(/\\/g, "/");
           if (
-            normalized.includes("/codemirror-")
-            || normalized.includes("/mdxeditor-")
-            || normalized.includes("/markdown-rendering-")
-            || normalized.includes("/MarkdownEditorImpl-")
-            || normalized.includes("/MarkdownPreviewImpl-")
-            || normalized.includes("/CodeEditor-")
+            normalized.includes("/codemirror-") ||
+            normalized.includes("/mdxeditor-") ||
+            normalized.includes("/markdown-rendering-") ||
+            normalized.includes("/MarkdownEditorImpl-") ||
+            normalized.includes("/MarkdownPreviewImpl-") ||
+            normalized.includes("/CodeEditor-")
           ) {
             return false;
           }

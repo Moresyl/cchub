@@ -23,11 +23,16 @@ function HeaderComponent() {
   return (
     <header className="topbar">
       <ProjectProfileSwitcher />
-      <button className="theme-btn" title="GitHub" onClick={handleOpenGithub}>
-        <Github size={16} />
+      <button className="theme-btn" aria-label="GitHub" title="GitHub" onClick={handleOpenGithub}>
+        <Github aria-hidden="true" size={16} />
       </button>
 
-      <button className="theme-btn" onClick={toggleTheme} title="Toggle theme">
+      <button
+        className="theme-btn"
+        onClick={toggleTheme}
+        aria-label={`${t().settings.theme}: ${currentTheme === "dark" ? t().settings.light : t().settings.dark}`}
+        title={`${t().settings.theme}: ${currentTheme === "dark" ? t().settings.light : t().settings.dark}`}
+      >
         {currentTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
       </button>
 
@@ -43,7 +48,7 @@ function HeaderComponent() {
         </button>
       )}
 
-      <div className="dot dot-active" title="Connected" />
+      <div className="dot dot-active" role="status" aria-label="Connected" title="Connected" />
     </header>
   );
 }

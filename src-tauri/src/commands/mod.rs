@@ -45,7 +45,6 @@ pub mod startup_compat;
 pub mod stream_check_compat;
 pub mod tool_lifecycle_compat;
 pub mod universal_provider_commands;
-pub mod update_commands;
 pub mod usage_analytics;
 pub mod usage_commands;
 pub mod usage_compat;

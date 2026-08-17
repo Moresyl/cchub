@@ -33,6 +33,12 @@ export const ja: I18n = {
     settings: "設定",
     tools: "ツール",
   },
+  navGroups: {
+    overview: "概要",
+    ecosystem: "エコシステム",
+    automation: "自動化",
+    advanced: "高度なツール",
+  },
   dashboard: {
     ...en.dashboard,
     title: "概要",

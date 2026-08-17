@@ -41,6 +41,7 @@ export default function AppUpdateHost({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [installProgress, setInstallProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const checkingRef = useRef(false);
 
@@ -90,13 +91,19 @@ export default function AppUpdateHost({ children }: { children: ReactNode }) {
   const install = useCallback(async () => {
     if (!handle) return;
     setInstalling(true);
+    setInstallProgress(handle.source === "tauri" ? 0 : null);
     setError(null);
     try {
-      await installAppUpdate(handle);
+      await installAppUpdate(handle, (downloaded, total) => {
+        if (total && total > 0) {
+          setInstallProgress(Math.min(100, Math.round((downloaded / total) * 100)));
+        }
+      });
     } catch (nextError) {
       setError(String(nextError));
     } finally {
       setInstalling(false);
+      setInstallProgress(null);
     }
   }, [handle]);
 
@@ -116,6 +123,7 @@ export default function AppUpdateHost({ children }: { children: ReactNode }) {
             update={update}
             checking={checking}
             installing={installing}
+            installProgress={installProgress}
             error={error}
             onClose={() => setOpen(false)}
             onCheck={() => void checkForUpdate(true)}

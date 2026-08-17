@@ -383,7 +383,12 @@ export default function Workflows() {
           style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 0 }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button className="btn btn-ghost btn-icon-sm" onClick={closeEditor}>
+            <button
+              className="btn btn-ghost btn-icon-sm"
+              aria-label={i.workflows.back}
+              title={i.workflows.back}
+              onClick={closeEditor}
+            >
               <ArrowLeft size={16} />
             </button>
             <div>
@@ -462,7 +467,12 @@ export default function Workflows() {
             <Plus size={14} />
             {i.workflows.installTemplate}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => void load()}>
+          <button
+            className="btn btn-secondary btn-sm"
+            aria-label={i.common.refresh}
+            title={i.common.refresh}
+            onClick={() => void load()}
+          >
             <RefreshCw size={14} />
           </button>
         </div>
@@ -474,7 +484,12 @@ export default function Workflows() {
           <div className="section-card" style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700 }}>{i.workflows.templateTitle}</h3>
-              <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowInstall(false)}>
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                aria-label={i.common.close}
+                title={i.common.close}
+                onClick={() => setShowInstall(false)}
+              >
                 <X size={16} />
               </button>
             </div>

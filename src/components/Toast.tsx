@@ -1,5 +1,6 @@
 import { memo, useState, useEffect, useCallback } from "react";
 import { CheckCircle, AlertCircle, Info, X } from "lucide-react";
+import { t } from "../lib/i18n";
 
 export type ToastType = "success" | "error" | "info";
 
@@ -49,6 +50,8 @@ function ToastItemComponent({ toast, onDismiss }: ToastItemProps) {
       <Icon size={16} style={{ color: color.icon, flexShrink: 0, marginTop: 1 }} />
       <span style={{ fontSize: 13, color: "var(--text-primary)", flex: 1, lineHeight: 1.5 }}>{toast.message}</span>
       <button
+        aria-label={t().common.close}
+        title={t().common.close}
         onClick={handleDismiss}
         style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "var(--text-muted)" }}
       >
@@ -91,6 +94,8 @@ export const ToastContainer = memo(function ToastContainer() {
 
   return (
     <div
+      aria-live="polite"
+      aria-relevant="additions"
       style={{
         position: "fixed",
         top: 12,

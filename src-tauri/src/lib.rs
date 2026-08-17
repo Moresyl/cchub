@@ -21,7 +21,6 @@ mod security;
 mod shared;
 mod skills;
 mod tray;
-mod updater;
 mod url_logging;
 mod utils;
 mod webdav_sync;
@@ -321,9 +320,6 @@ pub fn run() {
             commands::hook_commands::delete_hook,
             commands::hook_commands::save_hook_to_settings,
             commands::hook_commands::delete_hook_from_settings,
-            commands::update_commands::check_updates,
-            commands::update_commands::get_update_history,
-            commands::update_commands::get_app_version,
             commands::claude_md_commands::scan_claude_md,
             commands::claude_md_commands::read_claude_md_content,
             commands::claude_md_commands::write_claude_md_content,
@@ -603,7 +599,6 @@ pub fn run() {
             compat_commands::get_proxy_config,
             compat_commands::get_settings,
             compat_commands::save_settings,
-            compat_commands::check_for_updates,
             compat_commands::check_env_conflicts,
             compat_commands::get_config_status,
             compat_commands::get_tool_versions,
@@ -626,7 +621,6 @@ pub fn run() {
             compat_commands::get_current_provider,
             compat_commands::list_sessions,
             compat_commands::get_model_pricing,
-            compat_commands::check_app_update_available,
             compat_commands::get_provider_limits,
             compat_commands::check_provider_limits,
             compat_commands::get_claude_config_status,
@@ -736,8 +730,6 @@ pub fn run() {
             commands::codex_history_compat::restore_codex_unified_history,
             commands::codex_history_compat::migrate_codex_history,
             commands::extended_compat::restart_app,
-            commands::extended_compat::install_update_and_restart,
-            commands::extended_compat::copy_text_to_clipboard,
             commands::tool_lifecycle_compat::probe_tool_installations,
             commands::tool_lifecycle_compat::run_tool_lifecycle_action,
             commands::provider_compat::get_providers,

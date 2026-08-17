@@ -61,7 +61,12 @@ export default function McpServerWizardView({
               : "Fill in command, arguments, and environment step by step. A health check will run automatically after install."}
           </div>
         </div>
-        <button className="btn btn-ghost btn-icon-sm" onClick={closeWizard}>
+        <button
+          className="btn btn-ghost btn-icon-sm"
+          aria-label={i.common.close}
+          title={i.common.close}
+          onClick={closeWizard}
+        >
           <X size={14} />
         </button>
       </div>

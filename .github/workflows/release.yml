@@ -13,27 +13,18 @@ env:
   RELEASE_BODY: |
     ## 更新内容 / Highlights
 
-    ### 本地状态与扫描
-    - Skills 与插件改为直接读取本地文件和 Claude 插件安装清单，不再回退显示数据库中的过期记录
-    - 正确识别已禁用的 `.md.disabled` 技能，并排除缓存、市场目录及普通说明文档造成的误报
-    - MCP 列表改为读取各工具真实配置，支持 URL、Headers、Codex TOML 等远程 MCP 配置
-    - 扫描后自动清除已不存在的 MCP 数据库缓存，删除服务时同步清理所有工具中的实际配置
+    ### 新增 / 更新
+    - 侧栏按概览、生态管理、自动化和高级工具分组，设置固定在底部，复杂功能更容易定位
+    - 恢复细滚动条、键盘焦点反馈和减少动态效果支持，完善卡片、图标按钮及通知的无障碍语义
+    - 编辑器与语言模块改为按需分包，移除 1.66 MB CodeMirror 聚合块和生产构建超大块警告
+    - 更新弹窗新增下载安装进度，Windows 更新采用被动安装模式并自动重启
+    - 发布流水线生成并上传签名更新包、签名文件和 `latest.json`，支持真正的一键更新
 
-    ### 流畅度与设置页
-    - 设置页重组为常规、集成、数据、诊断、关于五个分类，只挂载当前分类内容
-    - 迁移与备份等重型数据延迟到“数据”分类打开后加载，减少进入设置时的卡顿
-    - 文件系统操作期间不再长时间持有数据库锁，降低 MCP 编辑和删除时的界面阻塞
-    - 移除不会写入真实配置的自动扫描、自动更新和 MCP 总开关，避免显示状态与实际状态不一致
-
-    ### 更新体验
-    - 顶部新版本提示改为直接打开更新弹窗，展示版本号、发布说明和当前版本
-    - 支持 Tauri 一键下载安装并重启；自动更新不可用时回退到 GitHub Release 下载页
-    - 命令面板与关于页统一复用更新弹窗，更新检查在空闲时执行并按需加载界面代码
-
-    ### 修复与维护
-    - 修复远程 MCP URL 被当成本地可执行文件检查而错误显示异常的问题
-    - 修复插件顶层缓存目录被误识别为插件、普通 Markdown 被误识别为技能的问题
-    - 清理旧更新区块、伪状态接口和无用前端调用，保持全部 TypeScript、TSX 与 Rust 文件不超过 900 行
+    ### 问题修复
+    - 移除侧栏悬停触发的文件扫描、SQLite 查询和市场请求，避免鼠标掠过时争抢 IPC 导致卡顿
+    - 修复版本比较对预发布版本处理不正确、发布页回退与一键更新状态不一致的问题
+    - 删除已淘汰的 MCP 包更新扫描、重复应用更新命令、自建剪贴板进程和关联数据结构
+    - 修正文档中不存在的便携版、UI 技术栈和已完成功能状态，保证发布信息与软件一致
 
     ## 下载 / Download
 
@@ -75,12 +66,16 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "CCHub ${{ github.ref_name }}"
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
 
       - name: Report bundle sizes
         shell: pwsh
@@ -126,12 +121,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "CCHub ${{ github.ref_name }}"
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
+          uploadUpdaterJson: true
           args: --target ${{ matrix.target }}
 
       - name: Report bundle sizes
@@ -174,12 +172,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "CCHub ${{ github.ref_name }}"
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
+          uploadUpdaterJson: true
 
       - name: Report bundle sizes
         run: |

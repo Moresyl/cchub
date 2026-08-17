@@ -162,13 +162,6 @@ pub fn update_tray_menu(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn check_for_updates(
-    db: State<'_, DbState>,
-) -> Result<Vec<crate::db::models::UpdateInfo>, String> {
-    crate::commands::update_commands::check_updates(db).await
-}
-
-#[tauri::command]
 pub fn check_env_conflicts(
 ) -> Result<Vec<crate::commands::extra_commands::EnvironmentConflict>, String> {
     get_environment_conflicts()
@@ -316,13 +309,6 @@ pub fn get_model_pricing(
     db: State<'_, DbState>,
 ) -> Result<Vec<crate::commands::usage_commands::ModelPricingRow>, String> {
     crate::commands::usage_commands::list_model_pricing(db)
-}
-
-#[tauri::command]
-pub async fn check_app_update_available(
-    db: State<'_, DbState>,
-) -> Result<Vec<crate::db::models::UpdateInfo>, String> {
-    crate::commands::update_commands::check_updates(db).await
 }
 
 #[tauri::command]

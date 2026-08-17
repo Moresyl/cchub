@@ -28,6 +28,12 @@ export const zh = {
     settings: "设置",
     tools: "工具",
   },
+  navGroups: {
+    overview: "概览",
+    ecosystem: "生态管理",
+    automation: "自动化",
+    advanced: "高级工具",
+  },
   dashboard: {
     title: "概览",
     mcpServers: "MCP 服务",

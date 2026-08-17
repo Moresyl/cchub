@@ -68,8 +68,17 @@ function McpServerCardComponent({
   return (
     <div
       className={`card card-interactive ${selected ? "selected" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
       style={{ padding: "16px 20px", opacity: server.status === "disabled" ? 0.5 : 1 }}
       onClick={() => onSelect(server)}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onSelect(server);
+        }
+      }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -105,6 +114,7 @@ function McpServerCardComponent({
                 onEdit(server);
               }}
               title={editTitle}
+              aria-label={editTitle}
             >
               <Edit3 size={15} />
             </button>
@@ -116,6 +126,7 @@ function McpServerCardComponent({
               onDelete(server);
             }}
             title={deleteTitle}
+            aria-label={deleteTitle}
           >
             <Trash2 size={15} />
           </button>

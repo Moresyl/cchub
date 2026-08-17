@@ -59,12 +59,3 @@ pub struct Hook {
     pub enabled: bool,
     pub timeout: Option<u64>,
 }
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct UpdateInfo {
-    pub item_type: String,
-    pub item_id: String,
-    pub item_name: String,
-    pub current_version: String,
-    pub latest_version: String,
-}

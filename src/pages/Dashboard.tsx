@@ -308,7 +308,12 @@ const StatCard = memo(function StatCard({
   onClick?: () => void;
 }) {
   return (
-    <div className="stat-card" onClick={onClick} style={{ cursor: onClick ? "pointer" : undefined }}>
+    <button
+      type="button"
+      className="stat-card"
+      onClick={onClick}
+      style={{ cursor: onClick ? "pointer" : undefined, width: "100%", textAlign: "left", color: "inherit" }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div className="icon-box" style={{ background: `${color}15`, width: 36, height: 36, borderRadius: 6 }}>
           <Icon size={17} style={{ color }} />
@@ -317,7 +322,7 @@ const StatCard = memo(function StatCard({
       </div>
       <p style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 500 }}>{label}</p>
       {sub && <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, opacity: 0.7 }}>{sub}</p>}
-    </div>
+    </button>
   );
 });
 
@@ -333,7 +338,12 @@ const QuickAction = memo(function QuickAction({
   onClick: () => void;
 }) {
   return (
-    <div className="card card-interactive" style={{ padding: "18px 20px", cursor: "pointer" }} onClick={onClick}>
+    <button
+      type="button"
+      className="card card-interactive"
+      style={{ padding: "18px 20px", cursor: "pointer", width: "100%", textAlign: "left", color: "inherit" }}
+      onClick={onClick}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div className="icon-box" style={{ background: "var(--bg-elevated)", width: 36, height: 36, borderRadius: 6 }}>
           <Icon size={16} style={{ color: "var(--text-secondary)" }} />
@@ -343,7 +353,7 @@ const QuickAction = memo(function QuickAction({
           <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{desc}</p>
         </div>
       </div>
-    </div>
+    </button>
   );
 });
 

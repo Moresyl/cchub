@@ -469,7 +469,12 @@ export default function ClaudeMd() {
         {/* Header */}
         <div className="page-header">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button className="btn btn-ghost btn-icon-sm" onClick={closeEditor}>
+            <button
+              className="btn btn-ghost btn-icon-sm"
+              aria-label={i.workflows.back}
+              title={i.workflows.back}
+              onClick={closeEditor}
+            >
               <ArrowLeft size={16} />
             </button>
             <FileText size={18} style={{ color: "var(--text-secondary)" }} />
@@ -589,7 +594,12 @@ export default function ClaudeMd() {
                     ? "新建预设"
                     : "Create Preset"}
               </div>
-              <button className="btn btn-ghost btn-icon-sm" onClick={closePresetEditor}>
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                aria-label={i.common.close}
+                title={i.common.close}
+                onClick={closePresetEditor}
+              >
                 <X size={14} />
               </button>
             </div>
@@ -699,6 +709,8 @@ export default function ClaudeMd() {
             {search && (
               <button
                 className="btn btn-ghost btn-icon-sm"
+                aria-label={locale === "zh" ? "清除搜索" : "Clear search"}
+                title={locale === "zh" ? "清除搜索" : "Clear search"}
                 style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
                 onClick={handleClearSearch}
               >
@@ -712,7 +724,12 @@ export default function ClaudeMd() {
             <div className="section-card" style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 700 }}>{i.claudeMd.newFile}</h3>
-                <button className="btn btn-ghost btn-icon-sm" onClick={handleCloseCreate}>
+                <button
+                  className="btn btn-ghost btn-icon-sm"
+                  aria-label={i.common.close}
+                  title={i.common.close}
+                  onClick={handleCloseCreate}
+                >
                   <X size={16} />
                 </button>
               </div>

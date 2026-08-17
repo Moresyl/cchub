@@ -13,6 +13,7 @@ interface McpClientCardProps {
   client: McpClientCardClient;
   selected: boolean;
   serverCountLabel: string;
+  deleteTitle: string;
   onSelect: (client: McpClientCardClient) => void;
   onDelete: (client: McpClientCardClient) => void;
 }
@@ -21,29 +22,42 @@ function McpClientCardComponent({
   client,
   selected,
   serverCountLabel,
+  deleteTitle,
   onSelect,
   onDelete,
 }: McpClientCardProps) {
   return (
     <div
       className={`card card-interactive ${selected ? "selected" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
       style={{ padding: "16px 20px" }}
       onClick={() => onSelect(client)}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onSelect(client);
+        }
+      }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div className="icon-box" style={{ background: "var(--bg-elevated)", width: 36, height: 36, borderRadius: 6 }}>
+          <div
+            className="icon-box"
+            style={{ background: "var(--bg-elevated)", width: 36, height: 36, borderRadius: 6 }}
+          >
             <Monitor size={16} style={{ color: "var(--text-secondary)" }} />
           </div>
           <div>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{client.name}</span>
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-              {serverCountLabel}
-            </p>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{serverCountLabel}</p>
           </div>
         </div>
         <button
           className="btn btn-danger-ghost btn-icon-sm"
+          aria-label={deleteTitle}
+          title={deleteTitle}
           onClick={(event) => {
             event.stopPropagation();
             onDelete(client);

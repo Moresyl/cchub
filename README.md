@@ -37,9 +37,11 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 ## Screenshots
 
 ### Light Theme
+
 ![Light Theme](screenshots/light-theme.png)
 
 ### Dark Theme
+
 ![Dark Theme](screenshots/dark-theme.png)
 
 ---
@@ -48,77 +50,76 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 
 ### Core Management
 
-| Feature | Description |
-|---------|-------------|
-| **MCP Server Management** | Auto-scan Claude Code, Claude Desktop, Cursor configs. Enable/disable, edit, delete — no JSON editing |
-| **MCP Marketplace** | Built-in registry with categories. One-click install with env config. Custom source support |
-| **MCP Health Monitor** | Command check, process spawn test, latency measurement. Know which servers are broken |
-| **Config Profiles** | One-click switch between Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw, and Hermes configs |
-| **Skills & Plugins** | Browse, edit (MDXEditor rich-text), cross-tool sync |
-| **Workflows** | 12 built-in templates (Code Review, TDD, Bug Diagnosis, Security Audit...). One-click install |
-| **Hooks Visualizer** | See all hooks: event types, matchers, commands — at a glance |
+| Feature                   | Description                                                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **MCP Server Management** | Auto-scan Claude Code, Claude Desktop, Cursor, Codex, Gemini, OpenCode, OpenClaw, and Hermes configs. Sync per app, edit, delete — no JSON editing |
+| **MCP Marketplace**       | Built-in registry with categories. One-click install with env config. Custom source support                                                        |
+| **MCP Health Monitor**    | Command check, process spawn test, latency measurement. Know which servers are broken                                                              |
+| **Config Profiles**       | One-click switch between Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw, and Hermes configs                                                    |
+| **Skills & Plugins**      | Browse, edit (MDXEditor rich-text), cross-tool sync                                                                                                |
+| **Workflows**             | 12 built-in templates (Code Review, TDD, Bug Diagnosis, Security Audit...). One-click install                                                      |
+| **Hooks Visualizer**      | See all hooks: event types, matchers, commands — at a glance                                                                                       |
 
 ### Developer Experience
 
-| Feature | Description |
-|---------|-------------|
-| **CLAUDE.md Manager** | Visual editor for project instructions with templates |
-| **Autopilot** | Task orchestration for Claude / Codex auto-execution with real-time monitoring |
-| **Command Palette** | `Ctrl+K` to navigate anywhere instantly |
-| **Security Audit** | Env secrets, shell execution risks, npx auto-install risk scanning |
-| **StatusLine (claude-hud)** | One-click install, proxy support, China mirror, display config |
+| Feature                     | Description                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| **CLAUDE.md Manager**       | Visual editor for project instructions with templates                          |
+| **Autopilot**               | Task orchestration for Claude / Codex auto-execution with real-time monitoring |
+| **Command Palette**         | `Ctrl+K` to navigate anywhere instantly                                        |
+| **Security Audit**          | Env secrets, shell execution risks, npx auto-install risk scanning             |
+| **StatusLine (claude-hud)** | One-click install, proxy support, China mirror, display config                 |
 
 ### Platform
 
-| Feature | Description |
-|---------|-------------|
-| **Cross-platform** | Windows 10/11, macOS 10.15+, Linux |
-| **Dark / Light Theme** | Glassmorphism UI with system-aware theme |
-| **Backup & Restore** | Export all configs as SQL, import with legacy format support |
-| **Auto Update** | Built-in updater with GitHub Releases fallback |
-| **i18n** | Chinese, English, Japanese |
-| **System Tray** | Minimize to tray on close |
+| Feature                | Description                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| **Cross-platform**     | Windows 10/11, macOS 10.15+, Linux                                                            |
+| **Dark / Light Theme** | Compact desktop UI with system-aware theme, keyboard focus states, and reduced-motion support |
+| **Backup & Restore**   | Export all configs as SQL, import with legacy format support                                  |
+| **Auto Update**        | Signed Tauri updater when available, with a reliable GitHub Releases fallback                 |
+| **i18n**               | Chinese, English, Japanese                                                                    |
+| **System Tray**        | Minimize to tray on close                                                                     |
 
 ---
 
 ## Quick Comparison
 
-| Task | Without CCHub | With CCHub |
-|------|:---:|:---:|
-| Install an MCP server | Edit JSON, find npm package, configure env vars manually | One click from Marketplace |
-| Switch from Claude to Codex config | Copy files, rename, edit paths | One click in Profiles |
-| Check if MCP servers are healthy | Run commands manually, check logs | Health dashboard with latency |
-| Audit security risks | Read JSON files, grep for secrets | Automated scan with risk report |
-| Manage CLAUDE.md | Open in text editor, remember syntax | Rich visual editor with templates |
+| Task                               |                      Without CCHub                       |            With CCHub             |
+| ---------------------------------- | :------------------------------------------------------: | :-------------------------------: |
+| Install an MCP server              | Edit JSON, find npm package, configure env vars manually |    One click from Marketplace     |
+| Switch from Claude to Codex config |              Copy files, rename, edit paths              |       One click in Profiles       |
+| Check if MCP servers are healthy   |            Run commands manually, check logs             |   Health dashboard with latency   |
+| Audit security risks               |            Read JSON files, grep for secrets             |  Automated scan with risk report  |
+| Manage CLAUDE.md                   |           Open in text editor, remember syntax           | Rich visual editor with templates |
 
 ---
 
 ## Download
 
-| File | Platform | Description |
-|------|----------|-------------|
-| [`CCHub_x64-setup.exe`](https://github.com/Moresyl/cchub/releases/latest) | Windows | **Recommended** — NSIS installer with auto-update |
-| [`CCHub_x64_en-US.msi`](https://github.com/Moresyl/cchub/releases/latest) | Windows | MSI format for enterprise deployment |
-| [`CCHub_x64_portable.exe`](https://github.com/Moresyl/cchub/releases/latest) | Windows | No install needed — double-click and run |
-| [`CCHub_aarch64.dmg`](https://github.com/Moresyl/cchub/releases/latest) | macOS | Apple Silicon (M1/M2/M3/M4) |
-| [`CCHub_x64.dmg`](https://github.com/Moresyl/cchub/releases/latest) | macOS | Intel |
-| [`CCHub_amd64.deb`](https://github.com/Moresyl/cchub/releases/latest) | Linux | Debian / Ubuntu |
-| [`CCHub_amd64.AppImage`](https://github.com/Moresyl/cchub/releases/latest) | Linux | Universal AppImage |
-| [`CCHub_x86_64.rpm`](https://github.com/Moresyl/cchub/releases/latest) | Linux | Fedora / RHEL |
+| File                                                                       | Platform | Description                                       |
+| -------------------------------------------------------------------------- | -------- | ------------------------------------------------- |
+| [`CCHub_x64-setup.exe`](https://github.com/Moresyl/cchub/releases/latest)  | Windows  | **Recommended** — NSIS installer with auto-update |
+| [`CCHub_x64_en-US.msi`](https://github.com/Moresyl/cchub/releases/latest)  | Windows  | MSI format for enterprise deployment              |
+| [`CCHub_aarch64.dmg`](https://github.com/Moresyl/cchub/releases/latest)    | macOS    | Apple Silicon (M1/M2/M3/M4)                       |
+| [`CCHub_x64.dmg`](https://github.com/Moresyl/cchub/releases/latest)        | macOS    | Intel                                             |
+| [`CCHub_amd64.deb`](https://github.com/Moresyl/cchub/releases/latest)      | Linux    | Debian / Ubuntu                                   |
+| [`CCHub_amd64.AppImage`](https://github.com/Moresyl/cchub/releases/latest) | Linux    | Universal AppImage                                |
+| [`CCHub_x86_64.rpm`](https://github.com/Moresyl/cchub/releases/latest)     | Linux    | Fedora / RHEL                                     |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | [**Tauri 2.0**](https://tauri.app) — Rust backend + Web frontend, ~20MB binary |
-| Frontend | **React 19** + **TypeScript** + **Tailwind CSS 4** |
-| Backend | **Rust** — High perf, memory safe, single binary |
-| Database | **SQLite** (rusqlite) — Zero-dependency local storage |
-| Build | **Vite 6** + **pnpm** |
-| Data Layer | **TanStack React Query** — Unified caching & state |
-| UI | **shadcn/ui** + **Framer Motion** + **cmdk** |
+| Layer      | Technology                                                                     |
+| ---------- | ------------------------------------------------------------------------------ |
+| Framework  | [**Tauri 2.0**](https://tauri.app) — Rust backend + Web frontend, ~20MB binary |
+| Frontend   | **React 19** + **TypeScript** + **Tailwind CSS 4**                             |
+| Backend    | **Rust** — High perf, memory safe, single binary                               |
+| Database   | **SQLite** (rusqlite) — Zero-dependency local storage                          |
+| Build      | **Vite 6** + **pnpm**                                                          |
+| Data Layer | **TanStack React Query** — Unified caching & state                             |
+| UI         | CCHub design system + **Tailwind CSS 4** + **cmdk** + **Lucide**               |
 
 ---
 
@@ -126,9 +127,9 @@ The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, 
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org) >= 18
-- [pnpm](https://pnpm.io) >= 8
-- [Rust](https://rustup.rs) >= 1.70
+- [Node.js](https://nodejs.org) >= 20
+- [pnpm](https://pnpm.io) 10.32.1
+- [Rust](https://rustup.rs) stable
 - [Tauri 2.0 Prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ### Quick Start
@@ -152,20 +153,20 @@ pnpm tauri build
 
 CCHub auto-scans MCP server configs from:
 
-| Path | Source |
-|------|--------|
-| `~/.claude/plugins/**/.mcp.json` | Claude Code plugins (recursive) |
-| `%APPDATA%/Claude/claude_desktop_config.json` | Claude Desktop |
-| `~/.cursor/mcp.json` | Cursor |
-| `~/.codex/config.toml` | Codex CLI |
-| `~/.gemini/settings.json` | Gemini CLI |
+| Path                                           | Source                                      |
+| ---------------------------------------------- | ------------------------------------------- |
+| `~/.claude/plugins/**/.mcp.json`               | Claude Code plugins (recursive)             |
+| `%APPDATA%/Claude/claude_desktop_config.json`  | Claude Desktop                              |
+| `~/.cursor/mcp.json`                           | Cursor                                      |
+| `~/.codex/config.toml`                         | Codex CLI                                   |
+| `~/.gemini/settings.json`                      | Gemini CLI                                  |
 | `~/.hermes/cli-config.yaml` + `~/.hermes/.env` | Hermes Agent (NousResearch) — YAML + dotenv |
 
 ---
 
 ## Roadmap
 
-- [x] MCP Server management (scan, toggle, edit, delete)
+- [x] MCP Server management (scan, per-app sync, edit, delete)
 - [x] MCP Marketplace (registry, one-click install, custom sources)
 - [x] MCP Health monitoring (command check, spawn test, latency)
 - [x] Skills & Plugins browser (MDXEditor, cross-tool sync)
@@ -186,8 +187,8 @@ CCHub auto-scans MCP server configs from:
 - [x] Cross-platform (Windows, macOS, Linux)
 - [x] System tray
 - [ ] Config change detection (security timeline)
-- [ ] Hooks editor (create/edit hooks from UI)
-- [ ] WebDAV cloud sync
+- [x] Hooks editor (create/edit hooks from UI)
+- [x] WebDAV cloud sync
 - [ ] Plugin ecosystem (community MCP templates)
 
 ---

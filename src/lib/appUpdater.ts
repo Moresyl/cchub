@@ -45,19 +45,38 @@ function buildNoUpdateResult(currentVersion: string, overrides?: Partial<AppUpda
   };
 }
 
-function normalizeVersion(version: string | null | undefined): string {
+export function normalizeVersion(version: string | null | undefined): string {
   return String(version ?? "")
     .trim()
     .replace(/^[^\d]*/, "");
 }
 
-function compareVersions(left: string, right: string): number {
-  const a = normalizeVersion(left)
-    .split(".")
-    .map((part) => Number.parseInt(part, 10) || 0);
-  const b = normalizeVersion(right)
-    .split(".")
-    .map((part) => Number.parseInt(part, 10) || 0);
+function comparePrerelease(left: string[], right: string[]): number {
+  if (left.length === 0 && right.length === 0) return 0;
+  if (left.length === 0) return 1;
+  if (right.length === 0) return -1;
+  const max = Math.max(left.length, right.length);
+  for (let index = 0; index < max; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+    if (a === b) continue;
+    const aNumber = /^\d+$/.test(a) ? Number(a) : null;
+    const bNumber = /^\d+$/.test(b) ? Number(b) : null;
+    if (aNumber !== null && bNumber !== null) return aNumber > bNumber ? 1 : -1;
+    if (aNumber !== null) return -1;
+    if (bNumber !== null) return 1;
+    return a.localeCompare(b);
+  }
+  return 0;
+}
+
+export function compareVersions(left: string, right: string): number {
+  const [leftCore, leftPrerelease = ""] = normalizeVersion(left).split("-", 2);
+  const [rightCore, rightPrerelease = ""] = normalizeVersion(right).split("-", 2);
+  const a = leftCore.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const b = rightCore.split(".").map((part) => Number.parseInt(part, 10) || 0);
   const max = Math.max(a.length, b.length);
 
   for (let i = 0; i < max; i += 1) {
@@ -67,7 +86,7 @@ function compareVersions(left: string, right: string): number {
     if (av < bv) return -1;
   }
 
-  return 0;
+  return comparePrerelease(leftPrerelease.split(".").filter(Boolean), rightPrerelease.split(".").filter(Boolean));
 }
 
 function isUpdaterNotConfigured(message: string): boolean {
@@ -229,9 +248,24 @@ export async function checkAppUpdate(): Promise<{
   }
 }
 
-export async function installAppUpdate(handle: AppUpdateHandle): Promise<void> {
+export async function installAppUpdate(
+  handle: AppUpdateHandle,
+  onProgress?: (downloaded: number, total: number | null) => void,
+): Promise<void> {
   if (handle.source === "tauri" && handle.update) {
-    await handle.update.downloadAndInstall();
+    let downloaded = 0;
+    let total: number | null = null;
+    await handle.update.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        downloaded = 0;
+        total = event.data.contentLength ?? null;
+      } else if (event.event === "Progress") {
+        downloaded += event.data.chunkLength;
+      } else if (event.event === "Finished" && total !== null) {
+        downloaded = total;
+      }
+      onProgress?.(downloaded, total);
+    });
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
     return;

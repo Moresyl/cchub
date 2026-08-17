@@ -262,7 +262,12 @@ export default function McpClients() {
                   <h3 style={{ fontSize: 14, fontWeight: 600 }}>
                     {uiText("新建客户端", "New Client", "クライアントを新規作成")}
                   </h3>
-                  <button className="btn btn-ghost btn-icon-sm" onClick={closeCreate}>
+                  <button
+                    className="btn btn-ghost btn-icon-sm"
+                    aria-label={uiText("关闭", "Close", "閉じる")}
+                    title={uiText("关闭", "Close", "閉じる")}
+                    onClick={closeCreate}
+                  >
                     <X size={14} />
                   </button>
                 </div>
@@ -313,6 +318,7 @@ export default function McpClients() {
                     `${accessCount}/${servers.length} servers accessible`,
                     `${accessCount}/${servers.length} 個のサーバーにアクセス可能`,
                   )}
+                  deleteTitle={uiText("删除客户端", "Delete client", "クライアントを削除")}
                   onSelect={handleSelectClient}
                   onDelete={handleDelete}
                 />

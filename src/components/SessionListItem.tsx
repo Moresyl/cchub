@@ -67,9 +67,18 @@ function SessionListItemComponent({
   onDelete,
 }: SessionListItemProps) {
   return (
-    <button
+    <div
       className="card card-interactive cv-auto"
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
       onClick={() => onOpen(session)}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onOpen(session);
+        }
+      }}
       style={{
         textAlign: "left",
         padding: 14,
@@ -176,7 +185,7 @@ function SessionListItemComponent({
           </button>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 

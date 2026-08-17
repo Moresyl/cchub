@@ -1,4 +1,3 @@
-
 /* ═══ Icon Box ═══ */
 
 .icon-box {
@@ -83,13 +82,25 @@
 /* ═══ Animations ═══ */
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes pageIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-in {
@@ -101,15 +112,33 @@
   animation: fadeIn 0.2s ease forwards;
   opacity: 0;
 }
-.stagger > *:nth-child(1) { animation-delay: 0.02s; }
-.stagger > *:nth-child(2) { animation-delay: 0.04s; }
-.stagger > *:nth-child(3) { animation-delay: 0.06s; }
-.stagger > *:nth-child(4) { animation-delay: 0.08s; }
-.stagger > *:nth-child(5) { animation-delay: 0.10s; }
-.stagger > *:nth-child(6) { animation-delay: 0.12s; }
-.stagger > *:nth-child(7) { animation-delay: 0.14s; }
-.stagger > *:nth-child(8) { animation-delay: 0.16s; }
-.stagger > *:nth-child(n+9) { animation-delay: 0.18s; }
+.stagger > *:nth-child(1) {
+  animation-delay: 0.02s;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 0.04s;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 0.06s;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 0.08s;
+}
+.stagger > *:nth-child(5) {
+  animation-delay: 0.1s;
+}
+.stagger > *:nth-child(6) {
+  animation-delay: 0.12s;
+}
+.stagger > *:nth-child(7) {
+  animation-delay: 0.14s;
+}
+.stagger > *:nth-child(8) {
+  animation-delay: 0.16s;
+}
+.stagger > *:nth-child(n + 9) {
+  animation-delay: 0.18s;
+}
 
 /* ═══ Theme toggle button ═══ */
 
@@ -147,6 +176,7 @@
   align-items: center;
   justify-content: center;
   z-index: 2000;
+  overscroll-behavior: contain;
 }
 .confirm-dialog {
   background: var(--bg-card);
@@ -175,3 +205,26 @@
   z-index: 10;
 }
 
+/* ═══ Keyboard & Motion Accessibility ═══ */
+
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--text-primary) 70%, transparent) !important;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

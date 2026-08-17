@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AlertCircle, CheckCircle, Download, RefreshCw, X } from "lucide-react";
 import type { AppUpdateResult } from "../lib/appUpdater";
 import { getLocale } from "../lib/i18n";
@@ -8,6 +8,7 @@ interface AppUpdateDialogProps {
   update: AppUpdateResult | null;
   checking: boolean;
   installing: boolean;
+  installProgress: number | null;
   error: string | null;
   onClose: () => void;
   onCheck: () => void;
@@ -19,14 +20,17 @@ export default function AppUpdateDialog({
   update,
   checking,
   installing,
+  installProgress,
   error,
   onClose,
   onCheck,
   onInstall,
 }: AppUpdateDialogProps) {
   const zh = getLocale() === "zh";
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!isOpen) return;
+    closeButtonRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !installing) onClose();
     };
@@ -101,10 +105,12 @@ export default function AppUpdateDialog({
                 )}
               </div>
               <button
+                ref={closeButtonRef}
                 className="btn btn-ghost btn-icon-sm"
                 onClick={onClose}
                 disabled={installing}
                 aria-label={zh ? "关闭" : "Close"}
+                title={zh ? "关闭" : "Close"}
               >
                 <X size={16} />
               </button>
@@ -131,6 +137,32 @@ export default function AppUpdateDialog({
                 >
                   {update?.body?.trim() || (zh ? "此版本未提供更新说明。" : "No release notes were provided.")}
                 </div>
+              </div>
+            )}
+
+            {installing && update?.can_install && (
+              <div style={{ marginTop: 16 }}>
+                <div
+                  role="progressbar"
+                  aria-label={zh ? "更新下载进度" : "Update download progress"}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={installProgress ?? undefined}
+                  style={{ height: 6, overflow: "hidden", borderRadius: 999, background: "var(--bg-badge)" }}
+                >
+                  <div
+                    style={{
+                      width: `${installProgress ?? 12}%`,
+                      height: "100%",
+                      borderRadius: 999,
+                      background: "var(--accent)",
+                      transition: "width 0.16s ease",
+                    }}
+                  />
+                </div>
+                <p style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)", textAlign: "right" }}>
+                  {installProgress === null ? (zh ? "正在准备下载…" : "Preparing download…") : `${installProgress}%`}
+                </p>
               </div>
             )}
 

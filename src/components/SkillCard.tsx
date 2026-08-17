@@ -55,36 +55,70 @@ function SkillCardComponent({
 
   return (
     <div
-      className={`card card-interactive ${selected ? "selected" : ""}`}
+      className={`card card-interactive cv-auto ${selected ? "selected" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
       style={{ padding: "14px 18px", marginBottom: 6, opacity: isDisabled ? 0.5 : 1 }}
       onClick={() => onView(skill)}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onView(skill);
+        }
+      }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
-          <div className="icon-box" style={{ background: "var(--warning-subtle)", width: 34, height: 34, borderRadius: 6 }}>
+          <div
+            className="icon-box"
+            style={{ background: "var(--warning-subtle)", width: 34, height: 34, borderRadius: 6 }}
+          >
             <Zap size={15} style={{ color: "var(--warning)" }} />
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>{skill.name}</span>
-              {skill.plugin_id && <span className="badge badge-muted" style={{ fontSize: 10 }}>{skill.plugin_id}</span>}
+              {skill.plugin_id && (
+                <span className="badge badge-muted" style={{ fontSize: 10 }}>
+                  {skill.plugin_id}
+                </span>
+              )}
               {skill.source_url && (
-                <span className={`badge ${updateAvailable ? "badge-warning" : "badge-success"}`} style={{ fontSize: 10 }}>
+                <span
+                  className={`badge ${updateAvailable ? "badge-warning" : "badge-success"}`}
+                  style={{ fontSize: 10 }}
+                >
                   {checkingUpdates ? "..." : updateAvailable ? updateLabel : latestLabel}
                 </span>
               )}
               {isDisabled && (
-                <span className="badge badge-muted" style={{ fontSize: 10 }}>{disabledLabel}</span>
+                <span className="badge badge-muted" style={{ fontSize: 10 }}>
+                  {disabledLabel}
+                </span>
               )}
             </div>
             {skill.description && (
-              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{skill.description}</p>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                  marginTop: 2,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {skill.description}
+              </p>
             )}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {skill.trigger_command && (
-            <code className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{skill.trigger_command}</code>
+            <code className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
+              {skill.trigger_command}
+            </code>
           )}
           {skill.file_path && (
             <>
@@ -94,6 +128,8 @@ function SkillCardComponent({
                   onToggle(skill);
                 }}
                 title={isDisabled ? enableTitle : disableTitle}
+                aria-label={isDisabled ? enableTitle : disableTitle}
+                aria-pressed={!isDisabled}
                 style={{
                   position: "relative",
                   width: 40,
@@ -107,17 +143,19 @@ function SkillCardComponent({
                   flexShrink: 0,
                 }}
               >
-                <span style={{
-                  position: "absolute",
-                  top: 2,
-                  left: isDisabled ? 2 : 20,
-                  width: 18,
-                  height: 18,
-                  borderRadius: "50%",
-                  background: "#fff",
-                  transition: "left 0.2s",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                }} />
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    left: isDisabled ? 2 : 20,
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    background: "#fff",
+                    transition: "left 0.2s",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  }}
+                />
               </button>
               <button
                 className="btn btn-ghost btn-icon-sm"
@@ -126,6 +164,7 @@ function SkillCardComponent({
                   onEdit(skill);
                 }}
                 title={editTitle}
+                aria-label={editTitle}
               >
                 <Edit3 size={13} />
               </button>
@@ -136,6 +175,7 @@ function SkillCardComponent({
                   onDelete(skill);
                 }}
                 title={deleteTitle}
+                aria-label={deleteTitle}
               >
                 <Trash2 size={14} style={{ color: "var(--danger)" }} />
               </button>

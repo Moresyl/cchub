@@ -3,11 +3,9 @@
 use chrono::Utc;
 use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tauri::State;
-use tauri_plugin_updater::UpdaterExt;
 use tokio::io::AsyncReadExt;
 
 use crate::commands::extra_commands::{
@@ -725,82 +723,6 @@ pub fn restart_app(app: tauri::AppHandle) -> Result<bool, String> {
         app.exit(0);
     });
     Ok(true)
-}
-
-#[tauri::command]
-pub async fn install_update_and_restart(app: tauri::AppHandle) -> Result<bool, String> {
-    let updater = app
-        .updater()
-        .map_err(|error| format!("Updater initialization failed: {error}"))?;
-    let Some(update) = updater
-        .check()
-        .await
-        .map_err(|error| format!("Update check failed: {error}"))?
-    else {
-        return Ok(false);
-    };
-    update
-        .download_and_install(|_, _| {}, || {})
-        .await
-        .map_err(|error| format!("Update installation failed: {error}"))?;
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        app.restart();
-    });
-    Ok(true)
-}
-
-#[tauri::command]
-pub fn copy_text_to_clipboard(text: String) -> Result<bool, String> {
-    if text.len() > 4 * 1024 * 1024 {
-        return Err("Clipboard text is too large".to_string());
-    }
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut value = std::process::Command::new("powershell");
-        value.args(["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard"]);
-        value
-    };
-    #[cfg(target_os = "macos")]
-    let mut command = std::process::Command::new("pbcopy");
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = std::process::Command::new("wl-copy");
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("Clipboard provider unavailable: {error}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(text.as_bytes())
-            .map_err(|error| error.to_string())?;
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| error.to_string())?;
-    if output.status.success() {
-        return Ok(true);
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let mut fallback = std::process::Command::new("xclip");
-        fallback
-            .args(["-selection", "clipboard"])
-            .stdin(Stdio::piped());
-        let mut child = fallback.spawn().map_err(|error| error.to_string())?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(text.as_bytes())
-                .map_err(|error| error.to_string())?;
-        }
-        return child
-            .wait()
-            .map(|status| status.success())
-            .map_err(|error| error.to_string());
-    }
-    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
 }
 
 #[cfg(test)]

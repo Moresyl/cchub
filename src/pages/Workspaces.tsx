@@ -281,7 +281,12 @@ export default function Workspaces() {
                 <h3 style={{ fontSize: 14, fontWeight: 600 }}>
                   {uiText("新建工作区", "New Workspace", "ワークスペースを新規作成")}
                 </h3>
-                <button className="btn btn-ghost btn-icon-sm" onClick={closeCreate}>
+                <button
+                  className="btn btn-ghost btn-icon-sm"
+                  aria-label={uiText("关闭", "Close", "閉じる")}
+                  title={uiText("关闭", "Close", "閉じる")}
+                  onClick={closeCreate}
+                >
                   <X size={14} />
                 </button>
               </div>
@@ -306,7 +311,13 @@ export default function Workspaces() {
                     onChange={(e) => setNewPath(e.target.value)}
                     style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
                   />
-                  <button className="btn btn-secondary btn-sm" onClick={handlePickCreatePathClick} type="button">
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    aria-label={uiText("选择目录", "Choose folder", "フォルダーを選択")}
+                    title={uiText("选择目录", "Choose folder", "フォルダーを選択")}
+                    onClick={handlePickCreatePathClick}
+                    type="button"
+                  >
                     <FolderOpen size={14} />
                   </button>
                 </div>
@@ -347,6 +358,8 @@ export default function Workspaces() {
                   activeLabel={uiText("当前", "Active", "現在")}
                   editTitle={uiText("编辑", "Edit", "編集")}
                   deleteTitle={uiText("删除", "Delete", "削除")}
+                  cancelTitle={uiText("取消", "Cancel", "キャンセル")}
+                  saveTitle={uiText("保存", "Save", "保存")}
                   descriptionPlaceholder={uiText("描述", "Description", "説明")}
                   pathPlaceholder={uiText("项目路径", "Project path", "プロジェクトパス")}
                   pickFolderTitle={uiText("选择目录", "Pick folder", "フォルダを選択")}

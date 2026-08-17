@@ -30,6 +30,12 @@ export const en: I18n = {
     settings: "Settings",
     tools: "Tools",
   },
+  navGroups: {
+    overview: "Overview",
+    ecosystem: "Ecosystem",
+    automation: "Automation",
+    advanced: "Advanced",
+  },
   dashboard: {
     title: "Overview",
     mcpServers: "MCP Servers",

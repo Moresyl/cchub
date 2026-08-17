@@ -19,6 +19,8 @@ interface WorkspaceCardProps {
   activeLabel: string;
   editTitle: string;
   deleteTitle: string;
+  cancelTitle: string;
+  saveTitle: string;
   descriptionPlaceholder: string;
   pathPlaceholder: string;
   pickFolderTitle: string;
@@ -42,6 +44,8 @@ function WorkspaceCardComponent({
   activeLabel,
   editTitle,
   deleteTitle,
+  cancelTitle,
+  saveTitle,
   descriptionPlaceholder,
   pathPlaceholder,
   pickFolderTitle,
@@ -58,6 +62,8 @@ function WorkspaceCardComponent({
   return (
     <div
       className={`card ${workspace.is_active ? "" : "card-interactive"}`}
+      role={workspace.is_active || isEditing ? undefined : "button"}
+      tabIndex={workspace.is_active || isEditing ? undefined : 0}
       style={{
         padding: "18px 22px",
         border: workspace.is_active ? "1px solid var(--border-strong)" : undefined,
@@ -68,10 +74,24 @@ function WorkspaceCardComponent({
           onSwitch(workspace.id);
         }
       }}
+      onKeyDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          !workspace.is_active &&
+          !isEditing &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          event.preventDefault();
+          onSwitch(workspace.id);
+        }
+      }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div className="icon-box" style={{ background: "var(--bg-elevated)", width: 40, height: 40, borderRadius: 6 }}>
+          <div
+            className="icon-box"
+            style={{ background: "var(--bg-elevated)", width: 40, height: 40, borderRadius: 6 }}
+          >
             <Monitor size={18} style={{ color: workspace.is_active ? "var(--text-primary)" : "var(--text-muted)" }} />
           </div>
           <div>
@@ -105,6 +125,7 @@ function WorkspaceCardComponent({
                       onPickFolder();
                     }}
                     title={pickFolderTitle}
+                    aria-label={pickFolderTitle}
                   >
                     <FolderOpen size={14} />
                   </button>
@@ -114,13 +135,23 @@ function WorkspaceCardComponent({
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{workspace.name}</span>
-                  {workspace.is_active && <span className="badge badge-success" style={{ fontSize: 10 }}>{activeLabel}</span>}
+                  {workspace.is_active && (
+                    <span className="badge badge-success" style={{ fontSize: 10 }}>
+                      {activeLabel}
+                    </span>
+                  )}
                 </div>
-                {workspace.description && <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{workspace.description}</p>}
+                {workspace.description && (
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{workspace.description}</p>
+                )}
                 {workspace.base_path && (
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
                     <FolderOpen size={11} style={{ color: "var(--text-muted)" }} />
-                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{workspace.base_path}</span>
+                    <span
+                      style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}
+                    >
+                      {workspace.base_path}
+                    </span>
                   </div>
                 )}
               </>
@@ -132,6 +163,8 @@ function WorkspaceCardComponent({
             <>
               <button
                 className="btn btn-ghost btn-icon-sm"
+                aria-label={cancelTitle}
+                title={cancelTitle}
                 onClick={(event) => {
                   event.stopPropagation();
                   onCancelEdit();
@@ -141,6 +174,8 @@ function WorkspaceCardComponent({
               </button>
               <button
                 className="btn btn-primary btn-icon-sm"
+                aria-label={saveTitle}
+                title={saveTitle}
                 onClick={(event) => {
                   event.stopPropagation();
                   onSaveEdit(workspace);
@@ -158,6 +193,7 @@ function WorkspaceCardComponent({
                   onStartEdit(workspace);
                 }}
                 title={editTitle}
+                aria-label={editTitle}
               >
                 <Edit3 size={14} />
               </button>
@@ -169,6 +205,7 @@ function WorkspaceCardComponent({
                     onDelete(workspace);
                   }}
                   title={deleteTitle}
+                  aria-label={deleteTitle}
                 >
                   <Trash2 size={14} />
                 </button>

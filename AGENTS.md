@@ -36,6 +36,7 @@ pnpm test           # Vitest 单元测试
 ## 版本号同步位置
 
 升版本时这三处必须一起改：
+
 - `package.json` → `"version"`
 - `src-tauri/tauri.conf.json` → `"version"`
 - `src-tauri/Cargo.toml` → `version`
@@ -46,5 +47,5 @@ pnpm test           # Vitest 单元测试
 
 - 每次推送版本 Tag 并发布 GitHub Release 时，必须为该版本填写完整、可长期追溯的发布说明，禁止只写版本号或留空。
 - 发布说明至少包含“新增/更新”和“问题修复”两部分；没有对应内容时明确写“无”，不能省略。
-- 发布前根据该版本的实际提交更新 `.github/workflows/release.yml` 中的 `releaseBody`，不得沿用上一版本的说明。
+- 发布前根据该版本的实际提交更新 `.github/workflows/release.yml` 中的 `RELEASE_BODY`，不得沿用上一版本的说明。
 - 发布完成后必须打开对应 Tag 的 GitHub Release 页面，核对版本号、说明内容和各平台安装包均正确后，才算发布完成。

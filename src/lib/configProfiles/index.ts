@@ -25,8 +25,12 @@ export { PRESETS } from "./presets";
 export {
   applyPresetToFields,
   createDefaultStructuredFields,
+  findTomlValue,
   getConfigPresets,
   getPresetCategories,
+  normalizeCustomUserAgent,
+  normalizeEndpointList,
+  normalizeRequestHeaders,
   supportsStructuredConfig,
 } from "./helpers";
 

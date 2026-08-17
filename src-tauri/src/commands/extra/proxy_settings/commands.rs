@@ -25,6 +25,61 @@ pub fn get_sessions(
     result
 }
 
+/// Lightweight session-message endpoint used by external integrations. It
+/// reuses the same path allow-list and parsers as the full session detail view.
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_session_messages(
+    provider_id: String,
+    source_path: String,
+    db: State<'_, DbState>,
+) -> Result<Vec<SessionEntry>, String> {
+    let valid = {
+        let conn = db.0.lock().map_err(|error| error.to_string())?;
+        is_valid_session_source_path(&conn, &provider_id, &source_path)
+    };
+    if !valid {
+        return Err("Invalid session source path".to_string());
+    }
+    let path = std::path::Path::new(&source_path);
+    let session = SessionSummary {
+        id: path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("session")
+            .to_string(),
+        tool_id: provider_id.clone(),
+        tool_name: tool_label(&provider_id).to_string(),
+        title: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Session")
+            .to_string(),
+        cwd: None,
+        source_kind: if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
+            "jsonl".to_string()
+        } else {
+            "sqlite".to_string()
+        },
+        source_backend: if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
+            "jsonl".to_string()
+        } else {
+            "sqlite".to_string()
+        },
+        source_path,
+        created_at: None,
+        updated_at: None,
+        preview: String::new(),
+        message_count: 0,
+        input_tokens: None,
+        output_tokens: None,
+        tokens_used: None,
+        search_hit_count: 0,
+        can_resume: false,
+        can_delete: false,
+    };
+    load_session_detail(&session).map(|detail| detail.entries)
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn get_session_detail(

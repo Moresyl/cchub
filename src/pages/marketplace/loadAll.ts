@@ -158,17 +158,25 @@ export async function performMarketplaceLoadAll(
       queryFn: () => fetchMarketplaceSearchPage("mcp server"),
       staleTime: force ? 0 : 30_000,
     });
+    const repositorySkillsPromise = invoke<SkillEntry[]>("discover_available_skills");
 
-    const [catalogResult, searchResult] = await Promise.allSettled([catalogPromise, searchPromise]);
+    const [catalogResult, searchResult, repositorySkillsResult] = await Promise.allSettled([
+      catalogPromise,
+      searchPromise,
+      repositorySkillsPromise,
+    ]);
+    const repositorySkills = repositorySkillsResult.status === "fulfilled" ? repositorySkillsResult.value : [];
+    if (repositorySkillsResult.status === "rejected") {
+      console.warn("Configured skill repositories unavailable:", repositorySkillsResult.reason);
+    }
 
     if (catalogResult.status === "fulfilled") {
       const marketSkills = catalogResult.value.skills || [];
-      const localNames = new Set(localSkillEntries.map((s) => s.name.toLowerCase()));
-      const merged = [...localSkillEntries, ...marketSkills.filter((s) => !localNames.has(s.name.toLowerCase()))];
+      const merged = dedupByName([...localSkillEntries, ...repositorySkills, ...marketSkills]);
       setters.setSkillEntries(merged);
     } else {
-      console.warn("SkillHub API failed, showing local skills only:", catalogResult.reason);
-      setters.setSkillEntries(localSkillEntries);
+      console.warn("SkillHub API failed, showing local and configured repository skills:", catalogResult.reason);
+      setters.setSkillEntries(dedupByName([...localSkillEntries, ...repositorySkills]));
     }
 
     if (searchResult.status === "fulfilled") {

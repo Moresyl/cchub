@@ -9,6 +9,7 @@ import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
 import HighlightedText from "../components/HighlightedText";
 import SessionListItem from "../components/SessionListItem";
+import SessionUsageActions from "../components/SessionUsageActions";
 import LoadingState from "../components/states/LoadingState";
 import { useDeleteSessionMutation, useDeleteSessionsMutation } from "../hooks/mutations";
 import { fetchSessionsPageData, fetchVisibleAppsQuery, queryKeys } from "../hooks/queries";
@@ -402,10 +403,13 @@ export default function Sessions() {
               )}
             </p>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={() => void loadSessions(false)}>
-            <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
-            {uiText("刷新", "Refresh", "更新")}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <SessionUsageActions />
+            <button className="btn btn-secondary btn-sm" onClick={() => void loadSessions(false)}>
+              <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
+              {uiText("刷新", "Refresh", "更新")}
+            </button>
+          </div>
         </div>
 
         <div className="section-card" style={{ padding: 16 }}>

@@ -1,6 +1,6 @@
 [package]
 name = "cchub"
-version = "1.4.1"
+version = "1.4.2"
 edition = "2021"
 description = "Claude Code ecosystem management platform"
 license = "MIT"

@@ -30,6 +30,71 @@ export function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
+export function normalizeEndpointList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  for (const item of value) {
+    const raw = typeof item === "string" ? item : (item as { url?: unknown })?.url;
+    if (typeof raw !== "string") continue;
+    const normalized = raw.trim().replace(/\/+$/, "");
+    if (!normalized || result.includes(normalized)) continue;
+    try {
+      const parsed = new URL(normalized);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+    } catch {
+      continue;
+    }
+    result.push(normalized);
+  }
+  return result;
+}
+
+const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const PROTECTED_REQUEST_HEADERS = new Set([
+  "host",
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "content-length",
+  "authorization",
+  "x-api-key",
+  "x-goog-api-key",
+  "chatgpt-account-id",
+]);
+
+export function normalizeRequestHeaders(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized: Record<string, string> = {};
+  for (const [rawName, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    const name = rawName.trim();
+    if (
+      !HTTP_HEADER_NAME_PATTERN.test(name) ||
+      name.length > 128 ||
+      PROTECTED_REQUEST_HEADERS.has(name.toLowerCase()) ||
+      Object.keys(normalized).length >= 64
+    )
+      continue;
+    // eslint-disable-next-line no-control-regex
+    if (typeof rawValue !== "string" || rawValue.length > 4096 || /[\x00-\x08\x0a-\x1f\x7f]/.test(rawValue)) continue;
+    if (Object.keys(normalized).some((key) => key.toLowerCase() === name.toLowerCase())) continue;
+    normalized[name] = rawValue;
+  }
+  return normalized;
+}
+
+export function normalizeCustomUserAgent(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  // eslint-disable-next-line no-control-regex
+  if (!trimmed || trimmed.length > 512 || /[\x00-\x08\x0a-\x1f\x7f]/.test(trimmed)) return "";
+  return trimmed;
+}
+
 export function stringifyTemplateValues(value: Record<string, TemplateValueConfig> | undefined): string {
   if (!value || Object.keys(value).length === 0) return "";
   return JSON.stringify(value, null, 2);
@@ -51,9 +116,11 @@ export function supportsStructuredConfig(toolId: string): toolId is StructuredCo
     toolId === "claude" ||
     toolId === "codex" ||
     toolId === "gemini" ||
+    toolId === "grokbuild" ||
     toolId === "openclaw" ||
     toolId === "opencode" ||
-    toolId === "hermes"
+    toolId === "hermes" ||
+    toolId === "pi"
   );
 }
 
@@ -103,6 +170,11 @@ export function createDefaultStructuredFields(toolId: string): StructuredDraftFi
     apiKeyUrl: preset?.apiKeyUrl || "",
     category: preset?.category || "",
     endpointCandidates: (preset?.endpointCandidates || []).join("\n"),
+    customEndpoints: [],
+    customUserAgent: "",
+    requestHeaders: {},
+    requestHeaderOverrides: "",
+    requestBodyOverrides: "",
     costMultiplier: preset?.costMultiplier || "",
     templateValues: stringifyTemplateValues(preset?.templateValues),
     requiresOAuth: preset?.requiresOAuth || false,
@@ -162,6 +234,11 @@ export function applyPresetToFields(
       apiKeyUrl: current?.apiKeyUrl || "",
       category: current?.category || "",
       endpointCandidates: current?.endpointCandidates || "",
+      customEndpoints: current?.customEndpoints || [],
+      customUserAgent: current?.customUserAgent || "",
+      requestHeaders: current?.requestHeaders || {},
+      requestHeaderOverrides: current?.requestHeaderOverrides || "",
+      requestBodyOverrides: current?.requestBodyOverrides || "",
       costMultiplier: current?.costMultiplier || "",
       templateValues: current?.templateValues || "",
       requiresOAuth: current?.requiresOAuth || false,
@@ -213,6 +290,11 @@ export function applyPresetToFields(
     apiKeyUrl: preset.apiKeyUrl || current?.apiKeyUrl || "",
     category: preset.category || current?.category || "",
     endpointCandidates: (preset.endpointCandidates || []).join("\n") || current?.endpointCandidates || "",
+    customEndpoints: current?.customEndpoints || [],
+    customUserAgent: current?.customUserAgent || "",
+    requestHeaders: current?.requestHeaders || {},
+    requestHeaderOverrides: current?.requestHeaderOverrides || "",
+    requestBodyOverrides: current?.requestBodyOverrides || "",
     costMultiplier: preset.costMultiplier || current?.costMultiplier || "",
     templateValues: stringifyTemplateValues(preset.templateValues) || current?.templateValues || "",
     requiresOAuth: preset.requiresOAuth || false,

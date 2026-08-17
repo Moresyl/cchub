@@ -27,8 +27,8 @@ export const geminiPresets: ConfigPreset[] = [
     category: "aggregator",
     badge: "聚合",
     baseUrl: "https://openrouter.ai/api",
-    model: "gemini-3.1-pro",
+    model: "gemini-3.6-flash",
   },
   // === 自定义 ===
-  { id: "gemini-custom", toolId: "gemini", name: "自定义", category: "custom", baseUrl: "", model: "gemini-3.1-pro" },
+  { id: "gemini-custom", toolId: "gemini", name: "自定义", category: "custom", baseUrl: "", model: "gemini-3.6-flash" },
 ];

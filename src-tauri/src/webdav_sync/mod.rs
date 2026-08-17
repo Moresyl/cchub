@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::extra_commands::{
-    generate_sql_backup, get_json_app_setting, import_backup_from_path_impl, set_json_app_setting,
+    generate_sql_backup, get_json_app_setting, get_text_app_setting, import_backup_from_path_impl,
+    set_json_app_setting,
 };
 use crate::db::DbState;
 
@@ -39,6 +40,8 @@ pub struct WebDavSyncSettings {
     pub auto_sync: bool,
     pub last_sync_at: Option<String>,
     pub last_error: Option<String>,
+    #[serde(skip)]
+    pub proxy_url: Option<String>,
 }
 
 impl Default for WebDavSyncSettings {
@@ -54,6 +57,7 @@ impl Default for WebDavSyncSettings {
             auto_sync: false,
             last_sync_at: None,
             last_error: None,
+            proxy_url: None,
         }
     }
 }
@@ -212,6 +216,8 @@ fn read_settings_with_store(
     }
 
     settings.normalize();
+    settings.proxy_url =
+        get_text_app_setting(conn, "proxy_url")?.filter(|value| !value.trim().is_empty());
     Ok(settings)
 }
 
@@ -245,6 +251,7 @@ fn write_settings_with_store(
     if incoming.last_error.is_none() {
         incoming.last_error = existing.last_error;
     }
+    incoming.proxy_url = existing.proxy_url;
     incoming.validate()?;
     if incoming.password.trim().is_empty() {
         credential_store.delete_password()?;
@@ -278,9 +285,12 @@ pub async fn test_connection(
     preserve_empty_password: bool,
 ) -> Result<(), String> {
     if preserve_empty_password && settings.password.trim().is_empty() {
-        if let Some(existing_settings) = existing {
-            settings.password = existing_settings.password;
+        if let Some(existing_settings) = existing.as_ref() {
+            settings.password = existing_settings.password.clone();
         }
+    }
+    if settings.proxy_url.is_none() {
+        settings.proxy_url = existing.and_then(|value| value.proxy_url);
     }
     settings.normalize();
     let was_enabled = settings.enabled;
@@ -289,7 +299,7 @@ pub async fn test_connection(
     settings.enabled = was_enabled;
     validation?;
 
-    let client = build_client()?;
+    let client = build_client(&settings)?;
     let response = auth_request(
         client
             .request(method_propfind()?, normalize_base_url(&settings.base_url))
@@ -334,7 +344,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
     }
 
     let _guard = webdav_sync_lock().lock().await;
-    let client = build_client()?;
+    let client = build_client(&settings)?;
     match fetch_manifest_with_fallback(&client, &settings).await? {
         Some((manifest, layout)) => {
             let compatible = validate_manifest_compatibility(&manifest, layout).is_ok();
@@ -409,7 +419,7 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         ));
     }
 
-    let client = build_client()?;
+    let client = build_client(&settings)?;
     ensure_remote_directories(&client, &settings, WebDavRemoteLayout::Current).await?;
 
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -494,7 +504,7 @@ async fn download_inner(db: &State<'_, DbState>) -> Result<String, String> {
         settings
     };
 
-    let client = build_client()?;
+    let client = build_client(&settings)?;
     let (manifest, layout) = fetch_manifest_with_fallback(&client, &settings)
         .await?
         .ok_or_else(|| "No remote WebDAV sync manifest found".to_string())?;
@@ -656,6 +666,7 @@ mod tests {
             remote_root: " /configs/ ".to_string(),
             profile: " main ".to_string(),
             auto_sync: true,
+            proxy_url: None,
             last_sync_at: None,
             last_error: None,
         };
@@ -686,6 +697,7 @@ mod tests {
             remote_root: "configs".to_string(),
             profile: "main".to_string(),
             auto_sync: false,
+            proxy_url: None,
             last_sync_at: None,
             last_error: None,
         };

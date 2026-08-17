@@ -21,13 +21,10 @@ const ROOT_ICONS: Record<string, LucideIcon> = {
   opencode: Globe,
   openclaw: Monitor,
   hermes: Bot,
+  pi: Terminal,
 };
 
-function ConfigFilesRootTabsComponent({
-  roots,
-  activeRoot,
-  onSelectRoot,
-}: ConfigFilesRootTabsProps) {
+function ConfigFilesRootTabsComponent({ roots, activeRoot, onSelectRoot }: ConfigFilesRootTabsProps) {
   return (
     <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
       {roots.map((root) => {

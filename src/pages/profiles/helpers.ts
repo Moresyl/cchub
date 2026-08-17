@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Monitor, Code, Sparkles, Globe, Cat, Terminal } from "lucide-react";
+import { findTomlValue } from "../../lib/configProfiles";
 import type {
   CodexReasoningEffort,
   CodexWireApi,
@@ -44,6 +45,38 @@ export interface ProviderPingResult {
   message: string;
 }
 
+export interface ProviderEndpointCheckResult {
+  endpoint: string;
+  status: string;
+  latency_ms: number | null;
+  http_status: number | null;
+  message: string;
+}
+
+export function buildProviderPingResult(
+  profile: ConfigProfile,
+  checks: ProviderEndpointCheckResult[],
+): ProviderPingResult {
+  const reachable = checks
+    .filter((check) => check.status !== "error" && check.latency_ms != null)
+    .sort(
+      (left, right) => (left.latency_ms ?? Number.MAX_SAFE_INTEGER) - (right.latency_ms ?? Number.MAX_SAFE_INTEGER),
+    );
+  const best = reachable[0] ?? checks[0];
+  if (!best) throw new Error("No endpoint result");
+  return {
+    profile_id: profile.id,
+    tool_id: profile.tool_id,
+    provider_name: profile.name,
+    base_url: best.endpoint,
+    status: best.status,
+    latency_ms: best.latency_ms,
+    http_status: best.http_status,
+    checked_at: new Date().toISOString(),
+    message: `${checks.filter((check) => check.status !== "error").length}/${checks.length} endpoints reachable. ${best.message}`,
+  };
+}
+
 export interface ProviderStreamCheckResult {
   profile_id: string;
   tool_id: string;
@@ -69,6 +102,7 @@ export const TOOL_ICONS: Record<string, typeof Monitor> = {
   opencode: Globe,
   openclaw: Cat,
   hermes: Monitor,
+  pi: Terminal,
 };
 
 export const OPENCLAW_PROTOCOL_OPTIONS: OpenClawApiProtocol[] = [
@@ -117,6 +151,22 @@ export function prettyJson(content: string): string {
   } catch {
     return content;
   }
+}
+
+export function countProfilesByTool(profiles: ConfigProfile[]): Record<string, number> {
+  return profiles.reduce<Record<string, number>>((counts, profile) => {
+    counts[profile.tool_id] = (counts[profile.tool_id] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+export function countSharedProfileGroups(profiles: ConfigProfile[]): Record<string, number> {
+  return profiles.reduce<Record<string, number>>((counts, profile) => {
+    if (profile.source_type === "shared" && profile.source_key) {
+      counts[profile.source_key] = (counts[profile.source_key] || 0) + 1;
+    }
+    return counts;
+  }, {});
 }
 
 export function getConfigLanguage(toolId: string, content: string): "json" | "toml" {
@@ -173,6 +223,26 @@ export function extractConfigSummary(
         iconUrl: metadata.iconUrl,
       };
     }
+    if (toolId === "grokbuild") {
+      const config = typeof parsed.config === "string" ? parsed.config : "";
+      return {
+        baseUrl: findTomlValue(config, "base_url"),
+        model: findTomlValue(config, "model"),
+        iconUrl: metadata.iconUrl,
+      };
+    }
+    if (toolId === "pi") {
+      const providers = (parsed.providers || {}) as Record<string, any>;
+      const firstProvider = Object.values(providers)[0] as Record<string, any> | undefined;
+      const firstModel = (Array.isArray(firstProvider?.models) ? firstProvider.models[0] : undefined) as
+        | { id?: string }
+        | undefined;
+      return {
+        baseUrl: firstProvider?.baseUrl,
+        model: firstModel?.id,
+        iconUrl: metadata.iconUrl,
+      };
+    }
     if (toolId === "hermes") {
       const config = (parsed.config || {}) as Record<string, any>;
       const model = (config.model || {}) as Record<string, string>;
@@ -198,7 +268,16 @@ export function extractConfigSummary(
   return {};
 }
 
-export const MODEL_FETCH_SUPPORTED_TOOLS = ["claude", "codex", "gemini", "openclaw", "opencode"] as const;
+export const MODEL_FETCH_SUPPORTED_TOOLS = [
+  "claude",
+  "codex",
+  "gemini",
+  "grokbuild",
+  "openclaw",
+  "opencode",
+  "hermes",
+  "pi",
+] as const;
 
 export function supportsModelFetch(toolId: string) {
   return MODEL_FETCH_SUPPORTED_TOOLS.includes(toolId as (typeof MODEL_FETCH_SUPPORTED_TOOLS)[number]);

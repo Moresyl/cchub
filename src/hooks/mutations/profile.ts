@@ -71,7 +71,10 @@ export function useApplyConfigProfileMutation() {
 
   return useMutation({
     mutationFn: (id: string) => invoke<ApplyConfigProfileMutationResult>("apply_config_profile", { id }),
-    onSuccess: () => invalidateProfiles(queryClient),
+    onSuccess: () => {
+      invalidateProfiles(queryClient);
+      window.dispatchEvent(new Event("cchub-project-profile-refresh"));
+    },
   });
 }
 

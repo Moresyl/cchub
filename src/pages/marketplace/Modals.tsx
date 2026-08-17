@@ -1,7 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { CheckCircle, Download, Edit3, ExternalLink, Globe, Key, Plug, Plus, Trash2, X, Zap } from "lucide-react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type KeyboardEvent,
+  type SetStateAction,
+} from "react";
 
 import ConfirmDialog from "../../components/ConfirmDialog";
 import MarketplaceCustomSourceRow from "../../components/MarketplaceCustomSourceRow";
@@ -97,10 +106,81 @@ export interface CustomSourceModalProps {
   handleOpenRecommendedRepo: (name: string) => void;
   handleLoadRecommendedRepo: (name: string, branch: string) => void;
   removeCustomSource: (idx: number) => void;
+  onSkillsLoaded: Dispatch<SetStateAction<SkillEntry[]>>;
+}
+
+interface SkillRepo {
+  owner: string;
+  name: string;
+  branch: string;
+  enabled: boolean;
+}
+
+function mergeDiscoveredSkills(previous: SkillEntry[], discovered: SkillEntry[]) {
+  const byId = new Map(previous.map((skill) => [skill.id, skill]));
+  for (const skill of discovered) byId.set(skill.id, skill);
+  return Array.from(byId.values());
 }
 
 export function CustomSourceModal(props: CustomSourceModalProps) {
   const { locale, show, customUrl, loadingCustom, customSources, loadingRepo, recommendedRepos } = props;
+  const { onSkillsLoaded } = props;
+  const [repos, setRepos] = useState<SkillRepo[]>([]);
+  const [repoOwner, setRepoOwner] = useState("");
+  const [repoName, setRepoName] = useState("");
+  const [repoBranch, setRepoBranch] = useState("main");
+  const [repoBusy, setRepoBusy] = useState(false);
+  const [repoError, setRepoError] = useState<string | null>(null);
+  const [repoSkillCount, setRepoSkillCount] = useState(0);
+
+  const reloadRepos = useCallback(async () => {
+    setRepoError(null);
+    try {
+      const saved = await invoke<SkillRepo[]>("get_skill_repos");
+      setRepos(saved);
+      const discovered = await invoke<SkillEntry[]>("discover_available_skills");
+      setRepoSkillCount(discovered.length);
+      onSkillsLoaded((previous) => mergeDiscoveredSkills(previous, discovered));
+    } catch (error) {
+      setRepoError(String(error));
+    }
+  }, [onSkillsLoaded]);
+
+  useEffect(() => {
+    if (show) void reloadRepos();
+  }, [reloadRepos, show]);
+
+  const saveRepo = async (repo: SkillRepo) => {
+    setRepoBusy(true);
+    setRepoError(null);
+    try {
+      await invoke("add_skill_repo", { repo });
+      setRepoOwner("");
+      setRepoName("");
+      setRepoBranch("main");
+      await reloadRepos();
+    } catch (error) {
+      setRepoError(String(error));
+    } finally {
+      setRepoBusy(false);
+    }
+  };
+
+  const removeRepo = async (repo: SkillRepo) => {
+    setRepoBusy(true);
+    setRepoError(null);
+    try {
+      await invoke("remove_skill_repo", { owner: repo.owner, name: repo.name });
+      await reloadRepos();
+    } catch (error) {
+      setRepoError(String(error));
+    } finally {
+      setRepoBusy(false);
+    }
+  };
+
+  const toggleRepo = (repo: SkillRepo) => void saveRepo({ ...repo, enabled: !repo.enabled });
+
   if (!show) return null;
   return (
     <div
@@ -218,6 +298,91 @@ export function CustomSourceModal(props: CustomSourceModalProps) {
             </div>
           </div>
         )}
+
+        <div style={{ marginBottom: 20 }}>
+          <span className="field-label">{locale === "zh" ? "持久化技能仓库" : "Persistent Skill Repositories"}</span>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+            {locale === "zh"
+              ? "仓库会保存到本地，并在技能市场刷新时自动发现。"
+              : "Repositories are saved locally and discovered when the marketplace refreshes."}
+          </p>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <input
+              className="input"
+              placeholder="owner"
+              value={repoOwner}
+              onChange={(event) => setRepoOwner(event.target.value)}
+            />
+            <input
+              className="input"
+              placeholder="repository"
+              value={repoName}
+              onChange={(event) => setRepoName(event.target.value)}
+            />
+            <input
+              className="input"
+              style={{ maxWidth: 90 }}
+              placeholder="main"
+              value={repoBranch}
+              onChange={(event) => setRepoBranch(event.target.value)}
+            />
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={repoBusy || !repoOwner.trim() || !repoName.trim()}
+              onClick={() =>
+                void saveRepo({
+                  owner: repoOwner.trim(),
+                  name: repoName.trim(),
+                  branch: repoBranch.trim() || "main",
+                  enabled: true,
+                })
+              }
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+          {repos.map((repo) => (
+            <div
+              key={`${repo.owner}/${repo.name}`}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", fontSize: 12 }}
+            >
+              <button
+                className={`badge ${repo.enabled ? "badge-success" : "badge-muted"}`}
+                onClick={() => toggleRepo(repo)}
+                disabled={repoBusy}
+              >
+                {repo.enabled ? (locale === "zh" ? "启用" : "On") : locale === "zh" ? "停用" : "Off"}
+              </button>
+              <span style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace" }}>
+                {repo.owner}/{repo.name}@{repo.branch}
+              </span>
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                title={locale === "zh" ? "移除" : "Remove"}
+                onClick={() => void removeRepo(repo)}
+                disabled={repoBusy}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: 8,
+              fontSize: 11,
+              color: "var(--text-muted)",
+            }}
+          >
+            <span>{locale === "zh" ? `已发现 ${repoSkillCount} 个技能` : `${repoSkillCount} skills discovered`}</span>
+            <button className="btn btn-secondary btn-sm" onClick={() => void reloadRepos()} disabled={repoBusy}>
+              {locale === "zh" ? "刷新" : "Refresh"}
+            </button>
+          </div>
+          {repoError && <div style={{ color: "var(--danger)", fontSize: 11, marginTop: 6 }}>{repoError}</div>}
+        </div>
 
         <div>
           <span className="field-label">{locale === "zh" ? "添加新源" : "Add New Source"}</span>

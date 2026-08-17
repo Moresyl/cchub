@@ -10,6 +10,10 @@ import {
   deeplinkApi,
   getPrimaryDeepLinkEndpoint,
   maskSecret,
+  maskConfigValue,
+  classifyDeepLinkCommand,
+  classifyDeepLinkEndpoint,
+  classifyDeepLinkEnvKey,
   parseMcpPreviewServers,
   splitDeepLinkEndpoints,
   type DeepLinkErrorPayload,
@@ -48,6 +52,16 @@ interface ProviderPreviewSectionProps {
   primaryEndpointLabel: string;
   endpointCandidatesLabel: string;
   homepageLabel: string;
+  usageAccessTokenLabel: string;
+  usageUserIdLabel: string;
+  usageScriptLabel: string;
+  usageScriptCodeLabel: string;
+  usageScriptEnabledLabel: string;
+  usageScriptDisabledLabel: string;
+  usageScriptWarningLabel: string;
+  usageApiKeyLabel: string;
+  usageBaseUrlLabel: string;
+  usageIntervalLabel: string;
 }
 
 interface PromptPreviewSectionProps {
@@ -60,6 +74,17 @@ interface PromptPreviewSectionProps {
 interface McpPreviewSectionProps {
   current: DeepLinkImportRequest;
   unavailablePreviewLabel: string;
+  labels: {
+    command: string;
+    args: string;
+    url: string;
+    env: string;
+    headers: string;
+    privateEndpointRisk: string;
+    envHijackRisk: string;
+    shellCommandRisk: string;
+    importWarning: string;
+  };
 }
 
 interface SkillPreviewSectionProps {
@@ -73,6 +98,16 @@ function ProviderPreviewSectionComponent({
   primaryEndpointLabel,
   endpointCandidatesLabel,
   homepageLabel,
+  usageAccessTokenLabel,
+  usageUserIdLabel,
+  usageScriptLabel,
+  usageScriptCodeLabel,
+  usageScriptEnabledLabel,
+  usageScriptDisabledLabel,
+  usageScriptWarningLabel,
+  usageApiKeyLabel,
+  usageBaseUrlLabel,
+  usageIntervalLabel,
 }: ProviderPreviewSectionProps) {
   const endpoints = useMemo(() => splitDeepLinkEndpoints(current.endpoint), [current.endpoint]);
   const primaryEndpoint = useMemo(() => getPrimaryDeepLinkEndpoint(current), [current]);
@@ -115,6 +150,77 @@ function ProviderPreviewSectionComponent({
           <div>
             <div className="field-label">API Key</div>
             <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{maskSecret(current.apiKey)}</div>
+          </div>
+        )}
+        {current.usageAccessToken && (
+          <div>
+            <div className="field-label">{usageAccessTokenLabel}</div>
+            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>
+              {maskSecret(current.usageAccessToken)}
+            </div>
+          </div>
+        )}
+        {current.usageUserId && (
+          <div>
+            <div className="field-label">{usageUserIdLabel}</div>
+            <div style={{ fontSize: 13, wordBreak: "break-all" }}>{current.usageUserId}</div>
+          </div>
+        )}
+        {(current.usageScript ||
+          current.usageEnabled !== undefined ||
+          current.usageApiKey ||
+          current.usageBaseUrl ||
+          current.usageAutoInterval !== undefined) && (
+          <div style={{ display: "grid", gap: 8, paddingTop: 8, borderTop: "1px solid var(--border-default)" }}>
+            <div className="field-label">{usageScriptLabel}</div>
+            {(current.usageScript || current.usageEnabled !== undefined) && (
+              <span className={`badge ${current.usageEnabled === true ? "badge-success" : "badge-muted"}`}>
+                {current.usageEnabled === true ? usageScriptEnabledLabel : usageScriptDisabledLabel}
+              </span>
+            )}
+            {current.usageScript && (
+              <>
+                <div className="field-label">{usageScriptCodeLabel}</div>
+                <pre
+                  style={{
+                    maxHeight: 220,
+                    overflow: "auto",
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                    margin: 0,
+                    padding: 10,
+                    borderRadius: 8,
+                    background: "var(--bg-input)",
+                    border: "1px solid var(--border-default)",
+                    fontSize: 12,
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}
+                >
+                  {decodeDeepLinkText(current.usageScript)}
+                </pre>
+                <div
+                  style={{ display: "flex", gap: 7, alignItems: "flex-start", color: "var(--warning)", fontSize: 12 }}
+                >
+                  <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{usageScriptWarningLabel}</span>
+                </div>
+              </>
+            )}
+            {current.usageApiKey && (
+              <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+                {usageApiKeyLabel}: {maskSecret(current.usageApiKey)}
+              </div>
+            )}
+            {current.usageBaseUrl && (
+              <div style={{ fontSize: 12, wordBreak: "break-all" }}>
+                {usageBaseUrlLabel}: {current.usageBaseUrl}
+              </div>
+            )}
+            {current.usageAutoInterval !== undefined && (
+              <div style={{ fontSize: 12 }}>
+                {usageIntervalLabel}: {current.usageAutoInterval}
+              </div>
+            )}
           </div>
         )}
         {current.homepage && (
@@ -176,7 +282,7 @@ function PromptPreviewSectionComponent({
 
 const PromptPreviewSection = memo(PromptPreviewSectionComponent);
 
-function McpPreviewSectionComponent({ current, unavailablePreviewLabel }: McpPreviewSectionProps) {
+function McpPreviewSectionComponent({ current, unavailablePreviewLabel, labels }: McpPreviewSectionProps) {
   const mcpServers = useMemo(() => parseMcpPreviewServers(current), [current]);
   const appBadges = useMemo(
     () =>
@@ -186,6 +292,26 @@ function McpPreviewSectionComponent({ current, unavailablePreviewLabel }: McpPre
         .filter(Boolean),
     [current.apps],
   );
+
+  const riskLabels = {
+    privateEndpoint: labels.privateEndpointRisk,
+    envHijack: labels.envHijackRisk,
+    shellCommand: labels.shellCommandRisk,
+  } as const;
+  const risks = useMemo(() => {
+    const found = new Set<keyof typeof riskLabels>();
+    for (const server of mcpServers) {
+      const commandRisk = classifyDeepLinkCommand(server.command, server.args);
+      if (commandRisk) found.add(commandRisk);
+      const endpointRisk = server.url ? classifyDeepLinkEndpoint(server.url) : null;
+      if (endpointRisk) found.add(endpointRisk);
+      for (const key of server.envKeys) {
+        const envRisk = classifyDeepLinkEnvKey(key);
+        if (envRisk) found.add(envRisk);
+      }
+    }
+    return [...found];
+  }, [mcpServers]);
 
   return (
     <section className="section-card" style={{ padding: 14 }}>
@@ -214,23 +340,60 @@ function McpPreviewSectionComponent({ current, unavailablePreviewLabel }: McpPre
                   <strong style={{ fontSize: 13 }}>{server.name}</strong>
                   <span className="badge badge-muted">{server.transport}</span>
                 </div>
-                <div
-                  style={{
-                    marginTop: 6,
-                    fontSize: 12,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  {server.command}
-                  {server.args.length ? ` ${server.args.join(" ")}` : ""}
-                </div>
+                {server.command && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "grid",
+                      gap: 4,
+                      fontSize: 12,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    <div>
+                      {labels.command}: {server.command}
+                    </div>
+                    {server.args.map((arg, index) => (
+                      <div key={`${server.name}-arg-${index}`}>
+                        {index === 0 ? `${labels.args}: ` : ""}
+                        {arg}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {server.url && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontSize: 12,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      wordBreak: "break-all",
+                      color: classifyDeepLinkEndpoint(server.url) ? "var(--warning)" : "var(--text-secondary)",
+                    }}
+                  >
+                    {labels.url}: {server.url}
+                  </div>
+                )}
                 {server.envKeys.length > 0 && (
-                  <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {server.envKeys.map((key) => (
-                      <span key={key} className="badge badge-muted">
-                        {key}
-                      </span>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "grid",
+                      gap: 4,
+                      fontSize: 12,
+                      fontFamily: "'JetBrains Mono', monospace",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {Object.entries({ ...server.env, ...server.headers }).map(([key, value], index) => (
+                      <div
+                        key={`${server.name}-${key}`}
+                        style={{ color: classifyDeepLinkEnvKey(key) ? "var(--warning)" : "var(--text-secondary)" }}
+                      >
+                        {index === 0 ? `${server.headers[key] !== undefined ? labels.headers : labels.env}: ` : ""}
+                        {key}={maskConfigValue(key, value)}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -240,6 +403,31 @@ function McpPreviewSectionComponent({ current, unavailablePreviewLabel }: McpPre
         ) : (
           <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{unavailablePreviewLabel}</div>
         )}
+        {risks.length > 0 && (
+          <div
+            style={{
+              display: "grid",
+              gap: 5,
+              padding: "10px 12px",
+              borderRadius: 8,
+              background: "var(--warning-subtle)",
+              border: "1px solid var(--warning)",
+              color: "var(--warning)",
+              fontSize: 12,
+            }}
+          >
+            {risks.map((risk) => (
+              <div key={risk} style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{riskLabels[risk]}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 7, alignItems: "flex-start", color: "var(--warning)", fontSize: 12 }}>
+          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>{labels.importWarning}</span>
+        </div>
       </div>
     </section>
   );
@@ -555,6 +743,20 @@ function DeepLinkImportDialogComponent() {
   const primaryEndpointLabel = uiText("主端点", "Primary Endpoint", "プライマリエンドポイント");
   const endpointCandidatesLabel = uiText("候选端点", "Endpoint Candidates", "候補エンドポイント");
   const homepageLabel = uiText("主页", "Homepage", "ホームページ");
+  const usageAccessTokenLabel = uiText("用量访问令牌", "Usage Access Token", "使用量アクセストークン");
+  const usageUserIdLabel = uiText("用量用户 ID", "Usage User ID", "使用量ユーザー ID");
+  const usageScriptLabel = uiText("用量查询脚本", "Usage Query Script", "使用量クエリスクリプト");
+  const usageScriptCodeLabel = uiText("脚本正文", "Script Code", "スクリプトコード");
+  const usageScriptEnabledLabel = uiText("已启用", "Enabled", "有効");
+  const usageScriptDisabledLabel = uiText("未启用（默认）", "Disabled by default", "デフォルト無効");
+  const usageScriptWarningLabel = uiText(
+    "启用后会在查询用量时执行此 JavaScript，请先确认来源可信。",
+    "This JavaScript runs during usage queries when enabled. Verify the source before importing.",
+    "有効にすると使用量クエリでこの JavaScript が実行されます。インポート前にソースを確認してください。",
+  );
+  const usageApiKeyLabel = uiText("用量 API Key", "Usage API Key", "使用量 API キー");
+  const usageBaseUrlLabel = uiText("用量地址", "Usage Base URL", "使用量ベース URL");
+  const usageIntervalLabel = uiText("自动查询间隔（分钟）", "Auto query interval (minutes)", "自動クエリ間隔（分）");
   const contentPreviewLabel = uiText("内容预览", "Content Preview", "内容プレビュー");
   const emptyContentLabel = uiText("无内容", "No content", "内容なし");
   const unavailablePreviewLabel = uiText(
@@ -562,6 +764,33 @@ function DeepLinkImportDialogComponent() {
     "MCP config preview is unavailable and will be validated on import.",
     "MCP 設定はプレビューできません。インポート時に検証します。",
   );
+  const mcpPreviewLabels = {
+    command: uiText("命令", "Command", "コマンド"),
+    args: uiText("参数", "Args", "引数"),
+    url: uiText("远程 URL", "Remote URL", "リモート URL"),
+    env: uiText("环境变量", "Environment", "環境変数"),
+    headers: uiText("请求头", "Headers", "ヘッダー"),
+    privateEndpointRisk: uiText(
+      "该地址指向本机或私有网络，导入前请确认。",
+      "This endpoint points to a local or private network. Verify it before importing.",
+      "このエンドポイントはローカルまたはプライベートネットワークを指します。確認してください。",
+    ),
+    envHijackRisk: uiText(
+      "环境变量可能改变进程加载或网络代理行为。",
+      "This environment variable can alter process loading or network proxy behavior.",
+      "この環境変数はプロセスの読み込みまたはネットワークプロキシを変更できます。",
+    ),
+    shellCommandRisk: uiText(
+      "该命令会通过 Shell 解释器执行内联命令。",
+      "This command executes an inline command through a shell interpreter.",
+      "このコマンドはシェルインタープリター経由でインラインコマンドを実行します。",
+    ),
+    importWarning: uiText(
+      "MCP 会在目标工具启动时执行命令或连接远程服务。",
+      "MCP commands may execute or connect to remote services when the target tool starts.",
+      "MCP は対象ツールの起動時にコマンドを実行するか、リモートサービスへ接続します。",
+    ),
+  };
   const skillFetchDescription = uiText(
     "确认时将从远程仓库拉取技能内容并安装到当前技能目录。",
     "The skill content will be fetched from the repository and installed into the current skills directory on confirmation.",
@@ -625,6 +854,16 @@ function DeepLinkImportDialogComponent() {
               primaryEndpointLabel={primaryEndpointLabel}
               endpointCandidatesLabel={endpointCandidatesLabel}
               homepageLabel={homepageLabel}
+              usageAccessTokenLabel={usageAccessTokenLabel}
+              usageUserIdLabel={usageUserIdLabel}
+              usageScriptLabel={usageScriptLabel}
+              usageScriptCodeLabel={usageScriptCodeLabel}
+              usageScriptEnabledLabel={usageScriptEnabledLabel}
+              usageScriptDisabledLabel={usageScriptDisabledLabel}
+              usageScriptWarningLabel={usageScriptWarningLabel}
+              usageApiKeyLabel={usageApiKeyLabel}
+              usageBaseUrlLabel={usageBaseUrlLabel}
+              usageIntervalLabel={usageIntervalLabel}
             />
           )}
 
@@ -638,7 +877,11 @@ function DeepLinkImportDialogComponent() {
           )}
 
           {current.resource === "mcp" && (
-            <McpPreviewSection current={current} unavailablePreviewLabel={unavailablePreviewLabel} />
+            <McpPreviewSection
+              current={current}
+              unavailablePreviewLabel={unavailablePreviewLabel}
+              labels={mcpPreviewLabels}
+            />
           )}
 
           {current.resource === "skill" && (

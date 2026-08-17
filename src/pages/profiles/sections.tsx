@@ -458,7 +458,7 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
             <ModelInput
               value={draftOpusModel}
               onChange={(v) => onDraftChange(draftTool, { opusModel: v })}
-              placeholder="claude-opus-4-5"
+              placeholder="claude-opus-5"
             />
           </Field>
         </div>

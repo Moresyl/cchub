@@ -50,7 +50,7 @@ export const hermesPresets: ConfigPreset[] = [
     category: "official",
     badge: "官方",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    model: "gemini-2.5-pro",
+    model: "gemini-3.6-flash",
     hermesProvider: "gemini",
     hermesApiKeyEnv: "GEMINI_API_KEY",
   },

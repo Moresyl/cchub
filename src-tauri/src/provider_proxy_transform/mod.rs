@@ -548,15 +548,18 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, String> {
         }
     }
 
+    let finish_reason = choice.get("finish_reason").and_then(|value| value.as_str());
     if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
-        if !tool_calls.is_empty() {
-            has_tool_use = true;
-        }
+        let mut dropped_tool_calls = 0usize;
         for tc in tool_calls {
             let id = tc.get("id").and_then(|i| i.as_str()).unwrap_or("");
             let empty_obj = json!({});
             let func = tc.get("function").unwrap_or(&empty_obj);
             let name = func.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            if name.trim().is_empty() {
+                dropped_tool_calls += 1;
+                continue;
+            }
             let args_str = func
                 .get("arguments")
                 .and_then(|a| a.as_str())
@@ -568,6 +571,26 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, String> {
                 "name": name,
                 "input": input
             }));
+            has_tool_use = true;
+        }
+        if dropped_tool_calls > 0 {
+            crate::utils::append_runtime_log(
+                "warn",
+                "proxy.transform",
+                &format!(
+                    "Dropped invalid Chat tool calls: dropped={}, valid={}, finish_reason={}",
+                    dropped_tool_calls,
+                    tool_calls.len().saturating_sub(dropped_tool_calls),
+                    finish_reason.unwrap_or("unknown")
+                ),
+            );
+            if !has_tool_use
+                && matches!(finish_reason, Some("tool_calls" | "function_call" | "stop"))
+            {
+                return Err(
+                    "Upstream returned tool calls without a usable function name".to_string(),
+                );
+            }
         }
     }
 
@@ -599,10 +622,8 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, String> {
         }
     }
 
-    let stop_reason = choice
-        .get("finish_reason")
-        .and_then(|r| r.as_str())
-        .map(|r| match r {
+    let stop_reason = finish_reason
+        .map(|reason| match reason {
             "stop" => "end_turn",
             "length" => "max_tokens",
             "tool_calls" | "function_call" => "tool_use",
@@ -675,4 +696,60 @@ pub(super) fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str>
     line.strip_prefix(field)
         .and_then(|rest| rest.strip_prefix(':'))
         .map(str::trim_start)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::openai_to_anthropic;
+    use serde_json::json;
+
+    #[test]
+    fn invalid_completed_tool_calls_fail_conversion() {
+        let response = json!({
+            "id": "chat-1",
+            "model": "test",
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {"role": "assistant", "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "", "arguments": "{}"}}]}
+            }]
+        });
+
+        let error = openai_to_anthropic(response).expect_err("invalid tool call must fail");
+        assert!(error.contains("usable function name"));
+    }
+
+    #[test]
+    fn truncated_invalid_tool_calls_keep_length_semantics() {
+        let response = json!({
+            "id": "chat-2",
+            "model": "test",
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"role": "assistant", "tool_calls": [{"id": "call-2", "type": "function", "function": {"arguments": "{}"}}]}
+            }]
+        });
+
+        let converted = openai_to_anthropic(response).expect("length truncation remains valid");
+        assert_eq!(converted["stop_reason"], "max_tokens");
+        assert!(converted["content"].as_array().is_some_and(Vec::is_empty));
+    }
+
+    #[test]
+    fn valid_tool_calls_survive_mixed_invalid_calls() {
+        let response = json!({
+            "id": "chat-3",
+            "model": "test",
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {"role": "assistant", "tool_calls": [
+                    {"id": "bad", "type": "function", "function": {"name": ""}},
+                    {"id": "good", "type": "function", "function": {"name": "run", "arguments": "{\"x\":1}"}}
+                ]}
+            }]
+        });
+
+        let converted = openai_to_anthropic(response).expect("valid tool call remains usable");
+        assert_eq!(converted["stop_reason"], "tool_use");
+        assert_eq!(converted["content"][0]["id"], "good");
+    }
 }

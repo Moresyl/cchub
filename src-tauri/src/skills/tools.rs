@@ -59,6 +59,16 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         install_url: "https://github.com/google-gemini/gemini-cli",
     },
     ToolCandidate {
+        id: "grokbuild",
+        name: "Grok Build",
+        dir: ".grok",
+        config_file: "config.toml",
+        mcp_config_file: "config.toml",
+        skills_subdir: "skills",
+        install_command: "npm install -g @xai/grok-cli",
+        install_url: "https://docs.x.ai/docs/guides/grok-build",
+    },
+    ToolCandidate {
         id: "opencode",
         name: "OpenCode",
         dir: ".opencode",
@@ -88,6 +98,16 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         install_command:
             "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
         install_url: "https://github.com/NousResearch/hermes-agent",
+    },
+    ToolCandidate {
+        id: "pi",
+        name: "Pi Coding Agent",
+        dir: ".pi\\agent",
+        config_file: "models.json",
+        mcp_config_file: "settings.json",
+        skills_subdir: "skills",
+        install_command: "npm i -g @earendil-works/pi-coding-agent@latest",
+        install_url: "https://pi.dev",
     },
 ];
 

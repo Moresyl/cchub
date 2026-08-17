@@ -3,6 +3,9 @@ import {
   buildStructuredConfig,
   createDefaultStructuredFields,
   parseStructuredConfig,
+  normalizeEndpointList,
+  normalizeRequestHeaders,
+  normalizeCustomUserAgent,
   supportsStructuredConfig,
 } from "./configProfiles";
 
@@ -53,6 +56,66 @@ describe("configProfiles", () => {
     expect(parsedFields.hideAttribution).toBe(true);
     expect(parsedFields.effortHigh).toBe(true);
     expect(parsedFields.enableTeammates).toBe(true);
+  });
+
+  it("round-trips custom endpoints and rejects unsafe values", () => {
+    const fields = {
+      ...createDefaultStructuredFields("claude"),
+      customEndpoints: ["https://api.example.test", "https://backup.example.test"],
+    };
+    const content = buildStructuredConfig("claude", fields);
+    expect(JSON.parse(content).customEndpoints).toEqual(fields.customEndpoints);
+    expect(parseStructuredConfig("claude", content).customEndpoints).toEqual(fields.customEndpoints);
+    expect(
+      normalizeEndpointList(["https://api.example.test///", "file:///tmp/no", { url: "https://backup.example.test" }]),
+    ).toEqual(["https://api.example.test", "https://backup.example.test"]);
+  });
+
+  it("round-trips transport overrides and filters unsafe headers", () => {
+    const fields = {
+      ...createDefaultStructuredFields("claude"),
+      customUserAgent: " CCHub-Test/1.0 ",
+      requestHeaders: {
+        "X-Trace": "abc",
+        Authorization: "must-not-be-sent",
+        "bad header": "ignored",
+      },
+    };
+    const content = buildStructuredConfig("claude", fields);
+    const parsed = JSON.parse(content) as {
+      metadata: { customUserAgent: string; requestHeaders: Record<string, string> };
+    };
+    expect(parsed.metadata.customUserAgent).toBe("CCHub-Test/1.0");
+    expect(parsed.metadata.requestHeaders).toEqual({ "X-Trace": "abc" });
+    expect(parseStructuredConfig("claude", content).requestHeaders).toEqual({ "X-Trace": "abc" });
+    expect(normalizeCustomUserAgent("bad\nagent")).toBe("");
+    expect(normalizeRequestHeaders({ "X-Test": "ok", "bad header": "no" })).toEqual({ "X-Test": "ok" });
+  });
+
+  it("preserves imported usage scripts while rebuilding structured config", () => {
+    const fields = {
+      ...createDefaultStructuredFields("claude"),
+      usageScript: {
+        enabled: true,
+        code: "return { remaining: 1 };",
+        timeout: 1200,
+      },
+    };
+    const content = buildStructuredConfig("claude", fields);
+    expect(JSON.parse(content).metadata.usageScript).toEqual(fields.usageScript);
+    expect(parseStructuredConfig("claude", content).usageScript).toEqual(fields.usageScript);
+  });
+
+  it("round-trips local proxy JSON overrides without stream control", () => {
+    const fields = {
+      ...createDefaultStructuredFields("codex"),
+      requestHeaderOverrides: JSON.stringify({ "X-Provider-Tag": "cchub", Authorization: "ignored" }),
+      requestBodyOverrides: JSON.stringify({ temperature: 0.2, stream: false }),
+    };
+    const content = buildStructuredConfig("codex", fields);
+    const parsed = parseStructuredConfig("codex", content);
+    expect(JSON.parse(parsed.requestHeaderOverrides)).toEqual({ "X-Provider-Tag": "cchub" });
+    expect(JSON.parse(parsed.requestBodyOverrides)).toEqual({ temperature: 0.2 });
   });
 
   it("builds and parses OpenClaw model metadata", () => {

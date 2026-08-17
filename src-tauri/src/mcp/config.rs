@@ -42,9 +42,13 @@ fn get_claude_mcp_json_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude.json"))
 }
 
-/// Get Claude Desktop config path (Windows)
-fn get_claude_desktop_config_path() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("Claude").join("claude_desktop_config.json"))
+/// Get Claude Desktop's platform-specific configuration path.
+pub fn claude_desktop_config_path() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    let base = dirs::config_dir();
+    #[cfg(not(target_os = "linux"))]
+    let base = dirs::data_dir();
+    base.map(|directory| directory.join("Claude").join("claude_desktop_config.json"))
 }
 
 /// Scan all MCP servers from all known locations
@@ -73,7 +77,7 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
     }
 
     // 3. Scan Claude Desktop config
-    if let Some(desktop_config) = get_claude_desktop_config_path() {
+    if let Some(desktop_config) = claude_desktop_config_path() {
         if desktop_config.exists() {
             scan_claude_desktop_config(&desktop_config, &mut servers);
         }
@@ -84,6 +88,14 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
         if codex_config.exists() {
             scan_codex_mcp_toml(&codex_config, &mut servers);
         }
+    }
+
+    // Grok Build stores MCP entries in the same TOML document as its model
+    // configuration. Keep its transport mapping separate from Codex because
+    // remote servers use `headers` rather than `http_headers`.
+    let grok_config = crate::grok_config::get_grok_config_path();
+    if grok_config.exists() {
+        scan_grok_mcp_toml(&grok_config, &mut servers);
     }
 
     // 6. Scan Gemini settings.json
@@ -398,6 +410,77 @@ fn scan_codex_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
     }
 }
 
+fn scan_grok_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(_) => return,
+    };
+    let table: toml::Table = match toml::from_str(&content) {
+        Ok(table) => table,
+        Err(_) => return,
+    };
+    let config_path = path.to_string_lossy().to_string();
+    let Some(mcp_servers) = table.get("mcp_servers").and_then(toml::Value::as_table) else {
+        return;
+    };
+
+    for (name, value) in mcp_servers {
+        let Some(entry) = value.as_table() else {
+            continue;
+        };
+        let remote_url = entry.get("url").and_then(toml::Value::as_str);
+        let command = entry
+            .get("command")
+            .and_then(toml::Value::as_str)
+            .or(remote_url)
+            .map(str::to_string);
+        let Some(command) = command else {
+            continue;
+        };
+        let args = entry
+            .get("args")
+            .and_then(toml::Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let headers_key = if remote_url.is_some() {
+            "headers"
+        } else {
+            "env"
+        };
+        let env = entry
+            .get(headers_key)
+            .and_then(toml::Value::as_table)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        value.as_str().map(|value| (key.clone(), value.to_string()))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+        servers.push(ScannedMcpServer {
+            name: name.clone(),
+            command,
+            args,
+            env,
+            transport: if remote_url.is_some() {
+                "http".to_string()
+            } else {
+                "stdio".to_string()
+            },
+            source: "grokbuild".to_string(),
+            config_path: config_path.clone(),
+        });
+    }
+}
+
 // ── Write MCP to different tools ──
 
 /// Write MCP server config to Codex config.toml
@@ -449,6 +532,63 @@ pub fn write_mcp_to_codex(name: &str, config: &McpServerConfig) -> Result<(), St
     Ok(())
 }
 
+/// Write MCP server config to Grok Build `~/.grok/config.toml`.
+pub fn write_mcp_to_grokbuild(name: &str, config: &McpServerConfig) -> Result<(), String> {
+    let path = crate::grok_config::get_grok_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = if path.exists() {
+        std::fs::read_to_string(&path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
+    if doc
+        .get("mcp_servers")
+        .is_none_or(|item| item.as_table_like().is_none())
+    {
+        doc["mcp_servers"] = toml_edit::table();
+    }
+    let servers = doc["mcp_servers"]
+        .as_table_like_mut()
+        .ok_or_else(|| "Grok Build mcp_servers must be a TOML table".to_string())?;
+    let mut server = toml_edit::Table::new();
+    let remote = matches!(
+        config.transport_type.as_deref(),
+        Some("http" | "sse" | "streamable-http" | "remote")
+    ) || config.command.starts_with("http://")
+        || config.command.starts_with("https://");
+    if remote {
+        server["url"] = toml_edit::value(config.command.as_str());
+        if !config.env.is_empty() {
+            let mut headers = toml_edit::Table::new();
+            for (key, value) in &config.env {
+                headers[key.as_str()] = toml_edit::value(value.as_str());
+            }
+            server["headers"] = toml_edit::Item::Table(headers);
+        }
+    } else {
+        server["command"] = toml_edit::value(config.command.as_str());
+        let mut args = toml_edit::Array::new();
+        for arg in &config.args {
+            args.push(arg.as_str());
+        }
+        server["args"] = toml_edit::value(args);
+        if !config.env.is_empty() {
+            let mut env = toml_edit::Table::new();
+            for (key, value) in &config.env {
+                env[key.as_str()] = toml_edit::value(value.as_str());
+            }
+            server["env"] = toml_edit::Item::Table(env);
+        }
+    }
+    servers.insert(name, toml_edit::Item::Table(server));
+    crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())
+}
+
 /// Write MCP server config to Gemini settings.json
 pub fn write_mcp_to_gemini(name: &str, config: &McpServerConfig) -> Result<(), String> {
     let path = get_gemini_config_path().ok_or("Cannot find Gemini config path")?;
@@ -465,7 +605,13 @@ pub fn write_mcp_to_opencode(name: &str, config: &McpServerConfig) -> Result<(),
 pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> Result<(), String> {
     match tool_id {
         "claude" => write_claude_mcp_server(name, config),
+        "claude-desktop" => {
+            let path =
+                claude_desktop_config_path().ok_or("Cannot find Claude Desktop config path")?;
+            write_mcp_server_to_config(name, config, &path.to_string_lossy())
+        }
         "codex" => write_mcp_to_codex(name, config),
+        "grokbuild" => write_mcp_to_grokbuild(name, config),
         "gemini" => write_mcp_to_gemini(name, config),
         "opencode" => write_mcp_to_opencode(name, config),
         "openclaw" => Err("OpenClaw MCP sync is not yet supported".to_string()),
@@ -496,6 +642,25 @@ pub fn remove_mcp_from_codex(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove an MCP server from Grok Build `config.toml`.
+pub fn remove_mcp_from_grokbuild(name: &str) -> Result<(), String> {
+    let path = crate::grok_config::get_grok_config_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e: toml_edit::TomlError| e.to_string())?;
+    if let Some(servers) = doc
+        .get_mut("mcp_servers")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    {
+        servers.remove(name);
+    }
+    crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())
+}
+
 /// Remove MCP server from Gemini settings.json
 pub fn remove_mcp_from_gemini(name: &str) -> Result<(), String> {
     let path = match get_gemini_config_path() {
@@ -518,7 +683,15 @@ pub fn remove_mcp_from_opencode(name: &str) -> Result<(), String> {
 pub fn unsync_mcp_from_tool(name: &str, tool_id: &str) -> Result<(), String> {
     match tool_id {
         "claude" => remove_claude_mcp_server(name),
+        "claude-desktop" => {
+            let path = match claude_desktop_config_path() {
+                Some(path) if path.exists() => path,
+                _ => return Ok(()),
+            };
+            remove_mcp_server_from_config(name, &path.to_string_lossy())
+        }
         "codex" => remove_mcp_from_codex(name),
+        "grokbuild" => remove_mcp_from_grokbuild(name),
         "gemini" => remove_mcp_from_gemini(name),
         "opencode" => remove_mcp_from_opencode(name),
         "openclaw" => Err("OpenClaw MCP sync is not yet supported".to_string()),
@@ -567,6 +740,24 @@ fn check_server_in_codex(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn check_server_in_grokbuild(name: &str) -> bool {
+    let path = crate::grok_config::get_grok_config_path();
+    if !path.exists() {
+        return false;
+    }
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(_) => return false,
+    };
+    let Ok(document) = content.parse::<toml::Value>() else {
+        return false;
+    };
+    document
+        .get("mcp_servers")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|servers| servers.contains_key(name))
+}
+
 /// Check if a server exists in a specific tool's config
 pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
     let home = match dirs::home_dir() {
@@ -580,7 +771,10 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
             check_server_in_json_config(name, &claude_json)
                 || check_server_in_json_config(name, &claude_settings)
         }
+        "claude-desktop" => claude_desktop_config_path()
+            .is_some_and(|path| check_server_in_json_config(name, &path)),
         "codex" => check_server_in_codex(name),
+        "grokbuild" => check_server_in_grokbuild(name),
         "gemini" => {
             let p = home.join(".gemini").join("settings.json");
             check_server_in_json_config(name, &p)
@@ -592,5 +786,44 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
         "openclaw" => false, // OpenClaw MCP sync not yet supported
         "hermes" => hermes::mcp::has_server_in_default_root(name).unwrap_or(false),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{scan_grok_mcp_toml, ScannedMcpServer};
+
+    #[test]
+    fn scans_grok_stdio_and_remote_mcp_entries() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[mcp_servers.local]
+command = "node"
+args = ["server.js"]
+[mcp_servers.local.env]
+TOKEN = "secret"
+
+[mcp_servers.remote]
+url = "https://example.com/mcp"
+[mcp_servers.remote.headers]
+Authorization = "Bearer secret"
+"#,
+        )
+        .expect("write config");
+
+        let mut servers: Vec<ScannedMcpServer> = Vec::new();
+        scan_grok_mcp_toml(&path, &mut servers);
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[0].transport, "stdio");
+        assert_eq!(servers[0].args, vec!["server.js"]);
+        assert_eq!(servers[1].transport, "http");
+        assert_eq!(servers[1].command, "https://example.com/mcp");
+        assert_eq!(
+            servers[1].env.get("Authorization").map(String::as_str),
+            Some("Bearer secret")
+        );
     }
 }

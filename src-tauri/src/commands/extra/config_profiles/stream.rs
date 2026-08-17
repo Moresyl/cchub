@@ -1,11 +1,14 @@
 #![allow(clippy::too_many_arguments)]
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
-use crate::copilot_auth::{self, CopilotAuthState};
 use crate::hermes;
 use crate::shared::http_client;
 
+use super::stream_auth::{
+    build_openai_chat_endpoint, build_openai_responses_endpoint, extract_provider_type,
+    extract_use_full_url, resolve_codex_headers, resolve_copilot_headers, resolve_xai_headers,
+};
 use super::*;
 
 pub struct StreamCheckRequestSpec {
@@ -23,94 +26,14 @@ pub fn build_provider_probe_client(conn: &rusqlite::Connection) -> Result<reqwes
     )
 }
 
-fn extract_profile_metadata(
-    parsed: &serde_json::Value,
-) -> serde_json::Map<String, serde_json::Value> {
-    parsed
-        .get("metadata")
-        .and_then(|value| value.as_object())
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn extract_provider_type_from_snapshot(parsed: &serde_json::Value) -> Option<String> {
-    extract_profile_metadata(parsed)
-        .get("providerType")
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn extract_use_full_url_from_snapshot(parsed: &serde_json::Value) -> bool {
-    extract_profile_metadata(parsed)
-        .get("useFullUrl")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-}
-
-fn extract_copilot_account_id_from_snapshot(parsed: &serde_json::Value) -> Option<String> {
-    let metadata = extract_profile_metadata(parsed);
-    metadata
-        .get("authBinding")
-        .and_then(|value| {
-            value
-                .get("authProvider")
-                .and_then(|item| item.as_str())
-                .map(|provider| (value, provider))
-        })
-        .and_then(|(value, provider)| {
-            if provider == "github_copilot" {
-                value
-                    .get("accountId")
-                    .and_then(|item| item.as_str())
-                    .map(|item| item.trim().to_string())
-                    .filter(|item| !item.is_empty())
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            metadata
-                .get("githubAccountId")
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-}
-
-fn build_openai_chat_endpoint(
-    base_url: &str,
-    provider_type: Option<&str>,
-    use_full_url: bool,
-) -> String {
-    if provider_type == Some("github_copilot") {
-        join_api_endpoint(base_url, "chat/completions", use_full_url)
-    } else {
-        join_api_endpoint(base_url, "v1/chat/completions", use_full_url)
-    }
-}
-
-async fn resolve_copilot_headers(
-    app_handle: &AppHandle,
-    parsed: &serde_json::Value,
-) -> Result<Vec<(String, String)>, String> {
-    let account_id = extract_copilot_account_id_from_snapshot(parsed);
-    let manager = app_handle.state::<CopilotAuthState>().0.clone();
-    let token = manager
-        .get_valid_token_for_account(account_id.as_deref())
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(copilot_auth::copilot_request_headers(&token))
-}
-
 pub async fn extract_probe_target(
     app_handle: &AppHandle,
     profile: &ConfigProfile,
 ) -> Result<(Option<String>, Vec<(String, String)>), String> {
     let parsed: serde_json::Value =
         serde_json::from_str(&profile.config_snapshot).map_err(|e| e.to_string())?;
-    let provider_type = extract_provider_type_from_snapshot(&parsed);
-    let use_full_url = extract_use_full_url_from_snapshot(&parsed);
+    let provider_type = extract_provider_type(&parsed);
+    let use_full_url = extract_use_full_url(&parsed);
 
     match profile.tool_id.as_str() {
         "claude" => {
@@ -127,13 +50,20 @@ pub async fn extract_probe_target(
                 .map(str::to_string);
             let base_url = if use_full_url {
                 base_url
-            } else if provider_type.as_deref() == Some("github_copilot") {
+            } else if matches!(
+                provider_type.as_deref(),
+                Some("github_copilot") | Some("codex_oauth") | Some("xai_oauth")
+            ) {
                 base_url.map(|value| join_api_endpoint(&value, "models", false))
             } else {
                 base_url.or_else(|| Some("https://api.anthropic.com".to_string()))
             };
             let headers = if provider_type.as_deref() == Some("github_copilot") {
                 resolve_copilot_headers(app_handle, &parsed).await?
+            } else if provider_type.as_deref() == Some("codex_oauth") {
+                resolve_codex_headers(app_handle, &parsed).await?
+            } else if provider_type.as_deref() == Some("xai_oauth") {
+                resolve_xai_headers(app_handle, &parsed).await?
             } else {
                 let mut headers = Vec::new();
                 if let Some(token) = env
@@ -342,8 +272,8 @@ pub async fn extract_stream_check_request(
 ) -> Result<StreamCheckRequestSpec, String> {
     let parsed: serde_json::Value =
         serde_json::from_str(&profile.config_snapshot).map_err(|e| e.to_string())?;
-    let provider_type = extract_provider_type_from_snapshot(&parsed);
-    let use_full_url = extract_use_full_url_from_snapshot(&parsed);
+    let provider_type = extract_provider_type(&parsed);
+    let use_full_url = extract_use_full_url(&parsed);
 
     match profile.tool_id.as_str() {
         "claude" => {
@@ -381,6 +311,8 @@ pub async fn extract_stream_check_request(
             if provider_type.as_deref() == Some("github_copilot") || api_format == "openai_chat" {
                 let headers = if provider_type.as_deref() == Some("github_copilot") {
                     resolve_copilot_headers(app_handle, &parsed).await?
+                } else if provider_type.as_deref() == Some("xai_oauth") {
+                    resolve_xai_headers(app_handle, &parsed).await?
                 } else {
                     let token = env
                         .get("ANTHROPIC_AUTH_TOKEN")
@@ -410,16 +342,25 @@ pub async fn extract_stream_check_request(
             }
 
             if api_format == "openai_responses" {
-                let token = env
-                    .get("ANTHROPIC_AUTH_TOKEN")
-                    .or_else(|| env.get("ANTHROPIC_API_KEY"))
-                    .and_then(|value| value.as_str())
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| "No Claude API token configured".to_string())?;
+                let headers = if provider_type.as_deref() == Some("codex_oauth") {
+                    resolve_codex_headers(app_handle, &parsed).await?
+                } else {
+                    let token = env
+                        .get("ANTHROPIC_AUTH_TOKEN")
+                        .or_else(|| env.get("ANTHROPIC_API_KEY"))
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| "No Claude API token configured".to_string())?;
+                    vec![("authorization".to_string(), format!("Bearer {token}"))]
+                };
                 return Ok(StreamCheckRequestSpec {
-                    endpoint: join_api_endpoint(&base_url, "v1/responses", use_full_url),
-                    headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                    endpoint: build_openai_responses_endpoint(
+                        &base_url,
+                        provider_type.as_deref(),
+                        use_full_url,
+                    ),
+                    headers,
                     body: serde_json::json!({
                         "model": model,
                         "stream": true,
@@ -474,7 +415,7 @@ pub async fn extract_stream_check_request(
             let wire_api = parse_toml_assignment(config, "wire_api")
                 .unwrap_or_else(|| "responses".to_string());
             let model =
-                parse_toml_assignment(config, "model").unwrap_or_else(|| "gpt-5.4".to_string());
+                parse_toml_assignment(config, "model").unwrap_or_else(|| "gpt-5.6-sol".to_string());
             let (endpoint, body) = if wire_api == "chat" {
                 (
                     join_api_endpoint(&base_url, "chat/completions", use_full_url),
@@ -536,7 +477,7 @@ pub async fn extract_stream_check_request(
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .unwrap_or("gemini-2.5-flash");
+                .unwrap_or("gemini-3.6-flash");
 
             Ok(StreamCheckRequestSpec {
                 endpoint: build_gemini_stream_endpoint(&base_url, model, use_full_url),
@@ -584,7 +525,7 @@ pub async fn extract_stream_check_request(
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .unwrap_or("gpt-5.4");
+                .unwrap_or("gpt-5.6-sol");
 
             match api {
                 "openai-responses" => {
@@ -695,7 +636,7 @@ pub async fn extract_stream_check_request(
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .unwrap_or("gpt-5.4");
+                .unwrap_or("gpt-5.6-sol");
             let env_key = parsed
                 .get("metadata")
                 .and_then(|value| value.get("hermesApiKeyEnv"))
@@ -783,7 +724,7 @@ pub async fn extract_stream_check_request(
                 .get("models")
                 .and_then(|value| value.as_object())
                 .and_then(|value| value.keys().next().cloned())
-                .unwrap_or_else(|| "gpt-5.4".to_string());
+                .unwrap_or_else(|| "gpt-5.6-sol".to_string());
 
             if npm.contains("anthropic") {
                 Ok(StreamCheckRequestSpec {

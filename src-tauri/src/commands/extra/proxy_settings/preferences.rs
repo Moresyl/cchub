@@ -1,5 +1,8 @@
 #![allow(clippy::too_many_arguments)]
+use serde::Serialize;
 use std::collections::HashSet;
+use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
+use std::time::{Duration, Instant};
 use tauri::State;
 
 use crate::db::DbState;
@@ -24,6 +27,7 @@ pub fn set_proxy(proxy_url: String, db: State<'_, DbState>) -> Result<(), String
         .map_err(|e| e.to_string())?;
     } else {
         let url = proxy_url.trim().to_string();
+        validate_proxy_url(&url)?;
         conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('proxy_url', ?1)",
             rusqlite::params![url],
@@ -31,6 +35,12 @@ pub fn set_proxy(proxy_url: String, db: State<'_, DbState>) -> Result<(), String
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn validate_proxy_url(proxy_url: &str) -> Result<(), String> {
+    reqwest::Proxy::all(proxy_url)
+        .map(|_| ())
+        .map_err(|error| format!("Invalid proxy URL: {error}"))
 }
 
 /// Get current proxy setting
@@ -49,6 +59,122 @@ pub fn get_proxy(db: State<'_, DbState>) -> String {
         }
     }
     String::new()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyTestResult {
+    pub success: bool,
+    pub latency_ms: u64,
+    pub status: Option<u16>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn test_proxy_url(proxy_url: String) -> Result<ProxyTestResult, String> {
+    let trimmed = proxy_url.trim();
+    if trimmed.is_empty() {
+        return Err("Proxy URL is empty".to_string());
+    }
+    let proxy =
+        reqwest::Proxy::all(trimmed).map_err(|error| format!("Invalid proxy URL: {error}"))?;
+    let client = reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|error| format!("Failed to build proxy test client: {error}"))?;
+    let started = Instant::now();
+    let mut last_error = None;
+    for target in [
+        "https://httpbin.org/get",
+        "https://www.google.com",
+        "https://api.anthropic.com",
+    ] {
+        match client.head(target).send().await {
+            Ok(response) => {
+                return Ok(ProxyTestResult {
+                    success: true,
+                    latency_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                    status: Some(response.status().as_u16()),
+                    error: None,
+                });
+            }
+            Err(error) => last_error = Some(error.to_string()),
+        }
+    }
+    Ok(ProxyTestResult {
+        success: false,
+        latency_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        status: None,
+        error: last_error.or_else(|| Some("All proxy test targets failed".to_string())),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedProxy {
+    pub url: String,
+    pub proxy_type: String,
+    pub port: u16,
+}
+
+#[tauri::command]
+pub async fn scan_local_proxies() -> Vec<DetectedProxy> {
+    tokio::task::spawn_blocking(|| {
+        let candidates: &[(u16, &str, bool)] = &[
+            (7890, "http", true),
+            (7891, "socks5", false),
+            (1080, "socks5", false),
+            (8080, "http", false),
+            (8888, "http", false),
+            (3128, "http", false),
+            (10808, "socks5", false),
+            (10809, "http", false),
+        ];
+        candidates
+            .iter()
+            .filter(|(port, _, _)| {
+                TcpStream::connect_timeout(
+                    &SocketAddrV4::new(Ipv4Addr::LOCALHOST, *port).into(),
+                    Duration::from_millis(100),
+                )
+                .is_ok()
+            })
+            .flat_map(|(port, proxy_type, mixed)| {
+                let mut found = vec![DetectedProxy {
+                    url: format!("{proxy_type}://127.0.0.1:{port}"),
+                    proxy_type: (*proxy_type).to_string(),
+                    port: *port,
+                }];
+                if *mixed {
+                    found.push(DetectedProxy {
+                        url: format!("socks5://127.0.0.1:{port}"),
+                        proxy_type: "socks5".to_string(),
+                        port: *port,
+                    });
+                }
+                found
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_proxy_url;
+
+    #[test]
+    fn validates_http_proxy_urls() {
+        assert!(validate_proxy_url("http://127.0.0.1:7890").is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_urls() {
+        assert!(validate_proxy_url("not a proxy").is_err());
+    }
 }
 
 #[tauri::command]

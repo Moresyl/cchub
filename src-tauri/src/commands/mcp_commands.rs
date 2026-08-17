@@ -5,6 +5,130 @@ use crate::mcp::health;
 use std::collections::HashMap;
 use tauri::State;
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfigResponse {
+    pub config_path: String,
+    pub servers: HashMap<String, serde_json::Value>,
+}
+
+/// Compatibility view of the unified MCP store for one application.
+#[tauri::command]
+pub fn get_mcp_config(app: String, db: State<'_, DbState>) -> Result<McpConfigResponse, String> {
+    let config_path = if app.eq_ignore_ascii_case("claude-desktop") {
+        config::claude_desktop_config_path()
+    } else {
+        dirs::home_dir().map(|home| home.join(".claude.json"))
+    }
+    .map(|path| path.to_string_lossy().into_owned())
+    .unwrap_or_default();
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, command, args, env, transport, status FROM mcp_servers ORDER BY name")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            let args: Vec<String> =
+                serde_json::from_str(&row.get::<_, String>(2)?).unwrap_or_default();
+            let env: HashMap<String, String> =
+                serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default();
+            Ok((
+                row.get::<_, String>(0)?,
+                serde_json::json!({
+                    "command": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    "args": args,
+                    "env": env,
+                    "type": row.get::<_, String>(4)?,
+                    "enabled": row.get::<_, String>(5)? != "disabled",
+                }),
+            ))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut servers = HashMap::new();
+    for row in rows {
+        let (id, value) = row.map_err(|error| error.to_string())?;
+        servers.insert(id, value);
+    }
+    Ok(McpConfigResponse {
+        config_path,
+        servers,
+    })
+}
+
+/// Toggle a server in the local MCP registry. The application argument is
+/// retained for compatibility; the registry status is shared by all targets.
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_mcp_enabled(
+    _app: String,
+    id: String,
+    enabled: bool,
+    db: State<'_, DbState>,
+) -> Result<bool, String> {
+    toggle_mcp_server(id, enabled, db)?;
+    Ok(true)
+}
+
+/// Rescan all supported application config files and import their MCP entries.
+#[tauri::command]
+pub fn import_mcp_from_apps(db: State<'_, DbState>) -> Result<usize, String> {
+    Ok(scan_mcp_servers(db)?.len())
+}
+
+#[tauri::command]
+pub async fn read_claude_mcp_config() -> Result<Option<String>, String> {
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let primary = home.join(".claude.json");
+    let fallback = home.join(".claude").join("settings.json");
+    let path = if primary.exists() { primary } else { fallback };
+    if !path.exists() {
+        return Ok(None);
+    }
+    std::fs::read_to_string(path)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn upsert_claude_mcp_server(id: String, spec: serde_json::Value) -> Result<bool, String> {
+    if id.trim().is_empty() {
+        return Err("MCP server id cannot be empty".to_string());
+    }
+    let config: config::McpServerConfig = serde_json::from_value(spec)
+        .map_err(|error| format!("Invalid MCP server config: {error}"))?;
+    config::write_claude_mcp_server(&id, &config)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn delete_claude_mcp_server(id: String) -> Result<bool, String> {
+    if id.trim().is_empty() {
+        return Err("MCP server id cannot be empty".to_string());
+    }
+    config::remove_claude_mcp_server(&id)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn validate_mcp_command(cmd: String) -> Result<bool, String> {
+    let command = cmd.trim();
+    if command.is_empty() {
+        return Ok(false);
+    }
+    let path = std::path::Path::new(command);
+    if path.components().count() > 1 {
+        return Ok(path.is_file());
+    }
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    Ok(std::env::split_paths(&path_var).any(|directory| {
+        let candidate = directory.join(command);
+        candidate.is_file()
+            || (cfg!(windows)
+                && [".exe", ".cmd", ".bat"]
+                    .iter()
+                    .any(|suffix| directory.join(format!("{command}{suffix}")).is_file()))
+    }))
+}
+
 fn log_command_timing(command: &str, started_at: std::time::Instant) {
     eprintln!(
         "[cchub][invoke] {command} completed in {}ms",
@@ -384,7 +508,14 @@ pub fn unsync_mcp_server_from_tool(server_name: String, target_tool: String) -> 
 #[tauri::command]
 pub fn check_mcp_server_in_tools(server_name: String) -> std::collections::HashMap<String, bool> {
     let tools = [
-        "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+        "claude",
+        "claude-desktop",
+        "codex",
+        "gemini",
+        "grokbuild",
+        "opencode",
+        "openclaw",
+        "hermes",
     ];
     let mut result = std::collections::HashMap::new();
     for tool in tools {

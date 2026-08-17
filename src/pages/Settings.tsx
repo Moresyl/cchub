@@ -6,7 +6,11 @@ import { showToast } from "../components/Toast";
 import SettingsAboutSection from "../components/SettingsAboutSection";
 import SettingsAppVisibilitySection from "../components/SettingsAppVisibilitySection";
 import SettingsAuthCenterSection from "../components/SettingsAuthCenterSection";
+import SettingsClaudeDesktopSection from "../components/SettingsClaudeDesktopSection";
+import SettingsClaudeExtensionSection from "../components/SettingsClaudeExtensionSection";
+import SettingsCodexHistorySection from "../components/SettingsCodexHistorySection";
 import WebDavSyncSection from "../components/WebDavSyncSection";
+import S3SyncSection from "../components/S3SyncSection";
 import SettingsAppearanceSection from "../components/SettingsAppearanceSection";
 import SettingsBackupManagementSection from "../components/SettingsBackupManagementSection";
 import SettingsAppUpdateSection from "../components/SettingsAppUpdateSection";
@@ -20,6 +24,8 @@ import SettingsNetworkProxySection from "../components/SettingsNetworkProxySecti
 import SettingsPreferredTerminalSection from "../components/SettingsPreferredTerminalSection";
 import SettingsToolPathSection from "../components/SettingsToolPathSection";
 import SettingsWindowBehaviorSection from "../components/SettingsWindowBehaviorSection";
+import SettingsSkillStorageSection from "../components/SettingsSkillStorageSection";
+import SettingsImportExportSection from "../components/SettingsImportExportSection";
 import { buildAppUpdateLabels, buildMigrationCenterLabels } from "./settings/labels";
 import { useSettingsMigrationState } from "../hooks/useSettingsMigrationState";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
@@ -671,6 +677,9 @@ export default function Settings() {
           onSkillSyncMethodChange={handleSyncMethodChange}
         />
 
+        <SettingsSkillStorageSection />
+        <SettingsImportExportSection />
+
         <SettingsEnvironmentConflictSection
           locale={loc}
           conflicts={environmentConflicts}
@@ -768,8 +777,12 @@ export default function Settings() {
         />
 
         <SettingsAuthCenterSection locale={loc} />
+        <SettingsClaudeDesktopSection locale={loc} />
+        <SettingsClaudeExtensionSection />
+        <SettingsCodexHistorySection />
 
         <WebDavSyncSection />
+        <S3SyncSection />
 
         <SettingsMigrationCenterSection
           labels={migrationCenterLabels}
@@ -859,6 +872,9 @@ export default function Settings() {
           proxyUrl={proxyUrl}
           proxySaved={proxySaved}
           saveLabel={loc === "zh" ? "保存" : "Save"}
+          testLabel={loc === "zh" ? "测试连接" : loc === "ja" ? "接続テスト" : "Test"}
+          scanLabel={loc === "zh" ? "扫描本机" : loc === "ja" ? "ローカルをスキャン" : "Scan local"}
+          detectedLabel={loc === "zh" ? "已检测" : loc === "ja" ? "検出" : "Detected"}
           placeholder="http://127.0.0.1:7890"
           onProxyChange={handleProxyInputChange}
           onProxyKeyDown={handleProxyInputKeyDown}

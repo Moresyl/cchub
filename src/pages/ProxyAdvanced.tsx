@@ -4,6 +4,8 @@ import { ArrowRight, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import LoadingState from "../components/states/LoadingState";
+import CircuitBreakerPanel from "../components/CircuitBreakerPanel";
+import FailoverQueueManager from "../components/FailoverQueueManager";
 import { useSaveProxyAdvancedConfigMutation } from "../hooks/mutations";
 
 interface MappingRule {
@@ -530,6 +532,9 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             </div>
           </div>
         )}
+
+        {mode !== "codex" && <CircuitBreakerPanel />}
+        <FailoverQueueManager appType={mode === "claude" ? "claude" : mode === "codex" ? "codex" : undefined} />
 
         {/* Failover */}
         {mode !== "codex" && (

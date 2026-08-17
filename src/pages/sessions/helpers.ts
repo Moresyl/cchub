@@ -41,7 +41,16 @@ export interface SessionDeleteTarget {
   source_backend: string;
 }
 
-export const TOOL_ORDER: ManagedAppId[] = ["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
+export const TOOL_ORDER: ManagedAppId[] = [
+  "claude",
+  "codex",
+  "gemini",
+  "grokbuild",
+  "opencode",
+  "openclaw",
+  "hermes",
+  "pi",
+];
 
 export function sessionSelectionKey(session: Pick<SessionSummary, "tool_id" | "id" | "source_path">) {
   return `${session.tool_id}::${session.id}::${session.source_path}`;
@@ -97,6 +106,8 @@ export function buildResumeCommand(toolId: string, sessionId: string): string | 
       return `gemini --resume ${sessionId}`;
     case "opencode":
       return `opencode session resume ${sessionId}`;
+    case "pi":
+      return `pi --session ${sessionId}`;
     default:
       return null; // openclaw etc. — no CLI resume
   }

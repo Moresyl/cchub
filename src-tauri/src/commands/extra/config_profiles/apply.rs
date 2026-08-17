@@ -92,7 +92,14 @@ pub fn sync_live_profiles(
     now: &str,
 ) -> Result<(), String> {
     for tool_id in [
-        "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+        "claude",
+        "codex",
+        "gemini",
+        "grokbuild",
+        "opencode",
+        "openclaw",
+        "hermes",
+        "pi",
     ] {
         let id = format!("live-{}", tool_id);
 
@@ -208,6 +215,14 @@ pub fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<
             .map_err(|e| e.to_string())
         }
         "hermes" => hermes::snapshot::read_snapshot(conn),
+        "grokbuild" => crate::grok_config::read_snapshot(),
+        "pi" => {
+            let config_path = resolve_tool_config_path(conn, tool_id)?;
+            if !config_path.exists() {
+                return Err(format!("Config file not found: {}", config_path.display()));
+            }
+            std::fs::read_to_string(&config_path).map_err(|e| e.to_string())
+        }
         "claude" => {
             let (claude_json, settings_json) = resolve_claude_paths(conn)?;
 
@@ -409,6 +424,14 @@ pub fn apply_tool_snapshot_with_options(
             crate::utils::atomic_write_string(&settings_path, &effective_snapshot)
                 .map_err(|e| e.to_string())
         }
+        "pi" => {
+            let config_path = resolve_tool_config_path(conn, tool_id)?;
+            if let Some(parent) = config_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            crate::utils::atomic_write_string(&config_path, &effective_snapshot)
+                .map_err(|e| e.to_string())
+        }
         "claude" => {
             let (claude_json_path, settings_json_path) = resolve_claude_paths(conn)?;
 
@@ -537,6 +560,7 @@ pub fn apply_tool_snapshot_with_options(
             Ok(())
         }
         "hermes" => hermes::snapshot::apply_snapshot(conn, &effective_snapshot).map(|_| ()),
+        "grokbuild" => crate::grok_config::apply_snapshot(&effective_snapshot),
         _ => {
             let config_path = resolve_tool_config_path(conn, tool_id)?;
             if let Some(parent) = config_path.parent() {

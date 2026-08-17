@@ -20,7 +20,7 @@ pub(super) fn read_optimizer_config(
                 .and_then(|runtime| runtime.optimizer_config.clone())
         })
     {
-        return config;
+        return apply_auto_failover_override(app_handle, config);
     }
 
     let db = app_handle.state::<DbState>();
@@ -40,8 +40,35 @@ pub(super) fn read_optimizer_config(
     let config: crate::proxy_optimizer::OptimizerConfig = raw
         .and_then(|value| serde_json::from_str(&value).ok())
         .unwrap_or_default();
-
     update_optimizer_config_cache(app_handle, config.clone());
+    apply_auto_failover_override_with_conn(&conn, config)
+}
+
+fn apply_auto_failover_override(
+    app_handle: &AppHandle,
+    config: crate::proxy_optimizer::OptimizerConfig,
+) -> crate::proxy_optimizer::OptimizerConfig {
+    let db = app_handle.state::<DbState>();
+    let Ok(conn) = db.0.lock() else {
+        return config;
+    };
+    apply_auto_failover_override_with_conn(&conn, config)
+}
+
+fn apply_auto_failover_override_with_conn(
+    conn: &rusqlite::Connection,
+    mut config: crate::proxy_optimizer::OptimizerConfig,
+) -> crate::proxy_optimizer::OptimizerConfig {
+    let enabled = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'proxy_auto_failover_enabled'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|value| serde_json::from_str::<bool>(&value).ok())
+        .unwrap_or(true);
+    config.failover_enabled &= enabled;
     config
 }
 
@@ -112,10 +139,28 @@ pub(super) struct OptimizerResult {
 
 pub(super) fn apply_proxy_optimizers(
     tool_id: &str,
+    is_codex_oauth: bool,
     body_bytes: Bytes,
     original_headers: &[(axum::http::HeaderName, axum::http::HeaderValue)],
     config: &crate::proxy_optimizer::OptimizerConfig,
 ) -> OptimizerResult {
+    if tool_id == "claude" && is_codex_oauth {
+        let result_body = match serde_json::from_slice::<Value>(&body_bytes) {
+            Ok(mut body) => {
+                crate::provider_proxy_transform::strip_codex_oauth_fields(&mut body);
+                match serde_json::to_vec(&body) {
+                    Ok(value) => Bytes::from(value),
+                    Err(_) => body_bytes,
+                }
+            }
+            Err(_) => body_bytes,
+        };
+        return OptimizerResult {
+            body: result_body,
+            extra_headers: Vec::new(),
+        };
+    }
+
     if tool_id == "codex" && config.codex_field_stripping {
         let result_body = match serde_json::from_slice::<Value>(&body_bytes) {
             Ok(mut body) => {

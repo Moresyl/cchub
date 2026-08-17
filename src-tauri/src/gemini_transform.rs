@@ -4,7 +4,7 @@ pub fn anthropic_to_gemini(body: Value) -> Result<(Value, String), String> {
     let model = body
         .get("model")
         .and_then(|m| m.as_str())
-        .unwrap_or("gemini-2.5-flash")
+        .unwrap_or("gemini-3.6-flash")
         .to_string();
 
     let model_id = normalize_gemini_model(&model);

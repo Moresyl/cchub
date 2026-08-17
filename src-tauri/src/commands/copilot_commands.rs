@@ -1,7 +1,8 @@
 use tauri::State;
 
 use crate::copilot_auth::{
-    CopilotAuthState, CopilotAuthStatus, GitHubAccount, GitHubDeviceCodeResponse,
+    CopilotAuthState, CopilotAuthStatus, CopilotModel, CopilotUsage, GitHubAccount,
+    GitHubDeviceCodeResponse,
 };
 
 #[tauri::command]
@@ -60,6 +61,15 @@ pub async fn copilot_set_default_account(
 }
 
 #[tauri::command]
+pub async fn copilot_logout(state: State<'_, CopilotAuthState>) -> Result<(), String> {
+    state
+        .0
+        .clear_auth()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn copilot_get_auth_status(
     state: State<'_, CopilotAuthState>,
 ) -> Result<CopilotAuthStatus, String> {
@@ -75,6 +85,83 @@ pub async fn copilot_get_token(
     let manager = state.0.clone();
     manager
         .get_valid_token_for_account(account_id.as_deref())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn copilot_get_usage(
+    account_id: Option<String>,
+    state: State<'_, CopilotAuthState>,
+) -> Result<CopilotUsage, String> {
+    state
+        .0
+        .fetch_usage(account_id.as_deref())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn copilot_get_models(
+    account_id: Option<String>,
+    state: State<'_, CopilotAuthState>,
+) -> Result<Vec<CopilotModel>, String> {
+    state
+        .0
+        .fetch_models(account_id.as_deref())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn copilot_get_token_for_account(
+    account_id: String,
+    state: State<'_, CopilotAuthState>,
+) -> Result<String, String> {
+    state
+        .0
+        .get_valid_token_for_account(Some(account_id.as_str()))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn copilot_get_usage_for_account(
+    account_id: String,
+    state: State<'_, CopilotAuthState>,
+) -> Result<CopilotUsage, String> {
+    state
+        .0
+        .fetch_usage(Some(account_id.as_str()))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn copilot_get_models_for_account(
+    account_id: String,
+    state: State<'_, CopilotAuthState>,
+) -> Result<Vec<CopilotModel>, String> {
+    state
+        .0
+        .fetch_models(Some(account_id.as_str()))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn copilot_is_authenticated(state: State<'_, CopilotAuthState>) -> Result<bool, String> {
+    Ok(state.0.get_status().await.authenticated)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn copilot_poll_for_auth(
+    device_code: String,
+    state: State<'_, CopilotAuthState>,
+) -> Result<Option<GitHubAccount>, String> {
+    state
+        .0
+        .poll_for_token(&device_code)
         .await
         .map_err(|error| error.to_string())
 }

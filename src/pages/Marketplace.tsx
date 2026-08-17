@@ -18,7 +18,6 @@ import {
   queryKeys,
 } from "../hooks/queries";
 import { useUpdateMcpServerConfigMutation } from "../hooks/mutations";
-
 import {
   dedupByName,
   type InstalledMcpServer,
@@ -55,7 +54,6 @@ import {
   SkillPreviewModal,
   UninstallSkillDialog,
 } from "./marketplace/Modals";
-
 export default function Marketplace() {
   const queryClient = useQueryClient();
   const cachedLocalData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMarketplaceLocalData>>>(
@@ -189,7 +187,6 @@ export default function Marketplace() {
       locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
     [locale],
   );
-
   // Stable empty set so memos don't re-fire when active tool has no installs
   const emptySetRef = useRef<Set<string>>(new Set<string>());
   const currentToolInstalledIds = installedIdsByTool[activeTool] ?? emptySetRef.current;
@@ -199,7 +196,6 @@ export default function Marketplace() {
     () => tools.filter((tool) => visibleToolIds.has(tool.id as ManagedAppId)),
     [tools, visibleToolIds],
   );
-
   // Helper: rebuild per-tool installed sets after a fresh `scan_skills` run.
   const rebuildSkillsByTool = useCallback((records: InstalledSkillRecord[]) => {
     const map: Record<string, Set<string>> = {};
@@ -210,7 +206,6 @@ export default function Marketplace() {
     }
     return map;
   }, []);
-
   // Helper: probe each MCP server name across all 6 tools so the per-tool
   // map covers Claude AND any tool the server has been synced to.
   const rebuildMcpByTool = useCallback(async (serverNames: string[]) => {
@@ -235,7 +230,6 @@ export default function Marketplace() {
     }
     return out;
   }, []);
-
   const loadAll = useCallback(
     (options: { force?: boolean } = {}) =>
       performMarketplaceLoadAll(queryClient, options, {
@@ -256,7 +250,6 @@ export default function Marketplace() {
       }),
     [queryClient, rebuildMcpByTool, rebuildSkillsByTool],
   );
-
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
@@ -269,7 +262,6 @@ export default function Marketplace() {
     window.addEventListener("cchub-shortcut-search", handleSearchShortcut);
     return () => window.removeEventListener("cchub-shortcut-search", handleSearchShortcut);
   }, [editingSkill, editingMcp]);
-
   const formatJson = useCallback((raw: string): string => {
     try {
       return JSON.stringify(JSON.parse(raw), null, 2);
@@ -277,7 +269,6 @@ export default function Marketplace() {
       return raw;
     }
   }, []);
-
   const refreshInstalledMcpDetails = useCallback(
     () =>
       performRefreshInstalledMcpDetails({
@@ -288,7 +279,6 @@ export default function Marketplace() {
       }),
     [queryClient, rebuildMcpByTool],
   );
-
   const findInstalledSkill = useCallback(
     async (skill: SkillEntry) => {
       const skills = await invoke<InstalledSkillRecord[]>("scan_skills");
@@ -304,7 +294,6 @@ export default function Marketplace() {
     },
     [activeTool],
   );
-
   const openSkillPreview = useCallback(async (skill: SkillEntry) => {
     if (!skill.content && skill.file_path) {
       try {
@@ -319,7 +308,6 @@ export default function Marketplace() {
     }
     setPreviewSkill(skill);
   }, []);
-
   const startSkillEdit = useCallback(
     async (skill: SkillEntry) => {
       try {
@@ -348,7 +336,6 @@ export default function Marketplace() {
     },
     [findInstalledSkill, locale],
   );
-
   const handleSaveSkillContent = useCallback(() => {
     if (!editingSkill) return;
     return performSaveSkillContent({
@@ -360,7 +347,6 @@ export default function Marketplace() {
       setSkillEntries,
     });
   }, [editingSkill, editSkillContent, locale]);
-
   const startMcpEdit = useCallback(
     async (entry: RegistryEntry) => {
       try {
@@ -386,7 +372,6 @@ export default function Marketplace() {
     },
     [installedMcpDetails, locale, refreshInstalledMcpDetails],
   );
-
   const handleSaveMcpConfig = useCallback(() => {
     if (!editingMcp) return;
     return performSaveMcpConfig({
@@ -878,6 +863,7 @@ export default function Marketplace() {
         handleOpenRecommendedRepo={handleOpenRecommendedRepo}
         handleLoadRecommendedRepo={handleLoadRecommendedRepo}
         removeCustomSource={removeCustomSource}
+        onSkillsLoaded={setSkillEntries}
       />
 
       <SkillPreviewModal

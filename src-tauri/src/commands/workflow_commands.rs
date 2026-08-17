@@ -39,10 +39,6 @@ pub fn toggle_workflow(path: String, enabled: bool) -> Result<String, String> {
 /// Import a workflow .md file from disk to a tool's workflows directory
 #[command]
 pub async fn import_workflow_file(tool_id: String) -> Result<String, String> {
-    if tool_id == "hermes" {
-        return Err("Hermes workflows are not yet supported".to_string());
-    }
-
     let file = rfd::AsyncFileDialog::new()
         .set_title("Import Workflow")
         .add_filter("Markdown", &["md"])
@@ -65,9 +61,10 @@ pub async fn import_workflow_file(tool_id: String) -> Result<String, String> {
         "claude" => ".claude",
         "codex" => ".codex",
         "gemini" => ".gemini",
+        "grokbuild" => ".grok",
         "opencode" => ".opencode",
         "openclaw" => ".openclaw",
-        "hermes" => return Err("Hermes workflows are not yet supported".to_string()),
+        "hermes" => ".hermes",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     };
 

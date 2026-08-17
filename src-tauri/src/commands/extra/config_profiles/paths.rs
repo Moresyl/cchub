@@ -8,6 +8,7 @@ use crate::hermes;
 use crate::utils::configure_background_command;
 
 use super::super::statusline::*;
+use super::skill_storage::configured_skill_storage_dir;
 
 // ── Config Profiles ──
 
@@ -47,9 +48,11 @@ pub fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
         "claude" => Ok("settings.json"),
         "codex" => Ok("config.toml"),
         "gemini" => Ok("settings.json"),
+        "grokbuild" => Ok("config.toml"),
         "opencode" => Ok("opencode.json"),
         "openclaw" => Ok("openclaw.json"),
         "hermes" => Ok("config.yaml"),
+        "pi" => Ok("models.json"),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -59,9 +62,11 @@ pub fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<
         "claude" => ".claude",
         "codex" => ".codex",
         "gemini" => ".gemini",
+        "grokbuild" => ".grok",
         "opencode" => ".opencode",
         "openclaw" => ".openclaw",
         "hermes" => ".hermes",
+        "pi" => ".pi\\agent",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     };
     Ok(home.join(dir))
@@ -159,10 +164,6 @@ pub fn resolve_tool_skills_dir(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<PathBuf, String> {
-    if tool_id == "hermes" {
-        return hermes::skills_dir(conn);
-    }
-
     let custom_skills_dir: Option<String> = conn
         .query_row(
             "SELECT skills_dir FROM custom_paths WHERE tool_id = ?1",
@@ -176,6 +177,14 @@ pub fn resolve_tool_skills_dir(
         return Ok(PathBuf::from(dir));
     }
 
+    if let Some(root) = configured_skill_storage_dir(conn) {
+        return Ok(root);
+    }
+
+    if tool_id == "hermes" {
+        return hermes::skills_dir(conn);
+    }
+
     Ok(resolve_tool_config_dir(conn, tool_id)?.join("skills"))
 }
 
@@ -184,9 +193,11 @@ pub fn tool_cli_command(tool_id: &str) -> &'static str {
         "claude" => "claude",
         "codex" => "codex",
         "gemini" => "gemini",
+        "grokbuild" => "grok",
         "opencode" => "opencode",
         "openclaw" => "openclaw",
         "hermes" => "hermes",
+        "pi" => "pi",
         _ => "",
     }
 }
@@ -260,9 +271,11 @@ pub fn tool_label(tool_id: &str) -> &'static str {
         "claude" => "Claude",
         "codex" => "Codex",
         "gemini" => "Gemini",
+        "grokbuild" => "Grok Build",
         "opencode" => "OpenCode",
         "openclaw" => "OpenClaw",
         "hermes" => "Hermes",
+        "pi" => "Pi",
         _ => "Session",
     }
 }
@@ -272,9 +285,11 @@ pub fn tool_hidden_dir(tool_id: &str) -> Option<&'static str> {
         "claude" => Some(".claude"),
         "codex" => Some(".codex"),
         "gemini" => Some(".gemini"),
+        "grokbuild" => Some(".grok"),
         "opencode" => Some(".opencode"),
         "openclaw" => Some(".openclaw"),
         "hermes" => Some(".hermes"),
+        "pi" => Some(".pi\\agent"),
         _ => None,
     }
 }
@@ -838,6 +853,8 @@ pub fn tool_supports_session_resume(tool_id: &str) -> bool {
         "gemini" => cli_exists_in_path("gemini"),
         "opencode" => cli_exists_in_path("opencode"),
         "openclaw" => cli_exists_in_path("openclaw"),
+        "grokbuild" => cli_exists_in_path("grok"),
+        "pi" => cli_exists_in_path("pi"),
         _ => false,
     }
 }

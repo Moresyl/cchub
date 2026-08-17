@@ -9,6 +9,80 @@ use super::super::config_profiles::*;
 use super::super::types::*;
 use super::*;
 
+const SQL_BACKUP_BATCH_ROWS: usize = 200;
+const SQL_BACKUP_BATCH_BYTES: usize = 1024 * 1024;
+
+const BACKUP_DATA_TABLES: &[&str] = &[
+    "mcp_servers",
+    "plugins",
+    "skills",
+    "hooks",
+    "activity_logs",
+    "mcp_clients",
+    "workspaces",
+    "custom_paths",
+    "config_profiles",
+    "project_profiles",
+    "app_settings",
+    "prompt_library",
+    "imported_project_files",
+    "proxy_request_logs",
+    "model_pricing",
+    "proxy_usage_daily_rollups",
+    "update_history",
+    "metrics",
+];
+
+fn append_insert_batches(sql: &mut String, prefix: &str, rows: &[String]) {
+    let mut batch: Vec<&str> = Vec::with_capacity(SQL_BACKUP_BATCH_ROWS);
+    let mut batch_bytes = prefix.len() + 2;
+
+    for row in rows {
+        let row_bytes = row.len() + 2;
+        if !batch.is_empty()
+            && (batch.len() >= SQL_BACKUP_BATCH_ROWS
+                || batch_bytes.saturating_add(row_bytes) > SQL_BACKUP_BATCH_BYTES)
+        {
+            sql.push_str(prefix);
+            sql.push_str(&batch.join(", "));
+            sql.push_str(";\n");
+            batch.clear();
+            batch_bytes = prefix.len() + 2;
+        }
+
+        batch.push(row);
+        batch_bytes = batch_bytes.saturating_add(row_bytes);
+    }
+
+    if !batch.is_empty() {
+        sql.push_str(prefix);
+        sql.push_str(&batch.join(", "));
+        sql.push_str(";\n");
+    }
+}
+
+fn count_backup_rows(conn: &rusqlite::Connection) -> Result<usize, String> {
+    BACKUP_DATA_TABLES
+        .iter()
+        .chain(
+            [
+                "_backup_meta",
+                "_tool_configs",
+                "_skill_files",
+                "_backup_files",
+            ]
+            .iter(),
+        )
+        .try_fold(0usize, |total, table| {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(total.saturating_add(count.max(0) as usize))
+        })
+}
+
 pub fn restore_imported_artifacts(
     conn: &rusqlite::Connection,
     restored_count: usize,
@@ -217,25 +291,9 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
     sql.push_str("CREATE TABLE IF NOT EXISTS _skill_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT, name TEXT, content TEXT);\n\n");
     sql.push_str("CREATE TABLE IF NOT EXISTS _backup_files (id INTEGER PRIMARY KEY AUTOINCREMENT, root_key TEXT, relative_path TEXT, content_base64 TEXT);\n\n");
 
-    // Data dump for all 12 business tables
+    // Data dump for all business tables
     sql.push_str("-- ── Data ──\n\n");
-    let tables = [
-        "mcp_servers",
-        "plugins",
-        "skills",
-        "hooks",
-        "activity_logs",
-        "mcp_clients",
-        "workspaces",
-        "custom_paths",
-        "config_profiles",
-        "app_settings",
-        "imported_project_files",
-        "update_history",
-        "metrics",
-    ];
-
-    for table in tables {
+    for table in BACKUP_DATA_TABLES {
         let query = format!("SELECT * FROM {}", table);
         if let Ok(mut stmt) = conn.prepare(&query) {
             let col_count = stmt.column_count();
@@ -243,7 +301,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
                 .map(|i| stmt.column_name(i).unwrap_or("").to_string())
                 .collect();
 
-            let mut has_rows = false;
+            let mut rows_to_insert = Vec::new();
             if let Ok(rows) = stmt.query_map([], |row| {
                 let mut vals = Vec::new();
                 for i in 0..col_count {
@@ -268,19 +326,20 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
                 Ok(vals)
             }) {
                 for row in rows.flatten() {
-                    if !has_rows {
-                        sql.push_str(&format!("-- Table: {}\n", table));
-                        has_rows = true;
-                    }
-                    sql.push_str(&format!(
-                        "INSERT OR REPLACE INTO {} ({}) VALUES ({});\n",
-                        table,
-                        col_names.join(", "),
-                        row.join(", ")
-                    ));
+                    rows_to_insert.push(format!("({})", row.join(", ")));
                 }
             }
-            if has_rows {
+            if !rows_to_insert.is_empty() {
+                sql.push_str(&format!("-- Table: {}\n", table));
+                append_insert_batches(
+                    &mut sql,
+                    &format!(
+                        "INSERT OR REPLACE INTO {} ({}) VALUES ",
+                        table,
+                        col_names.join(", ")
+                    ),
+                    &rows_to_insert,
+                );
                 sql.push('\n');
             }
         }
@@ -289,7 +348,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
     // Tool config files
     sql.push_str("-- ── Tool Configs ──\n\n");
     let tool_ids = [
-        "claude", "codex", "gemini", "opencode", "openclaw", "hermes",
+        "claude", "codex", "gemini", "opencode", "openclaw", "hermes", "pi",
     ];
     for tool_id in tool_ids {
         if let Ok(content) = read_tool_snapshot(conn, tool_id) {
@@ -309,12 +368,17 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
                     .unwrap_or_else(|_| home.join(format!(".{}", tool_id)).display().to_string()),
             };
 
-            sql.push_str(&format!(
-                "INSERT OR REPLACE INTO _tool_configs VALUES ('{}', '{}', '{}');\n",
+            let row = format!(
+                "('{}', '{}', '{}')",
                 tool_id,
                 sql_escape(&config_path),
                 sql_escape(&content)
-            ));
+            );
+            append_insert_batches(
+                &mut sql,
+                "INSERT OR REPLACE INTO _tool_configs VALUES ",
+                &[row],
+            );
         }
     }
     sql.push('\n');
@@ -326,6 +390,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
             Ok(path) => path,
             Err(_) => continue,
         };
+        let mut rows_to_insert = Vec::new();
         if skills_dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&skills_dir) {
                 for entry in entries.flatten() {
@@ -337,15 +402,22 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
                                 .unwrap_or_default()
                                 .to_string_lossy()
                                 .to_string();
-                            sql.push_str(&format!(
-                                "INSERT INTO _skill_files (tool_id, name, content) VALUES ('{}', '{}', '{}');\n",
-                                tool_id, sql_escape(&name), sql_escape(&content)
+                            rows_to_insert.push(format!(
+                                "('{}', '{}', '{}')",
+                                tool_id,
+                                sql_escape(&name),
+                                sql_escape(&content)
                             ));
                         }
                     }
                 }
             }
         }
+        append_insert_batches(
+            &mut sql,
+            "INSERT INTO _skill_files (tool_id, name, content) VALUES ",
+            &rows_to_insert,
+        );
     }
 
     // Full file backup for tool directories and standalone config files
@@ -435,14 +507,22 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
         }
     }
 
-    for (root_key, relative_path, content_base64) in backup_file_rows {
-        sql.push_str(&format!(
-            "INSERT INTO _backup_files (root_key, relative_path, content_base64) VALUES ('{}', '{}', '{}');\n",
-            sql_escape(&root_key),
-            sql_escape(&relative_path),
-            sql_escape(&content_base64),
-        ));
-    }
+    let backup_rows = backup_file_rows
+        .into_iter()
+        .map(|(root_key, relative_path, content_base64)| {
+            format!(
+                "('{}', '{}', '{}')",
+                sql_escape(&root_key),
+                sql_escape(&relative_path),
+                sql_escape(&content_base64),
+            )
+        })
+        .collect::<Vec<_>>();
+    append_insert_batches(
+        &mut sql,
+        "INSERT INTO _backup_files (root_key, relative_path, content_base64) VALUES ",
+        &backup_rows,
+    );
 
     sql.push_str("\n-- ── End of Backup ──\n");
     sql
@@ -558,13 +638,12 @@ pub(crate) fn import_backup_from_path_impl(
 ) -> Result<String, String> {
     let raw_content = std::fs::read_to_string(file_path).map_err(|e| e.to_string())?;
     let content = validate_sql_backup_content(&raw_content)?;
-    let restored_count = content.matches("\nINSERT").count();
 
     let db_path;
     let db_dir;
     let safety_backup_path;
     let pre_import_path;
-    let temp_file = {
+    let (temp_file, restored_count) = {
         let mut conn = db.0.lock().map_err(|e| e.to_string())?;
         db_path = get_main_db_path(&conn)?;
         db_dir = db_path
@@ -587,16 +666,24 @@ pub(crate) fn import_backup_from_path_impl(
             .tempfile_in(&db_dir)
             .map_err(|e| e.to_string())?;
 
-        {
+        let restored_count = {
             let temp_conn =
                 rusqlite::Connection::open(temp_file.path()).map_err(|e| e.to_string())?;
             configure_database_connection(&temp_conn, false)?;
             temp_conn
-                .execute_batch(content)
+                .execute_batch("BEGIN IMMEDIATE;")
+                .map_err(|e| e.to_string())?;
+            if let Err(error) = temp_conn.execute_batch(content) {
+                let _ = temp_conn.execute_batch("ROLLBACK;");
+                return Err(error.to_string());
+            }
+            temp_conn
+                .execute_batch("COMMIT;")
                 .map_err(|e| e.to_string())?;
             crate::db::schema::run_migrations(&temp_conn).map_err(|e| e.to_string())?;
             validate_imported_backup_tables(&temp_conn)?;
-        }
+            count_backup_rows(&temp_conn)?
+        };
 
         let placeholder = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
         let old_conn = std::mem::replace(&mut *conn, placeholder);
@@ -608,7 +695,7 @@ pub(crate) fn import_backup_from_path_impl(
             return Err(err.to_string());
         }
 
-        temp_file
+        (temp_file, restored_count)
     };
 
     let import_result =
@@ -702,6 +789,48 @@ pub(crate) fn import_backup_from_path_impl(
             *conn = fallback;
 
             Err(err)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_batches_split_by_row_count() {
+        let rows = (0..(SQL_BACKUP_BATCH_ROWS * 2 + 1))
+            .map(|value| format!("({value})"))
+            .collect::<Vec<_>>();
+        let mut output = String::new();
+
+        append_insert_batches(&mut output, "INSERT INTO sample VALUES ", &rows);
+
+        assert_eq!(output.matches("INSERT INTO sample VALUES").count(), 3);
+        assert!(output.ends_with(";\n"));
+    }
+
+    #[test]
+    fn insert_batches_split_by_sql_size() {
+        let row = format!("('{}')", "x".repeat(SQL_BACKUP_BATCH_BYTES * 2 / 3));
+        let rows = vec![row.clone(), row.clone(), row, "('tail')".to_string()];
+        let mut output = String::new();
+
+        append_insert_batches(&mut output, "INSERT INTO sample VALUES ", &rows);
+
+        assert_eq!(output.matches("INSERT INTO sample VALUES").count(), 3);
+        assert!(output.contains("('tail')"));
+    }
+
+    #[test]
+    fn backup_data_tables_cover_all_persisted_domains() {
+        for table in [
+            "prompt_library",
+            "proxy_request_logs",
+            "model_pricing",
+            "proxy_usage_daily_rollups",
+        ] {
+            assert!(BACKUP_DATA_TABLES.contains(&table));
         }
     }
 }

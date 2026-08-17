@@ -16,6 +16,7 @@ interface ProxyRequestRowProps {
   tokenLabel: string;
   latencyLabel: string;
   createdAtLabel: string;
+  onSelect?: () => void;
 }
 
 function ProxyRequestRowComponent({
@@ -27,10 +28,17 @@ function ProxyRequestRowComponent({
   tokenLabel,
   latencyLabel,
   createdAtLabel,
+  onSelect,
 }: ProxyRequestRowProps) {
   return (
     <div
       className="list-row cv-auto"
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (onSelect && (event.key === "Enter" || event.key === " ")) onSelect();
+      }}
       style={{
         padding: "10px 12px",
         display: "flex",
@@ -38,6 +46,7 @@ function ProxyRequestRowComponent({
         alignItems: "stretch",
         gap: 6,
         containIntrinsicSize: "0 56px",
+        cursor: onSelect ? "pointer" : undefined,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

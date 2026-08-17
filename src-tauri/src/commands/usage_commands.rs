@@ -1,5 +1,6 @@
 use crate::db::DbState;
 use chrono::{Duration, Utc};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
@@ -62,6 +63,27 @@ pub struct ProxyUsageTrendPoint {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_cost_usd: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSummaryByApp {
+    pub app_id: String,
+    pub total_requests: u64,
+    pub success_requests: u64,
+    pub success_rate: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_cost_usd: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDataSource {
+    pub id: String,
+    pub label: String,
+    pub available: bool,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +230,71 @@ pub fn get_proxy_usage_summary(db: State<'_, DbState>) -> Result<ProxyUsageSumma
     result
 }
 
+/// Stable, provider-neutral alias used by dashboard integrations.
+#[tauri::command]
+pub fn get_usage_summary(db: State<'_, DbState>) -> Result<ProxyUsageSummary, String> {
+    get_proxy_usage_summary(db)
+}
+
+#[tauri::command]
+pub fn get_usage_summary_by_app(db: State<'_, DbState>) -> Result<Vec<UsageSummaryByApp>, String> {
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    let mut statement = conn
+        .prepare(
+            "SELECT
+                tool_id,
+                COUNT(*) AS total_requests,
+                COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(CAST(total_cost_usd AS REAL)), 0)
+             FROM proxy_request_logs
+             GROUP BY tool_id
+             ORDER BY total_requests DESC, tool_id ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let total_requests = row.get::<_, i64>(1)?.max(0) as u64;
+            let success_requests = row.get::<_, i64>(2)?.max(0) as u64;
+            let total_cost: f64 = row.get(5)?;
+            Ok(UsageSummaryByApp {
+                app_id: row.get(0)?,
+                total_requests,
+                success_requests,
+                success_rate: if total_requests == 0 {
+                    0.0
+                } else {
+                    success_requests as f64 * 100.0 / total_requests as f64
+                },
+                input_tokens: row.get::<_, i64>(3)?.max(0) as u64,
+                output_tokens: row.get::<_, i64>(4)?.max(0) as u64,
+                total_cost_usd: format!("{total_cost:.6}"),
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn get_usage_trends(
+    days: Option<u32>,
+    db: State<'_, DbState>,
+) -> Result<Vec<ProxyUsageTrendPoint>, String> {
+    get_proxy_usage_trend(days, db)
+}
+
+#[tauri::command]
+pub fn get_usage_data_sources() -> Vec<UsageDataSource> {
+    vec![UsageDataSource {
+        id: "proxy_logs".to_string(),
+        label: "Local proxy logs".to_string(),
+        available: true,
+        detail: "Aggregated from locally recorded proxy requests".to_string(),
+    }]
+}
+
 #[tauri::command]
 pub fn get_recent_proxy_request_logs(
     limit: Option<u32>,
@@ -251,6 +338,33 @@ pub fn get_recent_proxy_request_logs(
     })();
     log_command_timing("get_recent_proxy_request_logs", started_at);
     result
+}
+
+/// Return one complete request log row by its stable request id.
+///
+/// The request log is local telemetry, so this command never performs a
+/// network call and returns `None` when the row has already been pruned.
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_request_detail(
+    request_id: String,
+    db: State<'_, DbState>,
+) -> Result<Option<ProxyRequestLogRow>, String> {
+    let request_id = request_id.trim();
+    if request_id.is_empty() {
+        return Err("Request id cannot be empty".to_string());
+    }
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    conn.query_row(
+        "SELECT request_id, tool_id, profile_id, provider_name, request_model,
+                response_model, input_tokens, output_tokens, cache_read_tokens,
+                cache_creation_tokens, total_cost_usd, latency_ms, status_code,
+                is_streaming, error_message, created_at
+         FROM proxy_request_logs WHERE request_id = ?1 LIMIT 1",
+        rusqlite::params![request_id],
+        map_proxy_request_log_row,
+    )
+    .optional()
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -421,7 +535,8 @@ pub fn get_proxy_usage_trend(
 pub fn list_model_pricing(db: State<'_, DbState>) -> Result<Vec<ModelPricingRow>, String> {
     let started_at = std::time::Instant::now();
     let result = (|| {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+        crate::commands::model_pricing_file::sync_local_model_pricing(&mut conn)?;
         let mut stmt = conn
             .prepare(
                 "SELECT
@@ -468,47 +583,19 @@ pub fn save_model_pricing(
     let output_cost_per_million = normalize_cost_text(&entry.output_cost_per_million)?;
     let cache_read_cost_per_million = normalize_cost_text(&entry.cache_read_cost_per_million)?;
     let cache_write_cost_per_million = normalize_cost_text(&entry.cache_write_cost_per_million)?;
-    let now = Utc::now().to_rfc3339();
-
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO model_pricing (
-            model_id,
-            normalized_model_id,
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    crate::commands::model_pricing_file::sync_local_model_pricing(&mut conn)?;
+    crate::commands::model_pricing_file::save_override(
+        &mut conn,
+        crate::commands::model_pricing_file::LocalModelPricingEntry {
+            model_id: model_id.to_string(),
+            display_name: None,
             input_cost_per_million,
             output_cost_per_million,
             cache_read_cost_per_million,
             cache_write_cost_per_million,
-            created_at,
-            updated_at
-        ) VALUES (
-            ?1,
-            ?2,
-            ?3,
-            ?4,
-            ?5,
-            ?6,
-            COALESCE((SELECT created_at FROM model_pricing WHERE model_id = ?1), ?7),
-            ?7
-        )
-        ON CONFLICT(model_id) DO UPDATE SET
-            normalized_model_id = excluded.normalized_model_id,
-            input_cost_per_million = excluded.input_cost_per_million,
-            output_cost_per_million = excluded.output_cost_per_million,
-            cache_read_cost_per_million = excluded.cache_read_cost_per_million,
-            cache_write_cost_per_million = excluded.cache_write_cost_per_million,
-            updated_at = excluded.updated_at",
-        rusqlite::params![
-            model_id,
-            normalized_model_id,
-            input_cost_per_million,
-            output_cost_per_million,
-            cache_read_cost_per_million,
-            cache_write_cost_per_million,
-            now,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+        },
+    )?;
 
     conn.query_row(
         "SELECT
@@ -535,11 +622,7 @@ pub fn delete_model_pricing(model_id: String, db: State<'_, DbState>) -> Result<
         return Err("Model ID is required".to_string());
     }
 
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM model_pricing WHERE model_id = ?1",
-        rusqlite::params![trimmed],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    crate::commands::model_pricing_file::sync_local_model_pricing(&mut conn)?;
+    crate::commands::model_pricing_file::delete_override(&mut conn, trimmed)
 }

@@ -1,5 +1,16 @@
 import { memo, type MouseEvent } from "react";
-import { Activity, ArrowRightLeft, Check, Copy, Edit3, GripVertical, Trash2, Wifi, type LucideIcon } from "lucide-react";
+import {
+  Activity,
+  ArrowRightLeft,
+  Check,
+  Copy,
+  Edit3,
+  Gauge,
+  GripVertical,
+  Trash2,
+  Wifi,
+  type LucideIcon,
+} from "lucide-react";
 import ProviderIcon from "./ProviderIcon";
 
 interface ConfigProfileCard {
@@ -34,6 +45,7 @@ interface ProfileCardText {
   dragDisabledTitle: string;
   pingTitle: string;
   streamTitle: string;
+  usageTitle: string;
   duplicateTitle: string;
   editTitle: string;
   deleteTitle: string;
@@ -68,6 +80,7 @@ interface ProfileCardProps {
   onDrop: (profileId: string) => void;
   onPing: (profile: ConfigProfileCard) => void;
   onStreamCheck: (profile: ConfigProfileCard) => void;
+  onUsage: (profile: ConfigProfileCard) => void;
   onApply: (profile: ConfigProfileCard) => void;
   onDuplicate: (profile: ConfigProfileCard) => void;
   onEdit: (profile: ConfigProfileCard) => void;
@@ -106,6 +119,7 @@ function ProfileCardComponent({
   onDrop,
   onPing,
   onStreamCheck,
+  onUsage,
   onApply,
   onDuplicate,
   onEdit,
@@ -156,7 +170,11 @@ function ProfileCardComponent({
               <span className="badge badge-muted" style={{ textTransform: "capitalize", fontSize: 10 }}>
                 {toolTag}
               </span>
-              {isActive && <span className="badge badge-success" style={{ fontSize: 10 }}>{text.activeTag}</span>}
+              {isActive && (
+                <span className="badge badge-success" style={{ fontSize: 10 }}>
+                  {text.activeTag}
+                </span>
+              )}
               {sharedCount > 1 && (
                 <span className="badge badge-accent" style={{ fontSize: 10 }}>
                   {sharedTag}
@@ -208,6 +226,9 @@ function ProfileCardComponent({
           <button className="btn btn-ghost btn-icon-sm" onClick={() => onStreamCheck(profile)} title={text.streamTitle}>
             {isStreamChecking ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Wifi size={14} />}
           </button>
+          <button className="btn btn-ghost btn-icon-sm" onClick={() => onUsage(profile)} title={text.usageTitle}>
+            <Gauge size={14} />
+          </button>
           <button
             className={`btn btn-xs ${isActive ? "btn-secondary" : "btn-primary"}`}
             onClick={() => onApply(profile)}
@@ -223,13 +244,21 @@ function ProfileCardComponent({
             )}
             {isActive ? text.activeButton : text.applyButton}
           </button>
-          <button className="btn btn-ghost btn-icon-sm" onClick={() => onDuplicate(profile)} title={text.duplicateTitle}>
+          <button
+            className="btn btn-ghost btn-icon-sm"
+            onClick={() => onDuplicate(profile)}
+            title={text.duplicateTitle}
+          >
             <Copy size={14} />
           </button>
           <button className="btn btn-ghost btn-icon-sm" onClick={() => onEdit(profile)} title={text.editTitle}>
             <Edit3 size={14} />
           </button>
-          <button className="btn btn-danger-ghost btn-icon-sm" onClick={() => onDelete(profile)} title={text.deleteTitle}>
+          <button
+            className="btn btn-danger-ghost btn-icon-sm"
+            onClick={() => onDelete(profile)}
+            title={text.deleteTitle}
+          >
             <Trash2 size={14} />
           </button>
         </div>

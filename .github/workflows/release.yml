@@ -19,6 +19,7 @@ env:
     - 编辑器与语言模块改为按需分包，移除 1.66 MB CodeMirror 聚合块和生产构建超大块警告
     - 更新弹窗新增下载安装进度，Windows 更新采用被动安装模式并自动重启
     - 发布流水线生成并上传签名更新包、签名文件和 `latest.json`，支持真正的一键更新
+    - GitHub Actions 升级到 Node.js 24 运行时，并适配 tauri-action 的 updater JSON 参数
 
     ### 问题修复
     - 移除侧栏悬停触发的文件扫描、SQLite 查询和市场请求，避免鼠标掠过时争抢 IPC 导致卡顿
@@ -41,15 +42,15 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -74,7 +75,7 @@ jobs:
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
       - name: Report bundle sizes
@@ -94,15 +95,15 @@ jobs:
       matrix:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -129,7 +130,7 @@ jobs:
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           args: --target ${{ matrix.target }}
 
       - name: Report bundle sizes
@@ -142,15 +143,15 @@ jobs:
   build-linux:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -180,7 +181,7 @@ jobs:
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
 
       - name: Report bundle sizes
         run: |

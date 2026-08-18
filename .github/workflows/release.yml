@@ -44,13 +44,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -97,13 +97,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -145,13 +145,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

@@ -26,6 +26,7 @@ env:
     - 修复版本比较对预发布版本处理不正确、发布页回退与一键更新状态不一致的问题
     - 删除已淘汰的 MCP 包更新扫描、重复应用更新命令、自建剪贴板进程和关联数据结构
     - 修正文档中不存在的便携版、UI 技术栈和已完成功能状态，保证发布信息与软件一致
+    - 修复 Ubuntu 发布因 Azure 镜像无响应而长时间卡住，增加官方源回退、重试、超时与非交互安装
 
     ## 下载 / Download
 
@@ -157,9 +158,25 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install system dependencies
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '\|azure.archive.ubuntu.com|d' /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            -o Acquire::ForceIPv4=true \
+            update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=20 \
+            -o Acquire::https::Timeout=20 \
+            -o Acquire::ForceIPv4=true \
+            -o Dpkg::Use-Pty=0 \
+            install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2

@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State as TauriState};
 use tokio::sync::oneshot;
 
+mod alpha_search;
 mod cost;
 mod forward;
 mod optimizer;

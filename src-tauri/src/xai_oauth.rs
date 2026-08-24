@@ -788,6 +788,31 @@ fn keyring_delete(account_id: &str) -> Result<(), XaiOAuthError> {
     }
 }
 
+pub(crate) fn init_xai_oauth_state(app_handle: &tauri::AppHandle) {
+    let storage_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cchub")
+        .join("xai_oauth_auth.json");
+    let proxy_url = app_handle
+        .state::<crate::db::DbState>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|conn| {
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key = 'proxy_url'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+        })
+        .filter(|value| !value.trim().is_empty());
+    app_handle.manage(XaiOAuthState(Arc::new(XaiOAuthManager::new(
+        storage_path,
+        proxy_url,
+    ))));
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_claims, token_identity, TokenPayload};
@@ -818,29 +843,4 @@ mod tests {
         };
         assert_eq!(token_identity(&tokens).unwrap().1, "user@example.com");
     }
-}
-
-pub(crate) fn init_xai_oauth_state(app_handle: &tauri::AppHandle) {
-    let storage_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".cchub")
-        .join("xai_oauth_auth.json");
-    let proxy_url = app_handle
-        .state::<crate::db::DbState>()
-        .0
-        .lock()
-        .ok()
-        .and_then(|conn| {
-            conn.query_row(
-                "SELECT value FROM app_settings WHERE key = 'proxy_url'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-        })
-        .filter(|value| !value.trim().is_empty());
-    app_handle.manage(XaiOAuthState(Arc::new(XaiOAuthManager::new(
-        storage_path,
-        proxy_url,
-    ))));
 }

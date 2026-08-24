@@ -31,6 +31,7 @@ pub mod openclaw_commands;
 pub mod optimizer_commands;
 pub mod pi_compat;
 pub mod pi_prompt_compat;
+pub mod pi_session_usage;
 pub mod prompt_library;
 pub mod provider_compat;
 pub mod provider_health_commands;

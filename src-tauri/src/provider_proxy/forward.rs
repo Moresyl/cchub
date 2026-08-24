@@ -196,11 +196,14 @@ pub(super) async fn forward_proxy_request(
                         upstream.is_codex_oauth,
                         Some(body_bytes.as_ref()),
                     );
-                    let transformed_body =
-                        match transform_claude_request_body(api_format, body_bytes.as_ref()) {
-                            Ok(body) => body,
-                            Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
-                        };
+                    let transformed_body = match transform_claude_request_body(
+                        api_format,
+                        body_bytes.as_ref(),
+                        upstream.is_codex_oauth,
+                    ) {
+                        Ok(body) => body,
+                        Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+                    };
                     (rewritten_path, rewritten_query, transformed_body)
                 }
                 _ => (
@@ -237,12 +240,15 @@ pub(super) async fn forward_proxy_request(
             let mut rectifier_attempts = 0usize;
 
             loop {
-                let upstream_url = build_upstream_request_url(
+                let upstream_url = match build_upstream_request_url(
                     base_url,
                     &effective_relative_path,
                     effective_request_query.as_deref(),
                     upstream.use_full_url,
-                );
+                ) {
+                    Ok(url) => url,
+                    Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+                };
                 let mut builder = client.request(method.clone(), upstream_url.clone());
                 for (name, value) in &forwarded_headers {
                     builder = builder.header(name, value);

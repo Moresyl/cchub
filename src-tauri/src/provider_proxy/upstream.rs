@@ -671,16 +671,19 @@ pub(super) fn build_upstream_request_url(
     relative_path: &str,
     query: Option<&str>,
     use_full_url: bool,
-) -> String {
+) -> Result<String, String> {
     if use_full_url {
         let trimmed = base_url.trim();
+        if relative_path.trim_matches('/') == "alpha/search" {
+            return super::alpha_search::rewrite_full_url(trimmed, query);
+        }
         if let Some(query) = query.filter(|value| !value.is_empty()) {
             if trimmed.contains('?') {
-                return trimmed.to_string();
+                return Ok(trimmed.to_string());
             }
-            return format!("{trimmed}?{query}");
+            return Ok(format!("{trimmed}?{query}"));
         }
-        return trimmed.to_string();
+        return Ok(trimmed.to_string());
     }
     let base = base_url.trim().trim_end_matches('/');
     let relative = relative_path.trim_start_matches('/');
@@ -717,7 +720,7 @@ pub(super) fn build_upstream_request_url(
         url.push_str(query);
     }
 
-    url
+    Ok(url)
 }
 
 pub(super) fn is_hop_by_hop_header(name: &str) -> bool {
@@ -861,13 +864,14 @@ pub(super) fn parse_json_bytes(bytes: &[u8]) -> Option<Value> {
 pub(super) fn transform_claude_request_body(
     api_format: ClaudeApiFormat,
     body_bytes: &[u8],
+    is_codex_oauth: bool,
 ) -> Result<Bytes, String> {
     let parsed = parse_json_bytes(body_bytes)
         .ok_or_else(|| "Claude transformed proxy request must be valid JSON".to_string())?;
     let transformed = match api_format {
         ClaudeApiFormat::Anthropic => parsed,
         ClaudeApiFormat::OpenAiChat => anthropic_to_openai(parsed)?,
-        ClaudeApiFormat::OpenAiResponses => anthropic_to_responses(parsed)?,
+        ClaudeApiFormat::OpenAiResponses => anthropic_to_responses(parsed, is_codex_oauth)?,
         ClaudeApiFormat::GeminiNative => {
             let (gemini_body, _model_id) = crate::gemini_transform::anthropic_to_gemini(parsed)?;
             gemini_body

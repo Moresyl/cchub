@@ -30,6 +30,19 @@ pub struct SessionSyncResult {
     pub errors: Vec<String>,
 }
 
+impl SessionSyncResult {
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.imported = self.imported.saturating_add(other.imported);
+        self.skipped = self.skipped.saturating_add(other.skipped);
+        self.files_scanned = self.files_scanned.saturating_add(other.files_scanned);
+        self.suspected_duplicates = self
+            .suspected_duplicates
+            .saturating_add(other.suspected_duplicates);
+        self.deferred_files = self.deferred_files.saturating_add(other.deferred_files);
+        self.errors.extend(other.errors);
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct UsageCounts {
     input: u64,
@@ -372,6 +385,11 @@ fn scan_file(
     only_tool: Option<&str>,
 ) {
     let tool = tool_for_path(path);
+    // Pi 有 entry id、分支重写和自带费用字段，必须走专用导入器；通用的
+    // path + line 去重会在分叉后重复计费，也会丢失 cacheWrite 与错误状态。
+    if tool == "pi" {
+        return;
+    }
     if only_tool.is_some_and(|expected| expected != tool) {
         return;
     }
@@ -545,6 +563,12 @@ pub fn sync_session_usage(
     let mut conn = db.0.lock().map_err(|error| error.to_string())?;
     if !records.is_empty() {
         persist_records(&mut conn, records, &mut result);
+    }
+    match crate::commands::pi_session_usage::sync_pi_usage(&mut conn) {
+        Ok(pi_result) => result.merge(pi_result),
+        Err(error) => result
+            .errors
+            .push(format!("Pi session import failed: {error}")),
     }
     match crate::commands::grok_session_usage::sync_grok_usage(&mut conn) {
         Ok(grok_result) => {

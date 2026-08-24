@@ -734,29 +734,6 @@ fn keyring_delete(account_id: &str) -> Result<(), CodexOAuthError> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{parse_interval, token_identity, TokenPayload};
-    use serde_json::json;
-
-    #[test]
-    fn parses_string_and_number_intervals() {
-        assert_eq!(parse_interval(Some(&json!("4"))), 6);
-        assert_eq!(parse_interval(Some(&json!(8))), 10);
-    }
-
-    #[test]
-    fn refuses_to_infer_identity_without_jwt_claims() {
-        let payload = TokenPayload {
-            access_token: "not-a-jwt".to_string(),
-            refresh_token: Some("refresh".to_string()),
-            id_token: None,
-            expires_in: Some(3600),
-        };
-        assert_eq!(token_identity(&payload), (None, None));
-    }
-}
-
 pub(crate) fn init_codex_oauth_state(app_handle: &tauri::AppHandle) {
     let storage_path = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -780,4 +757,27 @@ pub(crate) fn init_codex_oauth_state(app_handle: &tauri::AppHandle) {
         storage_path,
         proxy_url,
     ))));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_interval, token_identity, TokenPayload};
+    use serde_json::json;
+
+    #[test]
+    fn parses_string_and_number_intervals() {
+        assert_eq!(parse_interval(Some(&json!("4"))), 6);
+        assert_eq!(parse_interval(Some(&json!(8))), 10);
+    }
+
+    #[test]
+    fn refuses_to_infer_identity_without_jwt_claims() {
+        let payload = TokenPayload {
+            access_token: "not-a-jwt".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            id_token: None,
+            expires_in: Some(3600),
+        };
+        assert_eq!(token_identity(&payload), (None, None));
+    }
 }

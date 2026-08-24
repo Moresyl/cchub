@@ -85,22 +85,22 @@ fn auth_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
     Ok(crate::commands::extra_commands::resolve_tool_config_dir(conn, "codex")?.join("auth.json"))
 }
 
-fn read_credentials(conn: &rusqlite::Connection) -> Result<CodexCredentials, CodexCliQuota> {
-    let path = auth_path(conn).map_err(|error| quota_error("parse_error", error))?;
+fn read_credentials(conn: &rusqlite::Connection) -> Result<CodexCredentials, Box<CodexCliQuota>> {
+    let path = auth_path(conn).map_err(|error| Box::new(quota_error("parse_error", error)))?;
     if !path.is_file() {
-        return Err(quota_not_found(Some(format!(
+        return Err(Box::new(quota_not_found(Some(format!(
             "No Codex auth file found at {}",
             path.display()
-        ))));
+        )))));
     }
 
     let content = std::fs::read_to_string(&path).map_err(|error| {
-        quota_error(
+        Box::new(quota_error(
             "parse_error",
             format!("Failed to read Codex auth file: {error}"),
-        )
+        ))
     })?;
-    parse_credentials(&content).map_err(|message| quota_error("parse_error", message))
+    parse_credentials(&content).map_err(|message| Box::new(quota_error("parse_error", message)))
 }
 
 fn claude_auth_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
@@ -130,31 +130,37 @@ fn parse_timestamp(value: Option<&Value>) -> Option<i64> {
 
 fn read_claude_credentials(
     conn: &rusqlite::Connection,
-) -> Result<ClaudeCredentials, CodexCliQuota> {
-    let path = claude_auth_path(conn).map_err(|error| quota_error("parse_error", error))?;
+) -> Result<ClaudeCredentials, Box<CodexCliQuota>> {
+    let path =
+        claude_auth_path(conn).map_err(|error| Box::new(quota_error("parse_error", error)))?;
     if !path.is_file() {
-        return Err(quota_not_found(Some(format!(
+        return Err(Box::new(quota_not_found(Some(format!(
             "No Claude OAuth file found at {}",
             path.display()
-        ))));
+        )))));
     }
     let content = std::fs::read_to_string(&path).map_err(|error| {
-        quota_error(
+        Box::new(quota_error(
             "parse_error",
             format!("Failed to read Claude OAuth file: {error}"),
-        )
+        ))
     })?;
     let value: Value = serde_json::from_str(&content).map_err(|error| {
-        quota_error(
+        Box::new(quota_error(
             "parse_error",
             format!("Failed to parse Claude OAuth JSON: {error}"),
-        )
+        ))
     })?;
     let oauth = value
         .get("claudeAiOauth")
         .or_else(|| value.get("claude.ai_oauth"))
         .and_then(Value::as_object)
-        .ok_or_else(|| quota_error("not_found", "Claude OAuth entry is missing".to_string()))?;
+        .ok_or_else(|| {
+            Box::new(quota_error(
+                "not_found",
+                "Claude OAuth entry is missing".to_string(),
+            ))
+        })?;
     let token = oauth
         .get("accessToken")
         .or_else(|| oauth.get("access_token"))
@@ -162,10 +168,10 @@ fn read_claude_credentials(
         .map(str::trim)
         .filter(|token| !token.is_empty())
         .ok_or_else(|| {
-            quota_error(
+            Box::new(quota_error(
                 "parse_error",
                 "Claude OAuth access token is missing".to_string(),
-            )
+            ))
         })?
         .to_string();
     Ok(ClaudeCredentials {
@@ -383,7 +389,7 @@ pub async fn get_codex_cli_quota(db: State<'_, DbState>) -> Result<CodexCliQuota
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let credentials = match read_credentials(&conn) {
             Ok(credentials) => credentials,
-            Err(result) => return Ok(result),
+            Err(result) => return Ok(*result),
         };
         let client = build_client(&conn)?;
         (credentials, client)
@@ -688,7 +694,7 @@ pub async fn get_claude_cli_quota(db: State<'_, DbState>) -> Result<CodexCliQuot
             Err(result) => {
                 return Ok(CodexCliQuota {
                     tool: "claude".to_string(),
-                    ..result
+                    ..*result
                 })
             }
         };

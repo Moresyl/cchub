@@ -374,8 +374,7 @@ pub async fn testUsageScript(
         .ok_or_else(|| "Usage script stderr pipe unavailable".to_string())?;
     let timeout_ms = timeout
         .unwrap_or(MAX_USAGE_SCRIPT_TIMEOUT_MS)
-        .min(MAX_USAGE_SCRIPT_TIMEOUT_MS)
-        .max(100);
+        .clamp(100, MAX_USAGE_SCRIPT_TIMEOUT_MS);
     let execution = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async {
         let status_future = child.wait();
         let (status, stdout, stderr) = tokio::join!(

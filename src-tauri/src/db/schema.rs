@@ -197,6 +197,20 @@ ON proxy_request_logs(provider_name, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_request_model_created_at
 ON proxy_request_logs(request_model, created_at DESC);
 
+-- 会话导入的持久化去重账本独立于明细日志。即使明细被清理，重写或分叉的
+-- JSONL 也不会在下一次同步时重复计费。
+CREATE TABLE IF NOT EXISTS session_usage_dedup (
+    data_source TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    semantic_id TEXT NOT NULL,
+    has_entry_id INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (data_source, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_usage_dedup_semantic
+ON session_usage_dedup(data_source, semantic_id, has_entry_id);
+
 CREATE TABLE IF NOT EXISTS model_pricing (
     model_id TEXT PRIMARY KEY,
     normalized_model_id TEXT NOT NULL,
@@ -356,6 +370,7 @@ mod tests {
         assert!(table_exists(&conn, "config_profiles"));
         assert!(table_exists(&conn, "project_profiles"));
         assert!(table_exists(&conn, "proxy_request_logs"));
+        assert!(table_exists(&conn, "session_usage_dedup"));
         assert!(column_exists(&conn, "mcp_servers", "config_path"));
         assert!(column_exists(&conn, "config_profiles", "source_type"));
         assert!(column_exists(&conn, "skills", "last_checked_at"));

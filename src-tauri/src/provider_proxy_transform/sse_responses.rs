@@ -79,6 +79,47 @@ fn resolve_content_index(
     }
 }
 
+fn web_search_action_input(item: &Value) -> Value {
+    let Some(action) = item.get("action").and_then(Value::as_object) else {
+        return json!({});
+    };
+    let mut input = serde_json::Map::new();
+    for key in ["query", "queries", "url", "pattern"] {
+        if let Some(value) = action.get(key) {
+            input.insert(key.to_string(), value.clone());
+        }
+    }
+    Value::Object(input)
+}
+
+fn web_search_result_content(item: &Value) -> Value {
+    if item.get("status").and_then(Value::as_str) != Some("completed")
+        || item.get("error").is_some_and(|error| !error.is_null())
+    {
+        return json!({
+            "type": "web_search_tool_result_error",
+            "error_code": "unavailable"
+        });
+    }
+    let results = item
+        .pointer("/action/sources")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|source| {
+            let url = source.get("url")?.as_str()?;
+            Some(json!({
+                "type": "web_search_result",
+                "url": url,
+                "title": source.get("title").and_then(Value::as_str).unwrap_or(url),
+                "encrypted_content": "",
+                "page_age": source.get("page_age").cloned().unwrap_or(Value::Null)
+            }))
+        })
+        .collect::<Vec<_>>();
+    json!(results)
+}
+
 pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
@@ -223,7 +264,43 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                             "response.output_item.added" => {
                                 if let Some(item) = data.get("item") {
                                     let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                                    if item_type == "function_call" {
+                                    if item_type == "web_search_call" {
+                                        if !has_sent_message_start {
+                                            let start_event = json!({
+                                                "type": "message_start",
+                                                "message": {
+                                                    "id": message_id.clone().unwrap_or_default(),
+                                                    "type": "message",
+                                                    "role": "assistant",
+                                                    "model": current_model.clone().unwrap_or_default(),
+                                                    "usage": { "input_tokens": 0, "output_tokens": 0 }
+                                                }
+                                            });
+                                            yield Ok(Bytes::from(format!("event: message_start\ndata: {}\n\n", serde_json::to_string(&start_event).unwrap_or_default())));
+                                            has_sent_message_start = true;
+                                        }
+                                        if let Some(index) = current_text_index.take() {
+                                            if open_indices.remove(&index) {
+                                                let stop_event = json!({"type": "content_block_stop", "index": index});
+                                                yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
+                                            }
+                                        }
+                                        let index = next_content_index;
+                                        next_content_index += 1;
+                                        let start_event = json!({
+                                            "type": "content_block_start",
+                                            "index": index,
+                                            "content_block": {
+                                                "type": "server_tool_use",
+                                                "id": item.get("id").and_then(Value::as_str).unwrap_or(""),
+                                                "name": "web_search",
+                                                "input": web_search_action_input(item)
+                                            }
+                                        });
+                                        yield Ok(Bytes::from(format!("event: content_block_start\ndata: {}\n\n", serde_json::to_string(&start_event).unwrap_or_default())));
+                                        let stop_event = json!({"type": "content_block_stop", "index": index});
+                                        yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
+                                    } else if item_type == "function_call" {
                                         has_tool_use = true;
                                         if let Some(index) = current_text_index.take() {
                                             if open_indices.remove(&index) {
@@ -358,6 +435,30 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                     }
                                 }
                             }
+                            "response.output_text.annotation.added" => {
+                                let annotation = data.get("annotation").unwrap_or(&data);
+                                if annotation.get("type").and_then(Value::as_str) == Some("url_citation") {
+                                    if let Some(index) = current_text_index {
+                                        if let Some(url) = annotation.get("url").and_then(Value::as_str) {
+                                            let event = json!({
+                                                "type": "content_block_delta",
+                                                "index": index,
+                                                "delta": {
+                                                    "type": "citations_delta",
+                                                    "citation": {
+                                                        "type": "web_search_result_location",
+                                                        "url": url,
+                                                        "title": annotation.get("title").and_then(Value::as_str).unwrap_or(url),
+                                                        "encrypted_index": "",
+                                                        "cited_text": ""
+                                                    }
+                                                }
+                                            });
+                                            yield Ok(Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
+                                        }
+                                    }
+                                }
+                            }
                             "response.reasoning.delta" => {
                                 if let Some(delta) = data.get("delta").or_else(|| data.get("text")).and_then(|d| d.as_str()) {
                                     if let Some(index) = current_text_index.take() {
@@ -436,7 +537,27 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 let stop_event = json!({"type": "message_stop"});
                                 yield Ok(Bytes::from(format!("event: message_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
                             }
-                            "response.output_item.done" | "response.in_progress" | "response.content_part.done" => {}
+                            "response.output_item.done" => {
+                                if let Some(item) = data.get("item") {
+                                    if item.get("type").and_then(Value::as_str) == Some("web_search_call") {
+                                        let index = next_content_index;
+                                        next_content_index += 1;
+                                        let start_event = json!({
+                                            "type": "content_block_start",
+                                            "index": index,
+                                            "content_block": {
+                                                "type": "web_search_tool_result",
+                                                "tool_use_id": item.get("id").and_then(Value::as_str).unwrap_or(""),
+                                                "content": web_search_result_content(item)
+                                            }
+                                        });
+                                        yield Ok(Bytes::from(format!("event: content_block_start\ndata: {}\n\n", serde_json::to_string(&start_event).unwrap_or_default())));
+                                        let stop_event = json!({"type": "content_block_stop", "index": index});
+                                        yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
+                                    }
+                                }
+                            }
+                            "response.in_progress" | "response.content_part.done" => {}
                             _ => {}
                         }
                     }
@@ -454,5 +575,39 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn streams_hosted_search_blocks_results_and_citations() {
+        let upstream = [
+            "event: response.created\ndata: {\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5\"}}\n\n",
+            "event: response.output_item.added\ndata: {\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"action\":{\"query\":\"CCHub\"}}}\n\n",
+            "event: response.output_item.done\ndata: {\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\",\"action\":{\"sources\":[{\"url\":\"https://example.com\",\"title\":\"Example\"}]}}}\n\n",
+            "event: response.content_part.added\ndata: {\"part\":{\"type\":\"output_text\"},\"item_id\":\"msg_1\",\"content_index\":0}\n\n",
+            "event: response.output_text.annotation.added\ndata: {\"annotation\":{\"type\":\"url_citation\",\"url\":\"https://example.com\",\"title\":\"Example\"}}\n\n",
+            "event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":8,\"output_tokens\":2}}}\n\n",
+        ];
+        let source = futures_util::stream::iter(
+            upstream
+                .into_iter()
+                .map(|event| Ok::<Bytes, std::io::Error>(Bytes::from(event))),
+        );
+        let chunks = create_anthropic_sse_stream_from_responses(source)
+            .collect::<Vec<_>>()
+            .await;
+        let output = chunks
+            .into_iter()
+            .map(|chunk| String::from_utf8_lossy(&chunk.expect("chunk")).into_owned())
+            .collect::<String>();
+
+        assert!(output.contains("server_tool_use"));
+        assert!(output.contains("web_search_tool_result"));
+        assert!(output.contains("web_search_result_location"));
+        assert!(output.contains("https://example.com"));
     }
 }

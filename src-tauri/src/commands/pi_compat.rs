@@ -99,14 +99,14 @@ fn read_json_file(path: &Path) -> Result<Option<Value>, String> {
 }
 
 fn read_json_object(path: &Path) -> Result<Option<Map<String, Value>>, String> {
-    Ok(read_json_file(path)?
+    read_json_file(path)?
         .map(|value| {
             value
                 .as_object()
                 .cloned()
                 .ok_or_else(|| format!("Pi JSON root must be an object: {}", path.display()))
         })
-        .transpose()?)
+        .transpose()
 }
 
 fn expand_home(value: &str, home: &Path) -> Option<PathBuf> {
@@ -123,7 +123,7 @@ fn expand_home(value: &str, home: &Path) -> Option<PathBuf> {
         })
 }
 
-fn session_root() -> Result<Result<PathBuf, String>, String> {
+pub(crate) fn session_root() -> Result<Result<PathBuf, String>, String> {
     let home = dirs::home_dir().ok_or_else(|| "Cannot determine the home directory".to_string())?;
     let configured = match std::env::var("PI_CODING_AGENT_SESSION_DIR")
         .ok()

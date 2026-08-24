@@ -67,20 +67,18 @@ fn run_hermes_lifecycle(action: &str) -> std::io::Result<std::process::Output> {
 }
 
 fn package_manager() -> Option<&'static str> {
-    for candidate in if cfg!(windows) {
+    (if cfg!(windows) {
         ["pnpm.cmd", "npm.cmd"]
     } else {
         ["pnpm", "npm"]
-    } {
-        if std::process::Command::new(candidate)
+    })
+    .into_iter()
+    .find(|candidate| {
+        std::process::Command::new(candidate)
             .arg("--version")
             .output()
             .is_ok_and(|output| output.status.success())
-        {
-            return Some(candidate);
-        }
-    }
-    None
+    })
 }
 
 fn run_lifecycle_action(

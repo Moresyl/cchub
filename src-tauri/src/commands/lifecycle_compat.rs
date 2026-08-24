@@ -185,7 +185,7 @@ pub fn set_default_cost_multiplier(
         .trim()
         .parse::<f64>()
         .map_err(|_| "Cost multiplier must be numeric".to_string())?;
-    if !parsed.is_finite() || parsed < 0.0 || parsed > 100.0 {
+    if !parsed.is_finite() || !(0.0..=100.0).contains(&parsed) {
         return Err("Cost multiplier must be between 0 and 100".to_string());
     }
     let normalized = format!("{parsed:.6}")

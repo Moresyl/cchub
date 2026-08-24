@@ -128,9 +128,7 @@ fn parse_snapshot(raw: &str) -> Result<ProjectProfileSnapshot, String> {
     Ok(snapshot)
 }
 
-fn row_to_profile(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(
+type ProjectProfileRow = (
     String,
     String,
     Option<String>,
@@ -138,7 +136,9 @@ fn row_to_profile(
     String,
     String,
     Option<String>,
-)> {
+);
+
+fn row_to_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectProfileRow> {
     Ok((
         row.get(0)?,
         row.get(1)?,

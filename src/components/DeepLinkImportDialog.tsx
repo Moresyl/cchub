@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, FileText, Globe, Package, Wrench } from "lucide-react";
@@ -8,14 +8,6 @@ import {
   buildProviderProfileFromDeepLink,
   decodeDeepLinkText,
   deeplinkApi,
-  getPrimaryDeepLinkEndpoint,
-  maskSecret,
-  maskConfigValue,
-  classifyDeepLinkCommand,
-  classifyDeepLinkEndpoint,
-  classifyDeepLinkEnvKey,
-  parseMcpPreviewServers,
-  splitDeepLinkEndpoints,
   type DeepLinkErrorPayload,
   type DeepLinkImportRequest,
   type DeepLinkMcpImportResult,
@@ -27,6 +19,21 @@ import {
   useSavePromptPresetMutation,
 } from "../hooks/mutations";
 import { normalizeDirectory, requestFingerprint, SkillPreviewSection } from "./deeplinkImportHelpers";
+import {
+  McpPreviewSection,
+  PromptPreviewSection,
+  ProviderPreviewSection,
+} from "./DeepLinkImportDialog/PreviewSections";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
 
 interface PromptPreset {
   id: string;
@@ -46,390 +53,6 @@ interface SkillRegistryEntry {
   tags: string[];
   content: string;
 }
-
-interface ProviderPreviewSectionProps {
-  current: DeepLinkImportRequest;
-  unnamedLabel: string;
-  primaryEndpointLabel: string;
-  endpointCandidatesLabel: string;
-  homepageLabel: string;
-  usageAccessTokenLabel: string;
-  usageUserIdLabel: string;
-  usageScriptLabel: string;
-  usageScriptCodeLabel: string;
-  usageScriptEnabledLabel: string;
-  usageScriptDisabledLabel: string;
-  usageScriptWarningLabel: string;
-  usageApiKeyLabel: string;
-  usageBaseUrlLabel: string;
-  usageIntervalLabel: string;
-}
-
-interface PromptPreviewSectionProps {
-  current: DeepLinkImportRequest;
-  unnamedLabel: string;
-  contentPreviewLabel: string;
-  emptyContentLabel: string;
-}
-
-interface McpPreviewSectionProps {
-  current: DeepLinkImportRequest;
-  unavailablePreviewLabel: string;
-  labels: {
-    command: string;
-    args: string;
-    url: string;
-    env: string;
-    headers: string;
-    privateEndpointRisk: string;
-    envHijackRisk: string;
-    shellCommandRisk: string;
-    importWarning: string;
-  };
-}
-
-function ProviderPreviewSectionComponent({
-  current,
-  unnamedLabel,
-  primaryEndpointLabel,
-  endpointCandidatesLabel,
-  homepageLabel,
-  usageAccessTokenLabel,
-  usageUserIdLabel,
-  usageScriptLabel,
-  usageScriptCodeLabel,
-  usageScriptEnabledLabel,
-  usageScriptDisabledLabel,
-  usageScriptWarningLabel,
-  usageApiKeyLabel,
-  usageBaseUrlLabel,
-  usageIntervalLabel,
-}: ProviderPreviewSectionProps) {
-  const endpoints = useMemo(() => splitDeepLinkEndpoints(current.endpoint), [current.endpoint]);
-  const primaryEndpoint = useMemo(() => getPrimaryDeepLinkEndpoint(current), [current]);
-
-  return (
-    <section className="section-card" style={{ padding: 14 }}>
-      <div className="field-label">Provider</div>
-      <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <span className="badge badge-accent">{current.app}</span>
-          <span className="badge badge-muted">{current.name || unnamedLabel}</span>
-        </div>
-        {primaryEndpoint && (
-          <div>
-            <div className="field-label">{primaryEndpointLabel}</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
-              {primaryEndpoint}
-            </div>
-          </div>
-        )}
-        {endpoints.length > 1 && (
-          <div>
-            <div className="field-label">{endpointCandidatesLabel}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {endpoints.map((endpoint) => (
-                <div key={endpoint} style={{ fontSize: 12, color: "var(--text-secondary)", wordBreak: "break-all" }}>
-                  {endpoint}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {(current.model || current.apiFormat) && (
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {current.model && <span className="badge badge-muted">{`Model: ${current.model}`}</span>}
-            {current.apiFormat && <span className="badge badge-muted">{`API: ${current.apiFormat}`}</span>}
-          </div>
-        )}
-        {current.apiKey && (
-          <div>
-            <div className="field-label">API Key</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{maskSecret(current.apiKey)}</div>
-          </div>
-        )}
-        {current.usageAccessToken && (
-          <div>
-            <div className="field-label">{usageAccessTokenLabel}</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>
-              {maskSecret(current.usageAccessToken)}
-            </div>
-          </div>
-        )}
-        {current.usageUserId && (
-          <div>
-            <div className="field-label">{usageUserIdLabel}</div>
-            <div style={{ fontSize: 13, wordBreak: "break-all" }}>{current.usageUserId}</div>
-          </div>
-        )}
-        {(current.usageScript ||
-          current.usageEnabled !== undefined ||
-          current.usageApiKey ||
-          current.usageBaseUrl ||
-          current.usageAutoInterval !== undefined) && (
-          <div style={{ display: "grid", gap: 8, paddingTop: 8, borderTop: "1px solid var(--border-default)" }}>
-            <div className="field-label">{usageScriptLabel}</div>
-            {(current.usageScript || current.usageEnabled !== undefined) && (
-              <span className={`badge ${current.usageEnabled === true ? "badge-success" : "badge-muted"}`}>
-                {current.usageEnabled === true ? usageScriptEnabledLabel : usageScriptDisabledLabel}
-              </span>
-            )}
-            {current.usageScript && (
-              <>
-                <div className="field-label">{usageScriptCodeLabel}</div>
-                <pre
-                  style={{
-                    maxHeight: 220,
-                    overflow: "auto",
-                    whiteSpace: "pre-wrap",
-                    overflowWrap: "anywhere",
-                    margin: 0,
-                    padding: 10,
-                    borderRadius: 8,
-                    background: "var(--bg-input)",
-                    border: "1px solid var(--border-default)",
-                    fontSize: 12,
-                    fontFamily: "'JetBrains Mono', monospace",
-                  }}
-                >
-                  {decodeDeepLinkText(current.usageScript)}
-                </pre>
-                <div
-                  style={{ display: "flex", gap: 7, alignItems: "flex-start", color: "var(--warning)", fontSize: 12 }}
-                >
-                  <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  <span>{usageScriptWarningLabel}</span>
-                </div>
-              </>
-            )}
-            {current.usageApiKey && (
-              <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-                {usageApiKeyLabel}: {maskSecret(current.usageApiKey)}
-              </div>
-            )}
-            {current.usageBaseUrl && (
-              <div style={{ fontSize: 12, wordBreak: "break-all" }}>
-                {usageBaseUrlLabel}: {current.usageBaseUrl}
-              </div>
-            )}
-            {current.usageAutoInterval !== undefined && (
-              <div style={{ fontSize: 12 }}>
-                {usageIntervalLabel}: {current.usageAutoInterval}
-              </div>
-            )}
-          </div>
-        )}
-        {current.homepage && (
-          <div>
-            <div className="field-label">{homepageLabel}</div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)", wordBreak: "break-all" }}>
-              {current.homepage}
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-const ProviderPreviewSection = memo(ProviderPreviewSectionComponent);
-
-function PromptPreviewSectionComponent({
-  current,
-  unnamedLabel,
-  contentPreviewLabel,
-  emptyContentLabel,
-}: PromptPreviewSectionProps) {
-  const decodedContent = useMemo(() => decodeDeepLinkText(current.content), [current.content]);
-
-  return (
-    <section className="section-card" style={{ padding: 14 }}>
-      <div className="field-label">Prompt</div>
-      <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {current.app && <span className="badge badge-accent">{current.app}</span>}
-          <span className="badge badge-muted">{current.name || unnamedLabel}</span>
-        </div>
-        {current.description && (
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{current.description}</div>
-        )}
-        <div>
-          <div className="field-label">{contentPreviewLabel}</div>
-          <div
-            style={{
-              padding: "12px 14px",
-              borderRadius: 8,
-              background: "var(--bg-input)",
-              border: "1px solid var(--border-default)",
-              fontSize: 13,
-              lineHeight: 1.6,
-              maxHeight: 240,
-              overflow: "auto",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {decodedContent || emptyContentLabel}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const PromptPreviewSection = memo(PromptPreviewSectionComponent);
-
-function McpPreviewSectionComponent({ current, unavailablePreviewLabel, labels }: McpPreviewSectionProps) {
-  const mcpServers = useMemo(() => parseMcpPreviewServers(current), [current]);
-  const appBadges = useMemo(
-    () =>
-      (current.apps || "")
-        .split(",")
-        .map((app) => app.trim())
-        .filter(Boolean),
-    [current.apps],
-  );
-
-  const riskLabels = {
-    privateEndpoint: labels.privateEndpointRisk,
-    envHijack: labels.envHijackRisk,
-    shellCommand: labels.shellCommandRisk,
-  } as const;
-  const risks = useMemo(() => {
-    const found = new Set<keyof typeof riskLabels>();
-    for (const server of mcpServers) {
-      const commandRisk = classifyDeepLinkCommand(server.command, server.args);
-      if (commandRisk) found.add(commandRisk);
-      const endpointRisk = server.url ? classifyDeepLinkEndpoint(server.url) : null;
-      if (endpointRisk) found.add(endpointRisk);
-      for (const key of server.envKeys) {
-        const envRisk = classifyDeepLinkEnvKey(key);
-        if (envRisk) found.add(envRisk);
-      }
-    }
-    return [...found];
-  }, [mcpServers]);
-
-  return (
-    <section className="section-card" style={{ padding: 14 }}>
-      <div className="field-label">MCP</div>
-      <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {appBadges.map((app) => (
-            <span key={app} className="badge badge-accent">
-              {app}
-            </span>
-          ))}
-        </div>
-        {mcpServers.length > 0 ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            {mcpServers.map((server) => (
-              <div
-                key={server.name}
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: 8,
-                  background: "var(--bg-input)",
-                  border: "1px solid var(--border-default)",
-                }}
-              >
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <strong style={{ fontSize: 13 }}>{server.name}</strong>
-                  <span className="badge badge-muted">{server.transport}</span>
-                </div>
-                {server.command && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      display: "grid",
-                      gap: 4,
-                      fontSize: 12,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    <div>
-                      {labels.command}: {server.command}
-                    </div>
-                    {server.args.map((arg, index) => (
-                      <div key={`${server.name}-arg-${index}`}>
-                        {index === 0 ? `${labels.args}: ` : ""}
-                        {arg}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {server.url && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      fontSize: 12,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      wordBreak: "break-all",
-                      color: classifyDeepLinkEndpoint(server.url) ? "var(--warning)" : "var(--text-secondary)",
-                    }}
-                  >
-                    {labels.url}: {server.url}
-                  </div>
-                )}
-                {server.envKeys.length > 0 && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      display: "grid",
-                      gap: 4,
-                      fontSize: 12,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {Object.entries({ ...server.env, ...server.headers }).map(([key, value], index) => (
-                      <div
-                        key={`${server.name}-${key}`}
-                        style={{ color: classifyDeepLinkEnvKey(key) ? "var(--warning)" : "var(--text-secondary)" }}
-                      >
-                        {index === 0 ? `${server.headers[key] !== undefined ? labels.headers : labels.env}: ` : ""}
-                        {key}={maskConfigValue(key, value)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{unavailablePreviewLabel}</div>
-        )}
-        {risks.length > 0 && (
-          <div
-            style={{
-              display: "grid",
-              gap: 5,
-              padding: "10px 12px",
-              borderRadius: 8,
-              background: "var(--warning-subtle)",
-              border: "1px solid var(--warning)",
-              color: "var(--warning)",
-              fontSize: 12,
-            }}
-          >
-            {risks.map((risk) => (
-              <div key={risk} style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
-                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span>{riskLabels[risk]}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 7, alignItems: "flex-start", color: "var(--warning)", fontSize: 12 }}>
-          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>{labels.importWarning}</span>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const McpPreviewSection = memo(McpPreviewSectionComponent);
 
 function DeepLinkImportDialogComponent() {
   const [queue, setQueue] = useState<DeepLinkImportRequest[]>([]);
@@ -762,31 +385,15 @@ function DeepLinkImportDialogComponent() {
   if (!current) return null;
 
   return (
-    <div className="confirm-overlay" onClick={handleCancel}>
-      <div
-        className="confirm-dialog animate-in"
-        onClick={(event) => event.stopPropagation()}
-        style={{ maxWidth: 720, padding: 22 }}
-      >
-        <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-          <div
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 12,
-              background: "var(--accent-subtle)",
-              color: "var(--accent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <ResourceIcon size={20} />
+    <Dialog open onOpenChange={(open) => !open && handleCancel()}>
+      <DialogContent hideClose className="max-w-[720px]">
+        <DialogHeader>
+          <div className="grid size-9 shrink-0 place-items-center rounded-[7px] bg-[var(--accent-subtle)] text-primary">
+            <ResourceIcon size={17} aria-hidden="true" />
           </div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700 }}>{resourceTitle}</h3>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <DialogTitle>{resourceTitle}</DialogTitle>
               {queue.length > 1 && (
                 <span className="badge badge-muted">
                   {uiText(`队列 ${queue.length}`, `Queue ${queue.length}`, `キュー ${queue.length}`)}
@@ -798,17 +405,17 @@ function DeepLinkImportDialogComponent() {
                 </span>
               )}
             </div>
-            <p style={{ marginTop: 6, fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+            <DialogDescription>
               {uiText(
-                "确认后将把该 Deep Link 内容导入到当前 CCHub 环境。仅导入你信任来源的链接。",
-                "This deep link will be imported into the current CCHub environment after confirmation. Only import links from trusted sources.",
-                "確認後、この Deep Link を現在の CCHub 環境へ取り込みます。信頼できるリンクのみをインポートしてください。",
+                "确认后将把该 Deep Link 内容导入当前环境。仅导入你信任来源的链接。",
+                "This deep link will be imported after confirmation. Only import links from trusted sources.",
+                "確認後、この Deep Link を現在の環境へ取り込みます。信頼できるリンクのみをインポートしてください。",
               )}
-            </p>
+            </DialogDescription>
           </div>
-        </div>
+        </DialogHeader>
 
-        <div style={{ marginTop: 18, display: "grid", gap: 14 }}>
+        <DialogBody className="grid gap-3">
           {current.resource === "provider" && (
             <ProviderPreviewSection
               current={current}
@@ -850,19 +457,9 @@ function DeepLinkImportDialogComponent() {
             <SkillPreviewSection current={current} fetchDescription={skillFetchDescription} />
           )}
 
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "flex-start",
-              padding: "12px 14px",
-              borderRadius: 10,
-              background: "var(--warning-subtle)",
-              border: "1px solid var(--warning)",
-            }}
-          >
-            <AlertTriangle size={16} style={{ color: "var(--warning)", flexShrink: 0, marginTop: 1 }} />
-            <div style={{ fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+          <div className="flex items-start gap-2.5 rounded-md border border-[var(--warning)]/35 bg-[var(--warning-subtle)] px-3.5 py-3">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-[var(--warning)]" aria-hidden="true" />
+            <div className="text-xs leading-relaxed text-muted-foreground">
               {uiText(
                 "Deep Link 可能包含 API Key、脚本或远程仓库信息。请确认来源可信后再导入。",
                 "Deep links may contain API keys, scripts, or remote repositories. Confirm the source is trusted before importing.",
@@ -870,20 +467,20 @@ function DeepLinkImportDialogComponent() {
               )}
             </div>
           </div>
-        </div>
+        </DialogBody>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-          <button className="btn btn-secondary btn-sm" onClick={handleCancel} disabled={importing}>
+        <DialogFooter>
+          <Button variant="secondary" size="sm" onClick={handleCancel} disabled={importing}>
             {uiText("取消", "Cancel", "キャンセル")}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={handleConfirm} disabled={importing}>
+          </Button>
+          <Button size="sm" onClick={handleConfirm} disabled={importing}>
             {importing
               ? uiText("导入中...", "Importing...", "インポート中...")
               : uiText("确认导入", "Import", "インポート")}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

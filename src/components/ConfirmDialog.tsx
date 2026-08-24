@@ -1,5 +1,15 @@
-import { memo, useEffect } from "react";
+import { memo } from "react";
 import { AlertTriangle, Info } from "lucide-react";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -22,53 +32,37 @@ function ConfirmDialogComponent({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [isOpen, onCancel]);
-
-  if (!isOpen) return null;
-
   const isDestructive = variant === "destructive";
   const Icon = isDestructive ? AlertTriangle : Info;
   const iconColor = isDestructive ? "var(--danger)" : "var(--accent)";
   const iconBg = isDestructive ? "var(--danger-subtle)" : "var(--accent-subtle)";
 
   return (
-    <div className="confirm-overlay" onClick={onCancel}>
-      <div className="confirm-dialog animate-in" onClick={(event) => event.stopPropagation()}>
-        <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            background: iconBg, flexShrink: 0,
-          }}>
-            <Icon size={20} style={{ color: iconColor }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>{title}</h3>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", whiteSpace: "pre-line", lineHeight: 1.5 }}>
-              {message}
-            </p>
-          </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-          <button className="btn btn-secondary btn-sm" onClick={onCancel}>
-            {cancelText || "取消"}
-          </button>
-          <button
-            className={`btn btn-sm ${isDestructive ? "btn-danger" : "btn-primary"}`}
-            onClick={onConfirm}
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent hideClose className="max-w-[420px]">
+        <DialogHeader>
+          <div
+            className="grid size-9 shrink-0 place-items-center rounded-[7px]"
+            style={{ background: iconBg, color: iconColor }}
           >
+            <Icon size={17} aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription className="whitespace-pre-line">{message}</DialogDescription>
+          </div>
+        </DialogHeader>
+        <DialogBody className="hidden" />
+        <DialogFooter>
+          <Button variant="secondary" size="sm" onClick={onCancel}>
+            {cancelText || "取消"}
+          </Button>
+          <Button variant={isDestructive ? "destructive" : "default"} size="sm" onClick={onConfirm}>
             {confirmText || "确认"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

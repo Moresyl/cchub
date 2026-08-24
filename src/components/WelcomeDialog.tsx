@@ -2,6 +2,17 @@ import { memo } from "react";
 import { ArrowRight, CheckCircle2, Globe2, MoonStar, Palette, ScanSearch, SunMedium, Wrench } from "lucide-react";
 import type { Theme } from "../lib/theme";
 import type { Locale } from "../lib/i18n";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
 
 interface WelcomeDialogProps {
   open: boolean;
@@ -28,173 +39,137 @@ function WelcomeDialogComponent({
   onSelectTheme,
   onFinish,
 }: WelcomeDialogProps) {
-  if (!open) {
-    return null;
-  }
-
   const localeOptions: Array<{ id: Locale; label: string }> = [
     { id: "zh", label: "中文" },
     { id: "en", label: "English" },
     { id: "ja", label: "日本語" },
   ];
-
   const themeOptions: Array<{ id: Theme; label: string; icon: typeof MoonStar }> = [
     { id: "dark", label: uiText(locale, "深色", "Dark", "ダーク"), icon: MoonStar },
     { id: "light", label: uiText(locale, "浅色", "Light", "ライト"), icon: SunMedium },
   ];
 
+  const scanDescription = uiText(
+    locale,
+    profileCount > 0
+      ? `已根据当前配置目录与数据库发现 ${profileCount} 个可用 Profile。后续仍可在“配置切换”和“设置”中继续导入、同步或修复。`
+      : "当前还没有发现可用 Profile。完成后可在“配置切换”中创建官方 Provider，或在“设置”中执行迁移与修复。",
+    profileCount > 0
+      ? `${profileCount} existing profile(s) were found. Continue importing, syncing, or repairing later from Profiles and Settings.`
+      : "No profiles were found yet. Create an official provider from Profiles or run migration and repair actions from Settings.",
+    profileCount > 0
+      ? `${profileCount} 件の Profile を検出しました。後から Profiles と Settings でインポート、同期、修復を続けられます。`
+      : "まだ Profile は見つかっていません。Profiles で公式 Provider を作成するか、Settings で移行や修復を実行してください。",
+  );
+
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 80,
-        background: "rgba(10, 15, 28, 0.56)",
-        backdropFilter: "blur(10px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-      }}
-    >
-      <div
-        className="card"
-        style={{
-          width: "min(760px, 100%)",
-          padding: 24,
-          borderRadius: 20,
-          background: "linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, #dbeafe 6%), var(--bg-card))",
-          border: "1px solid color-mix(in srgb, var(--accent) 16%, var(--border-default))",
-          boxShadow: "0 28px 80px rgba(0, 0, 0, 0.28)",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div>
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 10px",
-                borderRadius: 999,
-                background: "color-mix(in srgb, var(--accent) 10%, transparent)",
-                color: "var(--accent)",
-                fontSize: 12,
-                fontWeight: 700,
-                marginBottom: 12,
-              }}
-            >
-              <CheckCircle2 size={14} />
-              {uiText(locale, "首次运行引导", "First Run Setup", "初回セットアップ")}
-            </div>
-            <h2 style={{ margin: 0, fontSize: 26, lineHeight: 1.15 }}>
-              {uiText(locale, "欢迎使用 CCHub", "Welcome to CCHub", "CCHub へようこそ")}
-            </h2>
-            <p style={{ margin: "10px 0 0", color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.7, maxWidth: 520 }}>
+    <Dialog open={open}>
+      <DialogContent hideClose className="max-w-[760px]">
+        <DialogHeader>
+          <div className="grid size-9 shrink-0 place-items-center rounded-[7px] bg-[var(--accent-subtle)] text-primary">
+            <CheckCircle2 size={17} aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <DialogTitle>{uiText(locale, "欢迎使用 CCHub", "Welcome to CCHub", "CCHub へようこそ")}</DialogTitle>
+            <DialogDescription>
               {uiText(
                 locale,
-                "先完成语言、主题和现有配置扫描确认，之后你可以直接开始切换 Provider、管理 Session 与技能。",
-                "Pick your language, theme, and confirm the existing config scan. After that, you can start managing providers, sessions, and skills immediately.",
-                "言語とテーマを選び、既存設定のスキャン結果を確認してください。その後すぐに Provider、Session、スキル管理を始められます。",
+                "完成语言、主题与现有配置确认，然后即可管理 Provider、Session 与技能。",
+                "Confirm language, theme, and the existing configuration scan, then start managing providers, sessions, and skills.",
+                "言語、テーマ、既存設定の確認後、Provider、Session、スキル管理を開始できます。",
               )}
-            </p>
+            </DialogDescription>
           </div>
-          <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
-            <div className="badge badge-accent" style={{ justifyContent: "flex-start", padding: "8px 10px", fontSize: 11 }}>
-              <Wrench size={12} />
-              {uiText(locale, `已检测 ${installedToolCount} 个工具`, `${installedToolCount} tools detected`, `${installedToolCount} 個のツールを検出`)}
-            </div>
-            <div className="badge badge-muted" style={{ justifyContent: "flex-start", padding: "8px 10px", fontSize: 11 }}>
-              <ScanSearch size={12} />
-              {uiText(locale, `已发现 ${profileCount} 个配置`, `${profileCount} profiles found`, `${profileCount} 個のプロファイルを検出`)}
-            </div>
+          <div className="hidden gap-1.5 sm:flex">
+            <span className="badge badge-accent">
+              <Wrench size={11} aria-hidden="true" />
+              {installedToolCount}
+            </span>
+            <span className="badge badge-muted">
+              <ScanSearch size={11} aria-hidden="true" />
+              {profileCount}
+            </span>
           </div>
-        </div>
+        </DialogHeader>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginTop: 24 }}>
-          <section className="section-card" style={{ padding: 16 }}>
-            <div className="section-card-title" style={{ marginBottom: 12 }}>
-              <Globe2 size={16} />
-              {uiText(locale, "步骤 1: 语言", "Step 1: Language", "ステップ 1: 言語")}
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {localeOptions.map((option) => (
-                <button
-                  key={option.id}
-                  className={`btn btn-sm ${locale === option.id ? "btn-primary" : "btn-secondary"}`}
-                  onClick={() => onSelectLocale(option.id)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="section-card" style={{ padding: 16 }}>
-            <div className="section-card-title" style={{ marginBottom: 12 }}>
-              <Palette size={16} />
-              {uiText(locale, "步骤 2: 主题", "Step 2: Theme", "ステップ 2: テーマ")}
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {themeOptions.map((option) => {
-                const Icon = option.icon;
-                return (
-                  <button
+        <DialogBody className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2.5">
+                <CardTitle className="flex items-center gap-2 text-xs">
+                  <Globe2 size={15} aria-hidden="true" />
+                  {uiText(locale, "1. 语言", "1. Language", "1. 言語")}
+                </CardTitle>
+                <CardDescription>
+                  {uiText(locale, "选择界面显示语言", "Choose the interface language", "表示言語を選択")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                {localeOptions.map((option) => (
+                  <Button
                     key={option.id}
-                    className={`btn btn-sm ${theme === option.id ? "btn-primary" : "btn-secondary"}`}
-                    onClick={() => onSelectTheme(option.id)}
-                    style={{ gap: 6 }}
+                    variant={locale === option.id ? "default" : "secondary"}
+                    size="sm"
+                    aria-pressed={locale === option.id}
+                    onClick={() => onSelectLocale(option.id)}
                   >
-                    <Icon size={13} />
                     {option.label}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        </div>
+                  </Button>
+                ))}
+              </CardContent>
+            </Card>
 
-        <section className="section-card" style={{ marginTop: 16, padding: 16 }}>
-          <div className="section-card-title" style={{ marginBottom: 8 }}>
-            <ScanSearch size={16} />
-            {uiText(locale, "步骤 3: 扫描现有配置", "Step 3: Scan Existing Config", "ステップ 3: 既存設定のスキャン")}
+            <Card>
+              <CardHeader className="pb-2.5">
+                <CardTitle className="flex items-center gap-2 text-xs">
+                  <Palette size={15} aria-hidden="true" />
+                  {uiText(locale, "2. 主题", "2. Theme", "2. テーマ")}
+                </CardTitle>
+                <CardDescription>
+                  {uiText(locale, "选择明暗外观", "Choose a light or dark appearance", "明暗テーマを選択")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                {themeOptions.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <Button
+                      key={option.id}
+                      variant={theme === option.id ? "default" : "secondary"}
+                      size="sm"
+                      aria-pressed={theme === option.id}
+                      onClick={() => onSelectTheme(option.id)}
+                    >
+                      <Icon size={13} aria-hidden="true" />
+                      {option.label}
+                    </Button>
+                  );
+                })}
+              </CardContent>
+            </Card>
           </div>
-          <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, lineHeight: 1.7 }}>
-            {uiText(
-              locale,
-              profileCount > 0
-                ? `已根据当前配置目录与数据库发现 ${profileCount} 个可用 Profile。后续你仍可在“配置切换”和“设置”页继续导入、同步或修复。`
-                : "当前还没有发现可用 Profile。完成后可以在“配置切换”页创建官方 Provider，或在“设置”页执行迁移/修复。",
-              profileCount > 0
-                ? `${profileCount} existing profile(s) were found from your current config roots and local database. You can continue importing, syncing, or repairing later from Profiles and Settings.`
-                : "No profiles were found yet. After this, create an official provider from Profiles or run migration and repair actions from Settings.",
-              profileCount > 0
-                ? `現在の設定ディレクトリとローカル DB から ${profileCount} 件の Profile を検出しました。後から Profiles と Settings でインポート、同期、修復を続けられます。`
-                : "まだ Profile は見つかっていません。完了後に Profiles で公式 Provider を作成するか、Settings で移行や修復を実行してください。",
-            )}
-          </p>
-        </section>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
-          <button
-            className="btn btn-primary"
-            onClick={onFinish}
-            style={{
-              padding: "10px 28px",
-              fontSize: 14,
-              fontWeight: 600,
-              borderRadius: 10,
-              gap: 8,
-              letterSpacing: 0.2,
-              boxShadow: "0 2px 12px color-mix(in srgb, var(--accent) 36%, transparent)",
-            }}
-          >
+          <Card>
+            <CardHeader className="pb-2.5">
+              <CardTitle className="flex items-center gap-2 text-xs">
+                <ScanSearch size={15} aria-hidden="true" />
+                {uiText(locale, "3. 现有配置", "3. Existing configuration", "3. 既存設定")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs leading-relaxed text-muted-foreground">{scanDescription}</p>
+            </CardContent>
+          </Card>
+        </DialogBody>
+
+        <DialogFooter>
+          <Button onClick={onFinish}>
             {uiText(locale, "开始使用", "Start Using CCHub", "使い始める")}
-            <ArrowRight size={15} />
-          </button>
-        </div>
-      </div>
-    </div>
+            <ArrowRight size={14} aria-hidden="true" />
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

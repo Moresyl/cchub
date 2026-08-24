@@ -1,5 +1,16 @@
-import { PackagePlus, X } from "lucide-react";
+import { PackagePlus } from "lucide-react";
 import type { Locale } from "../../lib/i18n";
+import { Button } from "../../components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
+import { Input } from "../../components/ui/input";
 
 interface PluginInstallDialogProps {
   isOpen: boolean;
@@ -20,69 +31,44 @@ export default function PluginInstallDialog({
   onConfirm,
   onCancel,
 }: PluginInstallDialogProps) {
-  if (!isOpen) return null;
-
   const zh = locale === "zh";
   return (
-    <div className="confirm-overlay" onClick={onCancel}>
-      <div
-        className="confirm-dialog animate-in"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="plugin-install-title"
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "var(--accent-subtle)",
-              color: "var(--accent)",
-              flexShrink: 0,
-            }}
-          >
-            <PackagePlus size={20} />
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !busy && onCancel()}>
+      <DialogContent hideClose className="max-w-[480px]">
+        <DialogHeader>
+          <div className="grid size-9 shrink-0 place-items-center rounded-[7px] bg-[var(--accent-subtle)] text-primary">
+            <PackagePlus size={17} aria-hidden="true" />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h3 id="plugin-install-title" style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>
-              {zh ? "安装 Claude 插件" : "Install Claude plugin"}
-            </h3>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
+          <div className="min-w-0">
+            <DialogTitle>{zh ? "安装 Claude 插件" : "Install Claude plugin"}</DialogTitle>
+            <DialogDescription>
               {zh
-                ? "输入 HTTPS 插件归档地址，或选择本机 ZIP/TAR 文件路径。安装会自动备份同名旧插件。"
+                ? "输入 HTTPS 插件归档地址，或选择本机 ZIP/TAR 文件路径。安装前会自动备份同名旧插件。"
                 : "Enter an HTTPS archive URL or a local ZIP/TAR path. Existing plugins are backed up before replacement."}
-            </p>
+            </DialogDescription>
           </div>
-          <button className="btn btn-ghost btn-icon-sm" onClick={onCancel} title={zh ? "关闭" : "Close"}>
-            <X size={16} />
-          </button>
-        </div>
-        <input
-          className="input"
-          style={{ width: "100%", marginTop: 16 }}
-          value={source}
-          onChange={(event) => setSource(event.target.value)}
-          placeholder="https://example.com/plugin.zip"
-          aria-label={zh ? "插件归档地址" : "Plugin archive URL"}
-          autoFocus
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && source.trim() && !busy) onConfirm();
-          }}
-        />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-          <button className="btn btn-secondary btn-sm" onClick={onCancel} disabled={busy}>
+        </DialogHeader>
+        <DialogBody>
+          <Input
+            value={source}
+            onChange={(event) => setSource(event.target.value)}
+            placeholder="https://example.com/plugin.zip"
+            aria-label={zh ? "插件归档地址" : "Plugin archive URL"}
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && source.trim() && !busy) onConfirm();
+            }}
+          />
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="secondary" size="sm" onClick={onCancel} disabled={busy}>
             {zh ? "取消" : "Cancel"}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={onConfirm} disabled={!source.trim() || busy}>
+          </Button>
+          <Button size="sm" onClick={onConfirm} disabled={!source.trim() || busy}>
             {busy ? (zh ? "安装中..." : "Installing...") : zh ? "安装" : "Install"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

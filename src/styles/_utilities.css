@@ -166,27 +166,6 @@
   background: var(--bg-card-hover);
 }
 
-/* ═══ Confirm Dialog ═══ */
-
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--bg-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  overscroll-behavior: contain;
-}
-.confirm-dialog {
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  padding: 24px;
-  width: 90vw;
-  max-width: 420px;
-}
-
 /* ═══ Card Actions ═══ */
 
 .card-actions {
@@ -226,5 +205,45 @@ textarea:focus-visible,
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes dialog-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 7px)) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 5px)) scale(0.985);
   }
 }

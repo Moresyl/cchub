@@ -149,6 +149,8 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
+- [CCHub]() (Apache-2.0) — Workspace UI and interaction reference
+- [CCHub]() (MIT) — Configuration workflow and compatibility reference
 - [Tauri](https://tauri.app) — Lightweight desktop framework
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — AI coding assistant
 - [MCP](https://modelcontextprotocol.io) — Model Context Protocol

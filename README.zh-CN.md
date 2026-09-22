@@ -149,6 +149,8 @@ MIT License — 详见 [LICENSE](LICENSE)。
 
 ## 致谢
 
+- [CCHub]()（Apache-2.0）— 工作区界面与交互参考
+- [CCHub]()（MIT）— 配置工作流与兼容能力参考
 - [Tauri](https://tauri.app) — 轻量级桌面应用框架
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — AI 编程助手
 - [MCP](https://modelcontextprotocol.io) — 模型上下文协议

@@ -88,19 +88,19 @@ fn platform_paths() -> Result<DesktopPaths, String> {
             .map(PathBuf::from)
             .or_else(|| dirs::home_dir().map(|home| home.join("AppData/Local")))
             .ok_or("Cannot locate local application data")?;
-        return Ok(paths_from_dirs(base.join("Claude"), base.join("Claude-3p")));
+        Ok(paths_from_dirs(base.join("Claude"), base.join("Claude-3p")))
     }
     #[cfg(target_os = "macos")]
     {
         let base = dirs::home_dir()
             .ok_or("Cannot locate home directory")?
             .join("Library/Application Support");
-        return Ok(paths_from_dirs(base.join("Claude"), base.join("Claude-3p")));
+        Ok(paths_from_dirs(base.join("Claude"), base.join("Claude-3p")))
     }
     #[cfg(target_os = "linux")]
     {
         let base = dirs::config_dir().ok_or("Cannot locate config directory")?;
-        return Ok(paths_from_dirs(base.join("Claude"), base.join("Claude-3p")));
+        Ok(paths_from_dirs(base.join("Claude"), base.join("Claude-3p")))
     }
     #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     Err("Claude Desktop is unsupported on this platform".to_string())
@@ -350,6 +350,7 @@ fn safe_model(model: &str) -> bool {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn save_claude_desktop_provider(
     id: Option<String>,
     name: String,

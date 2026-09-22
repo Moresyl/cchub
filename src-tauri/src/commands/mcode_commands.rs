@@ -282,10 +282,7 @@ mod tests {
         update_at(&path, "new", Some(sample())).unwrap();
         let saved = read_document(&path).unwrap();
         assert_eq!(saved["extra"].as_str(), Some("preserved"));
-        assert_eq!(
-            saved["custom_provider"]["other"]["models"]["model"].is_mapping(),
-            true
-        );
+        assert!(saved["custom_provider"]["other"]["models"]["model"].is_mapping());
         assert!(saved["custom_provider"]["new"].is_mapping());
         assert!(!path.with_extension("yaml.lock").exists());
     }

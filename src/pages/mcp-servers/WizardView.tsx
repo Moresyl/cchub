@@ -89,16 +89,41 @@ export default function McpServerWizardView({
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
             <div className="field-label" style={{ marginBottom: 8 }}>
-              {zh ? "常用模板" : "Quick Templates"}
+              {zh ? "传输方式" : "Transport"}
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {WIZARD_PRESETS.map((preset) => (
-                <button key={preset.id} className="btn btn-secondary btn-sm" onClick={() => applyWizardPreset(preset)}>
-                  {zh ? preset.labelZh : preset.labelEn}
+            <div role="group" aria-label={zh ? "传输方式" : "Transport"} style={{ display: "flex", gap: 6 }}>
+              {(["stdio", "http", "sse"] as const).map((transport) => (
+                <button
+                  key={transport}
+                  type="button"
+                  className={`btn btn-sm ${wizardDraft.transport === transport ? "btn-primary" : "btn-secondary"}`}
+                  aria-pressed={wizardDraft.transport === transport}
+                  onClick={() => setWizardDraft((current) => ({ ...current, transport }))}
+                >
+                  {transport === "stdio" ? "STDIO" : transport.toUpperCase()}
                 </button>
               ))}
             </div>
           </div>
+
+          {wizardDraft.transport === "stdio" && (
+            <div>
+              <div className="field-label" style={{ marginBottom: 8 }}>
+                {zh ? "常用模板" : "Quick Templates"}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {WIZARD_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => applyWizardPreset(preset)}
+                  >
+                    {zh ? preset.labelZh : preset.labelEn}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
             <div>
@@ -111,41 +136,53 @@ export default function McpServerWizardView({
               />
             </div>
             <div>
-              <label className="field-label">{zh ? "命令" : "Command"}</label>
+              <label className="field-label">
+                {wizardDraft.transport === "stdio" ? (zh ? "命令" : "Command") : zh ? "服务 URL" : "Server URL"}
+              </label>
               <input
                 className="input"
                 value={wizardDraft.command}
                 onChange={(event) => setWizardDraft((current) => ({ ...current, command: event.target.value }))}
-                placeholder="npx / uvx / docker / node"
+                placeholder={
+                  wizardDraft.transport === "stdio" ? "npx / uvx / docker / node" : "https://example.com/mcp"
+                }
               />
             </div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+            {wizardDraft.transport === "stdio" && (
+              <div>
+                <label className="field-label">{zh ? "参数" : "Arguments"}</label>
+                <textarea
+                  className="input"
+                  value={wizardDraft.argsText}
+                  onChange={(event) => setWizardDraft((current) => ({ ...current, argsText: event.target.value }))}
+                  placeholder={
+                    zh ? "每行一个参数，或直接粘贴 JSON 数组" : "One argument per line, or paste a JSON array"
+                  }
+                  style={{
+                    minHeight: 118,
+                    resize: "vertical",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                    paddingTop: 10,
+                  }}
+                />
+              </div>
+            )}
             <div>
-              <label className="field-label">{zh ? "参数" : "Arguments"}</label>
-              <textarea
-                className="input"
-                value={wizardDraft.argsText}
-                onChange={(event) => setWizardDraft((current) => ({ ...current, argsText: event.target.value }))}
-                placeholder={zh ? "每行一个参数，或直接粘贴 JSON 数组" : "One argument per line, or paste a JSON array"}
-                style={{
-                  minHeight: 118,
-                  resize: "vertical",
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 12,
-                  paddingTop: 10,
-                }}
-              />
-            </div>
-            <div>
-              <label className="field-label">{zh ? "环境变量" : "Environment"}</label>
+              <label className="field-label">
+                {wizardDraft.transport === "stdio" ? (zh ? "环境变量" : "Environment") : zh ? "请求头" : "Headers"}
+              </label>
               <textarea
                 className="input"
                 value={wizardDraft.envText}
                 onChange={(event) => setWizardDraft((current) => ({ ...current, envText: event.target.value }))}
                 placeholder={
-                  zh ? "每行 KEY=value，或直接粘贴 JSON 对象" : "Use KEY=value per line, or paste a JSON object"
+                  zh
+                    ? `每行 ${wizardDraft.transport === "stdio" ? "KEY=value" : "Header=value"}，或直接粘贴 JSON 对象`
+                    : `Use ${wizardDraft.transport === "stdio" ? "KEY=value" : "Header=value"} per line, or paste a JSON object`
                 }
                 style={{
                   minHeight: 118,
@@ -239,9 +276,20 @@ export default function McpServerWizardView({
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
             <div className="card" style={{ padding: 12 }}>
-              <div className="field-label">{zh ? "命令预览" : "Command Preview"}</div>
+              <div className="field-label">
+                {wizardDraft.transport === "stdio"
+                  ? zh
+                    ? "命令预览"
+                    : "Command Preview"
+                  : zh
+                    ? "端点预览"
+                    : "Endpoint Preview"}
+              </div>
               <div className="code-block" style={{ fontSize: 12 }}>
-                {[wizardDraft.command.trim(), ...wizardValidation.parsedArgs].filter(Boolean).join(" ") || i.common.na}
+                {wizardDraft.transport === "stdio"
+                  ? [wizardDraft.command.trim(), ...wizardValidation.parsedArgs].filter(Boolean).join(" ") ||
+                    i.common.na
+                  : wizardDraft.command.trim() || i.common.na}
               </div>
             </div>
             <div className="card" style={{ padding: 12 }}>
@@ -253,20 +301,30 @@ export default function McpServerWizardView({
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+            {wizardDraft.transport === "stdio" && (
+              <div>
+                <div className="field-label">{zh ? "参数解析结果" : "Parsed Arguments"}</div>
+                <Suspense fallback={null}>
+                  <CodeEditor
+                    value={JSON.stringify(wizardValidation.parsedArgs, null, 2)}
+                    language="json"
+                    readOnly
+                    minHeight={100}
+                    maxHeight={180}
+                  />
+                </Suspense>
+              </div>
+            )}
             <div>
-              <div className="field-label">{zh ? "参数解析结果" : "Parsed Arguments"}</div>
-              <Suspense fallback={null}>
-                <CodeEditor
-                  value={JSON.stringify(wizardValidation.parsedArgs, null, 2)}
-                  language="json"
-                  readOnly
-                  minHeight={100}
-                  maxHeight={180}
-                />
-              </Suspense>
-            </div>
-            <div>
-              <div className="field-label">{zh ? "环境变量解析结果" : "Parsed Environment"}</div>
+              <div className="field-label">
+                {wizardDraft.transport === "stdio"
+                  ? zh
+                    ? "环境变量解析结果"
+                    : "Parsed Environment"
+                  : zh
+                    ? "请求头解析结果"
+                    : "Parsed Headers"}
+              </div>
               <Suspense fallback={null}>
                 <CodeEditor
                   value={JSON.stringify(wizardValidation.parsedEnv, null, 2)}

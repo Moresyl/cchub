@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 export interface McpWizardDraft {
   name: string;
+  transport: "stdio" | "http" | "sse";
   command: string;
   argsText: string;
   envText: string;
@@ -40,7 +41,7 @@ function parseArgs(argsText: string) {
   };
 }
 
-function parseEnv(envText: string) {
+function parseEnv(envText: string, headers: boolean) {
   const trimmed = envText.trim();
   if (!trimmed) return { parsedEnv: {} as Record<string, string>, errors: [] as string[] };
 
@@ -75,8 +76,9 @@ function parseEnv(envText: string) {
     }
     const key = value.slice(0, separator).trim();
     const envValue = value.slice(separator + 1).trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      errors.push(`Invalid env key: ${key}`);
+    const validKey = headers ? /^[A-Za-z0-9_-]+$/.test(key) : /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
+    if (!validKey) {
+      errors.push(`Invalid ${headers ? "header" : "env"} key: ${key}`);
       continue;
     }
     parsedEnv[key] = envValue;
@@ -100,16 +102,23 @@ export function useMcpValidation(draft: McpWizardDraft): McpValidationResult {
     }
 
     if (!command) {
-      errors.push("Command is required.");
-    } else if (command.includes(" ")) {
+      errors.push(draft.transport === "stdio" ? "Command is required." : "Remote URL is required.");
+    } else if (draft.transport === "stdio" && command.includes(" ")) {
       warnings.push("Command contains spaces. Move extra tokens into the arguments field when possible.");
+    } else if (draft.transport !== "stdio") {
+      try {
+        const url = new URL(command);
+        if (!["http:", "https:"].includes(url.protocol)) errors.push("Remote URL must use HTTP or HTTPS.");
+      } catch {
+        errors.push("Remote URL is invalid.");
+      }
     }
 
-    const parsedArgsResult = parseArgs(draft.argsText);
-    const parsedEnvResult = parseEnv(draft.envText);
+    const parsedArgsResult = draft.transport === "stdio" ? parseArgs(draft.argsText) : { parsedArgs: [], errors: [] };
+    const parsedEnvResult = parseEnv(draft.envText, draft.transport !== "stdio");
     errors.push(...parsedArgsResult.errors, ...parsedEnvResult.errors);
 
-    if (parsedArgsResult.parsedArgs.length === 0) {
+    if (draft.transport === "stdio" && parsedArgsResult.parsedArgs.length === 0) {
       warnings.push("No arguments provided. Add at least the MCP package or entrypoint if required.");
     }
 
@@ -120,5 +129,5 @@ export function useMcpValidation(draft: McpWizardDraft): McpValidationResult {
       parsedArgs: parsedArgsResult.parsedArgs,
       parsedEnv: parsedEnvResult.parsedEnv,
     };
-  }, [draft.argsText, draft.command, draft.envText, draft.name]);
+  }, [draft.argsText, draft.command, draft.envText, draft.name, draft.transport]);
 }

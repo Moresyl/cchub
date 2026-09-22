@@ -219,16 +219,29 @@ pub fn get_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String>
 #[tauri::command]
 pub fn install_mcp_server(
     name: String,
+    transport: Option<String>,
     command: String,
     args: Vec<String>,
     env: HashMap<String, String>,
     db: State<'_, DbState>,
 ) -> Result<McpServer, String> {
+    let transport = transport.unwrap_or_else(|| "stdio".to_string());
+    if !matches!(transport.as_str(), "stdio" | "http" | "sse") {
+        return Err(format!("Unsupported MCP transport: {transport}"));
+    }
+    if transport != "stdio"
+        && url::Url::parse(&command)
+            .ok()
+            .filter(|url| matches!(url.scheme(), "http" | "https"))
+            .is_none()
+    {
+        return Err("Remote MCP URL must use HTTP or HTTPS".to_string());
+    }
     let server_config = config::McpServerConfig {
         command: command.clone(),
         args: args.clone(),
         env: env.clone(),
-        transport_type: None,
+        transport_type: Some(transport.clone()),
     };
 
     config::write_claude_mcp_server(&name, &server_config)?;
@@ -249,8 +262,8 @@ pub fn install_mcp_server(
 
     conn.execute(
         "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'stdio', 'local', ?6, 'active', ?7, ?7)",
-        rusqlite::params![name, name, command, args_json, env_json, config_path, now],
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'local', ?7, 'active', ?8, ?8)",
+        rusqlite::params![name, name, command, args_json, env_json, transport, config_path, now],
     ).map_err(|e| e.to_string())?;
 
     record_activity(&conn, &name, "install", "success", None);
@@ -260,7 +273,7 @@ pub fn install_mcp_server(
         name,
         package_name: None,
         version: None,
-        transport: "stdio".to_string(),
+        transport,
         command: Some(command),
         args: args_json,
         env: env_json,
@@ -306,7 +319,7 @@ pub fn update_mcp_server_config(
     env: HashMap<String, String>,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
-    let server_config = config::McpServerConfig {
+    let mut server_config = config::McpServerConfig {
         command: command.clone(),
         args: args.clone(),
         env: env.clone(),
@@ -314,21 +327,28 @@ pub fn update_mcp_server_config(
     };
 
     // Get config_path from DB to write back to the correct file
-    let config_path: Option<String> = {
+    let source_and_path: Option<(String, Option<String>, String)> = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT config_path FROM mcp_servers WHERE id = ?1",
+            "SELECT source, config_path, transport FROM mcp_servers WHERE id = ?1",
             rusqlite::params![name],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .ok()
-        .flatten()
     };
 
-    if let Some(ref path) = config_path {
-        config::write_mcp_server_to_config(&name, &server_config, path)?;
+    if let Some((source, config_path, transport)) = source_and_path {
+        server_config.transport_type = Some(transport);
+        match source.as_str() {
+            "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode"
+            | "claude-desktop" => config::sync_mcp_to_tool(&name, &server_config, &source)?,
+            _ => match config_path {
+                Some(path) => config::write_mcp_server_to_config(&name, &server_config, &path)?,
+                None => config::write_claude_mcp_server(&name, &server_config)?,
+            },
+        }
     } else {
-        config::write_claude_mcp_server(&name, &server_config)?;
+        return Err(format!("Server not found: {name}"));
     }
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -445,11 +465,11 @@ pub fn sync_mcp_server_to_tool(
     db: State<'_, DbState>,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let (command, args_json, env_json): (String, String, String) = conn
+    let (command, args_json, env_json, transport): (String, String, String, String) = conn
         .query_row(
-            "SELECT COALESCE(command,''), args, env FROM mcp_servers WHERE id = ?1",
+            "SELECT COALESCE(command,''), args, env, transport FROM mcp_servers WHERE id = ?1",
             rusqlite::params![server_name],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|e| format!("Server not found: {}", e))?;
 
@@ -461,7 +481,7 @@ pub fn sync_mcp_server_to_tool(
         command: command.clone(),
         args,
         env,
-        transport_type: None,
+        transport_type: Some(transport),
     };
 
     config::sync_mcp_to_tool(&server_name, &mcp_config, &target_tool)?;
@@ -526,9 +546,12 @@ pub async fn import_mcp_servers_from_file(db: State<'_, DbState>) -> Result<u32,
         serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
 
     // Support two formats:
-    // 1. { "mcpServers": { "name": {...}, ... } }  (Claude's .claude.json format)
-    // 2. { "name": { "command": "...", "args": [...], ... }, ... }  (flat map)
+    // 1. { "mcpServers": { "name": {...}, ... } }  (Claude-compatible format)
+    // 2. { "mcp": { "name": {...}, ... } }  (OpenCode format)
+    // 3. { "name": { "command": "...", "args": [...], ... }, ... }  (flat map)
     let servers_map = if let Some(inner) = data.get("mcpServers").and_then(|v| v.as_object()) {
+        inner.clone()
+    } else if let Some(inner) = data.get("mcp").and_then(|v| v.as_object()) {
         inner.clone()
     } else if let Some(obj) = data.as_object() {
         obj.clone()
@@ -538,40 +561,15 @@ pub async fn import_mcp_servers_from_file(db: State<'_, DbState>) -> Result<u32,
 
     let mut imported = 0u32;
     for (name, cfg) in &servers_map {
-        let command = cfg
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if command.is_empty() {
+        let Some(server) = config::parse_server_entry(name, cfg, "import", "") else {
             continue;
-        }
-
-        let args: Vec<String> = cfg
-            .get("args")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let env: HashMap<String, String> = cfg
-            .get("env")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect()
-            })
-            .unwrap_or_default();
+        };
 
         let server_config = config::McpServerConfig {
-            command: command.clone(),
-            args: args.clone(),
-            env: env.clone(),
-            transport_type: None,
+            command: server.command.clone(),
+            args: server.args.clone(),
+            env: server.env.clone(),
+            transport_type: Some(server.transport.clone()),
         };
 
         if let Err(e) = config::write_claude_mcp_server(name, &server_config) {
@@ -581,12 +579,11 @@ pub async fn import_mcp_servers_from_file(db: State<'_, DbState>) -> Result<u32,
 
         // Insert into DB
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        let id = format!("mcp-{}", name);
-        let args_str = serde_json::to_string(&args).unwrap_or_default();
-        let env_str = serde_json::to_string(&env).unwrap_or_default();
+        let args_str = serde_json::to_string(&server.args).unwrap_or_default();
+        let env_str = serde_json::to_string(&server.env).unwrap_or_default();
         let _ = conn.execute(
-            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, status, transport, source, package_name, version, config_path) VALUES (?1, ?2, ?3, ?4, ?5, 'active', 'stdio', 'import', NULL, NULL, NULL)",
-            rusqlite::params![id, name, command, args_str, env_str],
+            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, status, transport, source, package_name, version, config_path) VALUES (?1, ?1, ?2, ?3, ?4, 'active', ?5, 'import', NULL, NULL, NULL)",
+            rusqlite::params![name, server.command, args_str, env_str, server.transport],
         );
 
         imported += 1;

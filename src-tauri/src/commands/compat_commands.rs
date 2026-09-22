@@ -695,6 +695,7 @@ pub fn upsert_mcp_server(
         .map_err(|error| format!("Invalid MCP server config: {error}"))?;
     crate::commands::mcp_commands::install_mcp_server(
         id,
+        config.transport_type,
         config.command,
         config.args,
         config.env,

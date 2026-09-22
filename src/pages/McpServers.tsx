@@ -41,6 +41,8 @@ const MCP_SYNCABLE_APPS = [
   { id: "mcode", label: "MiniMax Code" },
 ] as const;
 
+const MCP_SYNCABLE_TOOL_IDS = new Set<string>(MCP_SYNCABLE_APPS.map((app) => app.id));
+
 export default function McpServers() {
   const queryClient = useQueryClient();
   const cachedMcpServersPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMcpServersPageData>>>(
@@ -61,7 +63,7 @@ export default function McpServers() {
   const [syncingTo, setSyncingTo] = useState<string | null>(null);
   const [installedTools, setInstalledTools] = useState<DetectedTool[]>(
     cachedMcpServersPageData?.tools.filter(
-      (tool) => tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && tool.id !== "openclaw",
+      (tool) => tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && MCP_SYNCABLE_TOOL_IDS.has(tool.id),
     ) ?? [],
   );
   const [toolSyncStatus, setToolSyncStatus] = useState<Record<string, boolean>>({});
@@ -75,6 +77,7 @@ export default function McpServers() {
   const [wizardSyncTargets, setWizardSyncTargets] = useState<string[]>([]);
   const [wizardDraft, setWizardDraft] = useState<McpWizardDraft>({
     name: "",
+    transport: "stdio",
     command: "",
     argsText: "",
     envText: "",
@@ -108,7 +111,8 @@ export default function McpServers() {
         setServers(data.servers);
         setInstalledTools(
           data.tools.filter(
-            (tool) => tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && tool.id !== "openclaw",
+            (tool) =>
+              tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && MCP_SYNCABLE_TOOL_IDS.has(tool.id),
           ),
         );
         setSelected((current) =>
@@ -211,6 +215,7 @@ export default function McpServers() {
   const openWizard = useCallback(() => {
     setWizardDraft({
       name: "",
+      transport: "stdio",
       command: "",
       argsText: "",
       envText: "",
@@ -240,6 +245,7 @@ export default function McpServers() {
     try {
       const created = await installMcpServerMutation.mutateAsync({
         name: wizardDraft.name.trim(),
+        transport: wizardDraft.transport,
         command: wizardDraft.command.trim(),
         args: wizardValidation.parsedArgs,
         env: wizardValidation.parsedEnv,

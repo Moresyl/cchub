@@ -8,10 +8,11 @@ use crate::hermes;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct McpServerConfig {
+    #[serde(default, alias = "url")]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "headers")]
     pub env: HashMap<String, String>,
     #[serde(default, rename = "type")]
     pub transport_type: Option<String>,
@@ -185,7 +186,7 @@ fn parse_mcp_json_file(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
     if let Some(obj) = value.as_object() {
         for (name, cfg) in obj {
             // Skip non-server keys
-            if name == "mcpServers" || name == "$schema" {
+            if name == "mcpServers" || name == "mcp" || name == "$schema" {
                 continue;
             }
             if let Some(server) = parse_server_entry(name, cfg, source, &config_path) {
@@ -195,61 +196,13 @@ fn parse_mcp_json_file(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
     }
 }
 
-pub(super) fn parse_server_entry(
+pub(crate) fn parse_server_entry(
     name: &str,
     cfg: &serde_json::Value,
     source: &str,
     config_path: &str,
 ) -> Option<ScannedMcpServer> {
-    let remote_url = cfg.get("url").and_then(|value| value.as_str());
-    let command = cfg
-        .get("command")
-        .and_then(|value| value.as_str())
-        .or(remote_url)?
-        .to_string();
-
-    let args: Vec<String> = cfg
-        .get("args")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut env: HashMap<String, String> = cfg
-        .get("env")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-    for key in ["headers", "http_headers"] {
-        if let Some(headers) = cfg
-            .get(key)
-            .and_then(|value| serde_json::from_value::<HashMap<String, String>>(value.clone()).ok())
-        {
-            env.extend(headers);
-        }
-    }
-
-    let transport = cfg
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or(if remote_url.is_some() {
-            "http"
-        } else {
-            "stdio"
-        })
-        .to_string();
-
-    Some(ScannedMcpServer {
-        name: name.to_string(),
-        command,
-        args,
-        env,
-        transport,
-        source: source.to_string(),
-        config_path: config_path.to_string(),
-    })
+    super::formats::parse_json_server_entry(name, cfg, source, config_path)
 }
 
 fn scan_wrapped_mcp_json(path: &PathBuf, source: &str, servers: &mut Vec<ScannedMcpServer>) {
@@ -265,7 +218,12 @@ fn scan_wrapped_mcp_json(path: &PathBuf, source: &str, servers: &mut Vec<Scanned
 
     let config_path = path.to_string_lossy().to_string();
 
-    if let Some(mcp_servers) = value.get("mcpServers") {
+    let container = if source == "opencode" {
+        value.get("mcp").or_else(|| value.get("mcpServers"))
+    } else {
+        value.get("mcpServers")
+    };
+    if let Some(mcp_servers) = container {
         if let Some(obj) = mcp_servers.as_object() {
             for (name, cfg) in obj {
                 if let Some(server) = parse_server_entry(name, cfg, source, &config_path) {
@@ -286,48 +244,21 @@ pub fn write_mcp_server_to_config(
     config: &McpServerConfig,
     config_path: &str,
 ) -> Result<(), String> {
-    let path = PathBuf::from(config_path);
-
-    let mut settings: serde_json::Value = if path.exists() {
-        let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
-
-    if settings.get("mcpServers").is_none() {
-        settings["mcpServers"] = serde_json::json!({});
-    }
-    settings["mcpServers"][name] = serde_json::to_value(config).map_err(|e| e.to_string())?;
-
-    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
-
-    Ok(())
+    super::formats::write_json_server(
+        &PathBuf::from(config_path),
+        name,
+        config,
+        super::formats::JsonMcpFormat::Standard,
+    )
 }
 
 /// Remove MCP server from a specific config file
 pub fn remove_mcp_server_from_config(name: &str, config_path: &str) -> Result<(), String> {
-    let path = PathBuf::from(config_path);
-
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut settings: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-    if let Some(servers) = settings.get_mut("mcpServers") {
-        if let Some(obj) = servers.as_object_mut() {
-            obj.remove(name);
-        }
-    }
-
-    let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())?;
-
-    Ok(())
+    super::formats::remove_json_server(
+        &PathBuf::from(config_path),
+        name,
+        super::formats::JsonMcpFormat::Standard,
+    )
 }
 
 /// Write MCP server config to Claude settings (~/.claude.json)
@@ -539,32 +470,19 @@ pub fn write_mcp_to_codex(name: &str, config: &McpServerConfig) -> Result<(), St
         .parse()
         .map_err(|e: toml_edit::TomlError| e.to_string())?;
 
-    // Ensure [mcp_servers] table exists
-    if doc.get("mcp_servers").is_none() {
+    if doc
+        .get("mcp_servers")
+        .is_none_or(|item| item.as_table_like().is_none())
+    {
         doc["mcp_servers"] = toml_edit::table();
     }
-
-    if let Some(mcp_servers) = doc["mcp_servers"].as_table_mut() {
-        mcp_servers[name] = toml_edit::table();
-        if let Some(server_table) = mcp_servers[name].as_table_mut() {
-            server_table["command"] = toml_edit::value(&config.command);
-
-            let mut args_arr = toml_edit::Array::new();
-            for arg in &config.args {
-                args_arr.push(arg.as_str());
-            }
-            server_table["args"] = toml_edit::value(args_arr);
-
-            if !config.env.is_empty() {
-                server_table["env"] = toml_edit::table();
-                if let Some(env_table) = server_table["env"].as_table_mut() {
-                    for (k, v) in &config.env {
-                        env_table[k.as_str()] = toml_edit::value(v.as_str());
-                    }
-                }
-            }
-        }
-    }
+    let servers = doc["mcp_servers"]
+        .as_table_like_mut()
+        .ok_or_else(|| "Codex mcp_servers must be a TOML table".to_string())?;
+    servers.insert(
+        name,
+        toml_edit::Item::Table(super::formats::codex_server_table(config)),
+    );
 
     crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())?;
     Ok(())
@@ -630,13 +548,13 @@ pub fn write_mcp_to_grokbuild(name: &str, config: &McpServerConfig) -> Result<()
 /// Write MCP server config to Gemini settings.json
 pub fn write_mcp_to_gemini(name: &str, config: &McpServerConfig) -> Result<(), String> {
     let path = get_gemini_config_path().ok_or("Cannot find Gemini config path")?;
-    write_mcp_server_to_config(name, config, &path.to_string_lossy())
+    super::formats::write_json_server(&path, name, config, super::formats::JsonMcpFormat::Gemini)
 }
 
 /// Write MCP server config to OpenCode opencode.json
 pub fn write_mcp_to_opencode(name: &str, config: &McpServerConfig) -> Result<(), String> {
     let path = get_opencode_config_path().ok_or("Cannot find OpenCode config path")?;
-    write_mcp_server_to_config(name, config, &path.to_string_lossy())
+    super::formats::write_json_server(&path, name, config, super::formats::JsonMcpFormat::OpenCode)
 }
 
 /// Sync MCP server config to a target tool by tool ID
@@ -715,7 +633,7 @@ pub fn remove_mcp_from_opencode(name: &str) -> Result<(), String> {
         Some(p) if p.exists() => p,
         _ => return Ok(()),
     };
-    remove_mcp_server_from_config(name, &path.to_string_lossy())
+    super::formats::remove_json_server(&path, name, super::formats::JsonMcpFormat::OpenCode)
 }
 
 /// Unsync MCP server from a target tool by tool ID
@@ -743,22 +661,7 @@ pub fn unsync_mcp_from_tool(name: &str, tool_id: &str) -> Result<(), String> {
 // ── Check if MCP server exists in tool config ──
 
 fn check_server_in_json_config(name: &str, path: &std::path::Path) -> bool {
-    if !path.exists() {
-        return false;
-    }
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let settings: serde_json::Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    settings
-        .get("mcpServers")
-        .and_then(|s| s.as_object())
-        .map(|obj| obj.contains_key(name))
-        .unwrap_or(false)
+    super::formats::has_json_server(path, name, super::formats::JsonMcpFormat::Standard)
 }
 
 fn check_server_in_codex(name: &str) -> bool {
@@ -821,7 +724,7 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
         }
         "opencode" => {
             let p = home.join(".opencode").join("opencode.json");
-            check_server_in_json_config(name, &p)
+            super::formats::has_json_server(&p, name, super::formats::JsonMcpFormat::OpenCode)
         }
         "openclaw" => false, // OpenClaw MCP sync not yet supported
         "hermes" => hermes::mcp::has_server_in_default_root(name).unwrap_or(false),
@@ -832,7 +735,7 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_server_entry, scan_grok_mcp_toml, ScannedMcpServer};
+    use super::{parse_server_entry, scan_grok_mcp_toml, scan_wrapped_mcp_json, ScannedMcpServer};
 
     #[test]
     fn parses_remote_json_mcp_entries_and_headers() {
@@ -882,6 +785,38 @@ Authorization = "Bearer secret"
         assert_eq!(servers[1].command, "https://example.com/mcp");
         assert_eq!(
             servers[1].env.get("Authorization").map(String::as_str),
+            Some("Bearer secret")
+        );
+    }
+
+    #[test]
+    fn scans_opencode_native_mcp_container() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("opencode.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "theme": "system",
+  "mcp": {
+    "remote": {
+      "type": "remote",
+      "url": "https://example.com/mcp",
+      "headers": {"Authorization": "Bearer secret"},
+      "enabled": true
+    }
+  }
+}"#,
+        )
+        .expect("write config");
+
+        let mut servers = Vec::new();
+        scan_wrapped_mcp_json(&path, "opencode", &mut servers);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "remote");
+        assert_eq!(servers[0].command, "https://example.com/mcp");
+        assert_eq!(servers[0].transport, "http");
+        assert_eq!(
+            servers[0].env.get("Authorization").map(String::as_str),
             Some("Bearer secret")
         );
     }

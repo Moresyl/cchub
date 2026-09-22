@@ -15,6 +15,7 @@ export interface UpdateMcpServerConfigInput {
 
 export interface InstallMcpServerInput {
   name: string;
+  transport: "stdio" | "http" | "sse";
   command: string;
   args: string[];
   env: Record<string, string>;

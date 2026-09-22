@@ -14,28 +14,35 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 配置切换成为默认工作区，按工具筛选、搜索、测速及一键应用配置；跨工具共享 Provider 收入按需展开区域
-    - 采用紧凑的中性明暗主题与可折叠侧栏，导航聚焦配置档案、配置文件、MCP、Skills 和设置
-    - Ctrl+K 快速切换现在只显示当前可用页面与配置档案，并支持直接应用配置
-    - 项目配置档案管理迁入设置的工具与集成分类；旧版独立功能入口从主导航移除，已有配置数据保留
-    - 同步中英文使用说明，去除已不适用的功能清单及旧界面截图
+    - 采用 CCHub 风格的紧凑中性工作区：配置切换成为首页，提供可折叠/可调宽侧栏、系统明暗主题、Ctrl+K 快速切换和 900px 响应式布局
+    - MiniMax Code 新增独立自定义供应商管理、原生 YAML 安全写入、MCP 同步、Skills 路径识别和 Provider Deep Link 导入
+    - Claude Desktop 新增直连供应商与带鉴权的本地代理模式，支持 Anthropic、OpenAI 和 Gemini 请求转换、显式模型路由及官方配置回滚
+    - MCP 安装向导新增 STDIO、HTTP、SSE 创建及请求头配置，并按 Claude、Codex、Gemini、Grok Build、OpenCode、Hermes、MiniMax Code 的原生格式同步
+    - 会话管理覆盖九个工具，新增 Grok Build 与 MiniMax Code 会话读取、续接和删除能力；托盘补充 Grok Build 配置切换
 
     ### 变更与安全
-    - 无安全机制变更；此版本没有删除用户的配置文件或数据库数据
+    - Claude Desktop 本地代理令牌迁移到系统凭据存储，配置与数据库不再保存明文令牌；代理接口要求本地 Bearer 鉴权
+    - 配置写入使用原子替换、备份与失败回滚；MCP 导入过滤禁用项并保留目标文件中的非托管字段
+    - 主导航移除与配置切换无关的旧版独立入口，但升级不会删除已有数据库记录或工具配置文件
 
     ### 问题修复
-    - 快速切换应用配置后刷新主列表，避免当前生效状态滞后
-    - 旧页面链接自动返回配置首页，命令面板不再提供失效的页面和 Autopilot 操作
+    - 修复本地代理启动失败、重启后状态未恢复、Claude Desktop 响应模型未还原及无效凭据未拒绝的问题
+    - 修复远程 MCP 同步时传输类型丢失、OpenCode 写入错误容器、Gemini HTTP 端点字段错误及 Codex 请求头格式不兼容
+    - 修复 MCP Deep Link 无法解析 OpenCode/Gemini 原生结构、错误接受无原生 MCP 注册表的目标，以及禁用按钮点击穿透
+    - 修复 Codex 会话令牌累计值重复统计；大型 rollout 扫描改为读取文件尾部，实测由约 82 秒降至约 2 秒
+    - 修复配置工具栏和 MCP 向导在窄窗口下的换行、溢出与交互状态问题
 
     ### 安装
-    - 从下方选择对应平台安装包。Windows 推荐 NSIS；从旧版升级时保留现有配置。
+    - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
+    - 从旧版升级会保留现有 CCHub 数据库和工具配置；涉及生产配置时仍建议先在设置中创建 SQL 备份。
 
     ## English Summary
 
-    - Config profiles are now the default workspace with tool filters, search, health checks, and one-click activation.
-    - The interface uses a compact neutral theme, collapsible sidebar, and a focused Ctrl+K profile switcher. Legacy standalone destinations are removed from navigation without deleting configuration data.
-    - Fixed stale active-profile state after applying a profile from quick switch and removed unavailable commands.
-    - Install using the platform package below; Windows users should prefer the NSIS installer.
+    - Rebuilt the app around a compact CCHub-inspired configuration workspace with responsive navigation, system themes, and Ctrl+K switching.
+    - Added native MiniMax Code provider management, Claude Desktop direct/local-proxy profiles, and nine-tool session routing.
+    - Added transport-aware STDIO/HTTP/SSE MCP creation with native Codex, Gemini, Grok Build, OpenCode, Hermes, and MiniMax mappings.
+    - Hardened credential storage, authenticated the local desktop proxy, preserved unmanaged configuration fields, and added rollback-safe writes.
+    - Fixed remote MCP format loss, desktop proxy lifecycle issues, responsive toolbar overflow, and duplicate Codex token accounting. Windows users should prefer the NSIS installer below.
 
     ## 下载 / Download
 

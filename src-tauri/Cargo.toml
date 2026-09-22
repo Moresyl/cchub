@@ -55,7 +55,15 @@ base64 = "0.22.1"
 url = "2"
 serde_yaml = "0.9"
 sha2 = "0.10"
-keyring = "3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["linux-native"] }
 
 [profile.dev]
 # Windows/MSVC has hit intermittent linker failures with optimized dev builds

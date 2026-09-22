@@ -47,6 +47,8 @@ const LOCAL_PROVIDER_PROXY_TOKEN: &str = "cchub-local-proxy";
 const DEFAULT_LOCAL_PROVIDER_PROXY_PORT: u16 = 34567;
 const MAX_PROXY_BODY_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PROXY_RESPONSE_BODY_BYTES: usize = 128 * 1024 * 1024;
+const PROXY_ROOT_ROUTE: &str = "/proxy/{tool_id}";
+const PROXY_PATH_ROUTE: &str = "/proxy/{tool_id}/{*path}";
 const MANAGED_PROXY_TOOLS: [&str; 8] = [
     "claude",
     "codex",
@@ -452,6 +454,12 @@ fn stop_local_provider_proxy_locked(runtime: &mut LocalProviderProxyRuntimeInner
     runtime.port = None;
 }
 
+fn build_local_provider_proxy_router() -> Router<ProxyRouterState> {
+    Router::new()
+        .route(PROXY_ROOT_ROUTE, any(handle_proxy_root))
+        .route(PROXY_PATH_ROUTE, any(handle_proxy_path))
+}
+
 fn spawn_local_provider_proxy_server(
     app_handle: AppHandle,
     port: u16,
@@ -467,12 +475,9 @@ fn spawn_local_provider_proxy_server(
         .set_nonblocking(true)
         .map_err(|e| e.to_string())?;
 
-    let router = Router::new()
-        .route("/proxy/:tool_id", any(handle_proxy_root))
-        .route("/proxy/:tool_id/*path", any(handle_proxy_path))
-        .with_state(ProxyRouterState {
-            app_handle: app_handle.clone(),
-        });
+    let router = build_local_provider_proxy_router().with_state(ProxyRouterState {
+        app_handle: app_handle.clone(),
+    });
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     crate::utils::append_runtime_log(
@@ -722,7 +727,8 @@ pub(crate) fn set_claude_desktop_proxy_enabled(
 
 #[cfg(test)]
 mod tests {
-    use super::{CircuitState, EndpointCircuitState};
+    use super::{CircuitState, EndpointCircuitState, PROXY_PATH_ROUTE, PROXY_ROOT_ROUTE};
+    use axum::{routing::any, Router};
     use std::time::Duration;
 
     #[test]
@@ -766,5 +772,12 @@ mod tests {
         assert_eq!(state.state, CircuitState::Open);
         assert!(state.open_until.is_some());
         assert_eq!(state.consecutive_failures, 0);
+    }
+
+    #[test]
+    fn local_proxy_routes_use_axum_v08_capture_syntax() {
+        let _router: Router = Router::new()
+            .route(PROXY_ROOT_ROUTE, any(|| async {}))
+            .route(PROXY_PATH_ROUTE, any(|| async {}));
     }
 }

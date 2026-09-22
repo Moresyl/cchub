@@ -54,6 +54,16 @@ interface SkillRegistryEntry {
   content: string;
 }
 
+interface DesktopProviderImportState {
+  providers: Array<{ id: string }>;
+}
+
+function claudeDesktopModels(request: DeepLinkImportRequest) {
+  return [...new Set([request.model, request.haikuModel, request.sonnetModel, request.opusModel])]
+    .map((model) => model?.trim() || "")
+    .filter((model) => /^claude-(sonnet|opus|haiku|fable)-[a-z0-9-]+$/i.test(model));
+}
+
 function DeepLinkImportDialogComponent() {
   const [queue, setQueue] = useState<DeepLinkImportRequest[]>([]);
   const [importing, setImporting] = useState(false);
@@ -206,6 +216,22 @@ function DeepLinkImportDialogComponent() {
       if (current.resource === "provider") {
         if (current.app === "mcode") {
           await invoke("import_from_deeplink", { request: current });
+        } else if (current.app === "claude-desktop") {
+          const state = await invoke<DesktopProviderImportState>("save_claude_desktop_provider", {
+            id: null,
+            name: current.name?.trim() || "Imported Provider",
+            baseUrl: current.endpoint?.trim() || "",
+            apiKey: current.apiKey?.trim() || "",
+            models: claudeDesktopModels(current),
+            mode: "direct",
+            apiFormat: "anthropic",
+            modelRoutes: {},
+          });
+          const imported = state.providers[state.providers.length - 1];
+          if (!imported) throw new Error("Claude Desktop provider import returned no provider");
+          if (current.enabled) {
+            await invoke("apply_claude_desktop_provider", { id: imported.id });
+          }
         } else {
           const profile = buildProviderProfileFromDeepLink(current);
           const profileId = await saveConfigProfileMutation.mutateAsync({

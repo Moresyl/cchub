@@ -11,6 +11,23 @@ use super::*;
 
 const SQL_BACKUP_BATCH_ROWS: usize = 200;
 const SQL_BACKUP_BATCH_BYTES: usize = 1024 * 1024;
+const TOOL_BACKUP_IDS: &[&str] = &[
+    "claude",
+    "codex",
+    "gemini",
+    "grokbuild",
+    "opencode",
+    "openclaw",
+    "hermes",
+    "pi",
+    "mcode",
+];
+const CLAUDE_DESKTOP_BACKUP_KEYS: &[&str] = &[
+    "normal-config",
+    "threep-config",
+    "managed-profile",
+    "profile-meta",
+];
 
 const BACKUP_DATA_TABLES: &[&str] = &[
     "mcp_servers",
@@ -147,9 +164,8 @@ pub fn restore_imported_artifacts(
                                 .is_ok()
                         }
                     }
-                    "codex" | "gemini" | "opencode" | "openclaw" | "hermes" => {
-                        apply_tool_snapshot(conn, &tool_id, &config_content).is_ok()
-                    }
+                    "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes"
+                    | "pi" => apply_tool_snapshot(conn, &tool_id, &config_content).is_ok(),
                     _ => false,
                 };
                 if restored {
@@ -347,10 +363,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
 
     // Tool config files
     sql.push_str("-- ── Tool Configs ──\n\n");
-    let tool_ids = [
-        "claude", "codex", "gemini", "opencode", "openclaw", "hermes", "pi",
-    ];
-    for tool_id in tool_ids {
+    for &tool_id in TOOL_BACKUP_IDS {
         if let Ok(content) = read_tool_snapshot(conn, tool_id) {
             let config_path = match tool_id {
                 "claude" => resolve_claude_paths(conn)
@@ -385,7 +398,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
 
     // Skill files
     sql.push_str("-- ── Skill Files ──\n\n");
-    for tool_id in tool_ids {
+    for &tool_id in TOOL_BACKUP_IDS {
         let skills_dir = match resolve_tool_skills_dir(conn, tool_id) {
             Ok(path) => path,
             Err(_) => continue,
@@ -423,7 +436,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
     // Full file backup for tool directories and standalone config files
     sql.push_str("-- ── Full File Backup ──\n\n");
     let mut backup_roots: Vec<(String, PathBuf)> = Vec::new();
-    for tool_id in tool_ids {
+    for &tool_id in TOOL_BACKUP_IDS {
         if let Ok(tool_dir) = resolve_tool_config_dir(conn, tool_id) {
             backup_roots.push((format!("tooldir:{}", tool_id), tool_dir.clone()));
 
@@ -440,6 +453,11 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
                     }
                 }
             }
+        }
+    }
+    for key in CLAUDE_DESKTOP_BACKUP_KEYS {
+        if let Ok(path) = crate::commands::claude_desktop_profiles::backup_path(key) {
+            backup_roots.push((format!("claude-desktop:{key}"), path));
         }
     }
 
@@ -832,5 +850,8 @@ mod tests {
         ] {
             assert!(BACKUP_DATA_TABLES.contains(&table));
         }
+        assert!(TOOL_BACKUP_IDS.contains(&"grokbuild"));
+        assert!(TOOL_BACKUP_IDS.contains(&"mcode"));
+        assert_eq!(CLAUDE_DESKTOP_BACKUP_KEYS.len(), 4);
     }
 }

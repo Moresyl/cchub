@@ -65,4 +65,30 @@ describe("Claude Desktop direct providers", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("restore_claude_desktop_official", undefined));
   });
+
+  it("submits explicit model routes for local proxy mode", async () => {
+    render(<ClaudeDesktopProviders locale="en" />);
+    fireEvent.click(await screen.findByRole("button", { name: "New provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Local proxy" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Responses" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Upstream URL" }), {
+      target: { value: "https://api.example.com/v1" },
+    });
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Model routes/ }), {
+      target: { value: "claude-sonnet-4-6=gpt-5.4\nclaude-opus-4-6=gpt-5.4-pro" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "save_claude_desktop_provider",
+        expect.objectContaining({
+          mode: "proxy",
+          apiFormat: "anthropic",
+          models: ["claude-sonnet-4-6", "claude-opus-4-6"],
+          modelRoutes: { "claude-sonnet-4-6": "gpt-5.4", "claude-opus-4-6": "gpt-5.4-pro" },
+        }),
+      ),
+    );
+  });
 });

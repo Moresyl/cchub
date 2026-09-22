@@ -280,8 +280,8 @@ fn parse_bool(value: Option<&String>) -> Option<bool> {
 
 fn validate_provider_app(app: &str) -> Result<(), AppError> {
     match app {
-        "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes"
-        | "mcode" => Ok(()),
+        "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode"
+        | "openclaw" | "hermes" | "mcode" => Ok(()),
         other => Err(AppError::Custom(format!(
             "Unsupported provider app in deep link: {other}"
         ))),

@@ -6,6 +6,8 @@ import { showToast } from "./Toast";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Textarea } from "./ui/textarea";
 import type { Locale } from "../lib/i18n";
 
 interface DirectProvider {
@@ -14,6 +16,9 @@ interface DirectProvider {
   baseUrl: string;
   hasApiKey: boolean;
   models: string[];
+  mode?: "direct" | "proxy";
+  apiFormat?: string;
+  modelRoutes?: Record<string, string>;
 }
 
 interface ProviderState {
@@ -28,6 +33,18 @@ interface Draft {
   baseUrl: string;
   apiKey: string;
   models: string;
+  mode: "direct" | "proxy";
+  apiFormat: string;
+  modelRoutes: string;
+}
+
+function parseRoutes(raw: string): Record<string, string> {
+  return Object.fromEntries(
+    raw
+      .split("\n")
+      .map((line) => line.split("=", 2).map((part) => part.trim()))
+      .filter(([route, model]) => route && model),
+  );
 }
 
 function validateDraft(draft: Draft): string | null {
@@ -45,12 +62,21 @@ function validateDraft(draft: Draft): string | null {
     return "Enter a valid gateway URL";
   }
   if (!draft.apiKey.trim() && !draft.id) return "Enter a gateway API key";
-  const models = draft.models
+  const models = (draft.mode === "proxy" ? Object.keys(parseRoutes(draft.modelRoutes)).join(",") : draft.models)
     .split(/[\n,]/)
     .map((model) => model.trim())
     .filter(Boolean);
   if (models.some((model) => !/^claude-(sonnet|opus|haiku|fable)-[a-z0-9-]+$/i.test(model))) {
     return "Use Claude Sonnet, Opus, Haiku or Fable model IDs";
+  }
+  if (draft.mode === "proxy") {
+    if (
+      !draft.modelRoutes.trim() ||
+      draft.modelRoutes.split("\n").some((line) => line.trim() && !/^[^=]+=[^=]+$/.test(line.trim()))
+    ) {
+      return "Map each Claude model to an upstream model using model=upstream";
+    }
+    if (!models.length) return "Add at least one model route";
   }
   return null;
 }
@@ -111,10 +137,16 @@ export default function ClaudeDesktopProviders({ locale }: { locale: Locale }) {
       name: draft.name,
       baseUrl: draft.baseUrl,
       apiKey: draft.apiKey,
-      models: draft.models
-        .split(/[\n,]/)
-        .map((model) => model.trim())
-        .filter(Boolean),
+      models:
+        draft.mode === "proxy"
+          ? Object.keys(parseRoutes(draft.modelRoutes))
+          : draft.models
+              .split(/[\n,]/)
+              .map((model) => model.trim())
+              .filter(Boolean),
+      mode: draft.mode,
+      apiFormat: draft.mode === "proxy" ? draft.apiFormat : "anthropic",
+      modelRoutes: draft.mode === "proxy" ? parseRoutes(draft.modelRoutes) : {},
     });
     if (saved) setDraft(null);
   };
@@ -127,7 +159,7 @@ export default function ClaudeDesktopProviders({ locale }: { locale: Locale }) {
             {label("Claude Desktop 供应商", "Claude Desktop providers", "Claude Desktop プロバイダー")}
           </h3>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            {label("直连网关", "Direct gateway", "直接ゲートウェイ")}
+            {label("直连 / 本地代理", "Direct / local proxy", "直接 / ローカルプロキシ")}
             {state?.activeId
               ? ` · ${label("第三方模式", "Third-party mode", "サードパーティモード")}`
               : ` · ${label("官方模式", "Official mode", "公式モード")}`}
@@ -144,7 +176,15 @@ export default function ClaudeDesktopProviders({ locale }: { locale: Locale }) {
             size="sm"
             onClick={() => {
               setError(null);
-              setDraft({ name: "", baseUrl: "", apiKey: "", models: "" });
+              setDraft({
+                name: "",
+                baseUrl: "",
+                apiKey: "",
+                models: "",
+                mode: "direct",
+                apiFormat: "anthropic",
+                modelRoutes: "",
+              });
             }}
           >
             <Plus size={14} />
@@ -175,6 +215,9 @@ export default function ClaudeDesktopProviders({ locale }: { locale: Locale }) {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <span className="truncate">{provider.name}</span>
+                <span className="shrink-0 text-[11px] font-normal text-[var(--text-muted)]">
+                  {provider.mode === "proxy" ? label("代理", "Proxy", "プロキシ") : label("直连", "Direct", "直接")}
+                </span>
                 {state.activeId === provider.id && (
                   <Check
                     size={14}
@@ -207,7 +250,16 @@ export default function ClaudeDesktopProviders({ locale }: { locale: Locale }) {
               title={label("编辑", "Edit")}
               onClick={() => {
                 setError(null);
-                setDraft({ ...provider, apiKey: "", models: provider.models.join("\n") });
+                setDraft({
+                  ...provider,
+                  apiKey: "",
+                  models: provider.models.join("\n"),
+                  mode: provider.mode ?? "direct",
+                  apiFormat: provider.apiFormat ?? "anthropic",
+                  modelRoutes: Object.entries(provider.modelRoutes ?? {})
+                    .map(([route, upstream]) => `${route}=${upstream}`)
+                    .join("\n"),
+                });
               }}
             >
               <Pencil size={15} />
@@ -259,8 +311,52 @@ export default function ClaudeDesktopProviders({ locale }: { locale: Locale }) {
                   onChange={(event) => setDraft({ ...draft, name: event.target.value })}
                 />
               </label>
+              <div
+                className="flex gap-1 rounded-md border border-[var(--border-default)] p-1"
+                role="group"
+                aria-label={label("连接模式", "Connection mode", "接続モード")}
+              >
+                <Button
+                  type="button"
+                  className="flex-1"
+                  size="sm"
+                  variant={draft.mode === "direct" ? "secondary" : "ghost"}
+                  aria-pressed={draft.mode === "direct"}
+                  onClick={() => setDraft({ ...draft, mode: "direct" })}
+                >
+                  {label("直连", "Direct", "直接")}
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1"
+                  size="sm"
+                  variant={draft.mode === "proxy" ? "secondary" : "ghost"}
+                  aria-pressed={draft.mode === "proxy"}
+                  onClick={() => setDraft({ ...draft, mode: "proxy" })}
+                >
+                  {label("本地代理", "Local proxy", "ローカルプロキシ")}
+                </Button>
+              </div>
+              {draft.mode === "proxy" && (
+                <label className="block text-xs font-medium">
+                  API
+                  <Select value={draft.apiFormat} onValueChange={(apiFormat) => setDraft({ ...draft, apiFormat })}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="anthropic">Anthropic Messages</SelectItem>
+                      <SelectItem value="openai_chat">OpenAI Chat Completions</SelectItem>
+                      <SelectItem value="openai_responses">OpenAI Responses</SelectItem>
+                      <SelectItem value="gemini_native">Gemini Native</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+              )}
               <label className="block text-xs font-medium">
-                {label("网关 URL", "Gateway URL", "ゲートウェイ URL")}
+                {draft.mode === "proxy"
+                  ? label("上游 URL", "Upstream URL", "上流 URL")
+                  : label("网关 URL", "Gateway URL", "ゲートウェイ URL")}
                 <Input
                   className="mt-1"
                   type="url"
@@ -274,25 +370,41 @@ export default function ClaudeDesktopProviders({ locale }: { locale: Locale }) {
                 <Input
                   className="mt-1"
                   type="password"
-                  autoComplete="off"
+                  autoComplete="new-password"
                   placeholder={draft.id ? label("留空保留原密钥", "Leave blank to keep current key") : ""}
                   value={draft.apiKey}
                   onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
                 />
               </label>
-              <label className="block text-xs font-medium">
-                {label(
-                  "模型 ID（逗号分隔，可选）",
-                  "Model IDs (comma-separated, optional)",
-                  "モデル ID（カンマ区切り、任意）",
-                )}
-                <Input
-                  className="mt-1"
-                  placeholder="claude-sonnet-4-6"
-                  value={draft.models}
-                  onChange={(event) => setDraft({ ...draft, models: event.target.value })}
-                />
-              </label>
+              {draft.mode === "direct" ? (
+                <label className="block text-xs font-medium">
+                  {label(
+                    "模型 ID（逗号分隔，可选）",
+                    "Model IDs (comma-separated, optional)",
+                    "モデル ID（カンマ区切り、任意）",
+                  )}
+                  <Input
+                    className="mt-1"
+                    placeholder="claude-sonnet-4-6"
+                    value={draft.models}
+                    onChange={(event) => setDraft({ ...draft, models: event.target.value })}
+                  />
+                </label>
+              ) : (
+                <label className="block text-xs font-medium">
+                  {label(
+                    "模型路由（每行 Claude ID=上游 ID）",
+                    "Model routes (Claude ID=upstream ID per line)",
+                    "モデルルート（行ごとに Claude ID=上流 ID）",
+                  )}
+                  <Textarea
+                    className="mt-1 min-h-24 font-mono"
+                    placeholder="claude-sonnet-4-6=upstream-model"
+                    value={draft.modelRoutes}
+                    onChange={(event) => setDraft({ ...draft, modelRoutes: event.target.value })}
+                  />
+                </label>
+              )}
               {error && (
                 <p role="alert" className="text-xs text-[var(--danger)]">
                   {error}

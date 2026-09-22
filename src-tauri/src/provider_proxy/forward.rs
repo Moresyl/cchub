@@ -16,6 +16,7 @@ use crate::provider_proxy_transform::{
 use super::cost::{
     extract_error_message_from_response, log_proxy_request, transform_claude_response_body,
 };
+use super::desktop;
 use super::optimizer::{apply_proxy_optimizers, read_optimizer_config, read_rectifier_config};
 use super::profiles::{
     canonicalize_base_url, is_claude_messages_path, ordered_profile_candidates,
@@ -38,8 +39,9 @@ pub(super) async fn forward_proxy_request(
     app_handle: AppHandle,
     tool_id: String,
     relative_path: String,
-    request: Request<Body>,
+    mut request: Request<Body>,
 ) -> Response<Body> {
+    let is_desktop = tool_id == "claude-desktop";
     let (settings, proxy_url) = {
         let db = app_handle.state::<DbState>();
         let conn = match db.0.lock() {
@@ -71,6 +73,24 @@ pub(super) async fn forward_proxy_request(
         );
     }
 
+    if is_desktop {
+        let db = app_handle.state::<DbState>();
+        let conn = match db.0.lock() {
+            Ok(conn) => conn,
+            Err(_) => {
+                return build_proxy_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database lock failed".to_string(),
+                )
+            }
+        };
+        if let Err(error) = desktop::authorize(&conn, request.headers()) {
+            return build_proxy_error(StatusCode::UNAUTHORIZED, error);
+        }
+        request.headers_mut().remove("authorization");
+        request.headers_mut().remove("x-api-key");
+    }
+
     let request_query = request.uri().query().map(str::to_string);
     let profile_candidates = {
         let db = app_handle.state::<DbState>();
@@ -84,7 +104,12 @@ pub(super) async fn forward_proxy_request(
             }
         };
 
-        match ordered_profile_candidates(&app_handle, &conn, &tool_id) {
+        let candidates = if is_desktop {
+            desktop::profile_candidates(&conn)
+        } else {
+            ordered_profile_candidates(&app_handle, &conn, &tool_id)
+        };
+        match candidates {
             Ok(value) => value,
             Err(error) => return build_proxy_error(StatusCode::BAD_GATEWAY, error),
         }
@@ -182,6 +207,15 @@ pub(super) async fn forward_proxy_request(
             .iter()
             .any(|(name, _)| name.as_str().eq_ignore_ascii_case("accept-encoding"));
 
+        let profile_body_bytes = if is_desktop && is_claude_messages_path(&original_relative_path) {
+            match desktop::rewrite_model(&body_bytes, &candidate.snapshot) {
+                Ok(body) => Bytes::from(body),
+                Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+            }
+        } else {
+            body_bytes.clone()
+        };
+
         let (effective_relative_path, effective_request_query, effective_body_bytes) =
             match upstream.claude_api_format {
                 Some(api_format)
@@ -194,11 +228,11 @@ pub(super) async fn forward_proxy_request(
                         api_format,
                         upstream.is_github_copilot,
                         upstream.is_codex_oauth,
-                        Some(body_bytes.as_ref()),
+                        Some(profile_body_bytes.as_ref()),
                     );
                     let transformed_body = match transform_claude_request_body(
                         api_format,
-                        body_bytes.as_ref(),
+                        profile_body_bytes.as_ref(),
                         upstream.is_codex_oauth,
                     ) {
                         Ok(body) => body,
@@ -209,7 +243,7 @@ pub(super) async fn forward_proxy_request(
                 _ => (
                     original_relative_path.clone(),
                     request_query.clone(),
-                    body_bytes.clone(),
+                    profile_body_bytes.clone(),
                 ),
             };
 
@@ -218,7 +252,7 @@ pub(super) async fn forward_proxy_request(
             upstream.request_body_override.as_ref(),
         );
         let optimizer_result = apply_proxy_optimizers(
-            &tool_id,
+            if is_desktop { "claude" } else { &tool_id },
             upstream.is_codex_oauth,
             effective_body_bytes,
             &original_headers,
@@ -513,7 +547,16 @@ pub(super) async fn forward_proxy_request(
                                         status.as_u16(),
                                         error_message.as_deref(),
                                     );
-                                    if let Some(transformed_body) = transformed_body {
+                                    if let Some(mut transformed_body) = transformed_body {
+                                        if is_desktop
+                                            && status.is_success()
+                                            && is_claude_messages_path(&original_relative_path)
+                                        {
+                                            desktop::restore_response_model(
+                                                &mut transformed_body,
+                                                &body_bytes,
+                                            );
+                                        }
                                         return build_json_response_from_value(
                                             status,
                                             &headers,
@@ -559,6 +602,19 @@ pub(super) async fn forward_proxy_request(
                                 status.as_u16(),
                                 None,
                             );
+                            let desktop_model = if is_desktop
+                                && status.is_success()
+                                && is_claude_messages_path(&original_relative_path)
+                            {
+                                parse_json_bytes(&body_bytes).and_then(|value| {
+                                    value
+                                        .get("model")
+                                        .and_then(Value::as_str)
+                                        .map(str::to_string)
+                                })
+                            } else {
+                                None
+                            };
                             if let Some(api_format) = claude_transform {
                                 let body = match api_format {
                                     ClaudeApiFormat::OpenAiChat => {
@@ -619,6 +675,14 @@ pub(super) async fn forward_proxy_request(
                                         ))
                                     }
                                 };
+                                let body = if is_desktop {
+                                    Body::from_stream(desktop::restore_stream_model(
+                                        body.into_data_stream(),
+                                        desktop_model,
+                                    ))
+                                } else {
+                                    body
+                                };
                                 return build_forward_response_from_parts(status, &headers, body);
                             }
                             if content_type.contains("text/event-stream") {
@@ -632,6 +696,14 @@ pub(super) async fn forward_proxy_request(
                                     optimizer_config.streaming_first_byte_timeout,
                                     optimizer_config.streaming_idle_timeout,
                                 ));
+                                let body = if is_desktop {
+                                    Body::from_stream(desktop::restore_stream_model(
+                                        body.into_data_stream(),
+                                        desktop_model,
+                                    ))
+                                } else {
+                                    body
+                                };
                                 return build_forward_response_from_parts(status, &headers, body);
                             }
                             return build_forward_response(response);

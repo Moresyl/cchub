@@ -49,7 +49,7 @@ pub(super) async fn extract_upstream_target(
     let (request_header_overrides, request_body_override) = extract_local_proxy_overrides(&parsed);
 
     let target = match tool_id {
-        "claude" => {
+        "claude" | "claude-desktop" => {
             let env = parsed
                 .get("env")
                 .and_then(|value| value.as_object())

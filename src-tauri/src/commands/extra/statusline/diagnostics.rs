@@ -146,6 +146,10 @@ pub fn resolve_backup_root(conn: &rusqlite::Connection, root_key: &str) -> Resul
         return resolve_tool_skills_dir(conn, tool_id);
     }
 
+    if let Some(key) = root_key.strip_prefix("claude-desktop:") {
+        return crate::commands::claude_desktop_profiles::backup_path(key);
+    }
+
     if let Some(project_root) = root_key.strip_prefix("project:") {
         return Ok(PathBuf::from(project_root));
     }

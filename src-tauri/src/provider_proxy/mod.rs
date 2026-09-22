@@ -15,6 +15,7 @@ use tokio::sync::oneshot;
 
 mod alpha_search;
 mod cost;
+mod desktop;
 mod forward;
 mod optimizer;
 mod profiles;
@@ -46,7 +47,7 @@ const LOCAL_PROVIDER_PROXY_TOKEN: &str = "cchub-local-proxy";
 const DEFAULT_LOCAL_PROVIDER_PROXY_PORT: u16 = 34567;
 const MAX_PROXY_BODY_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PROXY_RESPONSE_BODY_BYTES: usize = 128 * 1024 * 1024;
-const MANAGED_PROXY_TOOLS: [&str; 7] = [
+const MANAGED_PROXY_TOOLS: [&str; 8] = [
     "claude",
     "codex",
     "gemini",
@@ -54,6 +55,7 @@ const MANAGED_PROXY_TOOLS: [&str; 7] = [
     "opencode",
     "openclaw",
     "hermes",
+    "claude-desktop",
 ];
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -642,12 +644,23 @@ pub fn set_local_provider_proxy_settings(
     app_handle: tauri::AppHandle,
     db: TauriState<'_, DbState>,
 ) -> Result<LocalProviderProxyStatus, String> {
-    let normalized = normalize_local_provider_proxy_settings(settings);
+    let mut normalized = normalize_local_provider_proxy_settings(settings);
 
     let previous = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         read_local_provider_proxy_settings_from_conn(&conn)
     };
+    if previous
+        .enabled_apps
+        .iter()
+        .any(|app| app == "claude-desktop")
+        && !normalized
+            .enabled_apps
+            .iter()
+            .any(|app| app == "claude-desktop")
+    {
+        normalized.enabled_apps.push("claude-desktop".to_string());
+    }
 
     {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -678,6 +691,33 @@ pub fn set_local_provider_proxy_settings(
     );
 
     build_local_provider_proxy_status(&app_handle, normalized)
+}
+
+pub(crate) fn set_claude_desktop_proxy_enabled(
+    app_handle: &AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let db = app_handle.state::<DbState>();
+    let previous = {
+        let conn = db.0.lock().map_err(|error| error.to_string())?;
+        let previous = read_local_provider_proxy_settings_from_conn(&conn);
+        let mut next = previous.clone();
+        next.enabled_apps.retain(|app| app != "claude-desktop");
+        if enabled {
+            next.enabled_apps.push("claude-desktop".to_string());
+        }
+        if next.enabled_apps == previous.enabled_apps {
+            return Ok(());
+        }
+        write_local_provider_proxy_settings_to_conn(&conn, &next)?;
+        previous
+    };
+    if let Err(error) = sync_local_provider_proxy_server(app_handle) {
+        let conn = db.0.lock().map_err(|lock_error| lock_error.to_string())?;
+        write_local_provider_proxy_settings_to_conn(&conn, &previous)?;
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

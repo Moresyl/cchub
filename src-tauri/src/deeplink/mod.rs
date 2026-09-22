@@ -183,7 +183,7 @@ pub async fn merge_deeplink_request(
         .ok_or_else(|| AppError::Custom("Missing app field for provider deep link".to_string()))?;
 
     match app_id.as_str() {
-        "claude" => merge_claude_config(&mut request, &config_text)?,
+        "claude" | "claude-desktop" => merge_claude_config(&mut request, &config_text)?,
         "codex" => merge_codex_config(&mut request, &config_text)?,
         "gemini" => merge_gemini_config(&mut request, &config_text)?,
         "openclaw" => merge_openclaw_config(&mut request, &config_text)?,
@@ -724,6 +724,12 @@ mod tests {
         assert_eq!(provider.app.as_deref(), Some("mcode"));
         let mcp = parse_deeplink_url("cchub://v1/import?resource=mcp&apps=mcode&name=service&config=%7B%22command%22%3A%22tool%22%7D").unwrap();
         assert_eq!(mcp.apps.as_deref(), Some("mcode"));
+
+        let desktop = parse_deeplink_url(
+            "cchub://v1/import?resource=provider&app=claude-desktop&name=Desktop&endpoint=https%3A%2F%2Fapi.example.com&apiKey=secret",
+        )
+        .unwrap();
+        assert_eq!(desktop.app.as_deref(), Some("claude-desktop"));
     }
 
     #[test]

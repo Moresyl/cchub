@@ -12,7 +12,7 @@ import {
 } from "./configProfiles";
 
 export type DeepLinkResource = "provider" | "prompt" | "mcp" | "skill";
-export type DeepLinkApp = StructuredConfigTool | "mcode";
+export type DeepLinkApp = StructuredConfigTool | "claude-desktop" | "mcode";
 
 export interface DeepLinkImportRequest {
   version: string;
@@ -352,8 +352,8 @@ export function buildProviderProfileFromDeepLink(request: DeepLinkImportRequest)
   }
 
   const toolId = request.app;
-  if (toolId === "mcode") {
-    throw new Error("MiniMax Code providers use the native provider import path");
+  if (toolId === "mcode" || toolId === "claude-desktop") {
+    throw new Error(`${toolId} providers use the native provider import path`);
   }
   const fields = createDefaultStructuredFields(toolId);
   const endpoints = splitDeepLinkEndpoints(request.endpoint);

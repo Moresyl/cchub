@@ -65,6 +65,12 @@ describe("deep link payloads", () => {
     );
   });
 
+  it("keeps Claude Desktop out of CLI whole-file profile import", () => {
+    expect(() =>
+      buildProviderProfileFromDeepLink({ version: "v1", resource: "provider", app: "claude-desktop" }),
+    ).toThrow("native provider import path");
+  });
+
   it("marks risky MCP values and masks credentials", () => {
     expect(classifyDeepLinkEndpoint("http://127.0.0.1:11434")).toBe("privateEndpoint");
     expect(classifyDeepLinkEnvKey("NODE_OPTIONS")).toBe("envHijack");

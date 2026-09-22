@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Globe, Moon, Palette, Sun } from "lucide-react";
+import { Globe, Monitor, Moon, Palette, Sun } from "lucide-react";
 import type { Locale } from "../lib/i18n";
 import type { Theme } from "../lib/theme";
 import SettingsChoiceButton from "./SettingsChoiceButton";
@@ -10,6 +10,7 @@ interface SettingsAppearanceSectionProps {
   languageLabel: string;
   darkLabel: string;
   lightLabel: string;
+  systemLabel: string;
   theme: Theme;
   locale: Locale;
   onThemeChange: (theme: Theme) => void | Promise<void>;
@@ -22,6 +23,7 @@ function SettingsAppearanceSectionComponent({
   languageLabel,
   darkLabel,
   lightLabel,
+  systemLabel,
   theme,
   locale,
   onThemeChange,
@@ -54,6 +56,13 @@ function SettingsAppearanceSectionComponent({
               icon={Sun}
               onSelect={onThemeChange}
             />
+            <SettingsChoiceButton
+              value="system"
+              label={systemLabel}
+              active={theme === "system"}
+              icon={Monitor}
+              onSelect={onThemeChange}
+            />
           </div>
         </div>
 
@@ -65,24 +74,9 @@ function SettingsAppearanceSectionComponent({
             <p style={{ fontSize: 14, fontWeight: 500 }}>{languageLabel}</p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <SettingsChoiceButton
-              value="zh"
-              label="中文"
-              active={locale === "zh"}
-              onSelect={onLocaleChange}
-            />
-            <SettingsChoiceButton
-              value="en"
-              label="English"
-              active={locale === "en"}
-              onSelect={onLocaleChange}
-            />
-            <SettingsChoiceButton
-              value="ja"
-              label="日本語"
-              active={locale === "ja"}
-              onSelect={onLocaleChange}
-            />
+            <SettingsChoiceButton value="zh" label="中文" active={locale === "zh"} onSelect={onLocaleChange} />
+            <SettingsChoiceButton value="en" label="English" active={locale === "en"} onSelect={onLocaleChange} />
+            <SettingsChoiceButton value="ja" label="日本語" active={locale === "ja"} onSelect={onLocaleChange} />
           </div>
         </div>
       </div>

@@ -9,7 +9,7 @@
       (function () {
         try {
           var saved = localStorage.getItem("cchub-theme");
-          if (saved === "light") {
+          if (saved === "light" || (saved === "system" && matchMedia("(prefers-color-scheme: light)").matches)) {
             document.documentElement.setAttribute("data-theme", "light");
           }
         } catch (e) {}

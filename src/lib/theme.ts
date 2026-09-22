@@ -12,10 +12,20 @@ export function setTheme(theme: Theme) {
   applyTheme(theme);
 }
 
+function resolveTheme(theme: Theme): "dark" | "light" {
+  if (theme !== "system") return theme;
+  return window.matchMedia?.("(prefers-color-scheme: light)")?.matches ? "light" : "dark";
+}
+
+export function getResolvedTheme(): "dark" | "light" {
+  return resolveTheme(getTheme());
+}
+
 export function applyTheme(theme: Theme) {
   const root = document.documentElement;
+  const resolved = resolveTheme(theme);
   const apply = () => {
-    root.setAttribute("data-theme", theme);
+    root.setAttribute("data-theme", resolved);
   };
 
   const startViewTransition = (
@@ -23,7 +33,7 @@ export function applyTheme(theme: Theme) {
       startViewTransition?: (callback: () => void) => void;
     }
   ).startViewTransition?.bind(document);
-  if (!startViewTransition || root.getAttribute("data-theme") === theme) {
+  if (!startViewTransition || root.getAttribute("data-theme") === resolved) {
     apply();
     return;
   }
@@ -35,4 +45,7 @@ export function applyTheme(theme: Theme) {
 
 export function initTheme() {
   applyTheme(getTheme());
+  window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", () => {
+    if (getTheme() === "system") applyTheme("system");
+  });
 }

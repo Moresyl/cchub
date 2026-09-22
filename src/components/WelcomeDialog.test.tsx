@@ -29,4 +29,23 @@ describe("WelcomeDialog", () => {
     expect(onSelectTheme).toHaveBeenCalledWith("light");
     expect(onFinish).toHaveBeenCalledTimes(1);
   });
+
+  it("allows following the operating system theme", () => {
+    const onSelectTheme = vi.fn();
+    render(
+      <WelcomeDialog
+        open
+        locale="zh"
+        theme="dark"
+        installedToolCount={0}
+        profileCount={0}
+        onSelectLocale={vi.fn()}
+        onSelectTheme={onSelectTheme}
+        onFinish={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "跟随系统" }));
+    expect(onSelectTheme).toHaveBeenCalledWith("system");
+  });
 });

@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { LucideIcon } from "lucide-react";
+import { Button } from "./ui/button";
 
 interface SettingsChoiceButtonProps<T extends string> {
   value: T;
@@ -19,15 +20,18 @@ function SettingsChoiceButtonComponent<T extends string>({
   onSelect,
 }: SettingsChoiceButtonProps<T>) {
   return (
-    <button
-      className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
+    <Button
+      type="button"
+      variant={active ? "default" : "secondary"}
+      size="sm"
+      aria-pressed={active}
       onClick={() => void onSelect(value)}
       disabled={disabled}
-      style={{ gap: 6 }}
+      className="gap-1.5"
     >
       {Icon ? <Icon size={14} /> : null}
       {label}
-    </button>
+    </Button>
   );
 }
 

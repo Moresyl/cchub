@@ -576,6 +576,7 @@ export default function Settings() {
             languageLabel={i.settings.language}
             darkLabel={i.settings.dark}
             lightLabel={i.settings.light}
+            systemLabel={i.settings.system}
             theme={theme}
             locale={locale}
             onThemeChange={handleThemeChange}

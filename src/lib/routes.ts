@@ -1,7 +1,12 @@
 export const pageImports = {
   "/": () => import("../pages/Profiles"),
   "/mcp-servers": () => import("../pages/McpServers"),
+  "/prompts": () => import("../pages/Prompts"),
   "/skills": () => import("../pages/Skills"),
+  "/sessions": () => import("../pages/Sessions"),
+  "/usage": () => import("../pages/Usage"),
+  "/proxy-advanced": () => import("../pages/ProxyAdvanced"),
+  "/openclaw": () => import("../pages/OpenClaw"),
   "/config-files": () => import("../pages/ConfigFiles"),
   "/settings": () => import("../pages/Settings"),
 } as const;

@@ -17,7 +17,8 @@ function readLegacyLocale(): Locale {
 
 function readLegacyTheme(): Theme {
   if (typeof localStorage === "undefined") return "dark";
-  return localStorage.getItem("cchub-theme") === "light" ? "light" : "dark";
+  const saved = localStorage.getItem("cchub-theme");
+  return saved === "light" || saved === "system" ? saved : "dark";
 }
 
 export const usePreferences = create<PreferencesState>()(

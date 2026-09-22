@@ -1,5 +1,15 @@
 import { memo } from "react";
-import { ArrowRight, CheckCircle2, Globe2, MoonStar, Palette, ScanSearch, SunMedium, Wrench } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Globe2,
+  Monitor,
+  MoonStar,
+  Palette,
+  ScanSearch,
+  SunMedium,
+  Wrench,
+} from "lucide-react";
 import type { Theme } from "../lib/theme";
 import type { Locale } from "../lib/i18n";
 import { Button } from "./ui/button";
@@ -47,6 +57,7 @@ function WelcomeDialogComponent({
   const themeOptions: Array<{ id: Theme; label: string; icon: typeof MoonStar }> = [
     { id: "dark", label: uiText(locale, "深色", "Dark", "ダーク"), icon: MoonStar },
     { id: "light", label: uiText(locale, "浅色", "Light", "ライト"), icon: SunMedium },
+    { id: "system", label: uiText(locale, "跟随系统", "System", "システムに合わせる"), icon: Monitor },
   ];
 
   const scanDescription = uiText(

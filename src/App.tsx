@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ComponentType,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -31,6 +32,7 @@ import type { EnvironmentConflict } from "./lib/appPreferences";
 import { queryClient } from "./lib/queryClient";
 import { scheduleIdleTask } from "./lib/idleTask";
 import { pageImports, type RoutePath } from "./lib/routes";
+import { clampSidebarWidth, readSidebarWidth } from "./lib/sidebarWidth";
 import { useSetWelcomeCompletedMutation } from "./hooks/mutations";
 
 const routeComponents: ReadonlyArray<{
@@ -113,6 +115,7 @@ function AppShell() {
       return false;
     }
   });
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   const [installedToolCount, setInstalledToolCount] = useState(0);
   const [profileCount, setProfileCount] = useState(0);
   const lastEnvConflictLoadAtRef = useRef(0);
@@ -267,6 +270,16 @@ function AppShell() {
     });
   }, []);
 
+  const resizeSidebar = useCallback((width: number) => {
+    const next = clampSidebarWidth(width);
+    setSidebarWidth(next);
+    try {
+      window.localStorage.setItem("cchub:sidebar-width", String(next));
+    } catch {
+      // Keep the current layout usable without storage.
+    }
+  }, []);
+
   const handleWelcomeFinish = useCallback(async () => {
     try {
       await setWelcomeCompletedMutation.mutateAsync({ completed: true });
@@ -307,8 +320,8 @@ function AppShell() {
           />
         </Suspense>
       )}
-      <div className="app-layout">
-        <Sidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+      <div className="app-layout" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+        <Sidebar collapsed={sidebarCollapsed} width={sidebarWidth} onResize={resizeSidebar} onToggle={toggleSidebar} />
         <div className="main-area">
           <NavigationProgress />
           <Header />

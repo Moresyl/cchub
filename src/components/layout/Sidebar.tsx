@@ -1,17 +1,20 @@
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { Command, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { getLocale, t } from "../../lib/i18n";
 import { getNavigationSection, navigationSections } from "../../lib/navigation";
 import { preloadRoute } from "../../lib/routes";
 import { Button } from "../ui/button";
+import { DEFAULT_SIDEBAR_WIDTH } from "../../lib/sidebarWidth";
 
 interface SidebarProps {
   collapsed: boolean;
+  width: number;
+  onResize: (width: number) => void;
   onToggle: () => void;
 }
 
-function SidebarComponent({ collapsed, onToggle }: SidebarProps) {
+function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps) {
   const i = t();
   const location = useLocation();
   const navigate = useNavigate();
@@ -38,6 +41,20 @@ function SidebarComponent({ collapsed, onToggle }: SidebarProps) {
   );
 
   useEffect(() => cancelHover, [cancelHover]);
+
+  const handleResizeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    onResize(event.clientX - event.currentTarget.closest("aside")!.getBoundingClientRect().left);
+  };
+
+  const handleResizeKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const delta = event.shiftKey ? 32 : 8;
+    if (event.key === "ArrowLeft") onResize(width - delta);
+    else if (event.key === "ArrowRight") onResize(width + delta);
+    else if (event.key === "Home") onResize(DEFAULT_SIDEBAR_WIDTH);
+    else return;
+    event.preventDefault();
+  };
 
   return (
     <aside className={`sidebar-shell ${collapsed ? "sidebar-collapsed" : ""}`} aria-label={i.app.name}>
@@ -74,17 +91,7 @@ function SidebarComponent({ collapsed, onToggle }: SidebarProps) {
         {navigationSections.slice(0, -1).map((section) => (
           <div className="sidebar-nav-group" key={section.key}>
             <div className="sidebar-nav-label">
-              {section.key === "overview"
-                ? locale === "zh"
-                  ? "工作区"
-                  : locale === "ja"
-                    ? "ワークスペース"
-                    : "Workspace"
-                : locale === "zh"
-                  ? "配置管理"
-                  : locale === "ja"
-                    ? "設定管理"
-                    : "Configuration"}
+              {section.key === "settings" ? i.nav.settings : i.navGroups[section.key]}
             </div>
             {section.items.map((item) => {
               const Icon = item.icon;
@@ -126,6 +133,27 @@ function SidebarComponent({ collapsed, onToggle }: SidebarProps) {
         </NavLink>
         <span className="sidebar-version">CCHub · v{__APP_VERSION__}</span>
       </footer>
+      {!collapsed && (
+        <div
+          className="sidebar-resize-handle"
+          role="separator"
+          tabIndex={0}
+          aria-label={locale === "zh" ? "调整侧栏宽度" : locale === "ja" ? "サイドバーの幅を調整" : "Resize sidebar"}
+          aria-orientation="vertical"
+          aria-valuenow={width}
+          aria-valuemin={216}
+          aria-valuemax={360}
+          onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) =>
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }
+          onPointerMove={handleResizeMove}
+          onPointerUp={(event: ReactPointerEvent<HTMLDivElement>) =>
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          onDoubleClick={() => onResize(DEFAULT_SIDEBAR_WIDTH)}
+          onKeyDown={handleResizeKey}
+        />
+      )}
     </aside>
   );
 }

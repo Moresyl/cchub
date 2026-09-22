@@ -6,7 +6,7 @@ import { useApplyConfigProfileMutation } from "../hooks/mutations";
 import type { ConfigProfileQueryResult } from "../hooks/queries";
 import { getLocale, t } from "../lib/i18n";
 import { navigationSections } from "../lib/navigation";
-import { getTheme, setTheme } from "../lib/theme";
+import { getResolvedTheme, setTheme } from "../lib/theme";
 import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { showToast } from "./Toast";
 
@@ -136,10 +136,10 @@ function CommandPaletteComponent({ open, onOpenChange, navigate, currentPath }: 
               <Command.Item
                 onSelect={() => {
                   close();
-                  setTheme(getTheme() === "dark" ? "light" : "dark");
+                  setTheme(getResolvedTheme() === "dark" ? "light" : "dark");
                 }}
               >
-                {getTheme() === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+                {getResolvedTheme() === "dark" ? <Sun size={16} /> : <Moon size={16} />}
                 <span>{text("切换主题", "Toggle theme", "テーマを切替")}</span>
               </Command.Item>
             </Command.Group>

@@ -1,7 +1,7 @@
 import { memo, useCallback } from "react";
-import { Sun, Moon, ArrowUpCircle, Search } from "lucide-react";
+import { Sun, Moon, Monitor, ArrowUpCircle, Search } from "lucide-react";
 import { useLocation } from "react-router-dom";
-import { setTheme } from "../../lib/theme";
+import { getResolvedTheme, setTheme } from "../../lib/theme";
 import { getLocale, t } from "../../lib/i18n";
 import { getNavigationSection } from "../../lib/navigation";
 import { usePreferences } from "../../stores/preferences";
@@ -29,9 +29,9 @@ function HeaderComponent() {
       : sectionTitle;
 
   const toggleTheme = useCallback(() => {
-    const next = currentTheme === "dark" ? "light" : "dark";
+    const next = getResolvedTheme() === "dark" ? "light" : "dark";
     setTheme(next);
-  }, [currentTheme]);
+  }, []);
 
   return (
     <header className="topbar">
@@ -55,10 +55,16 @@ function HeaderComponent() {
           variant="ghost"
           size="icon"
           onClick={toggleTheme}
-          aria-label={`${i.settings.theme}: ${currentTheme === "dark" ? i.settings.light : i.settings.dark}`}
-          title={`${i.settings.theme}: ${currentTheme === "dark" ? i.settings.light : i.settings.dark}`}
+          aria-label={`${i.settings.theme}: ${getResolvedTheme() === "dark" ? i.settings.light : i.settings.dark}`}
+          title={`${i.settings.theme}: ${getResolvedTheme() === "dark" ? i.settings.light : i.settings.dark}`}
         >
-          {currentTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          {currentTheme === "system" ? (
+            <Monitor size={16} />
+          ) : currentTheme === "dark" ? (
+            <Sun size={16} />
+          ) : (
+            <Moon size={16} />
+          )}
         </Button>
 
         {updateAvailable && (

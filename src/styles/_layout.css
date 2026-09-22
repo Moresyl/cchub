@@ -327,14 +327,15 @@
 
 /* Configuration workspace shell */
 .sidebar-shell {
-  width: 252px;
-  min-width: 252px;
+  position: relative;
+  width: var(--sidebar-width, 264px);
+  min-width: var(--sidebar-width, 264px);
   flex-direction: column;
   border-right-color: var(--border-subtle);
 }
 
 .sidebar-brand {
-  height: 66px;
+  height: 48px;
   padding: 0 18px;
   display: flex;
   align-items: center;
@@ -447,7 +448,7 @@
   min-width: 64px;
 }
 .sidebar-collapsed .sidebar-brand {
-  height: 66px;
+  height: 48px;
   padding: 8px;
   flex-direction: column;
   gap: 2px;
@@ -475,7 +476,7 @@
 }
 
 .topbar {
-  height: 66px;
+  height: 48px;
   padding: 0 28px;
   background: var(--bg-app);
   border-bottom-color: var(--border-subtle);
@@ -494,11 +495,23 @@
   width: min(100%, 1440px);
 }
 
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 11;
+}
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
 @media (max-width: 900px) {
-  .sidebar-shell {
-    width: 204px;
-    min-width: 204px;
-  }
   .topbar {
     padding: 0 16px;
   }
@@ -517,6 +530,9 @@
     height: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border-default);
+  }
+  .sidebar-resize-handle {
+    display: none;
   }
   .sidebar-collapsed {
     width: 100%;

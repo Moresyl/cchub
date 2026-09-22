@@ -290,8 +290,8 @@ fn validate_provider_app(app: &str) -> Result<(), AppError> {
 
 fn validate_mcp_app(app: &str) -> Result<(), AppError> {
     match app {
-        "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode"
-        | "openclaw" | "hermes" | "mcode" => Ok(()),
+        "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes"
+        | "mcode" => Ok(()),
         other => Err(AppError::Custom(format!(
             "Unsupported MCP target app in deep link: {other}"
         ))),

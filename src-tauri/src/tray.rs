@@ -5,11 +5,23 @@ use tauri::{
 
 use crate::{commands::extra_commands, db};
 
+const TOOL_ORDER: [&str; 8] = [
+    "claude",
+    "codex",
+    "gemini",
+    "grokbuild",
+    "opencode",
+    "openclaw",
+    "hermes",
+    "pi",
+];
+
 fn tool_label(tool_id: &str) -> &'static str {
     match tool_id {
         "claude" => "Claude",
         "codex" => "Codex",
         "gemini" => "Gemini",
+        "grokbuild" => "Grok Build",
         "opencode" => "OpenCode",
         "openclaw" => "OpenClaw",
         "hermes" => "Hermes",
@@ -37,10 +49,7 @@ pub(crate) fn refresh_menu(app_handle: &AppHandle) -> Result<(), tauri::Error> {
         .collect::<std::collections::HashSet<_>>();
     let mut menu_builder = MenuBuilder::new(app_handle).item(&show);
     menu_builder = menu_builder.separator();
-    let tool_order = [
-        "claude", "codex", "gemini", "opencode", "openclaw", "hermes", "pi",
-    ];
-    for tool_id in tool_order {
+    for tool_id in TOOL_ORDER {
         let tool_profiles = profiles
             .iter()
             .filter(|profile| profile.tool_id == tool_id)
@@ -70,4 +79,16 @@ pub(crate) fn refresh_menu(app_handle: &AppHandle) -> Result<(), tauri::Error> {
         tray.set_menu(Some(menu))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{tool_label, TOOL_ORDER};
+
+    #[test]
+    fn tray_includes_every_switchable_profile_tool() {
+        assert!(TOOL_ORDER.contains(&"grokbuild"));
+        assert_eq!(tool_label("grokbuild"), "Grok Build");
+        assert!(!TOOL_ORDER.contains(&"mcode"));
+    }
 }

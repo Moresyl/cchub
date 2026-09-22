@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
@@ -375,7 +373,6 @@ fn parse_target_apps(raw: &str) -> Result<Vec<String>, String> {
                     apps.push(value.to_string());
                 }
             }
-            "openclaw" => {}
             other => return Err(format!("Unsupported MCP target app: {other}")),
         }
     }
@@ -399,14 +396,27 @@ fn parse_mcp_servers(
         serde_json::from_str(&config_text).map_err(|error| format!("Invalid MCP JSON: {error}"))?;
 
     let mut servers = Vec::new();
-    if let Some(object) = parsed.get("mcpServers").and_then(Value::as_object) {
+    let wrapped = parsed
+        .get("mcpServers")
+        .or_else(|| parsed.get("mcp"))
+        .and_then(Value::as_object);
+    if let Some(object) = wrapped {
         for (name, value) in object {
+            if value.get("enabled").and_then(Value::as_bool) == Some(false) {
+                continue;
+            }
             servers.push((name.clone(), parse_mcp_server_config(value)?));
+        }
+        if servers.is_empty() {
+            return Err("No enabled MCP servers found in deep link config".to_string());
         }
         return Ok(servers);
     }
 
-    if parsed.get("command").is_some() || parsed.get("url").is_some() {
+    if parsed.get("command").is_some()
+        || parsed.get("url").is_some()
+        || parsed.get("httpUrl").is_some()
+    {
         let name = request
             .name
             .clone()
@@ -417,10 +427,9 @@ fn parse_mcp_servers(
 
     if let Some(object) = parsed.as_object() {
         for (name, value) in object {
-            if value.get("command").is_none() {
-                continue;
+            if let Ok(config) = parse_mcp_server_config(value) {
+                servers.push((name.clone(), config));
             }
-            servers.push((name.clone(), parse_mcp_server_config(value)?));
         }
     }
 
@@ -432,53 +441,24 @@ fn parse_mcp_servers(
 }
 
 fn parse_mcp_server_config(value: &Value) -> Result<McpServerConfig, String> {
-    let command = value
-        .get("command")
-        .or_else(|| value.get("url"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| "MCP server config missing command".to_string())?
-        .to_string();
-    let args = value
-        .get("args")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let env = value
-        .get("env")
-        .or_else(|| value.get("headers"))
-        .and_then(Value::as_object)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|(key, value)| {
-                    value.as_str().map(|text| (key.clone(), text.to_string()))
-                })
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_default();
-    let transport_type = value
-        .get("type")
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .or_else(|| value.get("url").map(|_| "http".to_string()));
-
+    let server = config::parse_server_entry("deeplink", value, "deeplink", "")
+        .ok_or_else(|| "MCP server config is disabled or missing a command/URL".to_string())?;
+    if !matches!(server.transport.as_str(), "stdio" | "http" | "sse") {
+        return Err(format!("Unsupported MCP transport: {}", server.transport));
+    }
     Ok(McpServerConfig {
-        command,
-        args,
-        env,
-        transport_type,
+        command: server.command,
+        args: server.args,
+        env: server.env,
+        transport_type: Some(server.transport),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{mcode_provider_from_request, parse_mcp_server_config, provider_snapshot};
+    use super::{
+        mcode_provider_from_request, parse_mcp_server_config, parse_target_apps, provider_snapshot,
+    };
     use crate::deeplink::parse_deeplink_url;
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
@@ -497,6 +477,35 @@ mod tests {
             config.env.get("Authorization").map(String::as_str),
             Some("Bearer secret")
         );
+    }
+
+    #[test]
+    fn parses_opencode_and_gemini_native_mcp_shapes() {
+        let local = parse_mcp_server_config(&json!({
+            "type": "local",
+            "command": ["node", "server.js"],
+            "environment": {"TOKEN": "secret"},
+            "enabled": true
+        }))
+        .unwrap();
+        assert_eq!(local.command, "node");
+        assert_eq!(local.args, vec!["server.js"]);
+        assert_eq!(local.transport_type.as_deref(), Some("stdio"));
+
+        let remote = parse_mcp_server_config(&json!({
+            "httpUrl": "https://example.com/mcp",
+            "headers": {"X-API-Key": "secret"}
+        }))
+        .unwrap();
+        assert_eq!(remote.command, "https://example.com/mcp");
+        assert_eq!(remote.transport_type.as_deref(), Some("http"));
+    }
+
+    #[test]
+    fn rejects_clients_without_native_mcp_support() {
+        assert!(parse_target_apps("openclaw").is_err());
+        assert!(parse_target_apps("pi").is_err());
+        assert_eq!(parse_target_apps("claude,gemini").unwrap().len(), 2);
     }
 
     #[test]

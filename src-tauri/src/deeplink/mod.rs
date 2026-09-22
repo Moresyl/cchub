@@ -733,6 +733,22 @@ mod tests {
     }
 
     #[test]
+    fn rejects_mcp_targets_without_a_native_registry() {
+        let provider = parse_deeplink_url(
+            "cchub://v1/import?resource=provider&app=openclaw&name=Provider&endpoint=https%3A%2F%2Fexample.com",
+        );
+        assert!(provider.is_ok());
+        let openclaw = parse_deeplink_url(
+            "cchub://v1/import?resource=mcp&apps=openclaw&name=service&config=%7B%22command%22%3A%22tool%22%7D",
+        );
+        assert!(openclaw.is_err());
+        let pi = parse_deeplink_url(
+            "cchub://v1/import?resource=mcp&apps=pi&name=service&config=%7B%22command%22%3A%22tool%22%7D",
+        );
+        assert!(pi.is_err());
+    }
+
+    #[test]
     fn restores_plus_signs_from_query_decoding() {
         let encoded = "4KC+";
         let with_query_space = encoded.replace('+', " ");

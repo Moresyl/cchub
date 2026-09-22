@@ -42,11 +42,14 @@
   color: var(--danger);
 }
 .profile-toolbar {
-  display: flex;
-  gap: 12px;
+  container-type: inline-size;
+  display: grid;
+  gap: 10px;
   margin-bottom: 10px;
-  align-items: center;
-  flex-wrap: wrap;
+}
+.profile-search {
+  position: relative;
+  width: min(100%, 360px);
 }
 .profile-shared-toggle {
   align-self: flex-start;
@@ -60,21 +63,58 @@
   transform: rotate(180deg);
 }
 .profile-tool-tabs {
-  display: flex;
-  flex: 1;
-  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
   gap: 4px;
-  overflow-x: auto;
 }
 .profile-tool-tab {
-  min-width: max-content;
+  width: 100%;
+  min-width: 0;
   height: 32px;
+  justify-content: flex-start;
+  padding-inline: 10px;
   font-size: 12px;
   font-weight: 500;
+}
+.profile-tool-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.profile-tool-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: auto;
+  padding-inline: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 .profile-tool-tab.active {
   background: var(--bg-elevated);
   color: var(--text-primary);
+}
+.profile-tool-tab.active .profile-tool-tab-count {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+@container (min-width: 620px) {
+  .profile-tool-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1120px) {
+  .profile-tool-tabs {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
 }
 
 .command-palette {

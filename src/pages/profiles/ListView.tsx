@@ -127,7 +127,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
       </div>
 
       <div className="profile-toolbar">
-        <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 360 }}>
+        <div className="profile-search">
           <Search
             size={14}
             style={{

@@ -25,10 +25,16 @@ function ProfileToolFilterTabComponent({
       className={`profile-tool-tab ${active ? "active" : ""}`}
       role="tab"
       aria-selected={active}
+      aria-label={`${toolName} (${count})`}
       onClick={() => onToggle(toolId)}
       style={{ opacity: dimmed ? 0.55 : 1 }}
     >
-      {toolName} ({count})
+      <span className="profile-tool-tab-label" title={toolName}>
+        {toolName}
+      </span>
+      <span className="profile-tool-tab-count" aria-hidden="true">
+        {count}
+      </span>
     </Button>
   );
 }

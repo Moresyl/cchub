@@ -83,4 +83,28 @@ describe("ProfilesListView", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Shared provider controls")).toBeTruthy();
   });
+
+  it("renders every tool in the wrapping switcher and changes the active filter", () => {
+    const props = createProps();
+    props.tools = [
+      { id: "claude", name: "Claude", installed: true },
+      { id: "codex", name: "Codex", installed: true },
+      { id: "gemini", name: "Gemini", installed: false },
+      { id: "grok", name: "Grok", installed: false },
+      { id: "opencode", name: "OpenCode", installed: false },
+      { id: "openclaw", name: "OpenClaw", installed: false },
+      { id: "hermes", name: "Hermes", installed: false },
+      { id: "pi", name: "Pi", installed: false },
+    ];
+    props.toolCounts = { claude: 1, codex: 2 };
+
+    render(<ProfilesListView {...props} />);
+
+    const switcher = screen.getByRole("tablist", { name: "工具" });
+    expect(switcher.children).toHaveLength(8);
+    expect(screen.getByRole("tab", { name: "Claude (1)" }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Codex (2)" }));
+    expect(props.handleToggleFilterTool).toHaveBeenCalledWith("codex");
+  });
 });

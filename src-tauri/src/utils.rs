@@ -244,7 +244,10 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
         #[cfg(windows)]
         replace_existing(path, temporary_path.as_ref())?;
         #[cfg(not(windows))]
-        std::fs::rename(temporary_path.as_ref(), path)?;
+        {
+            let temporary_path_ref: &Path = temporary_path.as_ref();
+            std::fs::rename(temporary_path_ref, path)?;
+        }
     } else {
         temporary.persist(path).map_err(|error| error.error)?;
     }

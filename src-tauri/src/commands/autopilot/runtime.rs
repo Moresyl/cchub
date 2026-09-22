@@ -1,6 +1,8 @@
 // Codex 子进程托管：原生 autopilot 主循环 + 单轮执行 + 命令构造 + 提示词模板
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "windows")]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;

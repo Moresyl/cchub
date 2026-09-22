@@ -34,6 +34,7 @@ env:
     - 修复配置工具栏和 MCP 向导在窄窗口下的换行、溢出与交互状态问题
     - 恢复仓库原有 MIT 许可证文件，修复 README 许可证断链，并补充 CCHub 与 CCHub 的参考来源
     - 修复国际化 key 覆盖脚本仍读取旧版单文件路径的问题，严格模式验证中、英、日 476 个 key 一致
+    - 修复 Linux 与 macOS 发布构建无法推断临时文件路径类型，以及平台专用 import 产生告警的问题
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -49,6 +50,7 @@ env:
     - Fixed remote MCP format loss, desktop proxy lifecycle issues, responsive toolbar overflow, and duplicate Codex token accounting. Windows users should prefer the NSIS installer below.
     - Restored the repository MIT license file and documented the CCHub and CCHub design/workflow references.
     - Fixed the i18n coverage script for split locale modules; strict checks now validate 476 keys across Chinese, English, and Japanese.
+    - Fixed non-Windows release compilation for atomic temporary-file replacement and platform-specific imports.
 
     ## 下载 / Download
 

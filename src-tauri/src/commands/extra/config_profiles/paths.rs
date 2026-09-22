@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::hermes;
+#[cfg(target_os = "windows")]
 use crate::utils::configure_background_command;
 
 use super::super::statusline::*;

@@ -25,6 +25,7 @@ import SettingsToolPathSection from "../components/SettingsToolPathSection";
 import SettingsWindowBehaviorSection from "../components/SettingsWindowBehaviorSection";
 import SettingsSkillStorageSection from "../components/SettingsSkillStorageSection";
 import SettingsImportExportSection from "../components/SettingsImportExportSection";
+import ProjectProfilePanel from "../components/ProjectProfilePanel";
 import { buildMigrationCenterLabels } from "./settings/labels";
 import SettingsCategoryNav, { type SettingsCategory } from "./settings/CategoryNav";
 import { useSettingsMigrationState } from "../hooks/useSettingsMigrationState";
@@ -709,6 +710,7 @@ export default function Settings() {
         )}
 
         {activeCategory === "integrations" && <SettingsAuthCenterSection locale={loc} />}
+        {activeCategory === "integrations" && <ProjectProfilePanel />}
         {activeCategory === "integrations" && <SettingsClaudeDesktopSection locale={loc} />}
         {activeCategory === "integrations" && <SettingsClaudeExtensionSection />}
         {activeCategory === "integrations" && <SettingsCodexHistorySection />}

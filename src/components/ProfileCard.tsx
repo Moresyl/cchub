@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import ProviderIcon from "./ProviderIcon";
+import { Button } from "./ui/button";
 
 interface ConfigProfileCard {
   id: string;
@@ -133,7 +134,7 @@ function ProfileCardComponent({
 
   return (
     <div
-      className="card card-hover"
+      className="card card-hover profile-row"
       draggable={reorderEnabled}
       onDragStart={() => onDragStart(profile.id)}
       onDragEnter={() => onDragEnter(profile.id)}
@@ -144,23 +145,23 @@ function ProfileCardComponent({
       onDragEnd={onDragEnd}
       onDrop={handleDrop}
       style={{
-        padding: "16px 18px",
         borderColor: isActive ? "var(--success)" : undefined,
-        boxShadow: isActive ? "0 0 0 1px color-mix(in srgb, var(--success) 30%, transparent)" : undefined,
         opacity: isDragging ? 0.65 : 1,
         transform: isDragOver ? "translateY(-2px)" : undefined,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1, alignItems: "center" }}>
-          <button
-            className="btn btn-ghost btn-icon-sm"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="profile-icon-button"
             type="button"
             title={reorderEnabled ? text.dragEnabledTitle : text.dragDisabledTitle}
             style={{ cursor: reorderEnabled ? "grab" : "default", opacity: reorderEnabled ? 1 : 0.45 }}
           >
             <GripVertical size={14} />
-          </button>
+          </Button>
           <div className="icon-box" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }}>
             <ProviderIcon iconUrl={iconUrl} fallbackIcon={Icon} size={16} />
           </div>
@@ -220,17 +221,36 @@ function ProfileCardComponent({
         </div>
 
         <div className="card-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-          <button className="btn btn-ghost btn-icon-sm" onClick={() => onPing(profile)} title={text.pingTitle}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onPing(profile)}
+            title={text.pingTitle}
+            aria-label={text.pingTitle}
+          >
             {isPinging ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Activity size={14} />}
-          </button>
-          <button className="btn btn-ghost btn-icon-sm" onClick={() => onStreamCheck(profile)} title={text.streamTitle}>
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onStreamCheck(profile)}
+            title={text.streamTitle}
+            aria-label={text.streamTitle}
+          >
             {isStreamChecking ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Wifi size={14} />}
-          </button>
-          <button className="btn btn-ghost btn-icon-sm" onClick={() => onUsage(profile)} title={text.usageTitle}>
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onUsage(profile)}
+            title={text.usageTitle}
+            aria-label={text.usageTitle}
+          >
             <Gauge size={14} />
-          </button>
-          <button
-            className={`btn btn-xs ${isActive ? "btn-secondary" : "btn-primary"}`}
+          </Button>
+          <Button
+            variant={isActive ? "secondary" : "default"}
+            size="sm"
             onClick={() => onApply(profile)}
             disabled={isApplying}
             style={{ gap: 5 }}
@@ -243,24 +263,35 @@ function ProfileCardComponent({
               <ArrowRightLeft size={11} />
             )}
             {isActive ? text.activeButton : text.applyButton}
-          </button>
-          <button
-            className="btn btn-ghost btn-icon-sm"
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onDuplicate(profile)}
             title={text.duplicateTitle}
+            aria-label={text.duplicateTitle}
           >
             <Copy size={14} />
-          </button>
-          <button className="btn btn-ghost btn-icon-sm" onClick={() => onEdit(profile)} title={text.editTitle}>
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onEdit(profile)}
+            title={text.editTitle}
+            aria-label={text.editTitle}
+          >
             <Edit3 size={14} />
-          </button>
-          <button
-            className="btn btn-danger-ghost btn-icon-sm"
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="profile-delete-button"
             onClick={() => onDelete(profile)}
             title={text.deleteTitle}
+            aria-label={text.deleteTitle}
           >
             <Trash2 size={14} />
-          </button>
+          </Button>
         </div>
       </div>
     </div>

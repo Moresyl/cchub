@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { Button } from "./ui/button";
 
 interface ProfileToolFilterTabProps {
   toolId: string;
@@ -18,13 +19,17 @@ function ProfileToolFilterTabComponent({
   onToggle,
 }: ProfileToolFilterTabProps) {
   return (
-    <button
-      className={`tab-item ${active ? "active" : ""}`}
+    <Button
+      variant={active ? "secondary" : "ghost"}
+      size="sm"
+      className={`profile-tool-tab ${active ? "active" : ""}`}
+      role="tab"
+      aria-selected={active}
       onClick={() => onToggle(toolId)}
       style={{ opacity: dimmed ? 0.55 : 1 }}
     >
       {toolName} ({count})
-    </button>
+    </Button>
   );
 }
 

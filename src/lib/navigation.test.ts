@@ -13,6 +13,7 @@ describe("navigation metadata", () => {
   it("resolves a contextual section and safely falls back to overview", () => {
     expect(getNavigationSection("/skills").key).toBe("ecosystem");
     expect(getNavigationSection("/not-found").key).toBe("overview");
+    expect(getNavigationSection("/").items[0].labelKey).toBe("profiles");
   });
 
   it("uses a route inside each section as its default destination", () => {

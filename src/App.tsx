@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AlertTriangle, Settings2, X } from "lucide-react";
@@ -75,7 +75,7 @@ function RouteProfiler({ children, pathname }: { children: ReactNode; pathname: 
 
 function ActiveRoute({ pathname }: { pathname: string }) {
   const route = routeComponents.find((r) => r.path === pathname);
-  if (!route) return null;
+  if (!route) return <Navigate to="/" replace />;
   const { Component } = route;
   return (
     <Suspense fallback={<RouteFallback />}>
@@ -106,6 +106,13 @@ function AppShell() {
   const [locale, setLocaleState] = useState<Locale>(getLocale());
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [welcomeTheme, setWelcomeTheme] = useState<Theme>(getTheme());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem("cchub:sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [installedToolCount, setInstalledToolCount] = useState(0);
   const [profileCount, setProfileCount] = useState(0);
   const lastEnvConflictLoadAtRef = useRef(0);
@@ -130,6 +137,7 @@ function AppShell() {
       { delay: 4_000, timeout: 12_000 },
     );
     const handleFocus = () => void loadEnvConflicts();
+    const openCommandPalette = () => setCommandPaletteOpen(true);
     const handleKeyDown = (event: KeyboardEvent) => {
       // 快速路径：非修饰键/非 Escape 直接返回，避免每次按键都走完整流程。
       const hasModifier = event.ctrlKey || event.metaKey;
@@ -178,12 +186,14 @@ function AppShell() {
 
     window.addEventListener("focus", handleFocus);
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("cchub-open-command-palette", openCommandPalette);
     const unlistenFailover = listen<{ profile_name: string }>("provider-failover", (event) => {
       showToast("info", `Failover → ${event.payload.profile_name}`);
     });
     return () => {
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("cchub-open-command-palette", openCommandPalette);
       cancelPricingSync();
       void unlistenFailover.then((fn) => fn());
     };
@@ -245,6 +255,18 @@ function AppShell() {
     setWelcomeTheme(nextTheme);
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem("cchub:sidebar-collapsed", String(next));
+      } catch {
+        // The layout still works when local storage is unavailable.
+      }
+      return next;
+    });
+  }, []);
+
   const handleWelcomeFinish = useCallback(async () => {
     try {
       await setWelcomeCompletedMutation.mutateAsync({ completed: true });
@@ -286,7 +308,7 @@ function AppShell() {
         </Suspense>
       )}
       <div className="app-layout">
-        <Sidebar />
+        <Sidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
         <div className="main-area">
           <NavigationProgress />
           <Header />

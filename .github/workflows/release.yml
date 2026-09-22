@@ -14,19 +14,28 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 侧栏按概览、生态管理、自动化和高级工具分组，设置固定在底部，复杂功能更容易定位
-    - 恢复细滚动条、键盘焦点反馈和减少动态效果支持，完善卡片、图标按钮及通知的无障碍语义
-    - 编辑器与语言模块改为按需分包，移除 1.66 MB CodeMirror 聚合块和生产构建超大块警告
-    - 更新弹窗新增下载安装进度，Windows 更新采用被动安装模式并自动重启
-    - 发布流水线生成并上传签名更新包、签名文件和 `latest.json`，支持真正的一键更新
-    - GitHub Actions 升级到 Node.js 24 运行时，并适配 tauri-action 的 updater JSON 参数
+    - 配置切换成为默认工作区，按工具筛选、搜索、测速及一键应用配置；跨工具共享 Provider 收入按需展开区域
+    - 采用紧凑的中性明暗主题与可折叠侧栏，导航聚焦配置档案、配置文件、MCP、Skills 和设置
+    - Ctrl+K 快速切换现在只显示当前可用页面与配置档案，并支持直接应用配置
+    - 项目配置档案管理迁入设置的工具与集成分类；旧版独立功能入口从主导航移除，已有配置数据保留
+    - 同步中英文使用说明，去除已不适用的功能清单及旧界面截图
+
+    ### 变更与安全
+    - 无安全机制变更；此版本没有删除用户的配置文件或数据库数据
 
     ### 问题修复
-    - 移除侧栏悬停触发的文件扫描、SQLite 查询和市场请求，避免鼠标掠过时争抢 IPC 导致卡顿
-    - 修复版本比较对预发布版本处理不正确、发布页回退与一键更新状态不一致的问题
-    - 删除已淘汰的 MCP 包更新扫描、重复应用更新命令、自建剪贴板进程和关联数据结构
-    - 修正文档中不存在的便携版、UI 技术栈和已完成功能状态，保证发布信息与软件一致
-    - 修复 Ubuntu 发布因 Azure 镜像无响应而长时间卡住，增加官方源回退、重试、超时与非交互安装
+    - 快速切换应用配置后刷新主列表，避免当前生效状态滞后
+    - 旧页面链接自动返回配置首页，命令面板不再提供失效的页面和 Autopilot 操作
+
+    ### 安装
+    - 从下方选择对应平台安装包。Windows 推荐 NSIS；从旧版升级时保留现有配置。
+
+    ## English Summary
+
+    - Config profiles are now the default workspace with tool filters, search, health checks, and one-click activation.
+    - The interface uses a compact neutral theme, collapsible sidebar, and a focused Ctrl+K profile switcher. Legacy standalone destinations are removed from navigation without deleting configuration data.
+    - Fixed stale active-profile state after applying a profile from quick switch and removed unavailable commands.
+    - Install using the platform package below; Windows users should prefer the NSIS installer.
 
     ## 下载 / Download
 

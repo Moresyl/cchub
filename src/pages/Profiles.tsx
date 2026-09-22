@@ -24,8 +24,7 @@ import {
   useUpdateConfigProfileAndRefreshMutation,
 } from "../hooks/mutations";
 import { type ModelInfo } from "../components/ModelSelector";
-import LoadingState from "../components/states/LoadingState";
-import ErrorState from "../components/states/ErrorState";
+import ProfilesLoadState from "./profiles/LoadState";
 import { fetchProfilesPageData, queryKeys } from "../hooks/queries";
 import {
   prettyJson,
@@ -561,6 +560,9 @@ export default function Profiles() {
   );
   useEffect(() => {
     void load();
+    const refreshProfiles = () => void load({ force: true });
+    window.addEventListener("cchub-profiles-refresh", refreshProfiles);
+    return () => window.removeEventListener("cchub-profiles-refresh", refreshProfiles);
   }, [load]);
   const activeIdSet = useMemo(() => new Set(activeIds), [activeIds]);
   const presetCategories = useMemo(() => getPresetCategories(draftTool), [draftTool]);
@@ -775,20 +777,8 @@ export default function Profiles() {
     setDragOverProfileId,
     reorderProfiles,
   });
-  if (loading) {
-    return <LoadingState label={localeText("加载中...", "Loading...", "読み込み中...")} />;
-  }
-  if (loadError) {
-    return (
-      <ErrorState
-        title={localeText("配置加载失败", "Failed to load profiles", "設定の読み込みに失敗しました")}
-        message={loadError}
-        retryLabel={localeText("刷新", "Refresh", "再読み込み")}
-        onRetry={() => {
-          void load({ force: true });
-        }}
-      />
-    );
+  if (loading || loadError) {
+    return <ProfilesLoadState error={loadError} localeText={localeText} onRetry={() => void load({ force: true })} />;
   }
   const isEditing = showCreateModal || !!editingProfile;
   const isStructured = supportsStructuredConfig(draftTool);

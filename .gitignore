@@ -29,6 +29,7 @@ todo.md
 
 # Temp
 tmp/
+.firecrawl/
 
 # Generated
 tsconfig.tsbuildinfo

@@ -1,57 +1,11 @@
-import {
-  Activity,
-  ArrowRightLeft,
-  BarChart3,
-  Bot,
-  Brain,
-  FileText,
-  FolderOpen,
-  GitBranch,
-  History,
-  LayoutDashboard,
-  Layers,
-  MessageSquareText,
-  Monitor,
-  Plug,
-  Settings,
-  Shield,
-  Store,
-  Terminal,
-  Webhook,
-  Wrench,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowRightLeft, FileJson2, Plug, Settings, Sparkles, type LucideIcon } from "lucide-react";
 import type { RoutePath } from "./routes";
 
-export type NavigationSectionKey = "overview" | "ecosystem" | "automation" | "advanced" | "settings";
+export type NavigationSectionKey = "overview" | "ecosystem" | "settings";
 
 export interface NavigationItem {
   path: RoutePath;
-  labelKey:
-    | "dashboard"
-    | "usage"
-    | "sessions"
-    | "logs"
-    | "mcpServers"
-    | "mcpClients"
-    | "skills"
-    | "marketplace"
-    | "workspaces"
-    | "profiles"
-    | "prompts"
-    | "workflows"
-    | "autopilot"
-    | "hooks"
-    | "claudeMd"
-    | "configFiles"
-    | "tools"
-    | "security"
-    | "hermesMemory"
-    | "hermesProviders"
-    | "openClaw"
-    | "proxyAdvanced"
-    | "settings";
+  labelKey: "profiles" | "configFiles" | "mcpServers" | "skills" | "settings";
   icon: LucideIcon;
 }
 
@@ -65,52 +19,18 @@ export interface NavigationSection {
 export const navigationSections: readonly NavigationSection[] = [
   {
     key: "overview",
-    icon: LayoutDashboard,
+    icon: ArrowRightLeft,
     defaultPath: "/",
-    items: [
-      { path: "/", labelKey: "dashboard", icon: LayoutDashboard },
-      { path: "/usage", labelKey: "usage", icon: BarChart3 },
-      { path: "/sessions", labelKey: "sessions", icon: History },
-      { path: "/logs", labelKey: "logs", icon: Activity },
-    ],
+    items: [{ path: "/", labelKey: "profiles", icon: ArrowRightLeft }],
   },
   {
     key: "ecosystem",
-    icon: Plug,
-    defaultPath: "/profiles",
+    icon: FileJson2,
+    defaultPath: "/config-files",
     items: [
-      { path: "/profiles", labelKey: "profiles", icon: ArrowRightLeft },
+      { path: "/config-files", labelKey: "configFiles", icon: FileJson2 },
       { path: "/mcp-servers", labelKey: "mcpServers", icon: Plug },
-      { path: "/mcp-clients", labelKey: "mcpClients", icon: Monitor },
-      { path: "/skills", labelKey: "skills", icon: Zap },
-      { path: "/marketplace", labelKey: "marketplace", icon: Store },
-      { path: "/workspaces", labelKey: "workspaces", icon: Layers },
-    ],
-  },
-  {
-    key: "automation",
-    icon: GitBranch,
-    defaultPath: "/prompts",
-    items: [
-      { path: "/prompts", labelKey: "prompts", icon: MessageSquareText },
-      { path: "/workflows", labelKey: "workflows", icon: GitBranch },
-      { path: "/autopilot", labelKey: "autopilot", icon: Bot },
-      { path: "/hooks", labelKey: "hooks", icon: Webhook },
-    ],
-  },
-  {
-    key: "advanced",
-    icon: Wrench,
-    defaultPath: "/tools",
-    items: [
-      { path: "/tools", labelKey: "tools", icon: Wrench },
-      { path: "/config-files", labelKey: "configFiles", icon: FolderOpen },
-      { path: "/claude-md", labelKey: "claudeMd", icon: FileText },
-      { path: "/security", labelKey: "security", icon: Shield },
-      { path: "/proxy-advanced", labelKey: "proxyAdvanced", icon: ArrowRightLeft },
-      { path: "/hermes-memory", labelKey: "hermesMemory", icon: Brain },
-      { path: "/hermes-providers", labelKey: "hermesProviders", icon: Brain },
-      { path: "/openclaw", labelKey: "openClaw", icon: Terminal },
+      { path: "/skills", labelKey: "skills", icon: Sparkles },
     ],
   },
   {

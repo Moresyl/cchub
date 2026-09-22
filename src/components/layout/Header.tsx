@@ -1,10 +1,10 @@
-import { memo, useCallback, useState } from "react";
-import { Sun, Moon, ArrowUpCircle, Github } from "lucide-react";
-import { open } from "@tauri-apps/plugin-shell";
+import { memo, useCallback } from "react";
+import { Sun, Moon, ArrowUpCircle, Search } from "lucide-react";
 import { useLocation } from "react-router-dom";
-import { getTheme, setTheme, type Theme } from "../../lib/theme";
+import { setTheme } from "../../lib/theme";
 import { getLocale, t } from "../../lib/i18n";
 import { getNavigationSection } from "../../lib/navigation";
+import { usePreferences } from "../../stores/preferences";
 import ProjectProfileSwitcher from "../ProjectProfileSwitcher";
 import { useAppUpdate } from "../AppUpdateHost";
 import { Button } from "../ui/button";
@@ -12,7 +12,7 @@ import { Button } from "../ui/button";
 function HeaderComponent() {
   const location = useLocation();
   const { updateAvailable, latestVersion, openUpdateDialog } = useAppUpdate();
-  const [currentTheme, setCurrentTheme] = useState<Theme>(getTheme());
+  const currentTheme = usePreferences((state) => state.theme);
   const i = t();
   const locale = getLocale();
   const section = getNavigationSection(location.pathname);
@@ -20,21 +20,18 @@ function HeaderComponent() {
   const pageTitle = i.nav[item.labelKey];
   const sectionTitle = section.key === "settings" ? i.nav.settings : i.navGroups[section.key];
   const pageSubtitle =
-    locale === "zh"
-      ? `${sectionTitle} · 集中管理、状态检查与快速操作`
-      : locale === "ja"
-        ? `${sectionTitle} · 一元管理、状態確認、クイック操作`
-        : `${sectionTitle} · Centralized management, status, and quick actions`;
+    location.pathname === "/"
+      ? locale === "zh"
+        ? "切换各工具的当前配置"
+        : locale === "ja"
+          ? "ツールの設定を切り替え"
+          : "Switch active tool configurations"
+      : sectionTitle;
 
   const toggleTheme = useCallback(() => {
     const next = currentTheme === "dark" ? "light" : "dark";
     setTheme(next);
-    setCurrentTheme(next);
   }, [currentTheme]);
-
-  const handleOpenGithub = useCallback(() => {
-    void open("https://github.com/Moresyl/cchub");
-  }, []);
 
   return (
     <header className="topbar">
@@ -44,8 +41,14 @@ function HeaderComponent() {
       </div>
       <div className="topbar-actions">
         <ProjectProfileSwitcher />
-        <Button variant="ghost" size="icon" aria-label="GitHub" title="GitHub" onClick={handleOpenGithub}>
-          <Github aria-hidden="true" size={16} />
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={locale === "zh" ? "快速切换" : "Quick switch"}
+          title={locale === "zh" ? "快速切换" : "Quick switch"}
+          onClick={() => window.dispatchEvent(new CustomEvent("cchub-open-command-palette"))}
+        >
+          <Search aria-hidden="true" size={16} />
         </Button>
 
         <Button
@@ -69,8 +72,6 @@ function HeaderComponent() {
             <span>{i.settings.updateAvailable}</span>
           </Button>
         )}
-
-        <div className="dot dot-active" role="status" aria-label="Connected" title="Connected" />
       </div>
     </header>
   );

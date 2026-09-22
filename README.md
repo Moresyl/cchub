@@ -4,7 +4,7 @@
 
 # CCHub
 
-### Stop editing JSON files. Manage your Claude Code ecosystem from one app.
+### Switch AI coding tool configurations from one desktop app.
 
 [![GitHub Stars](https://img.shields.io/github/stars/Moresyl/cchub?style=social)](https://github.com/Moresyl/cchub/stargazers)
 [![Latest Release](https://img.shields.io/github/v/release/Moresyl/cchub?color=green)](https://github.com/Moresyl/cchub/releases)
@@ -20,78 +20,35 @@
 
 ---
 
-## The Problem
+## Purpose
 
-The Claude Code ecosystem is exploding — MCP Servers, Skills, Plugins, Hooks, Workflows — but management is stuck in the stone age:
+CCHub opens directly into configuration switching. Filter and search saved provider profiles by tool, see which profile is active, and apply another in one click. You can also create, edit, duplicate, ping, and stream-check profiles. Shared providers and project profiles remain available as advanced options.
 
-- Editing `settings.json` by hand, hoping you don't break the syntax
-- Copy-pasting MCP configs between machines
-- No idea which of your 30 MCP servers are actually working
-- Switching between Claude / Codex / Gemini / Hermes configs = nightmare
-- Zero visibility into security risks from your installed tools
-
-**CCHub puts everything in one GUI.** Install MCP servers in one click. Switch configs instantly. Monitor health. Audit security. Done.
-
----
-
-## Screenshots
-
-### Light Theme
-
-![Light Theme](screenshots/light-theme.png)
-
-### Dark Theme
-
-![Dark Theme](screenshots/dark-theme.png)
+The compact neutral light/dark workspace has a collapsible sidebar and `Ctrl+K` quick switching. Configuration files, MCP servers, and Skills are secondary destinations. Former standalone pages such as Autopilot, session analytics, Marketplace, and security audit are no longer product entry points; upgrading does not delete existing configuration data.
 
 ---
 
 ## Features
 
-### Core Management
-
-| Feature                   | Description                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **MCP Server Management** | Auto-scan Claude Code, Claude Desktop, Cursor, Codex, Gemini, OpenCode, OpenClaw, and Hermes configs. Sync per app, edit, delete — no JSON editing |
-| **MCP Marketplace**       | Built-in registry with categories. One-click install with env config. Custom source support                                                        |
-| **MCP Health Monitor**    | Command check, process spawn test, latency measurement. Know which servers are broken                                                              |
-| **Config Profiles**       | One-click switch between Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw, and Hermes configs                                                    |
-| **Skills & Plugins**      | Browse, edit (MDXEditor rich-text), cross-tool sync                                                                                                |
-| **Workflows**             | 12 built-in templates (Code Review, TDD, Bug Diagnosis, Security Audit...). One-click install                                                      |
-| **Hooks Visualizer**      | See all hooks: event types, matchers, commands — at a glance                                                                                       |
-
-### Developer Experience
-
-| Feature                     | Description                                                                    |
-| --------------------------- | ------------------------------------------------------------------------------ |
-| **CLAUDE.md Manager**       | Visual editor for project instructions with templates                          |
-| **Autopilot**               | Task orchestration for Claude / Codex auto-execution with real-time monitoring |
-| **Command Palette**         | `Ctrl+K` to navigate anywhere instantly                                        |
-| **Security Audit**          | Env secrets, shell execution risks, npx auto-install risk scanning             |
-| **StatusLine (claude-hud)** | One-click install, proxy support, China mirror, display config                 |
+| Feature             | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| **Config Profiles** | Save and apply configurations for Claude Code, Codex, Gemini, and more |
+| **Providers**       | Tool filters, search, presets, ping, stream checks, and shared profiles |
+| **Config Files**    | View and edit managed tool configuration files                        |
+| **MCP Servers**     | Scan, edit, and sync MCP configurations across tools                  |
+| **Skills & Plugins** | Browse, edit, and sync Skills across tools                           |
+| **Quick Switch**    | `Ctrl+K` to find/apply profiles or navigate to configuration pages    |
 
 ### Platform
 
 | Feature                | Description                                                                                   |
 | ---------------------- | --------------------------------------------------------------------------------------------- |
 | **Cross-platform**     | Windows 10/11, macOS 10.15+, Linux                                                            |
-| **Dark / Light Theme** | Compact desktop UI with system-aware theme, keyboard focus states, and reduced-motion support |
+| **Dark / Light Theme** | Compact desktop UI with keyboard focus states and reduced-motion support             |
 | **Backup & Restore**   | Export all configs as SQL, import with legacy format support                                  |
 | **Auto Update**        | Signed Tauri updater when available, with a reliable GitHub Releases fallback                 |
 | **i18n**               | Chinese, English, Japanese                                                                    |
 | **System Tray**        | Minimize to tray on close                                                                     |
-
----
-
-## Quick Comparison
-
-| Task                               |                      Without CCHub                       |            With CCHub             |
-| ---------------------------------- | :------------------------------------------------------: | :-------------------------------: |
-| Install an MCP server              | Edit JSON, find npm package, configure env vars manually |    One click from Marketplace     |
-| Switch from Claude to Codex config |              Copy files, rename, edit paths              |       One click in Profiles       |
-| Check if MCP servers are healthy   |            Run commands manually, check logs             |   Health dashboard with latency   |
-| Audit security risks               |            Read JSON files, grep for secrets             |  Automated scan with risk report  |
-| Manage CLAUDE.md                   |           Open in text editor, remember syntax           | Rich visual editor with templates |
 
 ---
 
@@ -161,35 +118,6 @@ CCHub auto-scans MCP server configs from:
 | `~/.codex/config.toml`                         | Codex CLI                                   |
 | `~/.gemini/settings.json`                      | Gemini CLI                                  |
 | `~/.hermes/cli-config.yaml` + `~/.hermes/.env` | Hermes Agent (NousResearch) — YAML + dotenv |
-
----
-
-## Roadmap
-
-- [x] MCP Server management (scan, per-app sync, edit, delete)
-- [x] MCP Marketplace (registry, one-click install, custom sources)
-- [x] MCP Health monitoring (command check, spawn test, latency)
-- [x] Skills & Plugins browser (MDXEditor, cross-tool sync)
-- [x] Workflows (12 templates, Markdown editing, multi-tool install)
-- [x] Hooks visualization
-- [x] Config Profiles (structured editor, multi-tool switching)
-- [x] CLAUDE.md manager (editor, templates)
-- [x] Tools page (permissions, StatusLine, Codex settings)
-- [x] StatusLine (claude-hud) integration
-- [x] Security audit (permission scanning, risk detection)
-- [x] Backup & restore (SQL export/import)
-- [x] Auto-update (Tauri Updater + GitHub fallback)
-- [x] Autopilot (Claude / Codex task orchestration)
-- [x] Command Palette (Ctrl+K)
-- [x] hello2cc plugin management
-- [x] Dark / Light / System theme
-- [x] i18n (Chinese + English + Japanese)
-- [x] Cross-platform (Windows, macOS, Linux)
-- [x] System tray
-- [ ] Config change detection (security timeline)
-- [x] Hooks editor (create/edit hooks from UI)
-- [x] WebDAV cloud sync
-- [ ] Plugin ecosystem (community MCP templates)
 
 ---
 

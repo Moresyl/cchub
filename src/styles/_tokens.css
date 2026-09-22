@@ -1,37 +1,34 @@
-/* ═══════════════════════════════════════════════════════════════
-   CCHub Design System v4 — shadcn/ui Flat Design
-   Clean · Flat · Subtle borders · Small radius · Clear hierarchy
-   ═══════════════════════════════════════════════════════════════ */
+/* CCHub-inspired neutral workspace palette, adapted for CCHub controls. */
 
 /* ── Dark Theme (default) — Neutral Grayscale ── */
 :root {
-  --bg-app: #0b0e15;
-  --bg-sidebar: #11151e;
-  --bg-card: #141923;
-  --bg-card-solid: #141923;
-  --bg-card-hover: #1b2130;
-  --bg-input: #0f131c;
-  --bg-elevated: #181e29;
-  --bg-badge: #202736;
-  --bg-overlay: rgba(5, 8, 14, 0.76);
-  --border-default: rgba(255, 255, 255, 0.09);
-  --border-subtle: rgba(255, 255, 255, 0.055);
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --text-primary: #e9edf5;
-  --text-secondary: #aeb6c7;
-  --text-muted: #737d93;
-  --accent: #6e9bff;
-  --accent-hover: #86aaff;
-  --accent-glow: rgba(110, 155, 255, 0.16);
-  --accent-subtle: rgba(110, 155, 255, 0.1);
-  --accent-foreground: #07101f;
-  --success: #46d9a2;
-  --success-subtle: rgba(70, 217, 162, 0.12);
-  --warning: #ffc46b;
-  --warning-subtle: rgba(255, 196, 107, 0.12);
-  --danger: #ff7a8a;
-  --danger-subtle: rgba(255, 122, 138, 0.12);
-  --error: #ff7a8a;
+  --bg-app: #161616;
+  --bg-sidebar: #1c1c1c;
+  --bg-card: #242424;
+  --bg-card-solid: #242424;
+  --bg-card-hover: #303030;
+  --bg-input: #2b2b2b;
+  --bg-elevated: #2b2b2b;
+  --bg-badge: #353535;
+  --bg-overlay: rgba(0, 0, 0, 0.72);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.065);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --text-primary: #f2f2f2;
+  --text-secondary: #bdbdbd;
+  --text-muted: #858585;
+  --accent: #f2f2f2;
+  --accent-hover: #d8d8d8;
+  --accent-glow: rgba(255, 255, 255, 0.12);
+  --accent-subtle: rgba(255, 255, 255, 0.09);
+  --accent-foreground: #161616;
+  --success: #46bf72;
+  --success-subtle: rgba(70, 191, 114, 0.16);
+  --warning: #ffb26b;
+  --warning-subtle: rgba(255, 138, 48, 0.14);
+  --danger: #ff7777;
+  --danger-subtle: rgba(255, 92, 92, 0.14);
+  --error: #ff7777;
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.22);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 8px 22px -14px rgba(0, 0, 0, 0.8);
@@ -40,33 +37,33 @@
 
 /* ── Light Theme — Neutral Grayscale ── */
 [data-theme="light"] {
-  --bg-app: #f5f7fb;
-  --bg-sidebar: #ffffff;
+  --bg-app: #f8f8f8;
+  --bg-sidebar: #f0f0f0;
   --bg-card: #ffffff;
   --bg-card-solid: #ffffff;
-  --bg-card-hover: #f0f3f9;
-  --bg-input: #f8f9fc;
-  --bg-elevated: #f4f6fa;
-  --bg-badge: #edf0f6;
+  --bg-card-hover: #f0f0f0;
+  --bg-input: #ffffff;
+  --bg-elevated: #f1f1f1;
+  --bg-badge: #e8e8e8;
   --bg-overlay: rgba(0, 0, 0, 0.5);
-  --border-default: rgba(13, 19, 43, 0.12);
-  --border-subtle: rgba(13, 19, 43, 0.07);
-  --border-strong: rgba(13, 19, 43, 0.22);
-  --text-primary: #101623;
-  --text-secondary: #4c5468;
-  --text-muted: #7b8398;
-  --accent: #3560e8;
-  --accent-hover: #294fcd;
-  --accent-glow: rgba(53, 96, 232, 0.1);
-  --accent-subtle: rgba(53, 96, 232, 0.07);
+  --border-default: rgba(13, 13, 13, 0.1);
+  --border-subtle: rgba(13, 13, 13, 0.065);
+  --border-strong: rgba(13, 13, 13, 0.18);
+  --text-primary: #202020;
+  --text-secondary: #626262;
+  --text-muted: #8a8a8a;
+  --accent: #202020;
+  --accent-hover: #3a3a3a;
+  --accent-glow: rgba(13, 13, 13, 0.1);
+  --accent-subtle: rgba(13, 13, 13, 0.06);
   --accent-foreground: #ffffff;
-  --success: #0e9e74;
+  --success: #1e8a3e;
   --success-subtle: rgba(22, 163, 74, 0.08);
-  --warning: #8f5f08;
+  --warning: #a76100;
   --warning-subtle: rgba(202, 138, 4, 0.08);
-  --danger: #c62d46;
+  --danger: #cf3030;
   --danger-subtle: rgba(220, 38, 38, 0.08);
-  --error: #c62d46;
+  --error: #cf3030;
   --shadow-xs: 0 1px 2px rgba(27, 35, 74, 0.08);
   --shadow-sm: 0 1px 3px rgba(27, 35, 74, 0.1);
   --shadow-md: 0 8px 20px -14px rgba(27, 35, 74, 0.28);

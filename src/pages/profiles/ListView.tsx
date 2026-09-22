@@ -1,12 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Suspense, lazy, type ChangeEvent } from "react";
-import { ArrowRightLeft, Monitor, Plus, RefreshCw, Search, X, type LucideIcon } from "lucide-react";
+import { Suspense, lazy, useState, type ChangeEvent } from "react";
+import { ArrowRightLeft, ChevronDown, Monitor, Plus, RefreshCw, Search, X, type LucideIcon } from "lucide-react";
 
 import ProfileCard from "../../components/ProfileCard";
 import ProfileToolFilterTab from "../../components/ProfileToolFilterTab";
 import LoadingState from "../../components/states/LoadingState";
 import EmptyState from "../../components/states/EmptyState";
 import UniversalProviderManager from "../../components/UniversalProviderManager";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 
 import {
   TOOL_ICONS,
@@ -81,9 +83,10 @@ function streamToneFor(status: string | undefined) {
 
 export default function ProfilesListView(props: ProfilesListViewProps) {
   const { locale, localeText, profiles, activeIds, tools, installedTools, toolCounts, filterTool } = props;
+  const [showSharedProviders, setShowSharedProviders] = useState(false);
   return (
     <>
-      <div className="page-header">
+      <div className="page-header profile-page-header">
         <div>
           <h2 className="page-title">{locale === "zh" ? "配置切换" : "Config Profiles"}</h2>
           <p className="page-subtitle">
@@ -94,12 +97,13 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
         </div>
         {filterTool !== "hermes" && (
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-secondary btn-sm" onClick={props.handleRefreshProfiles} style={{ gap: 6 }}>
+            <Button variant="secondary" size="sm" onClick={props.handleRefreshProfiles}>
               <RefreshCw size={14} />
               {locale === "zh" ? "刷新" : "Refresh"}
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={props.handleStreamCheckAll}
               disabled={props.batchStreamChecking}
               style={{ gap: 6 }}
@@ -108,27 +112,21 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
               {props.batchStreamChecking
                 ? localeText("检查中...", "Checking...", "確認中...")
                 : localeText("全量流检", "Check all streams", "全体ストリーム確認")}
-            </button>
-            <button
-              className="btn btn-primary btn-sm"
+            </Button>
+            <Button
+              size="sm"
               onClick={props.handleOpenCreateProfile}
               disabled={installedTools.length === 0}
               style={{ gap: 6 }}
             >
               <Plus size={14} />
               {locale === "zh" ? "新增" : "New"}
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
-      <UniversalProviderManager
-        locale={locale}
-        localeText={localeText}
-        onProfilesChanged={props.handleRefreshProfiles}
-      />
-
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="profile-toolbar">
         <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 360 }}>
           <Search
             size={14}
@@ -140,7 +138,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
               color: "var(--text-muted)",
             }}
           />
-          <input
+          <Input
             ref={props.searchInputRef}
             className="input"
             style={{ paddingLeft: 36 }}
@@ -149,18 +147,19 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
             onChange={props.handleSearchChange}
           />
           {props.search && (
-            <button
-              className="btn btn-ghost btn-icon-sm"
+            <Button
+              variant="ghost"
+              size="icon"
               aria-label={locale === "zh" ? "清除搜索" : "Clear search"}
               title={locale === "zh" ? "清除搜索" : "Clear search"}
               style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}
               onClick={props.handleClearSearch}
             >
               <X size={14} />
-            </button>
+            </Button>
           )}
         </div>
-        <div className="tab-bar" style={{ overflow: "auto", flexShrink: 0 }}>
+        <div className="profile-tool-tabs" role="tablist" aria-label={localeText("工具", "Tools", "ツール")}>
           {tools.map((tool) => (
             <ProfileToolFilterTab
               key={tool.id}
@@ -175,6 +174,24 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
         </div>
       </div>
 
+      <Button
+        variant="ghost"
+        size="sm"
+        className="profile-shared-toggle"
+        aria-expanded={showSharedProviders}
+        onClick={() => setShowSharedProviders((value) => !value)}
+      >
+        <ChevronDown size={14} className={showSharedProviders ? "profile-chevron-open" : ""} />
+        {localeText("跨工具共享配置", "Shared providers", "共有プロバイダー")}
+      </Button>
+      {showSharedProviders && (
+        <UniversalProviderManager
+          locale={locale}
+          localeText={localeText}
+          onProfilesChanged={props.handleRefreshProfiles}
+        />
+      )}
+
       {filterTool === "hermes" && (
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
           <Suspense fallback={<LoadingState />}>
@@ -184,6 +201,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
       )}
 
       <div
+        className="profile-list"
         style={{
           flex: 1,
           minHeight: 0,

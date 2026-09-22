@@ -24,6 +24,7 @@ env:
     - Claude Desktop 本地代理令牌迁移到系统凭据存储，配置与数据库不再保存明文令牌；代理接口要求本地 Bearer 鉴权
     - 配置写入使用原子替换、备份与失败回滚；MCP 导入过滤禁用项并保留目标文件中的非托管字段
     - 主导航移除与配置切换无关的旧版独立入口，但升级不会删除已有数据库记录或工具配置文件
+    - 升级 React Router 并约束安全版本的 js-yaml；官方 npm audit 验证生产依赖无已知漏洞
 
     ### 问题修复
     - 修复本地代理启动失败、重启后状态未恢复、Claude Desktop 响应模型未还原及无效凭据未拒绝的问题
@@ -31,6 +32,7 @@ env:
     - 修复 MCP Deep Link 无法解析 OpenCode/Gemini 原生结构、错误接受无原生 MCP 注册表的目标，以及禁用按钮点击穿透
     - 修复 Codex 会话令牌累计值重复统计；大型 rollout 扫描改为读取文件尾部，实测由约 82 秒降至约 2 秒
     - 修复配置工具栏和 MCP 向导在窄窗口下的换行、溢出与交互状态问题
+    - 恢复仓库原有 MIT 许可证文件，修复 README 许可证断链，并补充 CCHub 与 CCHub 的参考来源
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -42,7 +44,9 @@ env:
     - Added native MiniMax Code provider management, Claude Desktop direct/local-proxy profiles, and nine-tool session routing.
     - Added transport-aware STDIO/HTTP/SSE MCP creation with native Codex, Gemini, Grok Build, OpenCode, Hermes, and MiniMax mappings.
     - Hardened credential storage, authenticated the local desktop proxy, preserved unmanaged configuration fields, and added rollback-safe writes.
+    - Updated React Router and pinned a patched js-yaml release; the production dependency audit reports no known vulnerabilities.
     - Fixed remote MCP format loss, desktop proxy lifecycle issues, responsive toolbar overflow, and duplicate Codex token accounting. Windows users should prefer the NSIS installer below.
+    - Restored the repository MIT license file and documented the CCHub and CCHub design/workflow references.
 
     ## 下载 / Download
 

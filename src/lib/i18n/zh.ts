@@ -24,6 +24,7 @@ export const zh = {
     hermesProviders: "Hermes 供应商",
     openClaw: "OpenClaw",
     mcode: "MiniMax Code",
+    claudeDesktop: "Claude Desktop",
     proxyAdvanced: "代理增强",
     security: "安全审计",
     settings: "设置",

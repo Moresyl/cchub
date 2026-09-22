@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CheckCircle2, Monitor, RefreshCw, Upload } from "lucide-react";
 import type { Locale } from "../lib/i18n";
+import { Button } from "./ui/button";
 
 interface ClaudeDesktopStatus {
   supported: boolean;
@@ -79,21 +80,17 @@ export default function SettingsClaudeDesktopSection({ locale }: SettingsClaudeD
   );
 
   return (
-    <div className="section-card">
-      <div className="section-card-title">
+    <section className="space-y-3" aria-label="Claude Desktop MCP">
+      <div className="flex items-center gap-2 text-sm font-semibold">
         <Monitor size={17} style={{ color: "var(--text-secondary)" }} />
         {uiText(locale, "Claude Desktop 集成", "Claude Desktop Integration", "Claude Desktop 連携")}
       </div>
-      <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 14 }}>
-        {uiText(
-          locale,
-          "检测桌面配置、校验 JSON，并将 Claude Code 的 MCP 服务安全同步到桌面客户端。",
-          "Inspect the desktop config, validate JSON, and safely sync MCP servers from Claude Code.",
-          "デスクトップ設定を検査し、JSON を検証して Claude Code の MCP サーバーを安全に同期します。",
-        )}
-      </p>
-      {!status?.supported ? (
-        <div className="empty-state">
+      {status === null ? (
+        <div className="py-6 text-center text-xs text-[var(--text-muted)]">
+          {uiText(locale, "读取中...", "Loading...", "読み込み中...")}
+        </div>
+      ) : !status.supported ? (
+        <div className="py-6 text-center text-xs text-[var(--text-muted)]">
           {uiText(
             locale,
             "当前平台暂不支持自动定位配置文件",
@@ -103,52 +100,50 @@ export default function SettingsClaudeDesktopSection({ locale }: SettingsClaudeD
         </div>
       ) : (
         <>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: 10,
-              marginBottom: 12,
-            }}
-          >
-            <div className="stat-card">
-              <div className="stat-card-label">{uiText(locale, "配置状态", "Config", "設定")}</div>
-              <div className="stat-card-value" style={{ color: status.validJson ? "var(--success)" : "var(--danger)" }}>
+          <div className="flex flex-wrap gap-x-8 gap-y-2 border-y border-[var(--border-default)] py-3 text-xs">
+            <div>
+              <span className="mr-2 text-[var(--text-muted)]">{uiText(locale, "配置状态", "Config", "設定")}</span>
+              <span style={{ color: status.validJson ? "var(--success)" : "var(--danger)" }}>
                 {status.configured && status.validJson
                   ? uiText(locale, "有效", "Valid", "有効")
                   : uiText(locale, "未配置或无效", "Missing or invalid", "未設定または無効")}
-              </div>
+              </span>
             </div>
-            <div className="stat-card">
-              <div className="stat-card-label">{uiText(locale, "MCP 服务", "MCP servers", "MCP サーバー")}</div>
-              <div className="stat-card-value">{status.mcpServerCount}</div>
+            <div>
+              <span className="mr-2 text-[var(--text-muted)]">
+                {uiText(locale, "MCP 服务", "MCP servers", "MCP サーバー")}
+              </span>
+              <span>{status.mcpServerCount}</span>
             </div>
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 12, wordBreak: "break-all" }}>
-            {status.configPath}
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => void refresh()} disabled={busy}>
+          <div className="break-all text-[11px] text-[var(--text-muted)]">{status.configPath}</div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy}>
               <RefreshCw size={14} /> {uiText(locale, "刷新", "Refresh", "更新")}
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => void runAction("ensure_claude_desktop_official_provider")}
               disabled={busy}
             >
               <CheckCircle2 size={14} /> {uiText(locale, "校验并准备", "Validate & prepare", "検証して準備")}
-            </button>
-            <button
-              className="btn btn-primary btn-sm"
+            </Button>
+            <Button
+              size="sm"
               onClick={() => void runAction("import_claude_desktop_providers_from_claude")}
               disabled={busy}
             >
               <Upload size={14} /> {uiText(locale, "同步 Claude MCP", "Sync Claude MCP", "Claude MCP を同期")}
-            </button>
+            </Button>
           </div>
         </>
       )}
-      {message && <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-secondary)" }}>{message}</div>}
-    </div>
+      {message && (
+        <div role="status" className="text-xs text-[var(--text-secondary)]">
+          {message}
+        </div>
+      )}
+    </section>
   );
 }

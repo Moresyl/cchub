@@ -190,47 +190,103 @@ pub fn install_panic_hook() {
     }));
 }
 
-/// Atomic file write: write to a temp file, then rename.
-/// Prevents data corruption if the process crashes mid-write.
-/// Uses timestamp suffix to avoid temp file conflicts.
+#[cfg(windows)]
+fn replace_existing(path: &Path, replacement: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "Kernel32")]
+    extern "system" {
+        fn ReplaceFileW(
+            replaced: *const u16,
+            replacement: *const u16,
+            backup: *const u16,
+            flags: u32,
+            exclude: *const std::ffi::c_void,
+            reserved: *const std::ffi::c_void,
+        ) -> i32;
+    }
+    let original = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let next = replacement
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        ReplaceFileW(
+            original.as_ptr(),
+            next.as_ptr(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Write and sync a temporary file before atomically replacing the destination.
 pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
-
-    // Use timestamp suffix to avoid conflicts between concurrent writes
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-    let temp_path = parent.join(format!("{file_name}.tmp.{ts}"));
-
-    // Write + flush to ensure data is on disk
-    {
-        let mut f = std::fs::File::create(&temp_path)?;
-        f.write_all(content)?;
-        f.flush()?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(content)?;
+    temporary.as_file().sync_all()?;
+    if path.exists() {
+        let temporary_path = temporary.into_temp_path();
+        #[cfg(windows)]
+        replace_existing(path, temporary_path.as_ref())?;
+        #[cfg(not(windows))]
+        std::fs::rename(temporary_path.as_ref(), path)?;
+    } else {
+        temporary.persist(path).map_err(|error| error.error)?;
     }
-
-    // On Windows, rename fails if target exists, so remove first
-    #[cfg(windows)]
-    {
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
-    // Rename temp to target (atomic on most filesystems)
-    if let Err(e) = std::fs::rename(&temp_path, path) {
-        // Clean up temp file on failure
-        let _ = std::fs::remove_file(&temp_path);
-        return Err(e);
-    }
-
     Ok(())
 }
 
 /// Atomic string write convenience wrapper
 pub fn atomic_write_string(path: &Path, content: &str) -> std::io::Result<()> {
     atomic_write(path, content.as_bytes())
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::atomic_write;
+    use std::fs;
+
+    #[test]
+    fn creates_and_replaces_an_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("nested/config.json");
+        atomic_write(&path, b"first").unwrap();
+        atomic_write(&path, b"second").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+    }
+
+    #[test]
+    fn a_failed_replacement_keeps_the_original_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        fs::write(&path, "original").unwrap();
+        let result = atomic_write(&path.join("invalid"), b"next");
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_replace_failure_does_not_delete_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        fs::write(&path, "original").unwrap();
+        assert!(super::replace_existing(&path, &temp.path().join("missing.tmp")).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original");
+    }
 }

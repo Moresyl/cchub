@@ -2,7 +2,6 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
@@ -156,64 +155,8 @@ impl Drop for ConfigLock {
     }
 }
 
-#[cfg(windows)]
-fn replace_existing(path: &Path, replacement: &Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    #[link(name = "Kernel32")]
-    extern "system" {
-        fn ReplaceFileW(
-            replaced: *const u16,
-            replacement: *const u16,
-            backup: *const u16,
-            flags: u32,
-            exclude: *const std::ffi::c_void,
-            reserved: *const std::ffi::c_void,
-        ) -> i32;
-    }
-    let original = path
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let next = replacement
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let result = unsafe {
-        ReplaceFileW(
-            original.as_ptr(),
-            next.as_ptr(),
-            std::ptr::null(),
-            0,
-            std::ptr::null(),
-            std::ptr::null(),
-        )
-    };
-    if result == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
 pub(crate) fn write_config(path: &Path, content: &str) -> std::io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("Missing config directory"))?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    temporary.write_all(content.as_bytes())?;
-    temporary.as_file().sync_all()?;
-    if path.exists() {
-        let temporary_path = temporary.into_temp_path();
-        #[cfg(windows)]
-        replace_existing(path, temporary_path.as_ref())?;
-        #[cfg(not(windows))]
-        fs::rename(temporary_path.as_ref(), path)?;
-    } else {
-        temporary.persist(path).map_err(|error| error.error)?;
-    }
-    Ok(())
+    crate::utils::atomic_write_string(path, content)
 }
 
 fn update_at(path: &Path, id: &str, provider: Option<Value>) -> Result<(), String> {

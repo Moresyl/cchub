@@ -2,6 +2,7 @@ import {
   Activity,
   ArrowRightLeft,
   Bot,
+  Monitor,
   FileJson2,
   History,
   Layers3,
@@ -26,6 +27,7 @@ export interface NavigationItem {
     | "skills"
     | "openClaw"
     | "mcode"
+    | "claudeDesktop"
     | "proxyAdvanced"
     | "usage"
     | "sessions"
@@ -58,6 +60,7 @@ export const navigationSections: readonly NavigationSection[] = [
       { path: "/skills", labelKey: "skills", icon: Sparkles },
       { path: "/openclaw", labelKey: "openClaw", icon: Bot },
       { path: "/minimax-code", labelKey: "mcode", icon: Layers3 },
+      { path: "/claude-desktop", labelKey: "claudeDesktop", icon: Monitor },
     ],
   },
   {

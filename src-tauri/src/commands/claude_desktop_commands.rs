@@ -184,12 +184,8 @@ fn read_json_value(path: &Path) -> Result<Value, String> {
 }
 
 fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
-    let parent = path.parent().ok_or("Invalid Claude Desktop path")?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let content = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
-    let temp = path.with_extension("json.tmp");
-    fs::write(&temp, content).map_err(|error| error.to_string())?;
-    fs::rename(&temp, path).map_err(|error| error.to_string())
+    crate::utils::atomic_write(path, &content).map_err(|error| error.to_string())
 }
 
 fn valid_server_name(name: &str) -> Option<String> {

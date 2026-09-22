@@ -1,0 +1,18 @@
+# Reference parity audit
+
+Reference snapshots: `CCHub` (Apache-2.0) and `CCHub` (MIT), checked on 2026-09-22. This document tracks user-visible behavior, not just the presence of source files. A row is complete only after a native workflow and relevant tests pass. Do not publish a release claiming full parity while a required row is partial or missing.
+
+| Area | CCHub evidence | Status / acceptance gap |
+| --- | --- | --- |
+| CCHub workspace shell | `src/components/layout/{Sidebar,Header}.tsx`, `src/styles/_layout.css`, `src/lib/theme.ts` | Partial: 48px header, resizable 264px sidebar, 48px logo-only collapsed rail, command switcher and System/Light/Dark are present. Compare focus states, page density and responsive layouts in native and browser views. |
+| Provider profiles and presets | `src/pages/Profiles.tsx`, `src/lib/configProfiles/presets/`, `src-tauri/src/commands/extra/config_profiles/` | Partial: 55 built-in presets, search, reorder, apply, shared providers, endpoint and stream checks. Verify import/export, tray switch and real tool config round trips. |
+| Claude Desktop provider management | `src/pages/ClaudeDesktop.tsx`, `src-tauri/src/commands/claude_desktop_profiles.rs` | Partial: independent direct gateway providers, optional safe Claude models, activate/restore official with four-file rollback, MCP config and sync are present. Proxy mode and native smoke test remain. |
+| MiniMax Code | `src/pages/Mcode.tsx`, `src-tauri/src/commands/mcode_commands.rs`, `src-tauri/src/mcp/mcode.rs` | Partial: independent custom-provider CRUD, default-model protection, MCP sync, Skills directory detection and provider deep-link import. Live native smoke test remains. Do not apply whole-file profiles to MCode. |
+| Unified MCP | `src/pages/McpServers.tsx`, `src-tauri/src/mcp/config.rs` | Partial: Claude Code/Desktop, Codex, Gemini, Grok Build, OpenCode, Hermes and MiniMax Code are mapped. Verify bidirectional sync, HTTP/SSE, disabled entries and deep links across all targets. |
+| Prompts and Skills | `src/pages/{Prompts,Skills}.tsx`, `src-tauri/src/commands/{prompt_library,skill_repository_commands}.rs` | Partial: per-app prompt library, live files, GitHub/ZIP Skills, copy/symlink and repositories exist. Verify external-edit backfill, tool-specific paths and restore behavior. |
+| Local proxy and failover | `src-tauri/src/provider_proxy/`, `src/pages/ProxyAdvanced.tsx` | Partial: per-app takeover, format rewrites, circuit breakers, failover and optimizer controls exist. Verify hot switch and actual requests against fixture servers. |
+| Usage and sessions | `src/pages/{Usage,Sessions}.tsx`, `src-tauri/src/commands/usage_analytics.rs` | Partial: proxy aggregates, trends, detailed logs, pricing, session search/resume/delete exist. Verify source coverage, totals and controls against fixtures. |
+| Backup, cloud and deep links | `src/components/{SettingsImportExportSection,WebDavSyncSection,S3SyncSection,DeepLinkImportDialog}.tsx` | Partial: SQL export/restore, managed backups, WebDAV/S3 and provider/MCP/prompt/skill deep links exist. Verify rollback and all app targets, including MCode. |
+| Platform and release | `src-tauri/tauri.conf.json`, `.github/workflows/release.yml` | Partial: tray, autostart, updater and zh/en/ja exist. zh-TW and native cross-platform package verification remain. |
+
+The product keeps configuration switching as the primary workspace. Unrelated legacy routes are not promoted as navigation; no stored user data should be deleted by a UI cleanup. UI design should follow CCHub's neutral semantic surfaces, compact type and controls, not reproduce its brand identity or chat-specific panes.

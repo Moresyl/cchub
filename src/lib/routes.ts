@@ -8,6 +8,7 @@ export const pageImports = {
   "/proxy-advanced": () => import("../pages/ProxyAdvanced"),
   "/openclaw": () => import("../pages/OpenClaw"),
   "/minimax-code": () => import("../pages/Mcode"),
+  "/claude-desktop": () => import("../pages/ClaudeDesktop"),
   "/config-files": () => import("../pages/ConfigFiles"),
   "/settings": () => import("../pages/Settings"),
 } as const;

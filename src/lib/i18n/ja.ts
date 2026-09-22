@@ -29,6 +29,7 @@ export const ja: I18n = {
     hermesProviders: "Hermes プロバイダー",
     openClaw: "OpenClaw",
     mcode: "MiniMax Code",
+    claudeDesktop: "Claude Desktop",
     proxyAdvanced: "プロキシ最適化",
     security: "セキュリティ",
     settings: "設定",

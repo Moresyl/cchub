@@ -4,6 +4,7 @@ pub mod auth_commands;
 pub mod backup_compat;
 pub mod balance;
 pub mod claude_desktop_commands;
+pub mod claude_desktop_profiles;
 pub mod claude_extension;
 pub mod claude_md_commands;
 pub mod codex_history_compat;

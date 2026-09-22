@@ -26,6 +26,7 @@ export const en: I18n = {
     hermesProviders: "Hermes Providers",
     openClaw: "OpenClaw",
     mcode: "MiniMax Code",
+    claudeDesktop: "Claude Desktop",
     proxyAdvanced: "Proxy Optimizer",
     security: "Security",
     settings: "Settings",

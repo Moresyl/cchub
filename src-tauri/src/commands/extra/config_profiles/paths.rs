@@ -1,7 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::hermes;
@@ -370,117 +369,6 @@ pub fn count_query_hits(query: &str, values: &[String]) -> usize {
         .count()
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SessionTokenTotals {
-    input_tokens: u64,
-    output_tokens: u64,
-    total_tokens: u64,
-    has_usage: bool,
-}
-
-impl SessionTokenTotals {
-    fn record(
-        &mut self,
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-        total_tokens: Option<u64>,
-    ) {
-        let resolved_input = input_tokens.unwrap_or(0);
-        let resolved_output = output_tokens.unwrap_or(0);
-        let resolved_total =
-            total_tokens.unwrap_or_else(|| resolved_input.saturating_add(resolved_output));
-
-        if resolved_input == 0 && resolved_output == 0 && resolved_total == 0 {
-            return;
-        }
-
-        self.input_tokens = self.input_tokens.saturating_add(resolved_input);
-        self.output_tokens = self.output_tokens.saturating_add(resolved_output);
-        self.total_tokens = self.total_tokens.saturating_add(resolved_total);
-        self.has_usage = true;
-    }
-
-    pub fn input_option(self) -> Option<u64> {
-        self.has_usage.then_some(self.input_tokens)
-    }
-
-    pub fn output_option(self) -> Option<u64> {
-        self.has_usage.then_some(self.output_tokens)
-    }
-
-    pub fn total_option(self) -> Option<u64> {
-        self.has_usage.then_some(self.total_tokens)
-    }
-}
-
-pub fn read_token_u64(value: &serde_json::Value) -> Option<u64> {
-    match value {
-        serde_json::Value::Number(number) => number.as_u64(),
-        serde_json::Value::String(text) => text.trim().parse::<u64>().ok(),
-        _ => None,
-    }
-}
-
-pub fn object_usage_totals(
-    map: &serde_json::Map<String, serde_json::Value>,
-) -> Option<(Option<u64>, Option<u64>, Option<u64>)> {
-    let input_tokens = [
-        "input_tokens",
-        "prompt_tokens",
-        "inputTokenCount",
-        "inputTokens",
-    ]
-    .iter()
-    .find_map(|key| map.get(*key).and_then(read_token_u64));
-    let output_tokens = [
-        "output_tokens",
-        "completion_tokens",
-        "candidatesTokenCount",
-        "outputTokenCount",
-        "outputTokens",
-    ]
-    .iter()
-    .find_map(|key| map.get(*key).and_then(read_token_u64));
-    let total_tokens = ["total_tokens", "totalTokenCount", "totalTokens"]
-        .iter()
-        .find_map(|key| map.get(*key).and_then(read_token_u64));
-
-    (input_tokens.is_some() || output_tokens.is_some() || total_tokens.is_some()).then_some((
-        input_tokens,
-        output_tokens,
-        total_tokens,
-    ))
-}
-
-pub fn accumulate_token_usage_from_value(
-    value: &serde_json::Value,
-    totals: &mut SessionTokenTotals,
-    depth: usize,
-) {
-    if depth > 8 {
-        return;
-    }
-
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some((input_tokens, output_tokens, total_tokens)) = object_usage_totals(map) {
-                totals.record(input_tokens, output_tokens, total_tokens);
-                return;
-            }
-
-            for child in map.values() {
-                accumulate_token_usage_from_value(child, totals, depth + 1);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                accumulate_token_usage_from_value(item, totals, depth + 1);
-            }
-        }
-        _ => {}
-    }
-}
-
 pub fn normalize_session_query(query: Option<String>) -> String {
     query.unwrap_or_default().trim().to_lowercase()
 }
@@ -676,23 +564,6 @@ pub fn preferred_texts_from_value(
         }
         _ => {}
     }
-}
-
-pub fn read_session_token_totals_from_jsonl(path: &std::path::Path) -> SessionTokenTotals {
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(_) => return SessionTokenTotals::default(),
-    };
-
-    let mut totals = SessionTokenTotals::default();
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
-        accumulate_token_usage_from_value(&value, &mut totals, 0);
-    }
-
-    totals
 }
 
 /// Resolve the full path to a CLI tool executable (returned WITHOUT quotes).

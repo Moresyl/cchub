@@ -133,7 +133,7 @@ pub fn scan_codex_sessions_from_plan(
                     root.join(&rollout_path)
                 }
             };
-            let token_totals = read_session_token_totals_from_jsonl(&rollout_file_path);
+            let token_totals = read_codex_session_token_totals(&rollout_file_path);
             let history_items = history_index.get(&id).cloned().unwrap_or_default();
             let preview_source = history_items
                 .last()

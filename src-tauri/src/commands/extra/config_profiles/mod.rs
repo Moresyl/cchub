@@ -12,6 +12,7 @@ mod prefs;
 mod skill_storage;
 mod stream;
 mod stream_auth;
+mod token_usage;
 
 pub use apply::*;
 pub use auth::*;
@@ -25,3 +26,4 @@ pub use paths::*;
 pub use prefs::*;
 pub use skill_storage::*;
 pub use stream::*;
+pub use token_usage::*;

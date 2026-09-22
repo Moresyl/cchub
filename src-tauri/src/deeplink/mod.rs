@@ -713,7 +713,18 @@ pub fn infer_homepage_from_endpoint(endpoint: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_text_payload, DeepLinkErrorPayload, DeepLinkState};
+    use super::{decode_text_payload, parse_deeplink_url, DeepLinkErrorPayload, DeepLinkState};
+
+    #[test]
+    fn accepts_minimax_provider_and_mcp_targets() {
+        let provider = parse_deeplink_url(
+            "cchub://v1/import?resource=provider&app=mcode&name=MiniMax&model=example",
+        )
+        .unwrap();
+        assert_eq!(provider.app.as_deref(), Some("mcode"));
+        let mcp = parse_deeplink_url("cchub://v1/import?resource=mcp&apps=mcode&name=service&config=%7B%22command%22%3A%22tool%22%7D").unwrap();
+        assert_eq!(mcp.apps.as_deref(), Some("mcode"));
+    }
 
     #[test]
     fn restores_plus_signs_from_query_decoding() {

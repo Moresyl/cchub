@@ -59,6 +59,12 @@ describe("deep link payloads", () => {
     expect(snapshot.metadata?.usageScript).toMatchObject({ enabled: false, code: "return { remaining: 1 };" });
   });
 
+  it("keeps MiniMax Code out of whole-file profile import", () => {
+    expect(() => buildProviderProfileFromDeepLink({ version: "v1", resource: "provider", app: "mcode" })).toThrow(
+      "native provider import path",
+    );
+  });
+
   it("marks risky MCP values and masks credentials", () => {
     expect(classifyDeepLinkEndpoint("http://127.0.0.1:11434")).toBe("privateEndpoint");
     expect(classifyDeepLinkEnvKey("NODE_OPTIONS")).toBe("envHijack");

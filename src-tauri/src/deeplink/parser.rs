@@ -280,7 +280,8 @@ fn parse_bool(value: Option<&String>) -> Option<bool> {
 
 fn validate_provider_app(app: &str) -> Result<(), AppError> {
     match app {
-        "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes" => Ok(()),
+        "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes"
+        | "mcode" => Ok(()),
         other => Err(AppError::Custom(format!(
             "Unsupported provider app in deep link: {other}"
         ))),
@@ -290,7 +291,7 @@ fn validate_provider_app(app: &str) -> Result<(), AppError> {
 fn validate_mcp_app(app: &str) -> Result<(), AppError> {
     match app {
         "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode"
-        | "openclaw" | "hermes" => Ok(()),
+        | "openclaw" | "hermes" | "mcode" => Ok(()),
         other => Err(AppError::Custom(format!(
             "Unsupported MCP target app in deep link: {other}"
         ))),

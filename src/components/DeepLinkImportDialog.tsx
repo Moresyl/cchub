@@ -204,22 +204,27 @@ function DeepLinkImportDialogComponent() {
     setImporting(true);
     try {
       if (current.resource === "provider") {
-        const profile = buildProviderProfileFromDeepLink(current);
-        const profileId = await saveConfigProfileMutation.mutateAsync({
-          name: profile.name,
-          toolId: profile.toolId,
-          configSnapshot: profile.configSnapshot,
-        });
-        if (current.enabled) {
-          await applyConfigProfileMutation.mutateAsync(profileId);
+        if (current.app === "mcode") {
+          await invoke("import_from_deeplink", { request: current });
+        } else {
+          const profile = buildProviderProfileFromDeepLink(current);
+          const profileId = await saveConfigProfileMutation.mutateAsync({
+            name: profile.name,
+            toolId: profile.toolId,
+            configSnapshot: profile.configSnapshot,
+          });
+          if (current.enabled) {
+            await applyConfigProfileMutation.mutateAsync(profileId);
+          }
         }
         await invoke("refresh_tray_provider_menu");
+        const providerName = current.name?.trim() || "Imported Provider";
         showToast(
           "success",
           uiText(
-            `Provider 已导入: ${profile.name}`,
-            `Provider imported: ${profile.name}`,
-            `Provider をインポートしました: ${profile.name}`,
+            `Provider 已导入: ${providerName}`,
+            `Provider imported: ${providerName}`,
+            `Provider をインポートしました: ${providerName}`,
           ),
         );
       } else if (current.resource === "prompt") {

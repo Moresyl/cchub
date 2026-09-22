@@ -1,5 +1,5 @@
 export const DEFAULT_SIDEBAR_WIDTH = 264;
-export const MIN_SIDEBAR_WIDTH = 216;
+export const MIN_SIDEBAR_WIDTH = 264;
 export const MAX_SIDEBAR_WIDTH = 360;
 
 export function clampSidebarWidth(width: number): number {

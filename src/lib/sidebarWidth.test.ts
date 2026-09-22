@@ -5,7 +5,7 @@ describe("sidebar width", () => {
   afterEach(() => window.localStorage.removeItem("cchub:sidebar-width"));
 
   it("clamps dragged and keyboard-adjusted widths", () => {
-    expect(clampSidebarWidth(200)).toBe(216);
+    expect(clampSidebarWidth(200)).toBe(264);
     expect(clampSidebarWidth(280.6)).toBe(281);
     expect(clampSidebarWidth(500)).toBe(360);
     expect(clampSidebarWidth(Number.NaN)).toBe(DEFAULT_SIDEBAR_WIDTH);

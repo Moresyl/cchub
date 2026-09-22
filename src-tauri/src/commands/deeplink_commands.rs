@@ -103,6 +103,55 @@ fn provider_snapshot(request: &DeepLinkImportRequest) -> Result<String, String> 
     serde_json::to_string_pretty(&value).map_err(|error| error.to_string())
 }
 
+fn mcode_provider_from_request(
+    request: &DeepLinkImportRequest,
+    name: &str,
+) -> Result<(String, Value), String> {
+    let safe_name = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .chars()
+        .take(48)
+        .collect::<String>();
+    let prefix = if safe_name.is_empty() {
+        "imported"
+    } else {
+        &safe_name
+    };
+    let id = format!(
+        "{}-{}",
+        prefix,
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let api = match request
+        .api_protocol
+        .as_deref()
+        .or(request.api_format.as_deref())
+    {
+        None | Some("anthropic" | "anthropic-messages") => "anthropic-messages",
+        Some("openai_chat" | "openai-completions") => "openai-completions",
+        Some("openai_responses" | "openai-responses") => "openai-responses",
+        Some(_) => return Err("Unsupported MiniMax Code API format".to_string()),
+    };
+    let model = request.model.as_deref().unwrap_or_default().trim();
+    let provider = serde_json::json!({
+        "kind": "custom",
+        "enabled": request.enabled.unwrap_or(true),
+        "api": api,
+        "options": {"baseURL": request.endpoint.as_deref().unwrap_or_default(), "apiKey": request.api_key.as_deref().unwrap_or_default()},
+        "models": if model.is_empty() { serde_json::json!({}) } else { serde_json::json!({model: {"name": model}}) }
+    });
+    Ok((id, provider))
+}
+
 fn import_provider_request(
     request: &DeepLinkImportRequest,
     db: &DbState,
@@ -115,6 +164,11 @@ fn import_provider_request(
         .trim();
     if name.is_empty() {
         return Err("Provider name is required".to_string());
+    }
+    if app == "mcode" {
+        let (id, provider) = mcode_provider_from_request(request, name)?;
+        crate::commands::mcode_commands::save_mcode_provider(id.clone(), provider)?;
+        return Ok(id);
     }
     let snapshot = provider_snapshot(request)?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -316,7 +370,7 @@ fn parse_target_apps(raw: &str) -> Result<Vec<String>, String> {
     {
         match value {
             "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode"
-            | "hermes" => {
+            | "hermes" | "mcode" => {
                 if !apps.iter().any(|current| current == value) {
                     apps.push(value.to_string());
                 }
@@ -424,7 +478,7 @@ fn parse_mcp_server_config(value: &Value) -> Result<McpServerConfig, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_mcp_server_config, provider_snapshot};
+    use super::{mcode_provider_from_request, parse_mcp_server_config, provider_snapshot};
     use crate::deeplink::parse_deeplink_url;
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
@@ -465,5 +519,16 @@ mod tests {
             usage.get("code").and_then(|value| value.as_str()),
             Some("return { remaining: 1 };")
         );
+    }
+
+    #[test]
+    fn minimax_deep_link_builds_a_distinct_native_provider() {
+        let request = parse_deeplink_url("cchub://v1/import?resource=provider&app=mcode&name=Demo&endpoint=https%3A%2F%2Fexample.com%2Fv1&apiKey=secret&model=model-a&apiProtocol=openai-responses").unwrap();
+        let (first_id, provider) = mcode_provider_from_request(&request, "Demo").unwrap();
+        let (second_id, _) = mcode_provider_from_request(&request, "Demo").unwrap();
+        assert!(first_id.starts_with("Demo-"));
+        assert_ne!(first_id, second_id);
+        assert_eq!(provider["api"], "openai-responses");
+        assert_eq!(provider["models"]["model-a"]["name"], "model-a");
     }
 }

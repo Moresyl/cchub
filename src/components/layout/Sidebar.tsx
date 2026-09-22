@@ -59,20 +59,29 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
   return (
     <aside className={`sidebar-shell ${collapsed ? "sidebar-collapsed" : ""}`} aria-label={i.app.name}>
       <div className="sidebar-brand">
-        <button className="sidebar-brand-link" type="button" onClick={() => navigate("/")} aria-label={i.app.name}>
+        <button
+          className="sidebar-brand-link"
+          type="button"
+          onClick={collapsed ? onToggle : () => navigate("/")}
+          aria-label={collapsed ? (locale === "zh" ? "展开侧栏" : "Expand sidebar") : i.app.name}
+          title={collapsed ? (locale === "zh" ? "展开侧栏" : "Expand sidebar") : i.app.name}
+        >
           <span className="sidebar-mark">C</span>
+          {collapsed && <PanelLeftOpen className="sidebar-brand-expand" size={17} aria-hidden="true" />}
           <span className="sidebar-brand-name">CCHub</span>
         </button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="sidebar-collapse-button"
-          onClick={onToggle}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-        </Button>
+        {!collapsed && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="sidebar-collapse-button"
+            onClick={onToggle}
+            aria-label={locale === "zh" ? "折叠侧栏" : "Collapse sidebar"}
+            title={locale === "zh" ? "折叠侧栏" : "Collapse sidebar"}
+          >
+            <PanelLeftClose size={15} />
+          </Button>
+        )}
       </div>
 
       <Button
@@ -141,7 +150,7 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
           aria-label={locale === "zh" ? "调整侧栏宽度" : locale === "ja" ? "サイドバーの幅を調整" : "Resize sidebar"}
           aria-orientation="vertical"
           aria-valuenow={width}
-          aria-valuemin={216}
+          aria-valuemin={264}
           aria-valuemax={360}
           onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) =>
             event.currentTarget.setPointerCapture(event.pointerId)

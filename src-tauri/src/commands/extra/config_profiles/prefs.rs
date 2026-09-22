@@ -706,10 +706,15 @@ pub fn build_session_resume_command(
         "claude" => Ok(claude_resume_command(session_id)),
         "gemini" => Ok(gemini_resume_command(session_id)),
         "opencode" => Ok(opencode_resume_command(session_id)),
+        "grokbuild" => Ok(format!("grok --resume {}", shell_single_quote(session_id))),
         "openclaw" => openclaw_resume_command(source_path, session_id),
         "pi" => Ok(format!(
             "pi --session {}",
             shell_single_quote(source_path.unwrap_or(session_id))
+        )),
+        "mcode" => Ok(format!(
+            "mcode --session {}",
+            shell_single_quote(session_id)
         )),
         _ => Err(format!("Session restore is not supported for {tool_id}")),
     }

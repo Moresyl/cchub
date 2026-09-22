@@ -206,6 +206,7 @@ pub fn tool_cli_command(tool_id: &str) -> &'static str {
         "openclaw" => "openclaw",
         "hermes" => "hermes",
         "pi" => "pi",
+        "mcode" => "mcode",
         _ => "",
     }
 }
@@ -865,6 +866,7 @@ pub fn tool_supports_session_resume(tool_id: &str) -> bool {
         "openclaw" => cli_exists_in_path("openclaw"),
         "grokbuild" => cli_exists_in_path("grok"),
         "pi" => cli_exists_in_path("pi"),
+        "mcode" => cli_exists_in_path("mcode"),
         _ => false,
     }
 }

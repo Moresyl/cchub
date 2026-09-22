@@ -324,7 +324,11 @@ pub fn load_generic_sqlite_entries(
 
 pub fn load_session_detail(session: &SessionSummary) -> Result<SessionDetail, String> {
     let source_path = std::path::PathBuf::from(&session.source_path);
-    let entries = if session.tool_id == "codex" && session.source_kind == "codex_jsonl" {
+    let entries = if session.source_backend == "grokbuild_native" {
+        load_grokbuild_session_entries(&source_path)?
+    } else if session.source_backend == "mcode_sqlite" {
+        load_mcode_session_entries(&source_path, &session.id)?
+    } else if session.tool_id == "codex" && session.source_kind == "codex_jsonl" {
         parse_codex_session_entries(&source_path)?
     } else if session.source_backend == "jsonl" {
         parse_generic_jsonl_session_entries(&source_path)?
@@ -430,6 +434,12 @@ pub fn delete_session_impl(
     }
     let root = resolve_tool_config_dir(conn, tool_id)?;
 
+    if source_backend == "mcode_sqlite" {
+        return Err("MiniMax Code sessions are read-only".to_string());
+    }
+    if source_backend == "grokbuild_native" {
+        return delete_grokbuild_session(&root, &PathBuf::from(source_path), session_id);
+    }
     if tool_id == "codex" {
         delete_codex_session_records(&root, session_id)?;
     }

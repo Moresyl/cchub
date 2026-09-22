@@ -252,6 +252,12 @@
   font-family: inherit;
 }
 
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  pointer-events: none;
+}
+
 .btn-md {
   padding: 6px 14px;
   font-size: 12.5px;

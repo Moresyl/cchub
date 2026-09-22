@@ -60,6 +60,7 @@ export const TOOL_ORDER: ManagedAppId[] = [
   "openclaw",
   "hermes",
   "pi",
+  "mcode",
 ];
 
 export function sessionSelectionKey(session: Pick<SessionSummary, "tool_id" | "id" | "source_path">) {
@@ -118,6 +119,10 @@ export function buildResumeCommand(toolId: string, sessionId: string): string | 
       return `opencode session resume ${sessionId}`;
     case "pi":
       return `pi --session ${sessionId}`;
+    case "grokbuild":
+      return `grok --resume ${sessionId}`;
+    case "mcode":
+      return `mcode --session ${sessionId}`;
     default:
       return null; // openclaw etc. — no CLI resume
   }

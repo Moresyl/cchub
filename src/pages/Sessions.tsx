@@ -345,7 +345,7 @@ export default function Sessions() {
   }, [allSessions, deferredQuery]);
   const checkedSessionKeySet = useMemo(() => new Set(checkedSessionKeys), [checkedSessionKeys]);
   const checkedSessions = useMemo(
-    () => sessions.filter((session) => checkedSessionKeySet.has(sessionSelectionKey(session))),
+    () => sessions.filter((session) => session.can_delete && checkedSessionKeySet.has(sessionSelectionKey(session))),
     [checkedSessionKeySet, sessions],
   );
 
@@ -355,6 +355,7 @@ export default function Sessions() {
   }, [allSessions]);
 
   const handleToggleCheckedSession = useCallback((session: SessionSummary) => {
+    if (!session.can_delete) return;
     const key = sessionSelectionKey(session);
     setCheckedSessionKeys((current) =>
       current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
@@ -362,8 +363,8 @@ export default function Sessions() {
   }, []);
 
   const handleToggleAllVisibleSessions = useCallback(() => {
-    if (sessions.length === 0) return;
-    const visibleKeys = sessions.map(sessionSelectionKey);
+    const visibleKeys = sessions.filter((session) => session.can_delete).map(sessionSelectionKey);
+    if (visibleKeys.length === 0) return;
     const allChecked = visibleKeys.every((key) => checkedSessionKeySet.has(key));
     setCheckedSessionKeys((current) => {
       if (allChecked) {
@@ -439,10 +440,11 @@ export default function Sessions() {
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={handleToggleAllVisibleSessions}
-                disabled={sessions.length === 0}
+                disabled={!sessions.some((session) => session.can_delete)}
               >
                 <SquareCheckBig size={14} />
-                {checkedSessions.length === sessions.length && sessions.length > 0
+                {checkedSessions.length === sessions.filter((session) => session.can_delete).length &&
+                checkedSessions.length > 0
                   ? uiText("清空当前选择", "Clear visible selection", "現在の選択を解除")
                   : uiText("全选当前结果", "Select visible results", "現在の結果を全選択")}
               </button>

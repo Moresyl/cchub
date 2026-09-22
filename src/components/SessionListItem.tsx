@@ -93,6 +93,7 @@ function SessionListItemComponent({
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             <button
               className={`btn btn-ghost btn-icon-sm ${checked ? "selected" : ""}`}
+              disabled={!session.can_delete}
               onClick={(event) => {
                 event.stopPropagation();
                 onToggleChecked(session);

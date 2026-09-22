@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use super::super::config_profiles::*;
 use super::super::statusline::*;
 use super::super::types::*;
+use super::{scan_grokbuild_sessions, scan_mcode_sessions};
 
 pub fn load_codex_history_index(root: &std::path::Path) -> HashMap<String, Vec<String>> {
     let mut index = HashMap::new();
@@ -577,6 +578,32 @@ pub fn scan_generic_sqlite_sessions(
     sessions
 }
 
+fn session_tool_ids(requested_tool: Option<&str>) -> Vec<&'static str> {
+    match requested_tool {
+        Some("claude") => vec!["claude"],
+        Some("codex") => vec!["codex"],
+        Some("gemini") => vec!["gemini"],
+        Some("grokbuild") => vec!["grokbuild"],
+        Some("opencode") => vec!["opencode"],
+        Some("openclaw") => vec!["openclaw"],
+        Some("hermes") => vec!["hermes"],
+        Some("pi") => vec!["pi"],
+        Some("mcode") => vec!["mcode"],
+        Some(_) => Vec::new(),
+        _ => vec![
+            "claude",
+            "codex",
+            "gemini",
+            "grokbuild",
+            "opencode",
+            "openclaw",
+            "hermes",
+            "pi",
+            "mcode",
+        ],
+    }
+}
+
 pub fn scan_sessions_from_conn(
     conn: &rusqlite::Connection,
     tool_id: Option<String>,
@@ -590,18 +617,7 @@ pub fn scan_sessions_from_conn(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    let tool_ids: Vec<&str> = match requested_tool {
-        Some("claude") => vec!["claude"],
-        Some("codex") => vec!["codex"],
-        Some("gemini") => vec!["gemini"],
-        Some("opencode") => vec!["opencode"],
-        Some("openclaw") => vec!["openclaw"],
-        Some("hermes") => vec!["hermes"],
-        Some("pi") => vec!["pi"],
-        _ => vec![
-            "claude", "codex", "gemini", "opencode", "openclaw", "hermes", "pi",
-        ],
-    };
+    let tool_ids = session_tool_ids(requested_tool);
 
     // 第一阶段：在 db lock 持有期间收集每个 tool 的 session 根目录与 codex 候选文件，
     // 这是唯一需要 conn 的工作。之后释放 db 影响，把昂贵的文件 IO + JSON 解析
@@ -614,6 +630,12 @@ pub fn scan_sessions_from_conn(
         },
         Generic {
             roots: Vec<PathBuf>,
+        },
+        GrokBuild {
+            root: Option<PathBuf>,
+        },
+        Mcode {
+            database: Option<PathBuf>,
         },
     }
 
@@ -637,6 +659,17 @@ pub fn scan_sessions_from_conn(
                         generic_roots,
                     },
                 )
+            } else if tool == "grokbuild" {
+                let root = resolve_tool_config_dir(conn, tool)
+                    .ok()
+                    .filter(|path| path.exists());
+                (tool, ToolPlan::GrokBuild { root })
+            } else if tool == "mcode" {
+                let database = resolve_tool_config_dir(conn, tool)
+                    .ok()
+                    .map(|root| root.join("v2/sqlite/runtime-state.sqlite"))
+                    .filter(|path| path.exists());
+                (tool, ToolPlan::Mcode { database })
             } else {
                 let roots = session_roots_for_tool(conn, tool).unwrap_or_default();
                 (tool, ToolPlan::Generic { roots })
@@ -666,6 +699,14 @@ pub fn scan_sessions_from_conn(
                         ToolPlan::Generic { roots } => {
                             scan_generic_tool_sessions_from_roots(tool, &roots, query_ref)
                         }
+                        ToolPlan::GrokBuild { root } => root
+                            .as_deref()
+                            .map(|root| scan_grokbuild_sessions(root, query_ref))
+                            .unwrap_or_default(),
+                        ToolPlan::Mcode { database } => database
+                            .as_deref()
+                            .map(|path| scan_mcode_sessions(path, query_ref))
+                            .unwrap_or_default(),
                     }
                 })
             })
@@ -686,4 +727,17 @@ pub fn scan_sessions_from_conn(
     });
     sessions.truncate(max_results);
     Ok(sessions)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_tool_ids;
+
+    #[test]
+    fn routes_all_nine_session_tools_without_falling_back() {
+        assert_eq!(session_tool_ids(Some("grokbuild")), vec!["grokbuild"]);
+        assert_eq!(session_tool_ids(Some("mcode")), vec!["mcode"]);
+        assert!(session_tool_ids(Some("unsupported")).is_empty());
+        assert_eq!(session_tool_ids(None).len(), 9);
+    }
 }

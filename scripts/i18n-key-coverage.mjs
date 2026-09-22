@@ -6,14 +6,22 @@ import ts from "typescript";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
-const i18nPath = path.join(rootDir, "src", "lib", "i18n.ts");
-
-const sourceText = fs.readFileSync(i18nPath, "utf8");
-const sourceFile = ts.createSourceFile(i18nPath, sourceText, ts.ScriptTarget.Latest, true);
 const localeNames = ["zh", "en", "ja"];
 const strict = process.argv.includes("--strict");
+const localeFiles = new Map(
+  localeNames.map((name) => {
+    const filePath = path.join(rootDir, "src", "lib", "i18n", `${name}.ts`);
+    const sourceText = fs.readFileSync(filePath, "utf8");
+    const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true);
+    return [name, sourceFile];
+  }),
+);
 
 function findLocaleObject(name) {
+  const sourceFile = localeFiles.get(name);
+  if (!sourceFile) {
+    throw new Error(`Could not find locale source: ${name}`);
+  }
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
@@ -30,11 +38,12 @@ function findObjectPath(pathParts) {
   const [rootName, ...properties] = pathParts;
   let current = findLocaleObject(rootName);
   for (const propertyName of properties) {
-    const property = current.properties.find((item) => (
-      ts.isPropertyAssignment(item)
-      && propertyNameText(item.name) === propertyName
-      && ts.isObjectLiteralExpression(item.initializer)
-    ));
+    const property = current.properties.find(
+      (item) =>
+        ts.isPropertyAssignment(item) &&
+        propertyNameText(item.name) === propertyName &&
+        ts.isObjectLiteralExpression(item.initializer),
+    );
     if (!property || !ts.isPropertyAssignment(property) || !ts.isObjectLiteralExpression(property.initializer)) {
       return null;
     }
@@ -58,7 +67,7 @@ function propertyNameText(name) {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
   }
-  return name.getText(sourceFile);
+  return name.getText();
 }
 
 function collectLeafKeys(node, prefix = "") {

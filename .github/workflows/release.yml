@@ -33,6 +33,7 @@ env:
     - 修复 Codex 会话令牌累计值重复统计；大型 rollout 扫描改为读取文件尾部，实测由约 82 秒降至约 2 秒
     - 修复配置工具栏和 MCP 向导在窄窗口下的换行、溢出与交互状态问题
     - 恢复仓库原有 MIT 许可证文件，修复 README 许可证断链，并补充 CCHub 与 CCHub 的参考来源
+    - 修复国际化 key 覆盖脚本仍读取旧版单文件路径的问题，严格模式验证中、英、日 476 个 key 一致
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -47,6 +48,7 @@ env:
     - Updated React Router and pinned a patched js-yaml release; the production dependency audit reports no known vulnerabilities.
     - Fixed remote MCP format loss, desktop proxy lifecycle issues, responsive toolbar overflow, and duplicate Codex token accounting. Windows users should prefer the NSIS installer below.
     - Restored the repository MIT license file and documented the CCHub and CCHub design/workflow references.
+    - Fixed the i18n coverage script for split locale modules; strict checks now validate 476 keys across Chinese, English, and Japanese.
 
     ## 下载 / Download
 

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use toml_edit::DocumentMut;
 
+use super::mcode;
 use crate::hermes;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -116,6 +117,7 @@ pub fn scan_all_mcp_servers() -> Vec<ScannedMcpServer> {
     if let Ok(hermes_servers) = hermes::mcp::scan_servers_from_default_root() {
         servers.extend(hermes_servers);
     }
+    servers.extend(mcode::scan());
 
     // Deduplicate by name (keep first found)
     let mut seen = std::collections::HashSet::new();
@@ -193,7 +195,7 @@ fn parse_mcp_json_file(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
     }
 }
 
-fn parse_server_entry(
+pub(super) fn parse_server_entry(
     name: &str,
     cfg: &serde_json::Value,
     source: &str,
@@ -652,6 +654,7 @@ pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> 
         "opencode" => write_mcp_to_opencode(name, config),
         "openclaw" => Err("OpenClaw MCP sync is not yet supported".to_string()),
         "hermes" => hermes::mcp::write_server_to_default_root(name, config),
+        "mcode" => mcode::sync(name, Some(config)),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -732,6 +735,7 @@ pub fn unsync_mcp_from_tool(name: &str, tool_id: &str) -> Result<(), String> {
         "opencode" => remove_mcp_from_opencode(name),
         "openclaw" => Err("OpenClaw MCP sync is not yet supported".to_string()),
         "hermes" => hermes::mcp::remove_server_from_default_root(name),
+        "mcode" => mcode::sync(name, None),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -821,6 +825,7 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
         }
         "openclaw" => false, // OpenClaw MCP sync not yet supported
         "hermes" => hermes::mcp::has_server_in_default_root(name).unwrap_or(false),
+        "mcode" => mcode::has_server(name),
         _ => false,
     }
 }

@@ -7,6 +7,7 @@ export const pageImports = {
   "/usage": () => import("../pages/Usage"),
   "/proxy-advanced": () => import("../pages/ProxyAdvanced"),
   "/openclaw": () => import("../pages/OpenClaw"),
+  "/minimax-code": () => import("../pages/Mcode"),
   "/config-files": () => import("../pages/ConfigFiles"),
   "/settings": () => import("../pages/Settings"),
 } as const;

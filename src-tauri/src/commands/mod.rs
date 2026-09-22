@@ -22,6 +22,7 @@ pub use extra as extra_commands;
 pub mod hermes_commands;
 pub mod hook_commands;
 pub mod marketplace_commands;
+pub mod mcode_commands;
 pub mod mcp_commands;
 pub mod model_pricing_file;
 pub mod models_dev_sync;

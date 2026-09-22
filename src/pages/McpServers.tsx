@@ -38,6 +38,7 @@ const MCP_SYNCABLE_APPS = [
   { id: "grokbuild", label: "Grok Build" },
   { id: "opencode", label: "OpenCode" },
   { id: "hermes", label: "Hermes" },
+  { id: "mcode", label: "MiniMax Code" },
 ] as const;
 
 export default function McpServers() {

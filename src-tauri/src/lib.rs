@@ -261,6 +261,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::mcode_commands::get_mcode_state,
+            commands::mcode_commands::save_mcode_provider,
+            commands::mcode_commands::delete_mcode_provider,
             commands::mcp_commands::scan_mcp_servers,
             commands::mcp_commands::get_mcp_config,
             commands::mcp_commands::import_mcp_from_apps,

@@ -109,6 +109,16 @@ const TOOL_CANDIDATES: &[ToolCandidate] = &[
         install_command: "npm i -g @earendil-works/pi-coding-agent@latest",
         install_url: "https://pi.dev",
     },
+    ToolCandidate {
+        id: "mcode",
+        name: "MiniMax Code",
+        dir: ".minimax",
+        config_file: "config.yaml",
+        mcp_config_file: "mcp.json",
+        skills_subdir: "skills",
+        install_command: "",
+        install_url: "",
+    },
 ];
 
 pub fn detect_tools_for_conn(conn: &Connection) -> Vec<DetectedTool> {
@@ -129,6 +139,13 @@ fn base_dir_for_candidate(
     if candidate.id == "hermes" {
         if let Ok(path) = crate::hermes::hermes_root(conn) {
             return path;
+        }
+    }
+    if candidate.id == "mcode" {
+        if let Ok(path) = crate::commands::mcode_commands::config_path() {
+            if let Some(parent) = path.parent() {
+                return parent.to_path_buf();
+            }
         }
     }
 

@@ -28,6 +28,7 @@ export const ja: I18n = {
     hermesMemory: "Hermes メモリ",
     hermesProviders: "Hermes プロバイダー",
     openClaw: "OpenClaw",
+    mcode: "MiniMax Code",
     proxyAdvanced: "プロキシ最適化",
     security: "セキュリティ",
     settings: "設定",

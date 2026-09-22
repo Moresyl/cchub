@@ -25,6 +25,7 @@ export const en: I18n = {
     hermesMemory: "Hermes Memory",
     hermesProviders: "Hermes Providers",
     openClaw: "OpenClaw",
+    mcode: "MiniMax Code",
     proxyAdvanced: "Proxy Optimizer",
     security: "Security",
     settings: "Settings",

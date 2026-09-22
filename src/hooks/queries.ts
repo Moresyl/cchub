@@ -349,7 +349,7 @@ export async function fetchProfilesPageData() {
 
   return {
     profiles,
-    tools,
+    tools: tools.filter((tool) => tool.id !== "mcode"),
     activeIds,
     providerFragments,
   };

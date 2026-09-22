@@ -17,6 +17,8 @@ pub struct McpConfigResponse {
 pub fn get_mcp_config(app: String, _db: State<'_, DbState>) -> Result<McpConfigResponse, String> {
     let config_path = if app.eq_ignore_ascii_case("claude-desktop") {
         config::claude_desktop_config_path()
+    } else if app.eq_ignore_ascii_case("mcode") {
+        crate::mcp::mcode::path().ok()
     } else {
         dirs::home_dir().map(|home| home.join(".claude.json"))
     }

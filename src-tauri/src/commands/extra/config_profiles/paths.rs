@@ -53,6 +53,7 @@ pub fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
         "openclaw" => Ok("openclaw.json"),
         "hermes" => Ok("config.yaml"),
         "pi" => Ok("models.json"),
+        "mcode" => Ok("config.yaml"),
         _ => Err(format!("Unknown tool: {}", tool_id)),
     }
 }
@@ -67,6 +68,7 @@ pub fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<
         "openclaw" => ".openclaw",
         "hermes" => ".hermes",
         "pi" => ".pi\\agent",
+        "mcode" => ".minimax",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     };
     Ok(home.join(dir))
@@ -78,6 +80,12 @@ pub fn resolve_tool_config_dir(
 ) -> Result<PathBuf, String> {
     if tool_id == "hermes" {
         return hermes::hermes_root(conn);
+    }
+    if tool_id == "mcode" {
+        return crate::commands::mcode_commands::config_path()?
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "Invalid MiniMax Code config path".to_string());
     }
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
@@ -276,6 +284,7 @@ pub fn tool_label(tool_id: &str) -> &'static str {
         "openclaw" => "OpenClaw",
         "hermes" => "Hermes",
         "pi" => "Pi",
+        "mcode" => "MiniMax Code",
         _ => "Session",
     }
 }
@@ -290,6 +299,7 @@ pub fn tool_hidden_dir(tool_id: &str) -> Option<&'static str> {
         "openclaw" => Some(".openclaw"),
         "hermes" => Some(".hermes"),
         "pi" => Some(".pi\\agent"),
+        "mcode" => Some(".minimax"),
         _ => None,
     }
 }

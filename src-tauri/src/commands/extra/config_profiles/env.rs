@@ -306,7 +306,7 @@ pub fn get_text_app_setting(
         .ok())
 }
 
-pub const MANAGED_APP_IDS: [&str; 8] = [
+pub const MANAGED_APP_IDS: [&str; 9] = [
     "claude",
     "codex",
     "gemini",
@@ -315,6 +315,7 @@ pub const MANAGED_APP_IDS: [&str; 8] = [
     "openclaw",
     "hermes",
     "pi",
+    "mcode",
 ];
 pub const VISIBLE_APPS_SETTING_KEY: &str = "visible_apps";
 pub const WINDOW_PREFERENCES_SETTING_KEY: &str = "window_preferences";

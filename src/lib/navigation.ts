@@ -4,6 +4,7 @@ import {
   Bot,
   FileJson2,
   History,
+  Layers3,
   Plug,
   ScrollText,
   Settings,
@@ -24,6 +25,7 @@ export interface NavigationItem {
     | "prompts"
     | "skills"
     | "openClaw"
+    | "mcode"
     | "proxyAdvanced"
     | "usage"
     | "sessions"
@@ -55,6 +57,7 @@ export const navigationSections: readonly NavigationSection[] = [
       { path: "/prompts", labelKey: "prompts", icon: ScrollText },
       { path: "/skills", labelKey: "skills", icon: Sparkles },
       { path: "/openclaw", labelKey: "openClaw", icon: Bot },
+      { path: "/minimax-code", labelKey: "mcode", icon: Layers3 },
     ],
   },
   {

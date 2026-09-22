@@ -162,6 +162,7 @@ pub fn config_contents_match(left: &str, right: &str) -> bool {
 
 pub fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<String, String> {
     match tool_id {
+        "mcode" => Err("MiniMax Code providers must be managed individually".to_string()),
         "codex" => {
             let dir = resolve_tool_config_dir(conn, tool_id)?;
             let auth_path = dir.join("auth.json");
@@ -359,6 +360,7 @@ pub fn apply_tool_snapshot_with_options(
         crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool_id, snapshot)?;
 
     match tool_id {
+        "mcode" => Err("MiniMax Code providers must be managed individually".to_string()),
         "codex" => {
             let dir = resolve_tool_config_dir(conn, tool_id)?;
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

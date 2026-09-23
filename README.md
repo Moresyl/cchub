@@ -28,6 +28,14 @@ The compact neutral light/dark workspace has a collapsible sidebar and `Ctrl+K` 
 
 ---
 
+## Workspace
+
+| Dark theme                                          | Light theme                                           |
+| --------------------------------------------------- | ----------------------------------------------------- |
+| ![CCHub dark workspace](screenshots/dark-theme.png) | ![CCHub light workspace](screenshots/light-theme.png) |
+
+---
+
 ## Features
 
 | Feature              | Description                                                             |
@@ -54,15 +62,15 @@ The compact neutral light/dark workspace has a collapsible sidebar and `Ctrl+K` 
 
 ## Download
 
-| File                                                                       | Platform | Description                                       |
-| -------------------------------------------------------------------------- | -------- | ------------------------------------------------- |
-| [`CCHub_x64-setup.exe`](https://github.com/Moresyl/cchub/releases/latest)  | Windows  | **Recommended** — NSIS installer with auto-update |
-| [`CCHub_x64_en-US.msi`](https://github.com/Moresyl/cchub/releases/latest)  | Windows  | MSI format for enterprise deployment              |
-| [`CCHub_aarch64.dmg`](https://github.com/Moresyl/cchub/releases/latest)    | macOS    | Apple Silicon (M1/M2/M3/M4)                       |
-| [`CCHub_x64.dmg`](https://github.com/Moresyl/cchub/releases/latest)        | macOS    | Intel                                             |
-| [`CCHub_amd64.deb`](https://github.com/Moresyl/cchub/releases/latest)      | Linux    | Debian / Ubuntu                                   |
-| [`CCHub_amd64.AppImage`](https://github.com/Moresyl/cchub/releases/latest) | Linux    | Universal AppImage                                |
-| [`CCHub_x86_64.rpm`](https://github.com/Moresyl/cchub/releases/latest)     | Linux    | Fedora / RHEL                                     |
+| File                                                                       | Platform | Description                                                         |
+| -------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------- |
+| [`CCHub_x64-setup.exe`](https://github.com/Moresyl/cchub/releases/latest)  | Windows  | **Recommended** — branded bilingual NSIS installer with auto-update |
+| [`CCHub_x64_en-US.msi`](https://github.com/Moresyl/cchub/releases/latest)  | Windows  | Branded MSI format for enterprise deployment                        |
+| [`CCHub_aarch64.dmg`](https://github.com/Moresyl/cchub/releases/latest)    | macOS    | Apple Silicon (M1/M2/M3/M4)                                         |
+| [`CCHub_x64.dmg`](https://github.com/Moresyl/cchub/releases/latest)        | macOS    | Intel                                                               |
+| [`CCHub_amd64.deb`](https://github.com/Moresyl/cchub/releases/latest)      | Linux    | Debian / Ubuntu                                                     |
+| [`CCHub_amd64.AppImage`](https://github.com/Moresyl/cchub/releases/latest) | Linux    | Universal AppImage                                                  |
+| [`CCHub_x86_64.rpm`](https://github.com/Moresyl/cchub/releases/latest)     | Linux    | Fedora / RHEL                                                       |
 
 ---
 
@@ -103,6 +111,8 @@ pnpm tauri dev
 ```bash
 pnpm tauri build
 ```
+
+Windows installer artwork, localization, and validation are documented in [docs/WINDOWS_INSTALLER.md](docs/WINDOWS_INSTALLER.md).
 
 ---
 

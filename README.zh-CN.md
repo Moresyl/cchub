@@ -28,6 +28,14 @@ CCHub 以配置切换为主工作区。按工具筛选并搜索已保存的 Prov
 
 ---
 
+## 工作台预览
+
+| 深色主题                                        | 浅色主题                                         |
+| ----------------------------------------------- | ------------------------------------------------ |
+| ![CCHub 深色工作台](screenshots/dark-theme.png) | ![CCHub 浅色工作台](screenshots/light-theme.png) |
+
+---
+
 ## 核心功能
 
 | 功能              | 说明                                                       |
@@ -54,15 +62,15 @@ CCHub 以配置切换为主工作区。按工具筛选并搜索已保存的 Prov
 
 ## 下载安装
 
-| 文件                                                                       | 平台    | 说明                                 |
-| -------------------------------------------------------------------------- | ------- | ------------------------------------ |
-| [`CCHub_x64-setup.exe`](https://github.com/Moresyl/cchub/releases/latest)  | Windows | **推荐** — NSIS 安装包，支持自动更新 |
-| [`CCHub_x64_en-US.msi`](https://github.com/Moresyl/cchub/releases/latest)  | Windows | MSI 格式，适合企业部署               |
-| [`CCHub_aarch64.dmg`](https://github.com/Moresyl/cchub/releases/latest)    | macOS   | Apple Silicon (M1/M2/M3/M4)          |
-| [`CCHub_x64.dmg`](https://github.com/Moresyl/cchub/releases/latest)        | macOS   | Intel                                |
-| [`CCHub_amd64.deb`](https://github.com/Moresyl/cchub/releases/latest)      | Linux   | Debian / Ubuntu                      |
-| [`CCHub_amd64.AppImage`](https://github.com/Moresyl/cchub/releases/latest) | Linux   | 通用 AppImage                        |
-| [`CCHub_x86_64.rpm`](https://github.com/Moresyl/cchub/releases/latest)     | Linux   | Fedora / RHEL                        |
+| 文件                                                                       | 平台    | 说明                                                |
+| -------------------------------------------------------------------------- | ------- | --------------------------------------------------- |
+| [`CCHub_x64-setup.exe`](https://github.com/Moresyl/cchub/releases/latest)  | Windows | **推荐** — 品牌化中英双语 NSIS 安装包，支持自动更新 |
+| [`CCHub_x64_en-US.msi`](https://github.com/Moresyl/cchub/releases/latest)  | Windows | 品牌化 MSI 格式，适合企业部署                       |
+| [`CCHub_aarch64.dmg`](https://github.com/Moresyl/cchub/releases/latest)    | macOS   | Apple Silicon (M1/M2/M3/M4)                         |
+| [`CCHub_x64.dmg`](https://github.com/Moresyl/cchub/releases/latest)        | macOS   | Intel                                               |
+| [`CCHub_amd64.deb`](https://github.com/Moresyl/cchub/releases/latest)      | Linux   | Debian / Ubuntu                                     |
+| [`CCHub_amd64.AppImage`](https://github.com/Moresyl/cchub/releases/latest) | Linux   | 通用 AppImage                                       |
+| [`CCHub_x86_64.rpm`](https://github.com/Moresyl/cchub/releases/latest)     | Linux   | Fedora / RHEL                                       |
 
 ---
 
@@ -103,6 +111,8 @@ pnpm tauri dev
 ```bash
 pnpm tauri build
 ```
+
+Windows 安装器视觉资产、双语文案与校验方式见 [docs/WINDOWS_INSTALLER.md](docs/WINDOWS_INSTALLER.md)。
 
 ---
 

@@ -14,34 +14,34 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - Windows NSIS 安装器新增与应用一致的深色侧栏、浅色内容区、应用图标和青色状态强调，欢迎页与完成页不再使用默认素材
-    - NSIS 卸载器新增独立品牌头图与应用图标，安装和卸载流程保持统一视觉
-    - MSI 安装器新增 493×58 品牌横幅与 493×312 欢迎/完成页图，企业部署入口与推荐安装包保持一致
-    - 新增简体中文与英文安装维护文案，覆盖修复安装、版本替换、WebView2 状态和本地数据删除提示
+    - 新增统一的应用内确认与输入对话框，覆盖全量流检、备份重命名/删除/恢复、OAuth 账号移除、WebDAV 恢复、会话用量重建、供应商删除和 Hermes 路径设置
+    - 新增基于 Radix 的统一复选框与带说明选项组件，配置编辑器、配置文件、MCP 向导、日志、模型同步和设置页面使用相同的焦点与选中状态
+    - 配置编辑器新增 JSON、TOML、YAML 与 Markdown 语法支持，并提供语言栏、行号、活动行、错误标记及明暗主题自适应配色
+    - 原始配置区改为三列结构化选项面板，隐藏署名、高强度思考和协作模式的用途与状态更清晰
 
     ### 变更与安全
-    - Tauri CLI 升级至 2.11.5，Rust 构建链升级至 tauri-build 2.6.3 与 tauri-utils 2.9.3，以支持卸载器品牌资源
-    - 固定 MSI Upgrade Code，避免后续升级被 Windows 识别为另一款应用；NSIS 继续采用当前用户安装，不新增管理员权限要求
-    - 卸载页默认保留数据库与本地配置，只有用户主动勾选删除选项时才清理数据；本版本不修改配置文件或数据库格式
-    - 前端生产构建新增安装器资产校验，检查 CLI 版本、双语文件、路径、BMP 尺寸和 24 位像素格式
+    - 危险操作对话框明确标识删除或覆盖影响，并将取消操作保持为默认焦点，避免浏览器原生弹窗造成的误操作和视觉割裂
+    - CodeMirror 语言支持继续按需加载，不进入配置工作台首屏主包；新增组件均支持键盘焦点与辅助技术标签
+    - 本版本只调整前端控件与编辑体验，不修改数据库、配置文件格式、供应商协议或安装路径
+    - 继续沿用 1.6.3 已固定的 MSI Upgrade Code、品牌安装/卸载资源和升级数据保留策略
 
     ### 问题修复与打磨
-    - 修复 Windows 安装、卸载与维护页面沿用默认 NSIS/WiX 视觉、与应用界面割裂的问题
-    - 修复卸载数据选项含义不够明确的问题，中文和英文均明确说明会删除本地数据与设置
-    - 替换 README 中停留在旧版仪表盘的截图，新增当前配置工作台的 1440×900 深浅主题实拍
-    - 新增 Windows 安装器视觉规范文档与可重复生成脚本，降低后续品牌资产失配风险
+    - 修复原始 JSON/TOML 配置只有纯文本和行号、缺少语法层次的问题
+    - 修复大量原生复选框尺寸、颜色和焦点状态与应用设计系统不一致的问题
+    - 修复高风险操作弹出带“tauri.localhost 显示”标题的系统对话框问题，全部改为应用内一致交互
+    - README 新增真实配置编辑器截图，展示结构化选项、统一复选框和语法高亮后的界面
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
-    - 从旧版升级会保留现有 CCHub 数据库和工具配置，无需迁移；卸载时请仅在确实需要清理数据时勾选删除选项。
+    - 从 1.6.3 或更早版本升级会保留现有 CCHub 数据库和工具配置，无需迁移；卸载时请仅在确实需要清理数据时勾选删除选项。
 
     ## English Summary
 
-    - Gives both NSIS setup/uninstall flows and MSI maintenance dialogs a consistent CCHub visual system.
-    - Adds explicit Simplified Chinese and English maintenance, runtime, upgrade, and data-removal copy.
-    - Pins the WiX upgrade identity and validates every installer bitmap and localization file before production builds.
-    - Refreshes README screenshots with the current 1440×900 light and dark configuration workspace.
-    - Upgrades preserve existing databases and tool configurations; no migration is required.
+    - Replaces native browser confirmations and prompts with consistent in-app dialogs for all audited destructive and input workflows.
+    - Replaces native checkboxes across configuration, MCP, logs, model sync, and settings surfaces with one accessible control system.
+    - Adds theme-aware JSON, TOML, YAML, and Markdown syntax highlighting with polished editor chrome and validation states.
+    - Refines the raw configuration options and documents the updated editor with a real application screenshot.
+    - Existing databases and tool configurations remain compatible; no migration is required.
 
     ## 下载 / Download
 

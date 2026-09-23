@@ -34,6 +34,10 @@ CCHub 以配置切换为主工作区。按工具筛选并搜索已保存的 Prov
 | ----------------------------------------------- | ------------------------------------------------ |
 | ![CCHub 深色工作台](screenshots/dark-theme.png) | ![CCHub 浅色工作台](screenshots/light-theme.png) |
 
+### 配置编辑器
+
+![带结构化选项和语法高亮的 CCHub 配置编辑器](screenshots/profile-editor.png)
+
 ---
 
 ## 核心功能

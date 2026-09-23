@@ -1,14 +1,16 @@
 {
   "name": "cchub",
   "private": true,
-  "version": "1.6.2",
+  "version": "1.6.3",
   "type": "module",
   "scripts": {
     "sync:version": "node scripts/sync-version.mjs",
     "predev": "pnpm sync:version",
     "dev": "vite",
-    "prebuild": "pnpm sync:version",
+    "prebuild": "pnpm sync:version && pnpm check:installer",
     "build": "tsc -b && vite build",
+    "generate:installer-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-installer-assets.ps1",
+    "check:installer": "node scripts/check-installer-branding.mjs",
     "preview": "vite preview",
     "prepare": "husky",
     "lint": "eslint src --max-warnings 0",
@@ -58,7 +60,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "^2.11.5",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

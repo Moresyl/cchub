@@ -3,7 +3,7 @@
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border-default);
-  border-radius: 6px;
+  border-radius: 8px;
   transition:
     background-color 0.12s ease,
     border-color 0.12s ease,
@@ -14,25 +14,27 @@
 
 .card-hover:hover {
   border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
 }
 
 .profile-row {
-  padding: 12px 14px;
+  position: relative;
+  padding: 15px 16px;
   background: var(--bg-card);
-  border-radius: 7px;
+  border-radius: 8px;
 }
 
 .profile-list {
-  gap: 7px !important;
+  gap: 9px !important;
 }
 .profile-row .card-actions {
-  gap: 3px !important;
+  gap: 6px !important;
 }
 .profile-row .card-actions button {
-  height: 28px;
+  height: 32px;
 }
 .profile-row .card-actions button[title] {
-  width: 28px;
+  width: 32px;
 }
 .profile-row .card-actions button:not([title]) {
   padding: 5px 10px;
@@ -44,16 +46,22 @@
 .profile-toolbar {
   container-type: inline-size;
   display: grid;
-  gap: 10px;
-  margin-bottom: 10px;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-sidebar) 70%, transparent);
 }
 .profile-search {
   position: relative;
-  width: min(100%, 360px);
+  width: 100%;
 }
 .profile-shared-toggle {
   align-self: flex-start;
-  margin-bottom: 10px;
+  margin: 0 0 14px 2px;
   color: var(--text-secondary);
 }
 .profile-shared-toggle svg {
@@ -63,17 +71,23 @@
   transform: rotate(180deg);
 }
 .profile-tool-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: 100%;
-  gap: 4px;
-}
-.profile-tool-tab {
+  display: flex;
   width: 100%;
   min-width: 0;
-  height: 32px;
+  gap: 3px;
+  padding: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.profile-tool-tabs::-webkit-scrollbar {
+  display: none;
+}
+.profile-tool-tab {
+  width: auto;
+  min-width: max-content;
+  height: 34px;
   justify-content: flex-start;
-  padding-inline: 10px;
+  padding-inline: 11px;
   font-size: 12px;
   font-weight: 500;
 }
@@ -88,7 +102,7 @@
   justify-content: center;
   min-width: 18px;
   height: 18px;
-  margin-left: auto;
+  margin-left: 2px;
   padding-inline: 4px;
   border: 1px solid var(--border-default);
   border-radius: 4px;
@@ -97,24 +111,42 @@
   font-variant-numeric: tabular-nums;
 }
 .profile-tool-tab.active {
-  background: var(--bg-elevated);
+  background: var(--accent-subtle);
   color: var(--text-primary);
 }
 .profile-tool-tab.active .profile-tool-tab-count {
-  border-color: var(--border-strong);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: var(--accent);
+}
+
+.profile-card-menu-wrap {
+  position: relative;
+}
+.profile-card-menu {
+  position: fixed;
+  z-index: 30;
+  width: 190px;
+  padding: 5px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-card-solid);
+  box-shadow: var(--shadow-lg);
+}
+.profile-card-menu-item {
+  width: 100%;
+  height: 34px;
+  justify-content: flex-start;
+  padding-inline: 10px;
   color: var(--text-secondary);
+  font-weight: 500;
 }
-
-@container (min-width: 620px) {
-  .profile-tool-tabs {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
+.profile-card-menu-item-danger {
+  color: var(--danger);
 }
-
-@container (min-width: 1120px) {
-  .profile-tool-tabs {
-    grid-template-columns: repeat(8, minmax(0, 1fr));
-  }
+.profile-card-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-subtle);
 }
 
 .command-palette {
@@ -191,6 +223,10 @@
 }
 
 @media (max-width: 900px) {
+  .profile-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
   .profile-row > div {
     flex-wrap: wrap;
   }
@@ -201,6 +237,21 @@
   .profile-page-header {
     gap: 12px;
     flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 560px) {
+  .profile-page-header {
+    align-items: stretch;
+  }
+  .profile-page-actions {
+    width: 100%;
+  }
+  .profile-page-actions > button {
+    flex: 1;
+  }
+  .profile-row {
+    padding: 13px;
   }
 }
 

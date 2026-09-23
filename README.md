@@ -30,25 +30,25 @@ The compact neutral light/dark workspace has a collapsible sidebar and `Ctrl+K` 
 
 ## Features
 
-| Feature             | Description                                                           |
-| ------------------- | --------------------------------------------------------------------- |
-| **Config Profiles** | Save and apply configurations for Claude Code, Codex, Gemini, and more |
-| **Providers**       | Tool filters, search, presets, ping, stream checks, and shared profiles |
-| **Config Files**    | View and edit managed tool configuration files                        |
-| **MCP Servers**     | Scan, edit, and sync MCP configurations across tools                  |
-| **Skills & Plugins** | Browse, edit, and sync Skills across tools                           |
-| **Quick Switch**    | `Ctrl+K` to find/apply profiles or navigate to configuration pages    |
+| Feature              | Description                                                             |
+| -------------------- | ----------------------------------------------------------------------- |
+| **Config Profiles**  | Save and apply configurations for Claude Code, Codex, Gemini, and more  |
+| **Providers**        | Tool filters, search, presets, ping, stream checks, and shared profiles |
+| **Config Files**     | View and edit managed tool configuration files                          |
+| **MCP Servers**      | Scan, edit, and sync MCP configurations across tools                    |
+| **Skills & Plugins** | Browse, edit, and sync Skills across tools                              |
+| **Quick Switch**     | `Ctrl+K` to find/apply profiles or navigate to configuration pages      |
 
 ### Platform
 
-| Feature                | Description                                                                                   |
-| ---------------------- | --------------------------------------------------------------------------------------------- |
-| **Cross-platform**     | Windows 10/11, macOS 10.15+, Linux                                                            |
-| **Dark / Light Theme** | Compact desktop UI with keyboard focus states and reduced-motion support             |
-| **Backup & Restore**   | Export all configs as SQL, import with legacy format support                                  |
-| **Auto Update**        | Signed Tauri updater when available, with a reliable GitHub Releases fallback                 |
-| **i18n**               | Chinese, English, Japanese                                                                    |
-| **System Tray**        | Minimize to tray on close                                                                     |
+| Feature                | Description                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| **Cross-platform**     | Windows 10/11, macOS 10.15+, Linux                                            |
+| **Dark / Light Theme** | Compact desktop UI with keyboard focus states and reduced-motion support      |
+| **Backup & Restore**   | Export all configs as SQL, import with legacy format support                  |
+| **Auto Update**        | Signed Tauri updater when available, with a reliable GitHub Releases fallback |
+| **i18n**               | Chinese, English, Japanese                                                    |
+| **System Tray**        | Minimize to tray on close                                                     |
 
 ---
 
@@ -149,8 +149,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [CCHub]() (Apache-2.0) — Workspace UI and interaction reference
-- [CCHub]() (MIT) — Configuration workflow and compatibility reference
 - [Tauri](https://tauri.app) — Lightweight desktop framework
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — AI coding assistant
 - [MCP](https://modelcontextprotocol.io) — Model Context Protocol

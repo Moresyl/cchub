@@ -14,27 +14,20 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 采用 CCHub 风格的紧凑中性工作区：配置切换成为首页，提供可折叠/可调宽侧栏、系统明暗主题、Ctrl+K 快速切换和 900px 响应式布局
-    - MiniMax Code 新增独立自定义供应商管理、原生 YAML 安全写入、MCP 同步、Skills 路径识别和 Provider Deep Link 导入
-    - Claude Desktop 新增直连供应商与带鉴权的本地代理模式，支持 Anthropic、OpenAI 和 Gemini 请求转换、显式模型路由及官方配置回滚
-    - MCP 安装向导新增 STDIO、HTTP、SSE 创建及请求头配置，并按 Claude、Codex、Gemini、Grok Build、OpenCode、Hermes、MiniMax Code 的原生格式同步
-    - 会话管理覆盖九个工具，新增 Grok Build 与 MiniMax Code 会话读取、续接和删除能力；托盘补充 Grok Build 配置切换
+    - 重做 CCHub 工作区的颜色、字号、留白与信息层级，提升浅色和深色主题下的可读性
+    - 折叠侧栏升级为完整图标导航，保持快速切换、全部功能入口和设置入口可直接访问
+    - 配置工具筛选改为单行可滚动切换条，在窄窗口下不再堆叠成多行按钮
 
     ### 变更与安全
-    - Claude Desktop 本地代理令牌迁移到系统凭据存储，配置与数据库不再保存明文令牌；代理接口要求本地 Bearer 鉴权
-    - 配置写入使用原子替换、备份与失败回滚；MCP 导入过滤禁用项并保留目标文件中的非托管字段
-    - 主导航移除与配置切换无关的旧版独立入口，但升级不会删除已有数据库记录或工具配置文件
-    - 升级 React Router 并约束安全版本的 js-yaml；官方 npm audit 验证生产依赖无已知漏洞
+    - 配置卡片保留切换与编辑主操作，测速、流检、用量、复制和删除统一收入上下文菜单
+    - 上下文菜单挂载到窗口层并根据可用空间调整方向，支持点击外部、滚动、窗口变化和 Esc 关闭
+    - 清理仓库、发布说明和提交元数据中不必要的外部项目引用
 
     ### 问题修复
-    - 修复本地代理启动失败、重启后状态未恢复、Claude Desktop 响应模型未还原及无效凭据未拒绝的问题
-    - 修复远程 MCP 同步时传输类型丢失、OpenCode 写入错误容器、Gemini HTTP 端点字段错误及 Codex 请求头格式不兼容
-    - 修复 MCP Deep Link 无法解析 OpenCode/Gemini 原生结构、错误接受无原生 MCP 注册表的目标，以及禁用按钮点击穿透
-    - 修复 Codex 会话令牌累计值重复统计；大型 rollout 扫描改为读取文件尾部，实测由约 82 秒降至约 2 秒
-    - 修复配置工具栏和 MCP 向导在窄窗口下的换行、溢出与交互状态问题
-    - 恢复仓库原有 MIT 许可证文件，修复 README 许可证断链，并补充 CCHub 与 CCHub 的参考来源
-    - 修复国际化 key 覆盖脚本仍读取旧版单文件路径的问题，严格模式验证中、英、日 476 个 key 一致
-    - 修复 Linux 与 macOS 发布构建无法推断临时文件路径类型，以及平台专用 import 产生告警的问题
+    - 修复折叠侧栏只显示 Logo、无法直接导航的问题
+    - 修复配置卡片次要操作过多导致的拥挤，以及菜单可能被滚动容器裁切的问题
+    - 修复移动布局重复显示页面标题的问题
+    - 修复配置加载失败时直接显示底层异常文本和本机路径的问题
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -42,15 +35,11 @@ env:
 
     ## English Summary
 
-    - Rebuilt the app around a compact CCHub-inspired configuration workspace with responsive navigation, system themes, and Ctrl+K switching.
-    - Added native MiniMax Code provider management, Claude Desktop direct/local-proxy profiles, and nine-tool session routing.
-    - Added transport-aware STDIO/HTTP/SSE MCP creation with native Codex, Gemini, Grok Build, OpenCode, Hermes, and MiniMax mappings.
-    - Hardened credential storage, authenticated the local desktop proxy, preserved unmanaged configuration fields, and added rollback-safe writes.
-    - Updated React Router and pinned a patched js-yaml release; the production dependency audit reports no known vulnerabilities.
-    - Fixed remote MCP format loss, desktop proxy lifecycle issues, responsive toolbar overflow, and duplicate Codex token accounting. Windows users should prefer the NSIS installer below.
-    - Restored the repository MIT license file and documented the CCHub and CCHub design/workflow references.
-    - Fixed the i18n coverage script for split locale modules; strict checks now validate 476 keys across Chinese, English, and Japanese.
-    - Fixed non-Windows release compilation for atomic temporary-file replacement and platform-specific imports.
+    - Refined the CCHub workspace palette, typography, spacing, and visual hierarchy across light and dark themes.
+    - Kept every navigation destination available in the collapsed icon rail and replaced wrapping tool grids with a scrollable selector.
+    - Moved secondary profile operations into an accessible viewport-aware menu with reliable outside-click, scroll, resize, and Escape handling.
+    - Fixed cramped profile cards, duplicate mobile headings, clipped action menus, and raw implementation errors leaking into the interface.
+    - Cleaned unnecessary external project references from repository and release metadata.
 
     ## 下载 / Download
 

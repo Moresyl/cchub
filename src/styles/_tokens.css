@@ -1,73 +1,73 @@
-/* CCHub-inspired neutral workspace palette, adapted for CCHub controls. */
+/* CCHub workspace palette */
 
-/* ── Dark Theme (default) — Neutral Grayscale ── */
+/* Dark theme */
 :root {
-  --bg-app: #161616;
-  --bg-sidebar: #1c1c1c;
-  --bg-card: #242424;
-  --bg-card-solid: #242424;
-  --bg-card-hover: #303030;
-  --bg-input: #2b2b2b;
-  --bg-elevated: #2b2b2b;
-  --bg-badge: #353535;
-  --bg-overlay: rgba(0, 0, 0, 0.72);
-  --border-default: rgba(255, 255, 255, 0.1);
-  --border-subtle: rgba(255, 255, 255, 0.065);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --text-primary: #f2f2f2;
-  --text-secondary: #bdbdbd;
-  --text-muted: #858585;
-  --accent: #f2f2f2;
-  --accent-hover: #d8d8d8;
-  --accent-glow: rgba(255, 255, 255, 0.12);
-  --accent-subtle: rgba(255, 255, 255, 0.09);
-  --accent-foreground: #161616;
-  --success: #46bf72;
-  --success-subtle: rgba(70, 191, 114, 0.16);
-  --warning: #ffb26b;
-  --warning-subtle: rgba(255, 138, 48, 0.14);
-  --danger: #ff7777;
-  --danger-subtle: rgba(255, 92, 92, 0.14);
-  --error: #ff7777;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.22);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 8px 22px -14px rgba(0, 0, 0, 0.8);
-  --shadow-lg: 0 24px 70px -24px rgba(0, 0, 0, 0.92);
+  --bg-app: #111418;
+  --bg-sidebar: #171b21;
+  --bg-card: #1b2027;
+  --bg-card-solid: #1b2027;
+  --bg-card-hover: #242b34;
+  --bg-input: #20262e;
+  --bg-elevated: #242b34;
+  --bg-badge: #29313b;
+  --bg-overlay: rgba(5, 8, 12, 0.76);
+  --border-default: rgba(210, 222, 232, 0.12);
+  --border-subtle: rgba(210, 222, 232, 0.075);
+  --border-strong: rgba(210, 222, 232, 0.22);
+  --text-primary: #f4f7f8;
+  --text-secondary: #b8c2ca;
+  --text-muted: #7f8b96;
+  --accent: #62c4b5;
+  --accent-hover: #7bd1c4;
+  --accent-glow: rgba(98, 196, 181, 0.18);
+  --accent-subtle: rgba(98, 196, 181, 0.12);
+  --accent-foreground: #0b2824;
+  --success: #67c587;
+  --success-subtle: rgba(103, 197, 135, 0.15);
+  --warning: #e9b567;
+  --warning-subtle: rgba(233, 181, 103, 0.15);
+  --danger: #f07f83;
+  --danger-subtle: rgba(240, 127, 131, 0.14);
+  --error: #f07f83;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 6px 18px -12px rgba(0, 0, 0, 0.65);
+  --shadow-md: 0 18px 40px -24px rgba(0, 0, 0, 0.82);
+  --shadow-lg: 0 28px 80px -30px rgba(0, 0, 0, 0.9);
 }
 
-/* ── Light Theme — Neutral Grayscale ── */
+/* Light theme */
 [data-theme="light"] {
-  --bg-app: #f8f8f8;
-  --bg-sidebar: #f0f0f0;
+  --bg-app: #f5f7f8;
+  --bg-sidebar: #edf1f3;
   --bg-card: #ffffff;
   --bg-card-solid: #ffffff;
-  --bg-card-hover: #f0f0f0;
+  --bg-card-hover: #f0f4f5;
   --bg-input: #ffffff;
-  --bg-elevated: #f1f1f1;
-  --bg-badge: #e8e8e8;
+  --bg-elevated: #e8eef0;
+  --bg-badge: #e5ebed;
   --bg-overlay: rgba(0, 0, 0, 0.5);
-  --border-default: rgba(13, 13, 13, 0.1);
-  --border-subtle: rgba(13, 13, 13, 0.065);
-  --border-strong: rgba(13, 13, 13, 0.18);
-  --text-primary: #202020;
-  --text-secondary: #626262;
-  --text-muted: #8a8a8a;
-  --accent: #202020;
-  --accent-hover: #3a3a3a;
-  --accent-glow: rgba(13, 13, 13, 0.1);
-  --accent-subtle: rgba(13, 13, 13, 0.06);
+  --border-default: rgba(23, 44, 51, 0.12);
+  --border-subtle: rgba(23, 44, 51, 0.075);
+  --border-strong: rgba(23, 44, 51, 0.22);
+  --text-primary: #17252a;
+  --text-secondary: #53646c;
+  --text-muted: #7c8c93;
+  --accent: #167d70;
+  --accent-hover: #116b60;
+  --accent-glow: rgba(22, 125, 112, 0.13);
+  --accent-subtle: rgba(22, 125, 112, 0.09);
   --accent-foreground: #ffffff;
-  --success: #1e8a3e;
-  --success-subtle: rgba(22, 163, 74, 0.08);
-  --warning: #a76100;
-  --warning-subtle: rgba(202, 138, 4, 0.08);
-  --danger: #cf3030;
-  --danger-subtle: rgba(220, 38, 38, 0.08);
-  --error: #cf3030;
-  --shadow-xs: 0 1px 2px rgba(27, 35, 74, 0.08);
-  --shadow-sm: 0 1px 3px rgba(27, 35, 74, 0.1);
-  --shadow-md: 0 8px 20px -14px rgba(27, 35, 74, 0.28);
-  --shadow-lg: 0 24px 60px -24px rgba(27, 35, 74, 0.38);
+  --success: #257e48;
+  --success-subtle: rgba(37, 126, 72, 0.1);
+  --warning: #946319;
+  --warning-subtle: rgba(148, 99, 25, 0.1);
+  --danger: #c7444a;
+  --danger-subtle: rgba(199, 68, 74, 0.09);
+  --error: #c7444a;
+  --shadow-xs: 0 1px 2px rgba(20, 45, 52, 0.08);
+  --shadow-sm: 0 8px 20px -16px rgba(20, 45, 52, 0.34);
+  --shadow-md: 0 18px 42px -24px rgba(20, 45, 52, 0.36);
+  --shadow-lg: 0 28px 68px -28px rgba(20, 45, 52, 0.42);
 }
 
 /* ── Tailwind Theme Integration ── */

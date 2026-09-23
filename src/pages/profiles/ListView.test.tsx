@@ -41,7 +41,29 @@ function createProps(): ComponentProps<typeof ProfilesListView> {
     streamCheckingId: null,
     batchStreamChecking: false,
     applying: null,
-    profileCardText: { applyButton: "启用", activeButton: "已启用" },
+    profileCardText: {
+      activeTag: "当前生效",
+      pingFast: "快速",
+      pingMedium: "一般",
+      pingSlow: "较慢",
+      pingError: "异常",
+      streamHealthy: "流检通过",
+      streamReachable: "流检可达",
+      streamUnsupported: "流检暂不支持",
+      streamUnconfigured: "流检未配置",
+      streamError: "流检异常",
+      dragEnabledTitle: "拖拽调整顺序",
+      dragDisabledTitle: "当前不可排序",
+      pingTitle: "端点测速",
+      streamTitle: "流式健康检查",
+      usageTitle: "查询用量",
+      duplicateTitle: "复制",
+      editTitle: "编辑",
+      deleteTitle: "删除",
+      moreTitle: "更多操作",
+      applyButton: "启用",
+      activeButton: "已启用",
+    },
     handleRefreshProfiles: vi.fn(),
     handleOpenCreateProfile: vi.fn(),
     handleSearchChange: vi.fn(),
@@ -82,6 +104,22 @@ describe("ProfilesListView", () => {
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Shared provider controls")).toBeTruthy();
+  });
+
+  it("keeps secondary profile actions in a focused menu", () => {
+    const props = createProps();
+    render(<ProfilesListView {...props} />);
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制" }));
+    expect(props.handleDuplicate).toHaveBeenCalledWith(profile);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("renders every tool in the wrapping switcher and changes the active filter", () => {

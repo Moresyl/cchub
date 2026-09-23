@@ -10,10 +10,11 @@ describe("ProfilesLoadState", () => {
     expect(screen.getByText("加载中...")).toBeTruthy();
   });
 
-  it("shows the error and retries", () => {
+  it("hides implementation details and retries", () => {
     const onRetry = vi.fn();
-    render(<ProfilesLoadState error="Cannot read configuration" localeText={localeText} onRetry={onRetry} />);
-    expect(screen.getByText("Cannot read configuration")).toBeTruthy();
+    render(<ProfilesLoadState error="TypeError: internal path C:\\secret" localeText={localeText} onRetry={onRetry} />);
+    expect(screen.queryByText(/TypeError|secret/)).toBeNull();
+    expect(screen.getByText(/暂时无法读取本机配置/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

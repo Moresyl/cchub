@@ -32,11 +32,11 @@
   height: 36px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 58%, #a98cff));
+  background: var(--accent);
   color: var(--accent-foreground);
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   box-shadow: 0 6px 18px -8px var(--accent);
 }
 
@@ -129,7 +129,7 @@
   margin-top: 6px;
   font-size: 14px;
   font-weight: 680;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .sidebar-context-header p {
@@ -233,7 +233,7 @@
 .topbar-title h1 {
   font-size: 13.5px;
   font-weight: 680;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
 }
 
 .topbar-title p {
@@ -325,21 +325,23 @@
   }
 }
 
-/* Configuration workspace shell */
+/* Workspace shell */
 .sidebar-shell {
   position: relative;
   width: var(--sidebar-width, 264px);
   min-width: var(--sidebar-width, 264px);
   flex-direction: column;
   border-right-color: var(--border-subtle);
+  box-shadow: 10px 0 30px -30px rgba(0, 0, 0, 0.75);
 }
 
 .sidebar-brand {
-  height: 48px;
-  padding: 0 18px;
+  height: 64px;
+  padding: 0 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .sidebar-brand-link {
@@ -353,20 +355,23 @@
 }
 
 .sidebar-mark {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background: var(--accent);
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-card) 82%, var(--accent));
   color: var(--accent-foreground);
-  font-size: 17px;
-  font-weight: 750;
-  box-shadow: none;
+  box-shadow: 0 8px 20px -13px var(--accent);
+}
+.sidebar-mark img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
 }
 
 .sidebar-brand-name {
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 15px;
+  font-weight: 700;
 }
 .sidebar-collapse-button {
   color: var(--text-muted);
@@ -374,14 +379,15 @@
 
 .sidebar-command {
   width: calc(100% - 24px);
-  height: 34px;
-  margin: 2px 12px 14px;
-  padding: 0 10px;
+  height: 38px;
+  margin: 12px 12px 18px;
+  padding: 0 11px;
   justify-content: flex-start;
   border: 1px solid var(--border-default);
   background: var(--bg-input);
   color: var(--text-secondary);
   font-weight: 400;
+  box-shadow: var(--shadow-xs);
 }
 
 .sidebar-command span {
@@ -395,24 +401,25 @@
 }
 
 .sidebar-context-nav {
-  padding: 0 10px 12px;
+  padding: 0 10px 14px;
 }
 
 .sidebar-nav-group {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 .sidebar-nav-label {
-  padding: 0 10px 8px;
+  padding: 0 10px 7px;
   color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10.5px;
+  font-weight: 700;
 }
 
 .sidebar-context-link {
-  min-height: 36px;
-  margin-bottom: 2px;
-  padding: 8px 10px;
-  gap: 11px;
+  position: relative;
+  min-height: 38px;
+  margin-bottom: 3px;
+  padding: 8px 11px;
+  gap: 10px;
   border: 0;
   border-radius: 6px;
   font-size: 13px;
@@ -424,13 +431,23 @@
   color: var(--text-primary);
   box-shadow: none;
 }
+.sidebar-context-link.active::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
 
 .sidebar-context-link.active svg {
-  color: var(--text-primary);
+  color: var(--accent);
 }
 .sidebar-context-footer {
   height: auto;
-  padding: 10px;
+  padding: 10px 10px 12px;
   display: block;
 }
 .sidebar-context-footer .sidebar-context-link {
@@ -438,27 +455,26 @@
 }
 .sidebar-version {
   display: block;
-  padding: 9px 10px 2px;
+  padding: 10px 11px 2px;
   color: var(--text-muted);
   font-size: 10px;
 }
 
 .sidebar-collapsed {
-  width: 48px;
-  min-width: 48px;
+  width: 64px;
+  min-width: 64px;
 }
 .sidebar-collapsed .sidebar-brand {
-  height: 48px;
-  padding: 0 7px;
+  height: 64px;
+  padding: 0 16px;
   justify-content: center;
-  border-bottom: 1px solid var(--border-subtle);
 }
 .sidebar-collapsed .sidebar-brand-link {
   position: relative;
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
 }
 .sidebar-brand-expand {
   position: absolute;
@@ -473,30 +489,64 @@
   opacity: 1;
 }
 .sidebar-collapsed .sidebar-brand-name,
-.sidebar-collapsed .sidebar-command,
-.sidebar-collapsed .sidebar-context-nav,
-.sidebar-collapsed .sidebar-context-footer {
+.sidebar-collapsed .sidebar-command span,
+.sidebar-collapsed .sidebar-command kbd,
+.sidebar-collapsed .sidebar-nav-label,
+.sidebar-collapsed .sidebar-context-link span,
+.sidebar-collapsed .sidebar-version,
+.sidebar-collapsed .sidebar-resize-handle {
   display: none;
+}
+.sidebar-collapsed .sidebar-command {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  margin: 12px auto 18px;
+  padding: 0;
+  justify-content: center;
+}
+.sidebar-collapsed .sidebar-context-nav {
+  display: block;
+  padding: 0 11px 12px;
+}
+.sidebar-collapsed .sidebar-nav-group {
+  margin-bottom: 12px;
+}
+.sidebar-collapsed .sidebar-context-link {
+  width: 42px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  justify-content: center;
+}
+.sidebar-collapsed .sidebar-context-link.active::before {
+  top: 10px;
+  bottom: 10px;
+  left: -11px;
+}
+.sidebar-collapsed .sidebar-context-footer {
+  display: block;
+  padding: 10px 11px 12px;
 }
 
 .topbar {
-  height: 48px;
-  padding: 0 28px;
-  background: var(--bg-app);
+  height: 64px;
+  padding: 0 30px;
+  background: color-mix(in srgb, var(--bg-app) 88%, var(--bg-sidebar));
   border-bottom-color: var(--border-subtle);
 }
 .topbar-title h1 {
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 700;
 }
 .topbar-title p {
-  font-size: 11px;
+  font-size: 11.5px;
 }
 .page-content {
-  padding: 24px 28px;
+  padding: 30px;
 }
 .page-content > * {
-  width: min(100%, 1440px);
+  width: min(100%, 1280px);
 }
 
 .sidebar-resize-handle {
@@ -520,7 +570,7 @@
     padding: 0 16px;
   }
   .page-content {
-    padding: 18px 16px;
+    padding: 22px 18px;
   }
 }
 
@@ -568,6 +618,10 @@
   .sidebar-context-footer {
     display: none;
   }
+  .sidebar-collapsed .sidebar-command,
+  .sidebar-collapsed .sidebar-context-footer {
+    display: none;
+  }
   .sidebar-context-nav {
     display: flex;
     gap: 4px;
@@ -583,9 +637,10 @@
     white-space: nowrap;
   }
   .topbar {
-    height: 52px;
+    height: 48px;
+    justify-content: flex-end;
   }
-  .topbar-title p {
+  .topbar-title {
     display: none;
   }
 }

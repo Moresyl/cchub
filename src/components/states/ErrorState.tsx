@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Button } from "../ui/button";
 
 interface ErrorStateProps {
   title: string;
@@ -18,9 +19,9 @@ export default function ErrorState({ title, message, retryLabel, onRetry, action
       <div className="state-title">{title}</div>
       <div className="state-copy">{message}</div>
       {onRetry ? (
-        <button className="btn btn-secondary btn-sm" type="button" onClick={onRetry}>
+        <Button variant="secondary" size="sm" type="button" onClick={onRetry}>
           {retryLabel ?? "Retry"}
-        </button>
+        </Button>
       ) : (
         action
       )}

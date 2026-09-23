@@ -1,17 +1,7 @@
 import { memo, type MouseEvent } from "react";
-import {
-  Activity,
-  ArrowRightLeft,
-  Check,
-  Copy,
-  Edit3,
-  Gauge,
-  GripVertical,
-  Trash2,
-  Wifi,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowRightLeft, Check, Edit3, GripVertical, type LucideIcon } from "lucide-react";
 import ProviderIcon from "./ProviderIcon";
+import ProfileActionsMenu from "./ProfileActionsMenu";
 import { Button } from "./ui/button";
 
 interface ConfigProfileCard {
@@ -50,6 +40,7 @@ interface ProfileCardText {
   duplicateTitle: string;
   editTitle: string;
   deleteTitle: string;
+  moreTitle: string;
   activeButton: string;
   applyButton: string;
 }
@@ -152,16 +143,19 @@ function ProfileCardComponent({
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1, alignItems: "center" }}>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="profile-icon-button"
-            type="button"
-            title={reorderEnabled ? text.dragEnabledTitle : text.dragDisabledTitle}
-            style={{ cursor: reorderEnabled ? "grab" : "default", opacity: reorderEnabled ? 1 : 0.45 }}
-          >
-            <GripVertical size={14} />
-          </Button>
+          {reorderEnabled && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="profile-icon-button"
+              type="button"
+              title={text.dragEnabledTitle}
+              aria-label={text.dragEnabledTitle}
+              style={{ cursor: "grab" }}
+            >
+              <GripVertical size={14} />
+            </Button>
+          )}
           <div className="icon-box" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }}>
             <ProviderIcon iconUrl={iconUrl} fallbackIcon={Icon} size={16} />
           </div>
@@ -222,33 +216,6 @@ function ProfileCardComponent({
 
         <div className="card-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onPing(profile)}
-            title={text.pingTitle}
-            aria-label={text.pingTitle}
-          >
-            {isPinging ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Activity size={14} />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onStreamCheck(profile)}
-            title={text.streamTitle}
-            aria-label={text.streamTitle}
-          >
-            {isStreamChecking ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Wifi size={14} />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onUsage(profile)}
-            title={text.usageTitle}
-            aria-label={text.usageTitle}
-          >
-            <Gauge size={14} />
-          </Button>
-          <Button
             variant={isActive ? "secondary" : "default"}
             size="sm"
             onClick={() => onApply(profile)}
@@ -267,31 +234,27 @@ function ProfileCardComponent({
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => onDuplicate(profile)}
-            title={text.duplicateTitle}
-            aria-label={text.duplicateTitle}
-          >
-            <Copy size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
             onClick={() => onEdit(profile)}
             title={text.editTitle}
             aria-label={text.editTitle}
           >
             <Edit3 size={14} />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="profile-delete-button"
-            onClick={() => onDelete(profile)}
-            title={text.deleteTitle}
-            aria-label={text.deleteTitle}
-          >
-            <Trash2 size={14} />
-          </Button>
+          <ProfileActionsMenu
+            pingLabel={text.pingTitle}
+            streamLabel={text.streamTitle}
+            usageLabel={text.usageTitle}
+            duplicateLabel={text.duplicateTitle}
+            deleteLabel={text.deleteTitle}
+            moreLabel={text.moreTitle}
+            isPinging={isPinging}
+            isStreamChecking={isStreamChecking}
+            onPing={() => onPing(profile)}
+            onStreamCheck={() => onStreamCheck(profile)}
+            onUsage={() => onUsage(profile)}
+            onDuplicate={() => onDuplicate(profile)}
+            onDelete={() => onDelete(profile)}
+          />
         </div>
       </div>
     </div>

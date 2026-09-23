@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Suspense, lazy, useState, type ChangeEvent } from "react";
-import { ArrowRightLeft, ChevronDown, Monitor, Plus, RefreshCw, Search, X, type LucideIcon } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Monitor, Plus, RefreshCw, Search, Wifi, X, type LucideIcon } from "lucide-react";
 
 import ProfileCard from "../../components/ProfileCard";
 import ProfileToolFilterTab from "../../components/ProfileToolFilterTab";
@@ -96,19 +96,23 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
           </p>
         </div>
         {filterTool !== "hermes" && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="secondary" size="sm" onClick={props.handleRefreshProfiles}>
+          <div className="profile-page-actions" style={{ display: "flex", gap: 8 }}>
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={props.handleRefreshProfiles}
+              aria-label={locale === "zh" ? "刷新" : "Refresh"}
+              title={locale === "zh" ? "刷新" : "Refresh"}
+            >
               <RefreshCw size={14} />
-              {locale === "zh" ? "刷新" : "Refresh"}
             </Button>
             <Button
               variant="secondary"
               size="sm"
               onClick={props.handleStreamCheckAll}
               disabled={props.batchStreamChecking}
-              style={{ gap: 6 }}
             >
-              <RefreshCw size={14} />
+              <Wifi size={14} />
               {props.batchStreamChecking
                 ? localeText("检查中...", "Checking...", "確認中...")
                 : localeText("全量流检", "Check all streams", "全体ストリーム確認")}

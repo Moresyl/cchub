@@ -314,6 +314,7 @@ export function useProfileCardText(locale: string) {
       duplicateTitle: locale === "zh" ? "复制" : "Duplicate",
       editTitle: locale === "zh" ? "编辑" : "Edit",
       deleteTitle: locale === "zh" ? "删除" : "Delete",
+      moreTitle: locale === "zh" ? "更多操作" : "More actions",
       activeButton: locale === "zh" ? "已生效" : "Active",
       applyButton: locale === "zh" ? "切换" : "Apply",
     }),

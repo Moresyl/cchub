@@ -6,6 +6,7 @@ import { getNavigationSection, navigationSections } from "../../lib/navigation";
 import { preloadRoute } from "../../lib/routes";
 import { Button } from "../ui/button";
 import { DEFAULT_SIDEBAR_WIDTH } from "../../lib/sidebarWidth";
+import appIcon from "../../../src-tauri/icons/128x128.png";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -66,7 +67,9 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
           aria-label={collapsed ? (locale === "zh" ? "展开侧栏" : "Expand sidebar") : i.app.name}
           title={collapsed ? (locale === "zh" ? "展开侧栏" : "Expand sidebar") : i.app.name}
         >
-          <span className="sidebar-mark">C</span>
+          <span className="sidebar-mark">
+            <img src={appIcon} alt="" aria-hidden="true" />
+          </span>
           {collapsed && <PanelLeftOpen className="sidebar-brand-expand" size={17} aria-hidden="true" />}
           <span className="sidebar-brand-name">CCHub</span>
         </button>

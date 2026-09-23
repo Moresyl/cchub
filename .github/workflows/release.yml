@@ -14,22 +14,23 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 全面重构桌面工作区：采用 4px 外框间距、264px 操作侧栏和独立 12px 圆角主面板，首页不再使用贯穿式后台顶栏
-    - 配置切换首页改为中央操作区，将工具选择、配置搜索、共享配置、刷新、流检和新增入口集中到同一工作流
-    - 配置列表改为紧凑任务行，统一呈现工具、端点、模型、当前状态和主操作，同时保留编辑与更多操作
-    - 配置编辑器改为 920px 居中工作区，增加清晰的顶栏、分段内容和固定底部操作栏
+    - 侧栏改为紧凑工作台结构：新增配置、搜索、配置文件和技能插件成为四个固定主动作，常用入口不再淹没在长菜单中
+    - 新增“配置 / 运行”分段导航，根据当前工作切换客户端配置与运行分析入口，折叠后仍保留完整图标导航
+    - 配置首页采用轮廓品牌标记、动态问候、状态操作条和统一搜索输入面，搜索、共享配置、刷新与新增操作集中在同一上下文
+    - 工具筛选改为输入面下方的紧凑快捷项，只显示已安装或已有配置的客户端，减少无效信息并保留新增流程中的完整工具选择
 
     ### 变更与安全
-    - 重新定义深浅色主题的中性色阶、边框、状态色、阴影和文字层级，主按钮统一为高对比黑白样式
-    - 侧栏提供后退、前进、新增和搜索入口；折叠为 52px 图标栏后仍保留全部功能导航与设置
-    - 统一按钮和输入框为 8px 圆角，并恢复组件应有的内边距与焦点状态
-    - 本版本不修改配置数据结构、数据库或凭据存储方式，无需迁移
+    - 保持 4px 窗口内边距、264px 展开侧栏、52px 折叠侧栏、12px 主画布圆角和 672px 中央工作列的稳定尺寸
+    - 深浅色主题增加轻量表面层级，状态条、输入面、筛选项与列表之间使用更克制的边框和明暗关系
+    - 保留全部配置切换、配置编辑、共享 Provider、端点检测、用量查询和二级功能路由
+    - 本版本仅调整界面结构、导航和呈现方式，不修改配置数据库、凭据存储或工具配置格式，无需迁移
 
     ### 问题修复与打磨
-    - 修复旧的全局样式覆盖组件内边距，导致按钮文字拥挤和操作区比例失真的问题
-    - 修复配置工具较多时标签换行、列表操作拥挤以及主次信息难以扫描的问题
-    - 修复新增与编辑配置时表单横向铺满、底部操作不稳定和移动端双列溢出的问题
-    - 完善 390px 移动布局、侧栏折叠布局和长配置列表的滚动行为
+    - 修复工具筛选项超过工作列宽度时从左侧被裁切的问题，并隐藏未安装且没有配置的空筛选项
+    - 修复侧栏功能平铺导致视觉拥挤、主次入口难以快速识别的问题
+    - 修复状态、搜索、筛选和动作被拆成多层面板后造成的卡片堆叠与操作跳跃
+    - 完善 390px 移动端顶部横向导航、工具筛选滚动、配置行换行和桌面侧栏折叠状态
+    - 增加侧栏上下文切换与紧凑工具筛选测试，确保导航和配置切换交互稳定
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -37,10 +38,10 @@ env:
 
     ## English Summary
 
-    - Rebuilt the desktop shell around a compact action sidebar and an inset, rounded workspace panel.
-    - Consolidated tool selection, search, shared profiles, health checks, creation, and switching into a focused central workflow.
-    - Reworked profile rows and the full configuration editor for clearer hierarchy, denser scanning, and stable footer actions.
-    - Added responsive layouts for compact windows and corrected global styles that removed component spacing.
+    - Reorganized the sidebar around four primary actions and contextual Config/Runtime navigation.
+    - Refined the switching workspace with a focused status strip, unified search surface, compact tool filters, and clearer action placement.
+    - Removed empty tool filters and corrected horizontal clipping while preserving all profile, provider, health-check, and editing workflows.
+    - Polished collapsed-sidebar and mobile layouts, with new interaction tests for the revised navigation.
     - No configuration database or credential-storage migration is required.
 
     ## 下载 / Download

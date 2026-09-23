@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
+import { MemoryRouter } from "react-router-dom";
 import ProfilesListView from "./ListView";
 
 vi.mock("../../components/UniversalProviderManager", () => ({
@@ -84,21 +85,29 @@ function createProps(): ComponentProps<typeof ProfilesListView> {
   };
 }
 
+function renderListView(props = createProps()) {
+  return render(
+    <MemoryRouter>
+      <ProfilesListView {...props} />
+    </MemoryRouter>,
+  );
+}
+
 describe("ProfilesListView", () => {
   it("keeps switching prominent and applies the selected profile", () => {
     const props = createProps();
-    render(<ProfilesListView {...props} />);
+    renderListView(props);
 
     expect(screen.getByText("Primary API")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "启用" }));
     expect(props.doApply).toHaveBeenCalledWith(profile);
-    fireEvent.click(screen.getByRole("button", { name: "新增" }));
+    fireEvent.click(screen.getByRole("button", { name: "新增配置" }));
     expect(props.handleOpenCreateProfile).toHaveBeenCalledTimes(1);
   });
 
   it("reveals shared providers only when requested", () => {
-    render(<ProfilesListView {...createProps()} />);
-    const toggle = screen.getByRole("button", { name: "跨工具共享配置" });
+    renderListView();
+    const toggle = screen.getByRole("button", { name: "共享配置" });
 
     expect(screen.queryByText("Shared provider controls")).toBeNull();
     fireEvent.click(toggle);
@@ -108,7 +117,7 @@ describe("ProfilesListView", () => {
 
   it("keeps secondary profile actions in a focused menu", () => {
     const props = createProps();
-    render(<ProfilesListView {...props} />);
+    renderListView(props);
 
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
@@ -122,7 +131,7 @@ describe("ProfilesListView", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("renders every tool in the wrapping switcher and changes the active filter", () => {
+  it("shows available tools in the compact switcher and changes the active filter", () => {
     const props = createProps();
     props.tools = [
       { id: "claude", name: "Claude", installed: true },
@@ -136,10 +145,11 @@ describe("ProfilesListView", () => {
     ];
     props.toolCounts = { claude: 1, codex: 2 };
 
-    render(<ProfilesListView {...props} />);
+    renderListView(props);
 
     const switcher = screen.getByRole("tablist", { name: "工具" });
-    expect(switcher.children).toHaveLength(8);
+    expect(switcher.children).toHaveLength(2);
+    expect(screen.queryByRole("tab", { name: "Gemini (0)" })).toBeNull();
     expect(screen.getByRole("tab", { name: "Claude (1)" }).getAttribute("aria-selected")).toBe("true");
 
     fireEvent.click(screen.getByRole("tab", { name: "Codex (2)" }));

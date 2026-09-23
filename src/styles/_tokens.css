@@ -8,6 +8,7 @@
   --bg-card: #2b2b2b;
   --bg-card-solid: #2b2b2b;
   --bg-card-hover: #363636;
+  --bg-surface: rgba(255, 255, 255, 0.05);
   --bg-input: #2b2b2b;
   --bg-elevated: #303030;
   --bg-badge: #363636;
@@ -44,6 +45,7 @@
   --bg-card: #ffffff;
   --bg-card-solid: #ffffff;
   --bg-card-hover: #f2f2f2;
+  --bg-surface: rgba(13, 13, 13, 0.035);
   --bg-input: #ffffff;
   --bg-elevated: #ededed;
   --bg-badge: #ededed;

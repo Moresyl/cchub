@@ -8,64 +8,111 @@
 .profile-workspace-inner {
   width: min(100%, 720px);
   margin-inline: auto;
-  padding: clamp(96px, 13vh, 124px) 24px 48px;
+  padding: clamp(68px, 8.6vh, 82px) 24px 48px;
 }
 
 .profile-hero {
+  position: relative;
   display: flex;
+  height: 220px;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   text-align: center;
 }
 
 .profile-hero-mark {
-  width: 138px;
-  height: 138px;
-  margin-bottom: 12px;
-  object-fit: contain;
-  opacity: 0.1;
-  filter: grayscale(1) brightness(2.2);
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: grid;
+  width: min(68vw, 300px);
+  height: 174px;
+  place-items: center;
+  color: var(--text-primary);
+  opacity: 0.075;
+  transform: translateX(-50%);
 }
 
-[data-theme="light"] .profile-hero-mark {
-  opacity: 0.08;
-  filter: grayscale(1) brightness(0.1);
+.profile-hero-mark span {
+  color: transparent;
+  font-size: 148px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-text-stroke: 1px var(--text-primary);
 }
 
 .profile-hero h2 {
+  position: relative;
+  z-index: 1;
   max-width: 100%;
-  font-size: 28px;
+  padding-inline: 4px;
+  font-size: 30px;
   font-weight: 500;
-  line-height: 1.25;
+  line-height: 1.2;
   letter-spacing: 0;
 }
 
 .profile-status-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   min-height: 42px;
-  margin-top: 38px;
-  padding: 8px 12px;
+  margin-top: 45px;
+  padding: 5px 7px 5px 12px;
   border: 1px solid var(--border-default);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-card) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 68%, transparent);
   color: var(--text-secondary);
   font-size: 12px;
 }
 
-.profile-status-bar svg {
+.profile-status-message,
+.profile-status-actions {
+  display: flex;
+  align-items: center;
+}
+
+.profile-status-message {
+  min-width: 0;
+  gap: 8px;
+}
+
+.profile-status-message span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-status-message svg {
   flex-shrink: 0;
   color: var(--text-muted);
+}
+
+.profile-status-actions {
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.profile-status-actions button {
+  height: 28px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+}
+
+.profile-status-actions button[title] {
+  width: 28px;
 }
 
 .profile-composer {
   margin-top: 24px;
   overflow: hidden;
   border: 1px solid var(--border-default);
-  border-radius: 12px;
-  background: var(--bg-card);
-  box-shadow: var(--shadow-md);
+  border-radius: 16px;
+  background: var(--bg-surface);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 14%);
 }
 
 .profile-composer-context {
@@ -73,13 +120,25 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 34px;
-  padding: 7px 12px 5px;
+  min-height: 40px;
+  padding: 7px 13px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .profile-composer-context span:last-child {
+  color: var(--text-muted);
+}
+
+.profile-composer-project {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-composer-project svg {
+  flex-shrink: 0;
   color: var(--text-muted);
 }
 
@@ -87,8 +146,10 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  gap: 1px;
-  padding: 2px 8px 7px;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 22px;
+  padding: 0 2px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -100,22 +161,27 @@
 .profile-tool-tab {
   width: auto;
   min-width: max-content;
-  height: 30px;
+  height: 34px;
   justify-content: flex-start;
-  padding-inline: 7px;
-  border-radius: 7px;
+  padding-inline: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .profile-tool-tab:hover {
   color: var(--text-secondary);
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
 }
 
 .profile-tool-tab.active {
   color: var(--text-primary);
-  background: var(--accent-subtle);
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
 }
 
 .profile-tool-tab-count {
@@ -126,7 +192,7 @@
   height: 17px;
   padding-inline: 4px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   color: var(--text-muted);
   background: color-mix(in srgb, var(--bg-app) 45%, transparent);
   font-size: 10px;
@@ -138,22 +204,19 @@
   background: var(--bg-card-hover);
 }
 
-.profile-search {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 52px;
-  margin: 0 8px;
-  padding: 0 4px 0 11px;
+.profile-search-editor {
+  position: relative;
+  min-height: 106px;
   border-top: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-muted);
+  border-radius: 16px 16px 0 0;
+  background: var(--bg-card);
 }
 
 .profile-search-input,
 .profile-search-input:focus {
-  height: 50px;
-  padding: 0;
+  width: 100%;
+  height: 58px;
+  padding: 4px 48px 10px 14px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -166,19 +229,36 @@
   color: var(--text-muted);
 }
 
+.profile-search-clear {
+  position: absolute;
+  top: 9px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+}
+
 .profile-composer-actions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 46px;
-  padding: 6px 8px;
+  min-height: 48px;
+  padding: 6px 9px;
 }
 
+.profile-composer-leading-actions,
 .profile-composer-action-group {
   display: flex;
   align-items: center;
   gap: 3px;
+}
+
+.profile-composer-actions button {
+  height: 32px;
 }
 
 .profile-shared-toggle {
@@ -194,13 +274,18 @@
   transform: rotate(180deg);
 }
 
+.profile-composer-submit {
+  width: 32px;
+  border-radius: 9px;
+}
+
 .profile-shared-panel,
 .profile-embedded-panel {
   margin-top: 12px;
 }
 
 .profile-results {
-  margin-top: 22px;
+  margin-top: 30px;
 }
 
 .profile-results-header {
@@ -220,7 +305,7 @@
   overflow: hidden;
   border: 1px solid var(--border-default);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-card) 66%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 42%, transparent);
 }
 
 .profile-row {
@@ -364,38 +449,49 @@
 
 @media (max-width: 760px) {
   .profile-workspace-inner {
-    padding: 40px 14px 32px;
+    padding: 24px 14px 32px;
+  }
+
+  .profile-hero {
+    height: 156px;
   }
 
   .profile-hero-mark {
-    width: 96px;
-    height: 96px;
+    width: 190px;
+    height: 118px;
+  }
+
+  .profile-hero-mark span {
+    font-size: 88px;
   }
 
   .profile-hero h2 {
-    font-size: 22px;
+    font-size: 21px;
   }
 
   .profile-composer {
-    margin-top: 22px;
+    margin-top: 16px;
   }
 
   .profile-status-bar {
-    margin-top: 26px;
+    margin-top: 24px;
   }
 
-  .profile-composer-actions {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 5px;
+  .profile-tool-tabs {
+    justify-content: flex-start;
+    margin-inline: -14px;
+    padding-inline: 14px;
   }
 
-  .profile-shared-toggle {
-    align-self: flex-start;
+  .profile-tool-tab {
+    height: 32px;
   }
 
-  .profile-composer-action-group {
-    justify-content: flex-end;
+  .profile-status-actions button:first-child {
+    width: 30px;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
   }
 
   .profile-row-layout {
@@ -410,16 +506,19 @@
 
 @media (max-width: 460px) {
   .profile-workspace-inner {
-    padding-top: 28px;
+    padding-top: 18px;
   }
 
   .profile-hero h2 {
     font-size: 19px;
   }
 
-  .profile-composer-action-group button:nth-child(2) {
-    max-width: 42px;
-    overflow: hidden;
+  .profile-hero {
+    height: 140px;
+  }
+
+  .profile-shared-toggle {
+    display: none;
   }
 
   .profile-row-main {

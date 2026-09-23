@@ -21,4 +21,23 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开侧栏" }));
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
+
+  it("uses compact primary actions and switches navigation contexts", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar collapsed={false} width={264} onResize={vi.fn()} onToggle={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: "新增配置" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "搜索" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "配置文件" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "技能与插件" })).toBeTruthy();
+
+    const runtimeTab = screen.getByRole("tab", { name: "运行" });
+    fireEvent.click(runtimeTab);
+    expect(runtimeTab.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("link", { name: "代理增强" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "MCP 服务" })).toBeNull();
+  });
 });

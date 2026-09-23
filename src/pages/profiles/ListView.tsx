@@ -1,17 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Suspense, lazy, useState, type ChangeEvent } from "react";
 import {
+  ArrowUp,
   ArrowRightLeft,
   ChevronDown,
+  Folder,
   Info,
   Monitor,
   Plus,
   RefreshCw,
-  Search,
+  Settings,
   Wifi,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import ProfileCard from "../../components/ProfileCard";
 import ProfileToolFilterTab from "../../components/ProfileToolFilterTab";
@@ -20,7 +23,6 @@ import EmptyState from "../../components/states/EmptyState";
 import UniversalProviderManager from "../../components/UniversalProviderManager";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import appIcon from "../../../src-tauri/icons/128x128.png";
 
 import {
   TOOL_ICONS,
@@ -95,8 +97,12 @@ function streamToneFor(status: string | undefined) {
 
 export default function ProfilesListView(props: ProfilesListViewProps) {
   const { locale, localeText, profiles, activeIds, tools, installedTools, toolCounts, filterTool } = props;
+  const navigate = useNavigate();
   const [showSharedProviders, setShowSharedProviders] = useState(false);
   const activeTool = tools.find((tool) => tool.id === filterTool);
+  const visibleTools = tools.filter(
+    (tool) => tool.installed || (toolCounts[tool.id] || 0) > 0 || tool.id === filterTool,
+  );
   const hour = new Date().getHours();
   const greeting =
     hour < 6
@@ -111,30 +117,55 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
     <section className="profile-workspace">
       <div className="profile-workspace-inner">
         <div className="profile-hero">
-          <img className="profile-hero-mark" src={appIcon} alt="" aria-hidden="true" />
+          <div className="profile-hero-mark" aria-hidden="true">
+            <span>CC</span>
+          </div>
           <h2>
             {localeText(
-              `${greeting}，选择一个配置继续`,
-              `${greeting}. Pick a configuration`,
-              `${greeting}。設定を選択`,
+              `${greeting}呀，选择配置继续吧`,
+              `${greeting}! Pick a configuration to continue.`,
+              `${greeting}。設定を選んで続けましょう`,
             )}
           </h2>
         </div>
 
         <div className="profile-status-bar">
-          <Info size={14} aria-hidden="true" />
-          <span>
-            {localeText(
-              `已保存 ${profiles.length} 个配置，其中 ${activeIds.length} 个正在生效`,
-              `${profiles.length} configurations saved, ${activeIds.length} active`,
-              `${profiles.length} 件の設定を保存済み、${activeIds.length} 件が有効`,
-            )}
-          </span>
+          <div className="profile-status-message">
+            <Info size={14} aria-hidden="true" />
+            <span>
+              {localeText(
+                `已保存 ${profiles.length} 个配置，其中 ${activeIds.length} 个正在生效`,
+                `${profiles.length} configurations saved, ${activeIds.length} active`,
+                `${profiles.length} 件の設定を保存済み、${activeIds.length} 件が有効`,
+              )}
+            </span>
+          </div>
+          <div className="profile-status-actions">
+            <Button variant="ghost" size="sm" onClick={props.handleStreamCheckAll} disabled={props.batchStreamChecking}>
+              <Wifi size={13} />
+              {props.batchStreamChecking
+                ? localeText("检测中", "Checking", "確認中")
+                : localeText("检测", "Check", "確認")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate("/settings")}
+              aria-label={localeText("配置", "Settings", "設定")}
+              title={localeText("配置", "Settings", "設定")}
+            >
+              <Settings size={13} />
+            </Button>
+          </div>
         </div>
 
         <div className="profile-composer">
           <div className="profile-composer-context">
-            <span>{activeTool?.name || localeText("选择工具", "Choose a tool", "ツールを選択")}</span>
+            <span className="profile-composer-project">
+              <Folder size={15} aria-hidden="true" />
+              {activeTool?.name || localeText("选择工具", "Choose a tool", "ツールを選択")}
+              <ChevronDown size={13} aria-hidden="true" />
+            </span>
             <span>
               {localeText(
                 `${toolCounts[filterTool] || 0} 个配置`,
@@ -144,26 +175,15 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
             </span>
           </div>
 
-          <div className="profile-tool-tabs" role="tablist" aria-label={localeText("工具", "Tools", "ツール")}>
-            {tools.map((tool) => (
-              <ProfileToolFilterTab
-                key={tool.id}
-                toolId={tool.id}
-                toolName={tool.name}
-                count={toolCounts[tool.id] || 0}
-                active={filterTool === tool.id}
-                dimmed={!tool.installed && (toolCounts[tool.id] || 0) === 0}
-                onToggle={props.handleToggleFilterTool}
-              />
-            ))}
-          </div>
-
-          <div className="profile-search">
-            <Search size={16} aria-hidden="true" />
+          <div className="profile-search-editor">
             <Input
               ref={props.searchInputRef}
               className="profile-search-input"
-              placeholder={localeText("搜索要切换的配置...", "Search configurations...", "設定を検索...")}
+              placeholder={localeText(
+                "搜索配置，选择后立即切换",
+                "Search configurations and switch instantly",
+                "設定を検索してすぐに切り替え",
+              )}
               value={props.search}
               onChange={props.handleSearchChange}
             />
@@ -171,6 +191,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
               <Button
                 variant="ghost"
                 size="icon"
+                className="profile-search-clear"
                 aria-label={locale === "zh" ? "清除搜索" : "Clear search"}
                 title={locale === "zh" ? "清除搜索" : "Clear search"}
                 onClick={props.handleClearSearch}
@@ -178,48 +199,68 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
                 <X size={14} />
               </Button>
             )}
-          </div>
-
-          <div className="profile-composer-actions">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="profile-shared-toggle"
-              aria-expanded={showSharedProviders}
-              onClick={() => setShowSharedProviders((value) => !value)}
-            >
-              <ChevronDown size={14} className={showSharedProviders ? "profile-chevron-open" : ""} />
-              {localeText("跨工具共享配置", "Shared providers", "共有プロバイダー")}
-            </Button>
-            {filterTool !== "hermes" && (
-              <div className="profile-composer-action-group">
+            <div className="profile-composer-actions">
+              <div className="profile-composer-leading-actions">
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={props.handleRefreshProfiles}
-                  aria-label={locale === "zh" ? "刷新" : "Refresh"}
-                  title={locale === "zh" ? "刷新" : "Refresh"}
+                  aria-label={localeText("展开共享配置", "Open shared providers", "共有プロバイダーを開く")}
+                  title={localeText("展开共享配置", "Open shared providers", "共有プロバイダーを開く")}
+                  aria-expanded={showSharedProviders}
+                  onClick={() => setShowSharedProviders((value) => !value)}
                 >
-                  <RefreshCw size={14} />
+                  <Plus size={15} />
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={props.handleStreamCheckAll}
-                  disabled={props.batchStreamChecking}
+                  className="profile-shared-toggle"
+                  aria-expanded={showSharedProviders}
+                  onClick={() => setShowSharedProviders((value) => !value)}
                 >
-                  <Wifi size={14} />
-                  {props.batchStreamChecking
-                    ? localeText("检查中...", "Checking...", "確認中...")
-                    : localeText("全量流检", "Check streams", "全体ストリーム確認")}
-                </Button>
-                <Button size="sm" onClick={props.handleOpenCreateProfile} disabled={installedTools.length === 0}>
-                  <Plus size={14} />
-                  {locale === "zh" ? "新增" : "New"}
+                  {localeText("共享配置", "Shared providers", "共有プロバイダー")}
+                  <ChevronDown size={13} className={showSharedProviders ? "profile-chevron-open" : ""} />
                 </Button>
               </div>
-            )}
+              {filterTool !== "hermes" && (
+                <div className="profile-composer-action-group">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={props.handleRefreshProfiles}
+                    aria-label={locale === "zh" ? "刷新" : "Refresh"}
+                    title={locale === "zh" ? "刷新" : "Refresh"}
+                  >
+                    <RefreshCw size={14} />
+                  </Button>
+                  <Button
+                    className="profile-composer-submit"
+                    size="icon"
+                    onClick={props.handleOpenCreateProfile}
+                    disabled={installedTools.length === 0}
+                    aria-label={localeText("新增配置", "New configuration", "設定を追加")}
+                    title={localeText("新增配置", "New configuration", "設定を追加")}
+                  >
+                    <ArrowUp size={15} />
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
+        </div>
+
+        <div className="profile-tool-tabs" role="tablist" aria-label={localeText("工具", "Tools", "ツール")}>
+          {visibleTools.map((tool) => (
+            <ProfileToolFilterTab
+              key={tool.id}
+              toolId={tool.id}
+              toolName={tool.name}
+              count={toolCounts[tool.id] || 0}
+              active={filterTool === tool.id}
+              dimmed={!tool.installed && (toolCounts[tool.id] || 0) === 0}
+              onToggle={props.handleToggleFilterTool}
+            />
+          ))}
         </div>
 
         {showSharedProviders && (

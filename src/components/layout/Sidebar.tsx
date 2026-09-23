@@ -1,12 +1,25 @@
-import { memo, useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, ArrowRight, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Blocks,
+  CircleUserRound,
+  FileJson2,
+  Folder,
+  Gauge,
+  Hash,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  Settings,
+} from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { getLocale, t } from "../../lib/i18n";
-import { getNavigationSection, navigationSections } from "../../lib/navigation";
+import { getNavigationSection, navigationSections, type NavigationItem } from "../../lib/navigation";
 import { preloadRoute } from "../../lib/routes";
-import { Button } from "../ui/button";
 import { DEFAULT_SIDEBAR_WIDTH } from "../../lib/sidebarWidth";
-import appIcon from "../../../src-tauri/icons/128x128.png";
+import { Button } from "../ui/button";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -15,6 +28,12 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+const CONFIG_ITEMS: readonly NavigationItem[] = [
+  ...navigationSections[0].items,
+  ...navigationSections[1].items.filter((item) => item.path !== "/config-files" && item.path !== "/skills"),
+];
+const OPERATION_ITEMS = navigationSections[2].items;
+
 function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps) {
   const i = t();
   const location = useLocation();
@@ -22,6 +41,13 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
   const activeSection = getNavigationSection(location.pathname);
   const locale = getLocale();
   const hoverTimerRef = useRef<number | null>(null);
+  const operationMode = OPERATION_ITEMS.some((item) => item.path === location.pathname);
+  const visibleItems = useMemo(() => (operationMode ? OPERATION_ITEMS : CONFIG_ITEMS), [operationMode]);
+
+  const text = useCallback(
+    (zh: string, en: string, ja: string) => (locale === "zh" ? zh : locale === "ja" ? ja : en),
+    [locale],
+  );
 
   const cancelHover = useCallback(() => {
     if (hoverTimerRef.current !== null) {
@@ -62,6 +88,35 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
     window.setTimeout(() => window.dispatchEvent(new CustomEvent("cchub-shortcut-new")), 60);
   };
 
+  const primaryActions = [
+    {
+      key: "new",
+      label: text("新增配置", "New configuration", "設定を追加"),
+      shortcut: "Ctrl N",
+      icon: Plus,
+      onClick: handleCreateProfile,
+    },
+    {
+      key: "search",
+      label: text("搜索", "Search", "検索"),
+      shortcut: "Ctrl K",
+      icon: Search,
+      onClick: () => window.dispatchEvent(new CustomEvent("cchub-open-command-palette")),
+    },
+    {
+      key: "files",
+      label: i.nav.configFiles,
+      icon: FileJson2,
+      onClick: () => navigate("/config-files"),
+    },
+    {
+      key: "extensions",
+      label: i.nav.skills,
+      icon: Blocks,
+      onClick: () => navigate("/skills"),
+    },
+  ];
+
   return (
     <aside className={`sidebar-shell ${collapsed ? "sidebar-collapsed" : ""}`} aria-label={i.app.name}>
       <div className="sidebar-window-controls">
@@ -71,8 +126,8 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
               variant="ghost"
               size="icon"
               onClick={() => window.history.back()}
-              aria-label={locale === "zh" ? "后退" : "Back"}
-              title={locale === "zh" ? "后退" : "Back"}
+              aria-label={text("后退", "Back", "戻る")}
+              title={text("后退", "Back", "戻る")}
             >
               <ArrowLeft size={15} />
             </Button>
@@ -80,8 +135,8 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
               variant="ghost"
               size="icon"
               onClick={() => window.history.forward()}
-              aria-label={locale === "zh" ? "前进" : "Forward"}
-              title={locale === "zh" ? "前进" : "Forward"}
+              aria-label={text("前进", "Forward", "進む")}
+              title={text("前进", "Forward", "進む")}
             >
               <ArrowRight size={15} />
             </Button>
@@ -94,21 +149,13 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
           onClick={onToggle}
           aria-label={
             collapsed
-              ? locale === "zh"
-                ? "展开侧栏"
-                : "Expand sidebar"
-              : locale === "zh"
-                ? "折叠侧栏"
-                : "Collapse sidebar"
+              ? text("展开侧栏", "Expand sidebar", "サイドバーを展開")
+              : text("折叠侧栏", "Collapse sidebar", "サイドバーを折りたたむ")
           }
           title={
             collapsed
-              ? locale === "zh"
-                ? "展开侧栏"
-                : "Expand sidebar"
-              : locale === "zh"
-                ? "折叠侧栏"
-                : "Collapse sidebar"
+              ? text("展开侧栏", "Expand sidebar", "サイドバーを展開")
+              : text("折叠侧栏", "Collapse sidebar", "サイドバーを折りたたむ")
           }
         >
           {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
@@ -116,37 +163,67 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
       </div>
 
       <div className="sidebar-primary-actions">
-        <Button
-          variant="ghost"
-          className="sidebar-primary-action"
-          title={locale === "zh" ? "新增配置" : "New configuration"}
-          aria-label={locale === "zh" ? "新增配置" : "New configuration"}
-          onClick={handleCreateProfile}
-        >
-          <Plus size={15} aria-hidden="true" />
-          <span>{locale === "zh" ? "新增配置" : locale === "ja" ? "設定を追加" : "New configuration"}</span>
-          <kbd>Ctrl N</kbd>
-        </Button>
-        <Button
-          variant="ghost"
-          className="sidebar-primary-action"
-          title={locale === "zh" ? "搜索" : "Search"}
-          aria-label={locale === "zh" ? "搜索" : "Search"}
-          onClick={() => window.dispatchEvent(new CustomEvent("cchub-open-command-palette"))}
-        >
-          <Search size={15} aria-hidden="true" />
-          <span>{locale === "zh" ? "搜索" : locale === "ja" ? "検索" : "Search"}</span>
-          <kbd>Ctrl K</kbd>
-        </Button>
+        {primaryActions.map((action) => {
+          const Icon = action.icon;
+          return (
+            <Button
+              key={action.key}
+              variant="ghost"
+              className="sidebar-primary-action"
+              title={action.label}
+              aria-label={action.label}
+              onClick={action.onClick}
+            >
+              <Icon size={15} aria-hidden="true" />
+              <span>{action.label}</span>
+              {action.shortcut && <kbd>{action.shortcut}</kbd>}
+            </Button>
+          );
+        })}
       </div>
 
       <nav className="sidebar-context-nav" aria-label={i.app.name}>
-        {navigationSections.slice(0, -1).map((section) => (
-          <div className="sidebar-nav-group" key={section.key}>
-            <div className="sidebar-nav-label">
-              {section.key === "settings" ? i.nav.settings : i.navGroups[section.key]}
-            </div>
-            {section.items.map((item) => {
+        <div className="sidebar-view-toolbar">
+          <div
+            className="sidebar-view-tabs"
+            role="tablist"
+            aria-label={text("导航视图", "Navigation view", "ナビゲーション表示")}
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              className={!operationMode ? "active" : ""}
+              role="tab"
+              aria-selected={!operationMode}
+              onClick={() => navigate("/")}
+            >
+              <Hash size={12} />
+              {text("配置", "Configs", "設定")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={operationMode ? "active" : ""}
+              role="tab"
+              aria-selected={operationMode}
+              onClick={() => navigate("/proxy-advanced")}
+            >
+              <Gauge size={12} />
+              {text("运行", "Runtime", "実行")}
+            </Button>
+          </div>
+        </div>
+
+        <div className="sidebar-tree-section">
+          <div className="sidebar-tree-heading">
+            <span>
+              {operationMode
+                ? text("运行与分析", "Runtime & analytics", "実行と分析")
+                : text("客户端", "Clients", "クライアント")}
+            </span>
+          </div>
+          <div className="sidebar-tree-list">
+            {visibleItems.map((item, index) => {
               const Icon = item.icon;
               return (
                 <NavLink
@@ -164,19 +241,23 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
                   title={i.nav[item.labelKey]}
                   aria-label={i.nav[item.labelKey]}
                 >
-                  <Icon size={15} aria-hidden="true" />
+                  {index === 0 && !operationMode ? (
+                    <Folder size={15} aria-hidden="true" />
+                  ) : (
+                    <Icon size={15} aria-hidden="true" />
+                  )}
                   <span>{i.nav[item.labelKey]}</span>
                 </NavLink>
               );
             })}
           </div>
-        ))}
+        </div>
       </nav>
 
       <footer className="sidebar-context-footer">
         <div className="sidebar-product" title={`CCHub v${__APP_VERSION__}`}>
           <span className="sidebar-product-mark">
-            <img src={appIcon} alt="" aria-hidden="true" />
+            <CircleUserRound size={15} aria-hidden="true" />
           </span>
           <span className="sidebar-product-name">CCHub</span>
         </div>
@@ -195,7 +276,7 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
           className="sidebar-resize-handle"
           role="separator"
           tabIndex={0}
-          aria-label={locale === "zh" ? "调整侧栏宽度" : locale === "ja" ? "サイドバーの幅を調整" : "Resize sidebar"}
+          aria-label={text("调整侧栏宽度", "Resize sidebar", "サイドバーの幅を変更")}
           aria-orientation="vertical"
           aria-valuenow={width}
           aria-valuemin={264}

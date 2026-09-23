@@ -14,33 +14,34 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 配置切换首页改为居中的任务工作台：默认只保留品牌水印、动态问候、状态条、搜索输入面和工具快捷项，首屏不再被完整配置列表占满
-    - 新增按需展开的配置抽屉；聚焦搜索框或点击工具快捷项即可显示对应配置，完成切换后仍可继续使用测速、流式检测、用量、复制、编辑和删除操作
-    - 品牌水印改用应用自身图标资产，并针对深色和浅色主题分别处理亮度、对比度与透明度
+    - Windows NSIS 安装器新增与应用一致的深色侧栏、浅色内容区、应用图标和青色状态强调，欢迎页与完成页不再使用默认素材
+    - NSIS 卸载器新增独立品牌头图与应用图标，安装和卸载流程保持统一视觉
+    - MSI 安装器新增 493×58 品牌横幅与 493×312 欢迎/完成页图，企业部署入口与推荐安装包保持一致
+    - 新增简体中文与英文安装维护文案，覆盖修复安装、版本替换、WebView2 状态和本地数据删除提示
 
     ### 变更与安全
-    - 保持 672px 中央工作列、状态条、输入面和工具快捷项的稳定尺寸与垂直节奏，桌面和窄屏使用同一套交互层级
-    - 点击当前已选工具时只展开它的配置，不再隐式取消筛选；切换到其他工具时仍会同步更新筛选条件
-    - 本版本仅调整配置首页的呈现和本地交互状态，不修改配置数据库、凭据存储、配置文件格式或后端命令，无需迁移
+    - Tauri CLI 升级至 2.11.5，Rust 构建链升级至 tauri-build 2.6.3 与 tauri-utils 2.9.3，以支持卸载器品牌资源
+    - 固定 MSI Upgrade Code，避免后续升级被 Windows 识别为另一款应用；NSIS 继续采用当前用户安装，不新增管理员权限要求
+    - 卸载页默认保留数据库与本地配置，只有用户主动勾选删除选项时才清理数据；本版本不修改配置文件或数据库格式
+    - 前端生产构建新增安装器资产校验，检查 CLI 版本、双语文件、路径、BMP 尺寸和 24 位像素格式
 
     ### 问题修复与打磨
-    - 修复配置列表默认展开导致首屏拥挤、滚动条常驻和中心构图失衡的问题
-    - 修复旧文字轮廓水印缺少产品辨识度的问题，并限制水印绘制范围，避免覆盖状态条与输入控件
-    - 修复当前工具快捷项首次点击后意外显示全部配置的问题
-    - 完善 390px 窄屏下的配置抽屉滚动、操作换行和水平溢出控制
-    - 增加配置抽屉默认收起、搜索聚焦展开、手动收起及当前工具展开语义测试
+    - 修复 Windows 安装、卸载与维护页面沿用默认 NSIS/WiX 视觉、与应用界面割裂的问题
+    - 修复卸载数据选项含义不够明确的问题，中文和英文均明确说明会删除本地数据与设置
+    - 替换 README 中停留在旧版仪表盘的截图，新增当前配置工作台的 1440×900 深浅主题实拍
+    - 新增 Windows 安装器视觉规范文档与可重复生成脚本，降低后续品牌资产失配风险
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
-    - 从旧版升级会保留现有 CCHub 数据库和工具配置；涉及生产配置时建议先在设置中创建 SQL 备份。
+    - 从旧版升级会保留现有 CCHub 数据库和工具配置，无需迁移；卸载时请仅在确实需要清理数据时勾选删除选项。
 
     ## English Summary
 
-    - Keeps the configuration workspace calm by default and reveals the full profile drawer only from search or tool shortcuts.
-    - Replaces the placeholder letter mark with a theme-aware watermark based on the application icon.
-    - Preserves the current tool filter when opening its drawer, while keeping all switching and profile actions available.
-    - Improves drawer behavior on 390px screens and adds focused interaction coverage for open, close, and filter behavior.
-    - No configuration database or credential-storage migration is required.
+    - Gives both NSIS setup/uninstall flows and MSI maintenance dialogs a consistent CCHub visual system.
+    - Adds explicit Simplified Chinese and English maintenance, runtime, upgrade, and data-removal copy.
+    - Pins the WiX upgrade identity and validates every installer bitmap and localization file before production builds.
+    - Refreshes README screenshots with the current 1440×900 light and dark configuration workspace.
+    - Upgrades preserve existing databases and tool configurations; no migration is required.
 
     ## 下载 / Download
 

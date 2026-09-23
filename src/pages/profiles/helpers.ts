@@ -136,12 +136,11 @@ export const CODEX_REASONING_OPTIONS: CodexReasoningEffort[] = ["low", "medium",
 export const CODEX_WIRE_API_OPTIONS: CodexWireApi[] = ["responses", "chat"];
 export const THINKING_LEVEL_OPTIONS: OpenCodeThinkingLevel[] = ["minimal", "low", "medium", "high"];
 export const SECTION_TITLE_STYLE = {
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
-  color: "var(--text-muted)",
+  color: "var(--text-primary)",
   marginBottom: 12,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
+  letterSpacing: 0,
 } as const;
 export const FIELD_STACK_STYLE = {
   display: "flex",

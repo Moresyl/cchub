@@ -1,6 +1,7 @@
 import { memo } from "react";
-import { Save, X } from "lucide-react";
+import { ArrowLeft, Save } from "lucide-react";
 import type { ReactNode } from "react";
+import { Button } from "./ui/button";
 
 interface ProfileEditorProps {
   title: string;
@@ -22,30 +23,34 @@ function ProfileEditorComponent({
   children,
 }: ProfileEditorProps) {
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button className="btn btn-ghost btn-icon-sm" onClick={onClose} title="Back">
-            <X size={18} />
-          </button>
+    <div className="profile-editor animate-in">
+      <header className="profile-editor-header">
+        <div className="profile-editor-header-inner">
+          <Button variant="ghost" size="icon" onClick={onClose} title="返回" aria-label="返回">
+            <ArrowLeft size={17} />
+          </Button>
           <div>
-            <h2 className="page-title">{title}</h2>
-            <p className="page-subtitle">{subtitle}</p>
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
           </div>
         </div>
+      </header>
+
+      <div className="profile-editor-scroll">
+        <div className="profile-editor-content">{children}</div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 20, paddingBottom: 20 }}>
-        {children}
-      </div>
-
-      <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button className="btn btn-secondary btn-sm" onClick={onClose}>取消</button>
-        <button className="btn btn-primary btn-sm" onClick={onSave} disabled={saveDisabled} style={{ gap: 6 }}>
-          {saving ? <div className="spinner" style={{ width: 14, height: 14 }} /> : <Save size={14} />}
-          保存
-        </button>
-      </div>
+      <footer className="profile-editor-footer">
+        <div className="profile-editor-footer-inner">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button size="sm" onClick={onSave} disabled={saveDisabled}>
+            {saving ? <div className="spinner profile-editor-save-spinner" /> : <Save size={14} />}
+            保存
+          </Button>
+        </div>
+      </footer>
     </div>
   );
 }

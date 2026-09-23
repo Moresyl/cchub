@@ -125,7 +125,7 @@ function ProfileCardComponent({
 
   return (
     <div
-      className="card card-hover profile-row"
+      className={`profile-row ${isActive ? "profile-row-active" : ""} ${isDragging ? "profile-row-dragging" : ""} ${isDragOver ? "profile-row-drag-over" : ""}`}
       draggable={reorderEnabled}
       onDragStart={() => onDragStart(profile.id)}
       onDragEnter={() => onDragEnter(profile.id)}
@@ -135,14 +135,9 @@ function ProfileCardComponent({
       }}
       onDragEnd={onDragEnd}
       onDrop={handleDrop}
-      style={{
-        borderColor: isActive ? "var(--success)" : undefined,
-        opacity: isDragging ? 0.65 : 1,
-        transform: isDragOver ? "translateY(-2px)" : undefined,
-      }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1, alignItems: "center" }}>
+      <div className="profile-row-layout">
+        <div className="profile-row-main">
           {reorderEnabled && (
             <Button
               variant="ghost"
@@ -156,27 +151,17 @@ function ProfileCardComponent({
               <GripVertical size={14} />
             </Button>
           )}
-          <div className="icon-box" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }}>
+          <div className="profile-row-icon">
             <ProviderIcon iconUrl={iconUrl} fallbackIcon={Icon} size={16} />
           </div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{profile.name}</span>
-              <span className="badge badge-muted" style={{ textTransform: "capitalize", fontSize: 10 }}>
-                {toolTag}
-              </span>
-              {isActive && (
-                <span className="badge badge-success" style={{ fontSize: 10 }}>
-                  {text.activeTag}
-                </span>
-              )}
-              {sharedCount > 1 && (
-                <span className="badge badge-accent" style={{ fontSize: 10 }}>
-                  {sharedTag}
-                </span>
-              )}
+          <div className="profile-row-copy">
+            <div className="profile-row-title-line">
+              <span className="profile-row-name">{profile.name}</span>
+              <span className="badge badge-muted profile-row-tool">{toolTag}</span>
+              {isActive && <span className="badge badge-success">{text.activeTag}</span>}
+              {sharedCount > 1 && <span className="badge badge-accent">{sharedTag}</span>}
               {ping && (
-                <span className={`badge ${pingTone}`} style={{ fontSize: 10 }}>
+                <span className={`badge ${pingTone}`}>
                   {ping.status === "fast"
                     ? text.pingFast
                     : ping.status === "medium"
@@ -188,7 +173,7 @@ function ProfileCardComponent({
                 </span>
               )}
               {streamCheck && (
-                <span className={`badge ${streamTone}`} style={{ fontSize: 10 }}>
+                <span className={`badge ${streamTone}`}>
                   {streamCheck.status === "healthy"
                     ? text.streamHealthy
                     : streamCheck.status === "reachable"
@@ -202,19 +187,15 @@ function ProfileCardComponent({
                 </span>
               )}
             </div>
-            <div style={{ display: "flex", gap: 16, marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              {baseUrl && (
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>
-                  {baseUrl}
-                </span>
-              )}
-              {model && <span style={{ flexShrink: 0 }}>{model}</span>}
+            <div className="profile-row-meta">
+              {baseUrl && <span className="profile-row-url">{baseUrl}</span>}
+              {model && <span className="profile-row-model">{model}</span>}
               {!baseUrl && !model && <span>{formatTime(profile.updated_at || profile.created_at)}</span>}
             </div>
           </div>
         </div>
 
-        <div className="card-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <div className="card-actions profile-row-actions">
           <Button
             variant={isActive ? "secondary" : "default"}
             size="sm"

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { Command, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { ArrowLeft, ArrowRight, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { getLocale, t } from "../../lib/i18n";
 import { getNavigationSection, navigationSections } from "../../lib/navigation";
@@ -57,47 +57,88 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
     event.preventDefault();
   };
 
+  const handleCreateProfile = () => {
+    if (location.pathname !== "/") navigate("/");
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("cchub-shortcut-new")), 60);
+  };
+
   return (
     <aside className={`sidebar-shell ${collapsed ? "sidebar-collapsed" : ""}`} aria-label={i.app.name}>
-      <div className="sidebar-brand">
-        <button
-          className="sidebar-brand-link"
-          type="button"
-          onClick={collapsed ? onToggle : () => navigate("/")}
-          aria-label={collapsed ? (locale === "zh" ? "展开侧栏" : "Expand sidebar") : i.app.name}
-          title={collapsed ? (locale === "zh" ? "展开侧栏" : "Expand sidebar") : i.app.name}
-        >
-          <span className="sidebar-mark">
-            <img src={appIcon} alt="" aria-hidden="true" />
-          </span>
-          {collapsed && <PanelLeftOpen className="sidebar-brand-expand" size={17} aria-hidden="true" />}
-          <span className="sidebar-brand-name">CCHub</span>
-        </button>
+      <div className="sidebar-window-controls">
         {!collapsed && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="sidebar-collapse-button"
-            onClick={onToggle}
-            aria-label={locale === "zh" ? "折叠侧栏" : "Collapse sidebar"}
-            title={locale === "zh" ? "折叠侧栏" : "Collapse sidebar"}
-          >
-            <PanelLeftClose size={15} />
-          </Button>
+          <div className="sidebar-history-actions">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => window.history.back()}
+              aria-label={locale === "zh" ? "后退" : "Back"}
+              title={locale === "zh" ? "后退" : "Back"}
+            >
+              <ArrowLeft size={15} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => window.history.forward()}
+              aria-label={locale === "zh" ? "前进" : "Forward"}
+              title={locale === "zh" ? "前进" : "Forward"}
+            >
+              <ArrowRight size={15} />
+            </Button>
+          </div>
         )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="sidebar-collapse-button"
+          onClick={onToggle}
+          aria-label={
+            collapsed
+              ? locale === "zh"
+                ? "展开侧栏"
+                : "Expand sidebar"
+              : locale === "zh"
+                ? "折叠侧栏"
+                : "Collapse sidebar"
+          }
+          title={
+            collapsed
+              ? locale === "zh"
+                ? "展开侧栏"
+                : "Expand sidebar"
+              : locale === "zh"
+                ? "折叠侧栏"
+                : "Collapse sidebar"
+          }
+        >
+          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+        </Button>
       </div>
 
-      <Button
-        variant="ghost"
-        className="sidebar-command"
-        title={locale === "zh" ? "快速切换" : "Quick switch"}
-        aria-label={locale === "zh" ? "快速切换" : "Quick switch"}
-        onClick={() => window.dispatchEvent(new CustomEvent("cchub-open-command-palette"))}
-      >
-        <Command size={15} aria-hidden="true" />
-        <span>{locale === "zh" ? "快速切换" : locale === "ja" ? "クイック切替" : "Quick switch"}</span>
-        <kbd>Ctrl K</kbd>
-      </Button>
+      <div className="sidebar-primary-actions">
+        <Button
+          variant="ghost"
+          className="sidebar-primary-action"
+          title={locale === "zh" ? "新增配置" : "New configuration"}
+          aria-label={locale === "zh" ? "新增配置" : "New configuration"}
+          onClick={handleCreateProfile}
+        >
+          <Plus size={15} aria-hidden="true" />
+          <span>{locale === "zh" ? "新增配置" : locale === "ja" ? "設定を追加" : "New configuration"}</span>
+          <kbd>Ctrl N</kbd>
+        </Button>
+        <Button
+          variant="ghost"
+          className="sidebar-primary-action"
+          title={locale === "zh" ? "搜索" : "Search"}
+          aria-label={locale === "zh" ? "搜索" : "Search"}
+          onClick={() => window.dispatchEvent(new CustomEvent("cchub-open-command-palette"))}
+        >
+          <Search size={15} aria-hidden="true" />
+          <span>{locale === "zh" ? "搜索" : locale === "ja" ? "検索" : "Search"}</span>
+          <kbd>Ctrl K</kbd>
+        </Button>
+      </div>
 
       <nav className="sidebar-context-nav" aria-label={i.app.name}>
         {navigationSections.slice(0, -1).map((section) => (
@@ -123,7 +164,7 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
                   title={i.nav[item.labelKey]}
                   aria-label={i.nav[item.labelKey]}
                 >
-                  <Icon size={16} aria-hidden="true" />
+                  <Icon size={15} aria-hidden="true" />
                   <span>{i.nav[item.labelKey]}</span>
                 </NavLink>
               );
@@ -133,17 +174,21 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
       </nav>
 
       <footer className="sidebar-context-footer">
+        <div className="sidebar-product" title={`CCHub v${__APP_VERSION__}`}>
+          <span className="sidebar-product-mark">
+            <img src={appIcon} alt="" aria-hidden="true" />
+          </span>
+          <span className="sidebar-product-name">CCHub</span>
+        </div>
         <NavLink
           to="/settings"
-          className={({ isActive }) => `sidebar-context-link ${isActive ? "active" : ""}`}
+          className={({ isActive }) => `sidebar-settings-link ${isActive ? "active" : ""}`}
           aria-current={activeSection.key === "settings" ? "page" : undefined}
           title={i.nav.settings}
           aria-label={i.nav.settings}
         >
           <Settings size={16} aria-hidden="true" />
-          <span>{i.nav.settings}</span>
         </NavLink>
-        <span className="sidebar-version">CCHub · v{__APP_VERSION__}</span>
       </footer>
       {!collapsed && (
         <div

@@ -322,9 +322,9 @@ function AppShell() {
       )}
       <div className="app-layout" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
         <Sidebar collapsed={sidebarCollapsed} width={sidebarWidth} onResize={resizeSidebar} onToggle={toggleSidebar} />
-        <div className="main-area">
+        <div className={`main-area ${location.pathname === "/" ? "main-area-home" : ""}`}>
           <NavigationProgress />
-          <Header />
+          {location.pathname !== "/" && <Header />}
           {showConflictBanner && (
             <div className="env-warning-banner">
               <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -370,7 +370,7 @@ function AppShell() {
               </div>
             </div>
           )}
-          <main className="page-content">
+          <main className={`page-content ${location.pathname === "/" ? "profile-page-content" : ""}`}>
             <ErrorBoundary resetKey={location.pathname}>
               <RouteProfiler pathname={location.pathname}>
                 <ActiveRoute pathname={location.pathname} />

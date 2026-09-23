@@ -98,6 +98,9 @@ describe("ProfilesListView", () => {
     const props = createProps();
     renderListView(props);
 
+    expect(screen.queryByText("Primary API")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Claude (1)" }));
+    expect(props.handleToggleFilterTool).not.toHaveBeenCalled();
     expect(screen.getByText("Primary API")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "启用" }));
     expect(props.doApply).toHaveBeenCalledWith(profile);
@@ -120,6 +123,7 @@ describe("ProfilesListView", () => {
     renderListView(props);
 
     expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Claude (1)" }));
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
     expect(screen.getByRole("menu")).toBeTruthy();
     fireEvent.mouseDown(document.body);
@@ -129,6 +133,16 @@ describe("ProfilesListView", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "复制" }));
     expect(props.handleDuplicate).toHaveBeenCalledWith(profile);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("keeps the first screen calm and collapses the profile drawer", () => {
+    renderListView();
+
+    expect(screen.queryByLabelText("配置列表")).toBeNull();
+    fireEvent.focus(screen.getByPlaceholderText("搜索配置，选择后立即切换"));
+    expect(screen.getByLabelText("配置列表")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "收起配置" }));
+    expect(screen.queryByLabelText("配置列表")).toBeNull();
   });
 
   it("shows available tools in the compact switcher and changes the active filter", () => {
@@ -154,5 +168,6 @@ describe("ProfilesListView", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Codex (2)" }));
     expect(props.handleToggleFilterTool).toHaveBeenCalledWith("codex");
+    expect(screen.getByLabelText("配置列表")).toBeTruthy();
   });
 });

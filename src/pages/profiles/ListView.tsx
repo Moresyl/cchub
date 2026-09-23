@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ArrowRightLeft,
   ChevronDown,
+  ChevronUp,
   Folder,
   Info,
   Monitor,
@@ -23,6 +24,7 @@ import EmptyState from "../../components/states/EmptyState";
 import UniversalProviderManager from "../../components/UniversalProviderManager";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import appIconUrl from "../../../src-tauri/icons/icon.png";
 
 import {
   TOOL_ICONS,
@@ -99,6 +101,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
   const { locale, localeText, profiles, activeIds, tools, installedTools, toolCounts, filterTool } = props;
   const navigate = useNavigate();
   const [showSharedProviders, setShowSharedProviders] = useState(false);
+  const [showProfiles, setShowProfiles] = useState(false);
   const activeTool = tools.find((tool) => tool.id === filterTool);
   const visibleTools = tools.filter(
     (tool) => tool.installed || (toolCounts[tool.id] || 0) > 0 || tool.id === filterTool,
@@ -118,7 +121,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
       <div className="profile-workspace-inner">
         <div className="profile-hero">
           <div className="profile-hero-mark" aria-hidden="true">
-            <span>CC</span>
+            <img src={appIconUrl} alt="" />
           </div>
           <h2>
             {localeText(
@@ -186,6 +189,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
               )}
               value={props.search}
               onChange={props.handleSearchChange}
+              onFocus={() => setShowProfiles(true)}
             />
             {props.search && (
               <Button
@@ -258,7 +262,11 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
               count={toolCounts[tool.id] || 0}
               active={filterTool === tool.id}
               dimmed={!tool.installed && (toolCounts[tool.id] || 0) === 0}
-              onToggle={props.handleToggleFilterTool}
+              onToggle={(toolId) => {
+                const opensCurrentTool = !showProfiles && toolId === filterTool;
+                setShowProfiles(true);
+                if (!opensCurrentTool) props.handleToggleFilterTool(toolId);
+              }}
             />
           ))}
         </div>
@@ -281,11 +289,23 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
           </div>
         )}
 
-        {filterTool !== "hermes" && (
-          <div className="profile-results">
+        {filterTool !== "hermes" && (showProfiles || Boolean(props.search)) && (
+          <div className="profile-results" aria-label={localeText("配置列表", "Configuration list", "設定一覧")}>
             <div className="profile-results-header">
               <span>{localeText("可用配置", "Available configurations", "利用可能な設定")}</span>
-              <span>{props.filteredProfiles.length}</span>
+              <span className="profile-results-summary">
+                {props.filteredProfiles.length}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowProfiles(false)}
+                  disabled={Boolean(props.search)}
+                  aria-label={localeText("收起配置", "Collapse configurations", "設定を閉じる")}
+                  title={localeText("收起配置", "Collapse configurations", "設定を閉じる")}
+                >
+                  <ChevronUp size={13} />
+                </Button>
+              </span>
             </div>
             <div className="profile-list">
               {props.filteredProfiles.length === 0 ? (

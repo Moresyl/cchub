@@ -14,32 +14,34 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 重做 CCHub 工作区的颜色、字号、留白与信息层级，提升浅色和深色主题下的可读性
-    - 折叠侧栏升级为完整图标导航，保持快速切换、全部功能入口和设置入口可直接访问
-    - 配置工具筛选改为单行可滚动切换条，在窄窗口下不再堆叠成多行按钮
+    - 全面重构桌面工作区：采用 4px 外框间距、264px 操作侧栏和独立 12px 圆角主面板，首页不再使用贯穿式后台顶栏
+    - 配置切换首页改为中央操作区，将工具选择、配置搜索、共享配置、刷新、流检和新增入口集中到同一工作流
+    - 配置列表改为紧凑任务行，统一呈现工具、端点、模型、当前状态和主操作，同时保留编辑与更多操作
+    - 配置编辑器改为 920px 居中工作区，增加清晰的顶栏、分段内容和固定底部操作栏
 
     ### 变更与安全
-    - 配置卡片保留切换与编辑主操作，测速、流检、用量、复制和删除统一收入上下文菜单
-    - 上下文菜单挂载到窗口层并根据可用空间调整方向，支持点击外部、滚动、窗口变化和 Esc 关闭
-    - 清理仓库、发布说明和提交元数据中不必要的外部项目引用
+    - 重新定义深浅色主题的中性色阶、边框、状态色、阴影和文字层级，主按钮统一为高对比黑白样式
+    - 侧栏提供后退、前进、新增和搜索入口；折叠为 52px 图标栏后仍保留全部功能导航与设置
+    - 统一按钮和输入框为 8px 圆角，并恢复组件应有的内边距与焦点状态
+    - 本版本不修改配置数据结构、数据库或凭据存储方式，无需迁移
 
-    ### 问题修复
-    - 修复折叠侧栏只显示 Logo、无法直接导航的问题
-    - 修复配置卡片次要操作过多导致的拥挤，以及菜单可能被滚动容器裁切的问题
-    - 修复移动布局重复显示页面标题的问题
-    - 修复配置加载失败时直接显示底层异常文本和本机路径的问题
+    ### 问题修复与打磨
+    - 修复旧的全局样式覆盖组件内边距，导致按钮文字拥挤和操作区比例失真的问题
+    - 修复配置工具较多时标签换行、列表操作拥挤以及主次信息难以扫描的问题
+    - 修复新增与编辑配置时表单横向铺满、底部操作不稳定和移动端双列溢出的问题
+    - 完善 390px 移动布局、侧栏折叠布局和长配置列表的滚动行为
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
-    - 从旧版升级会保留现有 CCHub 数据库和工具配置；涉及生产配置时仍建议先在设置中创建 SQL 备份。
+    - 从旧版升级会保留现有 CCHub 数据库和工具配置；涉及生产配置时建议先在设置中创建 SQL 备份。
 
     ## English Summary
 
-    - Refined the CCHub workspace palette, typography, spacing, and visual hierarchy across light and dark themes.
-    - Kept every navigation destination available in the collapsed icon rail and replaced wrapping tool grids with a scrollable selector.
-    - Moved secondary profile operations into an accessible viewport-aware menu with reliable outside-click, scroll, resize, and Escape handling.
-    - Fixed cramped profile cards, duplicate mobile headings, clipped action menus, and raw implementation errors leaking into the interface.
-    - Cleaned unnecessary external project references from repository and release metadata.
+    - Rebuilt the desktop shell around a compact action sidebar and an inset, rounded workspace panel.
+    - Consolidated tool selection, search, shared profiles, health checks, creation, and switching into a focused central workflow.
+    - Reworked profile rows and the full configuration editor for clearer hierarchy, denser scanning, and stable footer actions.
+    - Added responsive layouts for compact windows and corrected global styles that removed component spacing.
+    - No configuration database or credential-storage migration is required.
 
     ## 下载 / Download
 

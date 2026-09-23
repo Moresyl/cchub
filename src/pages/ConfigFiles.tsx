@@ -11,6 +11,8 @@ import OmoConfigSection from "../components/OmoConfigSection";
 import OpenClawConfigSection from "../components/OpenClawConfigSection";
 import HermesConfigSection from "../components/HermesConfigSection";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
+import { Checkbox } from "../components/ui/checkbox";
+import { CheckboxField } from "../components/ui/checkbox-field";
 import { useConfigFiles } from "../hooks/queries";
 import {
   isCodexConfigToml,
@@ -649,22 +651,16 @@ export default function ConfigFiles() {
                   </div>
 
                   <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 14, flexWrap: "wrap" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                      <input
-                        type="checkbox"
-                        checked={codexStructuredConfig.disableResponseStorage}
-                        onChange={(event) => updateCodexConfig({ disableResponseStorage: event.target.checked })}
-                      />
-                      {zh ? "禁用响应存储" : "Disable Response Storage"}
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                      <input
-                        type="checkbox"
-                        checked={codexStructuredConfig.modelContextWindow === "1000000"}
-                        onChange={(event) => toggleCodexContextWindow1M(event.target.checked)}
-                      />
-                      {zh ? "1M 上下文窗口" : "1M Context Window"}
-                    </label>
+                    <CheckboxField
+                      checked={codexStructuredConfig.disableResponseStorage}
+                      onCheckedChange={(checked) => updateCodexConfig({ disableResponseStorage: checked })}
+                      label={zh ? "禁用响应存储" : "Disable Response Storage"}
+                    />
+                    <CheckboxField
+                      checked={codexStructuredConfig.modelContextWindow === "1000000"}
+                      onCheckedChange={toggleCodexContextWindow1M}
+                      label={zh ? "1M 上下文窗口" : "1M Context Window"}
+                    />
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       {codexStructuredConfig.mcpServers.length > 0
                         ? zh
@@ -747,11 +743,10 @@ export default function ConfigFiles() {
                           opacity: hasChanges ? 0.6 : 1,
                         }}
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={toggle.checked}
                           disabled={hasChanges || loadingClaudeToggles || writingClaudeToggleKey === toggle.key}
-                          onChange={(event) => void handleClaudeQuickToggle(toggle.key, event.target.checked)}
+                          onCheckedChange={(checked) => void handleClaudeQuickToggle(toggle.key, checked === true)}
                         />
                         <span style={{ fontSize: 13 }}>{toggle.label}</span>
                         {writingClaudeToggleKey === toggle.key && (

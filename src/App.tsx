@@ -22,6 +22,7 @@ import { showToast, ToastContainer } from "./components/Toast";
 import DeepLinkImportHost from "./components/DeepLinkImportHost";
 import NavigationProgress from "./components/NavigationProgress";
 import AppUpdateHost from "./components/AppUpdateHost";
+import { AppDialogProvider } from "./components/AppDialogProvider";
 
 // CommandPalette 仅在 Ctrl+K 时显示，懒加载避免 cmdk 进入主 bundle。
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
@@ -90,9 +91,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AppUpdateHost>
-          <AppShell />
-        </AppUpdateHost>
+        <AppDialogProvider>
+          <AppUpdateHost>
+            <AppShell />
+          </AppUpdateHost>
+        </AppDialogProvider>
       </BrowserRouter>
     </QueryClientProvider>
   );

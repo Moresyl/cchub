@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useState } from "react";
 import { Copy, ExternalLink, KeyRound, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { useAppDialog } from "./AppDialogProvider";
 
 type LocaleText = (zh: string, en: string, ja?: string) => string;
 
@@ -90,6 +91,7 @@ function AccountQuota({ accountId, localeText }: { accountId: string; localeText
 }
 
 export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
+  const appDialog = useAppDialog();
   const [status, setStatus] = useState<CodexStatus | null>(null);
   const [deviceCode, setDeviceCode] = useState<DeviceCode | null>(null);
   const [loading, setLoading] = useState(true);
@@ -181,16 +183,18 @@ export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
 
   const remove = useCallback(
     async (accountId: string) => {
-      if (
-        !window.confirm(
-          localeText(
-            "移除这个 Codex OAuth 账号？",
-            "Remove this Codex OAuth account?",
-            "この Codex OAuth アカウントを削除しますか？",
-          ),
-        )
-      )
-        return;
+      const confirmed = await appDialog.confirm({
+        title: localeText("移除 OAuth 账号", "Remove OAuth account", "OAuth アカウントを削除"),
+        message: localeText(
+          "此账号将从 CCHub 中移除，需要时可重新登录。",
+          "This account will be removed from CCHub. You can sign in again later.",
+          "このアカウントを CCHub から削除します。後で再ログインできます。",
+        ),
+        confirmText: localeText("移除", "Remove", "削除"),
+        cancelText: localeText("取消", "Cancel", "キャンセル"),
+        tone: "danger",
+      });
+      if (!confirmed) return;
       setBusy(true);
       try {
         await invoke("codex_oauth_remove_account", { accountId });
@@ -201,20 +205,22 @@ export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
         setBusy(false);
       }
     },
-    [load, localeText],
+    [appDialog, load, localeText],
   );
 
   const logout = useCallback(async () => {
-    if (
-      !window.confirm(
-        localeText(
-          "退出全部 Codex OAuth 账号？",
-          "Sign out all Codex OAuth accounts?",
-          "すべての Codex OAuth アカウントからサインアウトしますか？",
-        ),
-      )
-    )
-      return;
+    const confirmed = await appDialog.confirm({
+      title: localeText("退出全部账号", "Sign out all accounts", "すべてのアカウントからログアウト"),
+      message: localeText(
+        "所有 Codex OAuth 登录状态都将从本机移除。",
+        "All Codex OAuth sessions will be removed from this device.",
+        "すべての Codex OAuth セッションをこの端末から削除します。",
+      ),
+      confirmText: localeText("全部退出", "Sign out all", "すべてログアウト"),
+      cancelText: localeText("取消", "Cancel", "キャンセル"),
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setBusy(true);
     try {
       await invoke("codex_oauth_logout");
@@ -225,7 +231,7 @@ export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [load, localeText]);
+  }, [appDialog, load, localeText]);
 
   const copyCode = useCallback(async () => {
     if (!deviceCode) return;

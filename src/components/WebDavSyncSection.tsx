@@ -15,6 +15,7 @@ import { AlertCircle, CheckCircle, Copy, Download, Link2, RefreshCw, Save, Uploa
 import { getLocale, t } from "../lib/i18n";
 import { showToast } from "./Toast";
 import { useSetWebDavSyncSettingsMutation } from "../hooks/mutations";
+import { useAppDialog } from "./AppDialogProvider";
 
 import {
   EMPTY_SETTINGS,
@@ -36,6 +37,7 @@ import {
 } from "./webdav-sync/parts";
 
 function WebDavSyncSectionComponent() {
+  const appDialog = useAppDialog();
   const loc = getLocale();
   const i = t();
   const setWebDavSyncSettingsMutation = useSetWebDavSyncSettingsMutation<WebDavSyncSettings>();
@@ -239,15 +241,18 @@ function WebDavSyncSectionComponent() {
       );
       return;
     }
-    if (
-      !window.confirm(
-        uiText(
-          "从 WebDAV 恢复会覆盖当前数据库。确认继续？",
-          "Downloading from WebDAV will replace the current database. Continue?",
-          "WebDAV から復元すると現在のデータベースを上書きします。続行しますか？",
-        ),
-      )
-    ) {
+    const confirmed = await appDialog.confirm({
+      title: uiText("从 WebDAV 恢复", "Restore from WebDAV", "WebDAV から復元"),
+      message: uiText(
+        "远端快照会覆盖当前数据库，请确认本地工作已保存。",
+        "The remote snapshot will replace the current database. Make sure local work is saved.",
+        "リモートスナップショットで現在のデータベースを上書きします。ローカル作業を保存してください。",
+      ),
+      confirmText: uiText("继续恢复", "Restore", "復元を続行"),
+      cancelText: uiText("取消", "Cancel", "キャンセル"),
+      tone: "warning",
+    });
+    if (!confirmed) {
       return;
     }
     setActionState("downloading");
@@ -260,7 +265,7 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, [loadState, settings.enabled, uiText]);
+  }, [appDialog, loadState, settings.enabled, uiText]);
 
   const handleToggleEnabled = useCallback(() => {
     updateSettings("enabled", !settings.enabled);

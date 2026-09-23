@@ -7,6 +7,7 @@ import ProfilePresetButton from "../../components/ProfilePresetButton";
 import ProfileTargetToolToggle from "../../components/ProfileTargetToolToggle";
 import ModelSelector, { type ModelInfo } from "../../components/ModelSelector";
 import LoadingState from "../../components/states/LoadingState";
+import { CheckboxField } from "../../components/ui/checkbox-field";
 import { getPresetCategories, type StructuredDraftFields } from "../../lib/configProfiles";
 import {
   FIELD_STACK_STYLE,
@@ -549,34 +550,31 @@ export const ProfileRawConfigSection = memo(function ProfileRawConfigSection({
     <div>
       <SectionTitle>{locale === "zh" ? "原始配置" : "Raw Configuration"}</SectionTitle>
       {draftTool === "claude" && (
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={draftHideAttribution}
-              onChange={(event) => onDraftChange(draftTool, { hideAttribution: event.target.checked })}
-            />
-            {locale === "zh" ? "隐藏 AI 署名" : "Hide AI Attribution"}
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={draftEffortHigh}
-              onChange={(event) => onDraftChange(draftTool, { effortHigh: event.target.checked })}
-            />
-            {locale === "zh" ? "高强度思考" : "High Effort Thinking"}
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={draftEnableTeammates}
-              onChange={(event) => onDraftChange(draftTool, { enableTeammates: event.target.checked })}
-            />
-            {locale === "zh" ? "Teammates 模式" : "Teammates Mode"}
-          </label>
+        <div className="mb-3 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2">
+          <CheckboxField
+            variant="surface"
+            checked={draftHideAttribution}
+            onCheckedChange={(checked) => onDraftChange(draftTool, { hideAttribution: checked })}
+            label={locale === "zh" ? "隐藏 AI 署名" : "Hide AI Attribution"}
+            description={locale === "zh" ? "从提交与协作内容中移除署名" : "Remove attribution from generated content"}
+          />
+          <CheckboxField
+            variant="surface"
+            checked={draftEffortHigh}
+            onCheckedChange={(checked) => onDraftChange(draftTool, { effortHigh: checked })}
+            label={locale === "zh" ? "高强度思考" : "High Effort Thinking"}
+            description={locale === "zh" ? "为复杂任务启用更深入的推理" : "Use deeper reasoning for complex tasks"}
+          />
+          <CheckboxField
+            variant="surface"
+            checked={draftEnableTeammates}
+            onCheckedChange={(checked) => onDraftChange(draftTool, { enableTeammates: checked })}
+            label={locale === "zh" ? "Teammates 模式" : "Teammates Mode"}
+            description={locale === "zh" ? "允许任务使用协作代理模式" : "Allow collaborative agent workflows"}
+          />
         </div>
       )}
-      <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+      <div className="mb-2.5 text-[12px] leading-relaxed text-muted-foreground">
         {locale === "zh"
           ? "上方表单字段会自动同步到此处，你也可以直接编辑原始配置。"
           : "Form fields above are synced here. You can also edit the raw config directly."}

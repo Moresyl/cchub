@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { type ReactNode } from "react";
 import { FolderOpen, Trash2 } from "lucide-react";
+import { Checkbox } from "../../components/ui/checkbox";
 
 import type { LiveEvent } from "./helpers";
 
@@ -203,7 +204,7 @@ export function ToggleOption(props: { label: string; checked: boolean; onChange:
         cursor: "pointer",
       }}
     >
-      <input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} />
+      <Checkbox checked={props.checked} onCheckedChange={(checked) => props.onChange(checked === true)} />
       <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{props.label}</span>
     </label>
   );

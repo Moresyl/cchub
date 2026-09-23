@@ -5,6 +5,7 @@ import { Download, RefreshCw } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { buildStructuredConfig, parseStructuredConfig, supportsStructuredConfig } from "../lib/configProfiles";
 import { showToast } from "./Toast";
+import { Textarea } from "./ui/textarea";
 import {
   OMO_BUILTIN_AGENTS,
   OMO_BUILTIN_CATEGORIES,
@@ -328,12 +329,11 @@ function VariantEditor({
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
             {uiText("保留其他字段", "Preserved Extra Fields", "保持する追加フィールド")}
           </div>
-          <textarea
-            className="input"
+          <Textarea
+            className="min-h-[120px] font-mono"
             value={state.otherFieldsText}
             onChange={(event) => onOtherFieldsTextChange(event.target.value)}
             placeholder={otherFieldsPlaceholder}
-            style={{ minHeight: 120, resize: "vertical", fontFamily: "'JetBrains Mono', monospace" }}
           />
         </div>
 

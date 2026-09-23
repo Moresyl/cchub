@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { CheckboxField } from "./ui/checkbox-field";
 
 interface ToolsCheckboxOptionProps {
   optionKey: string;
@@ -7,21 +8,14 @@ interface ToolsCheckboxOptionProps {
   onToggle: (optionKey: string, checked: boolean) => void;
 }
 
-function ToolsCheckboxOptionComponent({
-  optionKey,
-  label,
-  checked,
-  onToggle,
-}: ToolsCheckboxOptionProps) {
+function ToolsCheckboxOptionComponent({ optionKey, label, checked, onToggle }: ToolsCheckboxOptionProps) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onToggle(optionKey, event.target.checked)}
-      />
-      {label}
-    </label>
+    <CheckboxField
+      checked={checked}
+      onCheckedChange={(value) => onToggle(optionKey, value)}
+      label={label}
+      className="text-[12px]"
+    />
   );
 }
 

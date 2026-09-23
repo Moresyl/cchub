@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "
 import { invoke } from "@tauri-apps/api/core";
 
 import { showToast } from "../../components/Toast";
+import type { ConfirmOptions } from "../../components/AppDialogProvider";
 import { type ModelInfo } from "../../components/ModelSelector";
 import {
   buildStructuredConfig,
@@ -25,19 +26,28 @@ type LocaleText = (zh: string, en: string, ja?: string) => string;
 
 interface BatchStreamCheckContext {
   localeText: LocaleText;
+  confirmBatch: () => Promise<boolean>;
   setChecking: (value: boolean) => void;
   setResults: Dispatch<SetStateAction<Record<string, ProviderStreamCheckResult>>>;
 }
 
+export function getBatchStreamCheckDialog(localeText: LocaleText): ConfirmOptions {
+  return {
+    title: localeText("全量流式检查", "Batch stream check", "全体ストリーム確認"),
+    message: localeText(
+      "将向每个配置的供应商发送一次最小流式请求，可能消耗少量额度。",
+      "A minimal streaming request will be sent to every configured provider and may consume a small amount of quota.",
+      "各 Provider に最小ストリームリクエストを送信するため、少量のクォータを消費する場合があります。",
+    ),
+    confirmText: localeText("开始检查", "Start check", "確認を開始"),
+    cancelText: localeText("取消", "Cancel", "キャンセル"),
+    tone: "warning",
+  };
+}
+
 export async function performBatchStreamCheck(ctx: BatchStreamCheckContext): Promise<void> {
   if (localStorage.getItem("cchub-stream-check-confirmed") !== "1") {
-    const confirmed = window.confirm(
-      ctx.localeText(
-        "全量流检会向每个配置的供应商发送最小流式请求，可能消耗额度。继续吗？",
-        "Batch stream checks send a minimal streaming request to every configured provider and may consume quota. Continue?",
-        "全体ストリーム確認は各 Provider に最小ストリームリクエストを送り、クォータを消費する場合があります。続行しますか？",
-      ),
-    );
+    const confirmed = await ctx.confirmBatch();
     if (!confirmed) return;
     localStorage.setItem("cchub-stream-check-confirmed", "1");
   }

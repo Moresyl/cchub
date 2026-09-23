@@ -5,6 +5,8 @@ import { WIZARD_PRESETS, type WizardPreset } from "./helpers";
 import type { McpValidationResult, McpWizardDraft } from "../../hooks/useMcpValidation";
 import type { I18n } from "../../lib/i18n";
 import type { DetectedTool } from "../../types/skills";
+import { CheckboxField } from "../../components/ui/checkbox-field";
+import { Textarea } from "../../components/ui/textarea";
 
 const CodeEditor = lazy(() => import("../../components/CodeEditor"));
 
@@ -154,20 +156,13 @@ export default function McpServerWizardView({
             {wizardDraft.transport === "stdio" && (
               <div>
                 <label className="field-label">{zh ? "参数" : "Arguments"}</label>
-                <textarea
-                  className="input"
+                <Textarea
+                  className="min-h-[118px] py-2.5 font-mono text-[12px]"
                   value={wizardDraft.argsText}
                   onChange={(event) => setWizardDraft((current) => ({ ...current, argsText: event.target.value }))}
                   placeholder={
                     zh ? "每行一个参数，或直接粘贴 JSON 数组" : "One argument per line, or paste a JSON array"
                   }
-                  style={{
-                    minHeight: 118,
-                    resize: "vertical",
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 12,
-                    paddingTop: 10,
-                  }}
                 />
               </div>
             )}
@@ -175,8 +170,8 @@ export default function McpServerWizardView({
               <label className="field-label">
                 {wizardDraft.transport === "stdio" ? (zh ? "环境变量" : "Environment") : zh ? "请求头" : "Headers"}
               </label>
-              <textarea
-                className="input"
+              <Textarea
+                className="min-h-[118px] py-2.5 font-mono text-[12px]"
                 value={wizardDraft.envText}
                 onChange={(event) => setWizardDraft((current) => ({ ...current, envText: event.target.value }))}
                 placeholder={
@@ -184,13 +179,6 @@ export default function McpServerWizardView({
                     ? `每行 ${wizardDraft.transport === "stdio" ? "KEY=value" : "Header=value"}，或直接粘贴 JSON 对象`
                     : `Use ${wizardDraft.transport === "stdio" ? "KEY=value" : "Header=value"} per line, or paste a JSON object`
                 }
-                style={{
-                  minHeight: 118,
-                  resize: "vertical",
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 12,
-                  paddingTop: 10,
-                }}
               />
             </div>
           </div>
@@ -206,11 +194,16 @@ export default function McpServerWizardView({
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, opacity: 0.8 }}>
-              <input type="checkbox" checked readOnly />
-              Claude
-              <span style={{ color: "var(--text-muted)" }}>{zh ? "默认" : "default"}</span>
-            </label>
+            <CheckboxField
+              checked
+              disabled
+              onCheckedChange={() => undefined}
+              label={
+                <>
+                  Claude <span className="font-normal text-muted-foreground">{zh ? "默认" : "default"}</span>
+                </>
+              }
+            />
 
             {wizardSyncableTools.length === 0 ? (
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
@@ -220,18 +213,16 @@ export default function McpServerWizardView({
               wizardSyncableTools.map((tool) => {
                 const checked = wizardSyncTargets.includes(tool.id);
                 return (
-                  <label key={tool.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() =>
-                        setWizardSyncTargets((current) =>
-                          checked ? current.filter((item) => item !== tool.id) : [...current, tool.id],
-                        )
-                      }
-                    />
-                    {tool.name}
-                  </label>
+                  <CheckboxField
+                    key={tool.id}
+                    checked={checked}
+                    onCheckedChange={() =>
+                      setWizardSyncTargets((current) =>
+                        checked ? current.filter((item) => item !== tool.id) : [...current, tool.id],
+                      )
+                    }
+                    label={tool.name}
+                  />
                 );
               })
             )}

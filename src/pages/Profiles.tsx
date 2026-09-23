@@ -12,6 +12,7 @@ import {
   type StructuredDraftFields,
 } from "../lib/configProfiles";
 import { showToast } from "../components/Toast";
+import { useAppDialog } from "../components/AppDialogProvider";
 import {
   useApplyConfigProfileMutation,
   useDeleteConfigProfileGroupAndRefreshMutation,
@@ -47,6 +48,7 @@ import {
   performBatchStreamCheck,
   performFetchModels,
   performOpenEditModal,
+  getBatchStreamCheckDialog,
   useFilteredProfiles,
   useProfileCardText,
   useProfileDragHandlers,
@@ -57,6 +59,7 @@ import ProfileEditorView from "./profiles/EditorView";
 import ProfilesListView from "./profiles/ListView";
 import UsageDetailsDialog from "../components/UsageDetailsDialog";
 export default function Profiles() {
+  const appDialog = useAppDialog();
   const queryClient = useQueryClient();
   const cachedProfilesPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchProfilesPageData>>>(
     queryKeys.profilesPage,
@@ -512,10 +515,11 @@ export default function Profiles() {
   const handleStreamCheckAll = useCallback(() => {
     void performBatchStreamCheck({
       localeText,
+      confirmBatch: () => appDialog.confirm(getBatchStreamCheckDialog(localeText)),
       setChecking: setBatchStreamChecking,
       setResults: setStreamCheckResults,
     });
-  }, [localeText]);
+  }, [appDialog, localeText]);
   const reorderProfiles = useCallback(
     async (sourceId: string, targetId: string) => {
       if (!filterTool || sourceId === targetId || search.trim()) return;

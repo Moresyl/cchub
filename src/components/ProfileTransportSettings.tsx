@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { Textarea } from "./ui/textarea";
 
 interface ProfileTransportSettingsProps {
   localeText: (zh: string, en: string, ja?: string) => string;
@@ -154,17 +155,11 @@ export default function ProfileTransportSettings({
           <span className="field-label">
             {localeText("代理 Header 覆盖", "Proxy Header Overrides", "プロキシ Header 上書き")}
           </span>
-          <textarea
-            className="input"
+          <Textarea
+            className="min-h-[110px] font-mono text-[12px]"
             value={requestHeaderOverrides}
             onChange={(event) => onChange({ requestHeaderOverrides: event.target.value })}
             placeholder={'{\n  "X-Provider-Tag": "cchub"\n}'}
-            style={{
-              minHeight: 110,
-              resize: "vertical",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-              fontSize: 12,
-            }}
             aria-invalid={Boolean(headerOverrideError)}
           />
           {headerOverrideError && <span style={{ color: "var(--danger)", fontSize: 11 }}>{headerOverrideError}</span>}
@@ -173,17 +168,11 @@ export default function ProfileTransportSettings({
           <span className="field-label">
             {localeText("代理 Body 覆盖", "Proxy Body Overrides", "プロキシ Body 上書き")}
           </span>
-          <textarea
-            className="input"
+          <Textarea
+            className="min-h-[110px] font-mono text-[12px]"
             value={requestBodyOverrides}
             onChange={(event) => onChange({ requestBodyOverrides: event.target.value })}
             placeholder={'{\n  "temperature": 0.2\n}'}
-            style={{
-              minHeight: 110,
-              resize: "vertical",
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-              fontSize: 12,
-            }}
             aria-invalid={Boolean(bodyOverrideError)}
           />
           {bodyOverrideError && <span style={{ color: "var(--danger)", fontSize: 11 }}>{bodyOverrideError}</span>}

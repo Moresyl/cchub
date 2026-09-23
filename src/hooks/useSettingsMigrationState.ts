@@ -11,6 +11,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../components/Toast";
+import { useAppDialog } from "../components/AppDialogProvider";
 import type { Locale } from "../lib/i18n";
 import {
   useDeleteManagedBackupMutation,
@@ -55,6 +56,7 @@ export function useSettingsMigrationState({
   setCustomPaths,
   openInSystemWithLabel,
 }: UseSettingsMigrationStateOptions) {
+  const appDialog = useAppDialog();
   const saveBackupToFileMutation = useSaveBackupToFileMutation();
   const setBackupPreferencesMutation = useSetBackupPreferencesMutation();
   const deleteManagedBackupMutation = useDeleteManagedBackupMutation();
@@ -280,10 +282,13 @@ export function useSettingsMigrationState({
 
   const handleRenameManagedBackup = useCallback(
     async (backup: ManagedBackupFile) => {
-      const nextName = window.prompt(
-        locale === "zh" ? "输入新的备份名称" : "Enter a new backup name",
-        backup.name.replace(/\.sql$/i, ""),
-      );
+      const nextName = await appDialog.prompt({
+        title: locale === "zh" ? "重命名备份" : "Rename backup",
+        message: locale === "zh" ? "输入新的备份名称。" : "Enter a new name for this backup.",
+        defaultValue: backup.name.replace(/\.sql$/i, ""),
+        confirmText: locale === "zh" ? "保存" : "Save",
+        cancelText: locale === "zh" ? "取消" : "Cancel",
+      });
       if (!nextName || nextName.trim() === "" || nextName.trim() === backup.name.replace(/\.sql$/i, "")) {
         return;
       }
@@ -295,12 +300,22 @@ export function useSettingsMigrationState({
         showToast("error", String(error));
       }
     },
-    [loadManagedBackups, locale],
+    [appDialog, loadManagedBackups, locale],
   );
 
   const handleDeleteManagedBackup = useCallback(
     async (backup: ManagedBackupFile) => {
-      if (!window.confirm(locale === "zh" ? `删除备份「${backup.name}」？` : `Delete backup "${backup.name}"?`)) {
+      const confirmed = await appDialog.confirm({
+        title: locale === "zh" ? "删除备份" : "Delete backup",
+        message:
+          locale === "zh"
+            ? `确定删除备份「${backup.name}」？此操作无法撤销。`
+            : `Delete backup "${backup.name}"? This cannot be undone.`,
+        confirmText: locale === "zh" ? "删除" : "Delete",
+        cancelText: locale === "zh" ? "取消" : "Cancel",
+        tone: "danger",
+      });
+      if (!confirmed) {
         return;
       }
       setDeletingBackupPath(backup.path);
@@ -314,18 +329,22 @@ export function useSettingsMigrationState({
         setDeletingBackupPath((current) => (current === backup.path ? null : current));
       }
     },
-    [deleteManagedBackupMutation, loadManagedBackups, locale],
+    [appDialog, deleteManagedBackupMutation, loadManagedBackups, locale],
   );
 
   const handleRestoreManagedBackup = useCallback(
     async (backup: ManagedBackupFile) => {
-      if (
-        !window.confirm(
+      const confirmed = await appDialog.confirm({
+        title: locale === "zh" ? "恢复备份" : "Restore backup",
+        message:
           locale === "zh"
-            ? `恢复备份「${backup.name}」？这会覆盖当前数据库。`
-            : `Restore backup "${backup.name}"? This replaces the current database.`,
-        )
-      ) {
+            ? `恢复「${backup.name}」会覆盖当前数据库，请确认当前工作已保存。`
+            : `Restoring "${backup.name}" replaces the current database. Make sure current work is saved.`,
+        confirmText: locale === "zh" ? "恢复" : "Restore",
+        cancelText: locale === "zh" ? "取消" : "Cancel",
+        tone: "warning",
+      });
+      if (!confirmed) {
         return;
       }
       setRestoringBackupPath(backup.path);
@@ -339,7 +358,7 @@ export function useSettingsMigrationState({
         setRestoringBackupPath((current) => (current === backup.path ? null : current));
       }
     },
-    [locale, refreshMigrationState],
+    [appDialog, locale, refreshMigrationState],
   );
 
   const handleToggleAutoBackup = useCallback(() => {

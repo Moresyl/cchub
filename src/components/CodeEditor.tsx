@@ -1,11 +1,15 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { EditorView, basicSetup } from "codemirror";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { json } from "@codemirror/lang-json";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { markdown } from "@codemirror/lang-markdown";
+import { yaml } from "@codemirror/lang-yaml";
+import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
+import { toml } from "@codemirror/legacy-modes/mode/toml";
 import { linter, type Diagnostic } from "@codemirror/lint";
-import { ViewUpdate } from "@codemirror/view";
+import { EditorView as CodeMirrorView, ViewUpdate, placeholder as editorPlaceholder } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 
 interface CodeEditorProps {
   value: string;
@@ -46,30 +50,41 @@ const cmTheme = EditorView.theme({
   },
   ".cm-scroller": {
     overflow: "auto",
+    lineHeight: "1.65",
   },
   ".cm-content": {
-    padding: "12px 0",
+    padding: "10px 0 18px",
     caretColor: "var(--text-primary)",
   },
+  ".cm-line": {
+    padding: "0 14px 0 8px",
+  },
   ".cm-gutters": {
-    background: "var(--bg-elevated)",
+    background: "color-mix(in srgb, var(--bg-elevated) 74%, var(--bg-input))",
     borderRight: "1px solid var(--border-subtle)",
     color: "var(--text-muted)",
     fontSize: "11px",
+    minWidth: "42px",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "32px",
+    padding: "0 8px 0 4px",
   },
   ".cm-activeLine": {
-    background: "rgba(255,255,255,0.03)",
+    background: "var(--bg-surface)",
   },
   ".cm-activeLineGutter": {
-    background: "rgba(255,255,255,0.05)",
+    background: "var(--bg-card-hover)",
+    color: "var(--text-secondary)",
   },
   "&.cm-focused .cm-cursor": {
-    borderLeftColor: "#ffffff",
+    borderLeftColor: "var(--text-primary)",
     borderLeftWidth: "2px",
   },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-    background: "rgba(255,255,255,0.1) !important",
+    background: "var(--accent-subtle) !important",
   },
+  "&.cm-focused": { outline: "none" },
   ".cm-tooltip": {
     background: "var(--bg-card)",
     border: "1px solid var(--border-default)",
@@ -81,14 +96,46 @@ const cmTheme = EditorView.theme({
   },
 });
 
+const darkHighlightStyle = HighlightStyle.define([
+  { tag: [tags.propertyName, tags.attributeName], color: "#e89298" },
+  { tag: [tags.string, tags.special(tags.string)], color: "#9dcc8c" },
+  { tag: [tags.number, tags.bool, tags.null], color: "#e7b979" },
+  { tag: [tags.keyword, tags.atom], color: "#c9a0dc" },
+  { tag: [tags.typeName, tags.className], color: "#72c7d2" },
+  { tag: [tags.variableName, tags.name], color: "#d8dee9" },
+  { tag: [tags.comment, tags.meta], color: "#77808f", fontStyle: "italic" },
+  { tag: tags.invalid, color: "#ff7373", textDecoration: "underline wavy" },
+]);
+
+const lightHighlightStyle = HighlightStyle.define([
+  { tag: [tags.propertyName, tags.attributeName], color: "#b4232a" },
+  { tag: [tags.string, tags.special(tags.string)], color: "#2f7d32" },
+  { tag: [tags.number, tags.bool, tags.null], color: "#9b5b13" },
+  { tag: [tags.keyword, tags.atom], color: "#7d3194" },
+  { tag: [tags.typeName, tags.className], color: "#146f7a" },
+  { tag: [tags.variableName, tags.name], color: "#262a31" },
+  { tag: [tags.comment, tags.meta], color: "#7b818b", fontStyle: "italic" },
+  { tag: tags.invalid, color: "#c92d2d", textDecoration: "underline wavy" },
+]);
+
+const themeCompartment = new Compartment();
+
+function getThemeExtensions() {
+  const isLight = document.documentElement.getAttribute("data-theme") === "light";
+  return [cmTheme, syntaxHighlighting(isLight ? lightHighlightStyle : darkHighlightStyle)];
+}
+
 function getLangExtension(language: string) {
   switch (language) {
     case "json":
       return [json(), jsonLinter];
-    case "text":
     case "yaml":
+      return [yaml()];
     case "toml":
+      return [StreamLanguage.define(toml)];
     case "markdown":
+      return [markdown()];
+    case "text":
       return [];
     default:
       return [];
@@ -102,6 +149,7 @@ function CodeEditorComponent({
   readOnly = false,
   minHeight = 120,
   maxHeight,
+  placeholder,
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -109,7 +157,18 @@ function CodeEditorComponent({
   onChangeRef.current = onChange;
 
   const extensions = useMemo(() => {
-    const nextExtensions = [basicSetup, ...getLangExtension(language), oneDark, cmTheme, EditorView.lineWrapping];
+    const nextExtensions = [
+      basicSetup,
+      ...getLangExtension(language),
+      themeCompartment.of(getThemeExtensions()),
+      EditorView.lineWrapping,
+      CodeMirrorView.contentAttributes.of({
+        "aria-label": `${language.toUpperCase()} configuration editor`,
+        spellcheck: "false",
+      }),
+    ];
+
+    if (placeholder) nextExtensions.push(editorPlaceholder(placeholder));
 
     if (readOnly) {
       nextExtensions.push(EditorState.readOnly.of(true));
@@ -124,7 +183,7 @@ function CodeEditorComponent({
     }
 
     return nextExtensions;
-  }, [language, readOnly]);
+  }, [language, placeholder, readOnly]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -133,7 +192,13 @@ function CodeEditorComponent({
     const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
 
+    const themeObserver = new MutationObserver(() => {
+      view.dispatch({ effects: themeCompartment.reconfigure(getThemeExtensions()) });
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
     return () => {
+      themeObserver.disconnect();
       view.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -153,19 +218,18 @@ function CodeEditorComponent({
 
   return (
     <div
-      ref={containerRef}
-      className="code-editor-wrapper"
+      className="code-editor-wrapper flex flex-col overflow-hidden rounded-md border border-border bg-[var(--bg-input)] shadow-[var(--shadow-xs)] focus-within:border-[var(--border-strong)] focus-within:ring-2 focus-within:ring-primary/10"
       style={{
-        borderRadius: 6,
-        border: "1px solid var(--border-default)",
-        background: "var(--bg-input)",
-        overflow: "hidden",
         minHeight,
         maxHeight,
-        display: "flex",
-        flexDirection: "column",
       }}
-    />
+    >
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-[var(--bg-elevated)]/65 px-3">
+        <span className="text-[10px] font-semibold uppercase text-muted-foreground">{language}</span>
+        <span className="size-1.5 rounded-full bg-[var(--success)] opacity-75" aria-hidden="true" />
+      </div>
+      <div ref={containerRef} className="min-h-0 flex-1" />
+    </div>
   );
 }
 

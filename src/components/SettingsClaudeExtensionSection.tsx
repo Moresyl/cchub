@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { CheckCircle2, Code2, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { showToast } from "./Toast";
 import { getLocale } from "../lib/i18n";
+import { CheckboxField } from "./ui/checkbox-field";
 
 interface ClaudeExtensionStatus {
   path: string;
@@ -122,32 +123,24 @@ export default function SettingsClaudeExtensionSection() {
         </div>
       ) : (
         <>
-          <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: busy ? "wait" : "pointer" }}>
-            <input
-              type="checkbox"
-              checked={integrationEnabled}
-              onChange={() => void toggleIntegration()}
-              disabled={busy}
-            />
-            <span>
-              <span style={{ display: "block", fontSize: 13, color: "var(--text-primary)" }}>
-                {text(
-                  locale,
-                  "切换 Claude profile 时同步扩展",
-                  "Sync the extension when switching Claude profiles",
-                  "Claude プロファイル切替時に拡張機能を同期",
-                )}
-              </span>
-              <span style={{ display: "block", marginTop: 3, fontSize: 11, color: "var(--text-muted)" }}>
-                {text(
-                  locale,
-                  "官方 profile 会移除托管覆盖，其他 profile 会启用托管入口。",
-                  "Official profiles remove the managed override; other profiles enable the managed entry point.",
-                  "公式プロファイルでは管理上書きを削除し、それ以外では管理エントリを有効にします。",
-                )}
-              </span>
-            </span>
-          </label>
+          <CheckboxField
+            variant="surface"
+            checked={integrationEnabled}
+            onCheckedChange={() => void toggleIntegration()}
+            disabled={busy}
+            label={text(
+              locale,
+              "切换 Claude profile 时同步扩展",
+              "Sync the extension when switching Claude profiles",
+              "Claude プロファイル切替時に拡張機能を同期",
+            )}
+            description={text(
+              locale,
+              "官方 profile 会移除托管覆盖，其他 profile 会启用托管入口。",
+              "Official profiles remove the managed override; other profiles enable the managed entry point.",
+              "公式プロファイルでは管理上書きを削除し、それ以外では管理エントリを有効にします。",
+            )}
+          />
           <div
             style={{
               display: "grid",

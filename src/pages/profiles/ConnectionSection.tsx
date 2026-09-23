@@ -6,6 +6,8 @@ import CopilotAuthSection from "../../components/CopilotAuthSection";
 import CodexOAuthAuthSection from "../../components/CodexOAuthAuthSection";
 import XaiOAuthAuthSection from "../../components/XaiOAuthAuthSection";
 import ProfileEndpointProbePanel from "../../components/ProfileEndpointProbePanel";
+import { CheckboxField } from "../../components/ui/checkbox-field";
+import { Textarea } from "../../components/ui/textarea";
 import {
   type ApiFormat,
   type ClaudeAuthField,
@@ -221,20 +223,15 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
           )}
         </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={draftUseFullUrl}
-            onChange={(event) => onDraftChange(draftTool, { useFullUrl: event.target.checked })}
-          />
-          <span>
-            {localeText(
-              "将接口地址作为完整端点使用",
-              "Use base URL as the full endpoint",
-              "Base URL を完全なエンドポイントとして扱う",
-            )}
-          </span>
-        </label>
+        <CheckboxField
+          checked={draftUseFullUrl}
+          onCheckedChange={(checked) => onDraftChange(draftTool, { useFullUrl: checked })}
+          label={localeText(
+            "将接口地址作为完整端点使用",
+            "Use base URL as the full endpoint",
+            "Base URL を完全なエンドポイントとして扱う",
+          )}
+        />
         <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -8 }}>
           {draftUseFullUrl
             ? localeText(
@@ -250,8 +247,8 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
         </div>
 
         <Field label={localeText("候选端点", "Endpoint Candidates", "候補エンドポイント")}>
-          <textarea
-            className="input"
+          <Textarea
+            className="min-h-[88px] text-[13px]"
             value={draftEndpointCandidates}
             onChange={(event) => onDraftChange(draftTool, { endpointCandidates: event.target.value })}
             placeholder={localeText(
@@ -259,7 +256,6 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
               "One backup URL per line, for example:\nhttps://api.example.com\nhttps://backup.example.com",
               "1 行につき 1 つの予備 URL を入力します。例:\nhttps://api.example.com\nhttps://backup.example.com",
             )}
-            style={{ minHeight: 88, resize: "vertical", fontSize: 13 }}
           />
         </Field>
 

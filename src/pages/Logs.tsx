@@ -13,6 +13,7 @@ import LoadingState from "../components/states/LoadingState";
 import { getLocale } from "../lib/i18n";
 import { fetchLogsPageData, queryKeys } from "../hooks/queries";
 import { useDeleteModelPricingMutation, useSaveModelPricingMutation } from "../hooks/mutations";
+import { CheckboxField } from "../components/ui/checkbox-field";
 
 interface ActivityItem {
   id: number;
@@ -561,16 +562,12 @@ export default function Logs() {
             </span>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <label
-              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-secondary)" }}
-            >
-              <input
-                type="checkbox"
-                checked={autoRefreshEnabled}
-                onChange={(event) => setAutoRefreshEnabled(event.target.checked)}
-              />
-              {uiText("自动刷新", "Auto Refresh", "自動更新")}
-            </label>
+            <CheckboxField
+              checked={autoRefreshEnabled}
+              onCheckedChange={setAutoRefreshEnabled}
+              label={uiText("自动刷新", "Auto Refresh", "自動更新")}
+              className="text-[12px] text-[var(--text-secondary)]"
+            />
             <select
               className="input"
               value={String(autoRefreshInterval)}

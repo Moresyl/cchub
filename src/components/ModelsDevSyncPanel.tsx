@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, ChevronUp, CloudDownload, RefreshCw, Save } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { Checkbox } from "./ui/checkbox";
+import { CheckboxField } from "./ui/checkbox-field";
 
 interface SyncConfig {
   autoSyncEnabled: boolean;
@@ -230,32 +232,26 @@ export default function ModelsDevSyncPanel() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-        <label className="toggle-row" style={{ alignItems: "flex-start" }}>
-          <input
-            type="checkbox"
-            checked={state.config.autoSyncEnabled}
-            disabled={busy}
-            onChange={(event) => void saveConfig({ ...state.config, autoSyncEnabled: event.target.checked })}
-          />
-          <span>
-            <strong>{uiText("启动时自动同步", "Sync on startup", "起動時に同期")}</strong>
-            <small>{uiText("最多每 6 小时执行一次", "At most once every 6 hours", "最短 6 時間間隔")}</small>
-          </span>
-        </label>
-        <label className="toggle-row" style={{ alignItems: "flex-start" }}>
-          <input
-            type="checkbox"
-            checked={state.config.includeCommonModels}
-            disabled={busy}
-            onChange={(event) => void saveConfig({ ...state.config, includeCommonModels: event.target.checked })}
-          />
-          <span>
-            <strong>{uiText("包含常用模型", "Include common models", "一般的なモデルを含める")}</strong>
-            <small>
-              {uiText("每个模型族保留最近版本", "Keep recent entries per model family", "各モデル系列の最近の版を保持")}
-            </small>
-          </span>
-        </label>
+        <CheckboxField
+          variant="surface"
+          checked={state.config.autoSyncEnabled}
+          disabled={busy}
+          onCheckedChange={(checked) => void saveConfig({ ...state.config, autoSyncEnabled: checked })}
+          label={uiText("启动时自动同步", "Sync on startup", "起動時に同期")}
+          description={uiText("最多每 6 小时执行一次", "At most once every 6 hours", "最短 6 時間間隔")}
+        />
+        <CheckboxField
+          variant="surface"
+          checked={state.config.includeCommonModels}
+          disabled={busy}
+          onCheckedChange={(checked) => void saveConfig({ ...state.config, includeCommonModels: checked })}
+          label={uiText("包含常用模型", "Include common models", "一般的なモデルを含める")}
+          description={uiText(
+            "每个模型族保留最近版本",
+            "Keep recent entries per model family",
+            "各モデル系列の最近の版を保持",
+          )}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--text-muted)", fontSize: 11 }}>
@@ -363,10 +359,9 @@ export default function ModelsDevSyncPanel() {
                         background: checked ? "var(--accent-subtle)" : undefined,
                       }}
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={checked}
-                        onChange={() => {
+                        onCheckedChange={() => {
                           if (common && state.config.includeCommonModels) {
                             setSelected((current) => {
                               const next = new Set(current);

@@ -3,6 +3,7 @@ import { Database, RotateCcw } from "lucide-react";
 import { compatApi, type SessionSyncResult } from "../lib/api/compat";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { useAppDialog } from "./AppDialogProvider";
 
 type Action = "sync" | "rebuild";
 
@@ -20,18 +21,22 @@ function resultMessage(result: SessionSyncResult, locale: string, action: Action
 
 export default function SessionUsageActions() {
   const locale = getLocale();
+  const appDialog = useAppDialog();
   const [busy, setBusy] = useState<Action | null>(null);
 
   async function run(action: Action) {
-    if (
-      action === "rebuild" &&
-      !window.confirm(
-        locale === "zh"
-          ? "重建会先清理现有 Codex 会话用量记录，再从本地会话重新导入，继续吗？"
-          : "Rebuild clears imported Codex session usage and re-imports it from local sessions. Continue?",
-      )
-    ) {
-      return;
+    if (action === "rebuild") {
+      const confirmed = await appDialog.confirm({
+        title: locale === "zh" ? "重建 Codex 用量" : "Rebuild Codex usage",
+        message:
+          locale === "zh"
+            ? "现有 Codex 会话用量记录会先被清理，再从本地会话重新导入。"
+            : "Existing Codex usage records will be cleared, then re-imported from local sessions.",
+        confirmText: locale === "zh" ? "继续重建" : "Rebuild",
+        cancelText: locale === "zh" ? "取消" : "Cancel",
+        tone: "warning",
+      });
+      if (!confirmed) return;
     }
     setBusy(action);
     try {

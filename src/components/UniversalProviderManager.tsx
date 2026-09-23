@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Cloud, Pencil, Plus, RefreshCw, Save, Trash2, Upload } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { CheckboxField } from "./ui/checkbox-field";
+import { useAppDialog } from "./AppDialogProvider";
 
 type LocaleText = (zh: string, en: string, ja?: string) => string;
 type AppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes";
@@ -164,6 +166,7 @@ interface Props {
 }
 
 export default function UniversalProviderManager({ localeText, onProfilesChanged }: Props) {
+  const appDialog = useAppDialog();
   const [expanded, setExpanded] = useState(false);
   const [providers, setProviders] = useState<UniversalProvider[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -230,12 +233,18 @@ export default function UniversalProviderManager({ localeText, onProfilesChanged
     }
   };
   const remove = async (provider: UniversalProvider) => {
-    if (
-      !window.confirm(
-        localeText(`删除「${provider.name}」？`, `Delete “${provider.name}”?`, `「${provider.name}」を削除しますか？`),
-      )
-    )
-      return;
+    const confirmed = await appDialog.confirm({
+      title: localeText("删除统一供应商", "Delete universal provider", "統合 Provider を削除"),
+      message: localeText(
+        `确定删除「${provider.name}」？已同步到工具的配置不会自动移除。`,
+        `Delete “${provider.name}”? Configurations already synced to tools will remain.`,
+        `「${provider.name}」を削除しますか？同期済みの設定は各ツールに残ります。`,
+      ),
+      confirmText: localeText("删除", "Delete", "削除"),
+      cancelText: localeText("取消", "Cancel", "キャンセル"),
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setBusy(true);
     try {
       await invoke("delete_universal_provider", { id: provider.id });
@@ -321,10 +330,13 @@ export default function UniversalProviderManager({ localeText, onProfilesChanged
               />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 {APP_OPTIONS.map((app) => (
-                  <label key={app.id} style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
-                    <input type="checkbox" checked={draft.apps.includes(app.id)} onChange={() => toggleApp(app.id)} />
-                    {app.label}
-                  </label>
+                  <CheckboxField
+                    key={app.id}
+                    checked={draft.apps.includes(app.id)}
+                    onCheckedChange={() => toggleApp(app.id)}
+                    label={app.label}
+                    className="text-[12px]"
+                  />
                 ))}
               </div>
               <div style={{ display: "flex", gap: 8 }}>

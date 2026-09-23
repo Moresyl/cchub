@@ -1,4 +1,5 @@
-import { memo, type ChangeEvent } from "react";
+import { memo } from "react";
+import { CheckboxField } from "./ui/checkbox-field";
 
 interface ToolsCheckboxRowProps {
   title: string;
@@ -7,25 +8,13 @@ interface ToolsCheckboxRowProps {
   onChange: (checked: boolean) => void;
 }
 
-function ToolsCheckboxRowComponent({
-  title,
-  label,
-  checked,
-  onChange,
-}: ToolsCheckboxRowProps) {
+function ToolsCheckboxRowComponent({ title, label, checked, onChange }: ToolsCheckboxRowProps) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
       <div>
         <span style={{ fontSize: 12, fontWeight: 600 }}>{title}</span>
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.checked)}
-        />
-        {label}
-      </label>
+      <CheckboxField checked={checked} onCheckedChange={onChange} label={label} className="text-[12px]" />
     </div>
   );
 }

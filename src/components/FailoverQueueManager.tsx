@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ArrowDown, ArrowUp, Check, Loader2 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { SimpleSelect } from "./ui/simple-select";
 
 type AppType = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes";
 interface QueueItem {
@@ -115,19 +116,14 @@ export default function FailoverQueueManager({ appType }: { appType?: AppType })
           <Check size={13} /> {enabled ? text("已启用", "Enabled") : text("已停用", "Disabled")}
         </button>
       </div>
-      <select
-        className="input input-sm"
+      <SimpleSelect
         value={selectedApp}
-        onChange={(event) => setSelectedApp(event.target.value as AppType)}
+        onValueChange={(value) => setSelectedApp(value as AppType)}
         disabled={loading}
-        style={{ marginBottom: 10 }}
-      >
-        {appOptions.map(([id, label]) => (
-          <option key={id} value={id}>
-            {label}
-          </option>
-        ))}
-      </select>
+        className="mb-2.5 h-7"
+        options={appOptions.map(([value, label]) => ({ value, label }))}
+        ariaLabel={text("应用", "Application")}
+      />
       {loading ? (
         <Loader2 size={15} className="animate-spin" />
       ) : items.length === 0 ? (

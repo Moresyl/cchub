@@ -1,14 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import {
-  memo,
-  startTransition,
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useMemo,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { memo, startTransition, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, CheckCircle, Copy, Download, Link2, RefreshCw, Save, Upload, Wifi } from "lucide-react";
@@ -16,6 +7,7 @@ import { getLocale, t } from "../lib/i18n";
 import { showToast } from "./Toast";
 import { useSetWebDavSyncSettingsMutation } from "../hooks/mutations";
 import { useAppDialog } from "./AppDialogProvider";
+import { SimpleSelect } from "./ui/simple-select";
 
 import {
   EMPTY_SETTINGS,
@@ -283,8 +275,7 @@ function WebDavSyncSectionComponent() {
   );
 
   const handlePresetChange = useCallback(
-    (event: ChangeEvent<HTMLSelectElement>) => {
-      const nextPresetId = event.target.value;
+    (nextPresetId: string) => {
       const preset = WEBDAV_PRESETS.find((item) => item.id === nextPresetId);
       setPresetId(nextPresetId);
       if (preset && preset.id !== "custom") {
@@ -495,13 +486,13 @@ function WebDavSyncSectionComponent() {
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 6 }}>
             {uiText("服务预设", "Service Preset", "サービスプリセット")}
           </div>
-          <select className="input" value={presetId} disabled={busy} onChange={handlePresetChange}>
-            {WEBDAV_PRESETS.map((preset) => (
-              <option key={preset.id} value={preset.id}>
-                {preset.label}
-              </option>
-            ))}
-          </select>
+          <SimpleSelect
+            value={presetId}
+            disabled={busy}
+            onValueChange={handlePresetChange}
+            options={WEBDAV_PRESETS.map((preset) => ({ value: preset.id, label: preset.label }))}
+            ariaLabel={uiText("服务预设", "Service Preset", "サービスプリセット")}
+          />
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>{presetHint}</div>
         </div>
 

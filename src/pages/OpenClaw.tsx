@@ -9,6 +9,7 @@ import {
   useSetOpenClawEnvMutation,
   useSetOpenClawToolsMutation,
 } from "../hooks/mutations";
+import { SimpleSelect } from "../components/ui/simple-select";
 
 type Tab = "env" | "tools" | "agents";
 
@@ -318,19 +319,16 @@ function ToolsPanel() {
         >
           {i.openClaw.toolProfile}
         </label>
-        <select
-          className="input input-sm"
-          style={{ width: 200 }}
-          value={config.profile ?? ""}
-          onChange={(e) => setConfig({ ...config, profile: e.target.value || null })}
-        >
-          <option value="">{i.openClaw.noProfile}</option>
-          {TOOL_PROFILES.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
+        <SimpleSelect
+          className="h-7 w-[200px]"
+          value={config.profile ?? "none"}
+          ariaLabel={i.openClaw.toolProfile}
+          options={[
+            { value: "none", label: i.openClaw.noProfile },
+            ...TOOL_PROFILES.map((profile) => ({ value: profile, label: profile })),
+          ]}
+          onValueChange={(value) => setConfig({ ...config, profile: value === "none" ? null : value })}
+        />
       </div>
 
       {/* Allow list */}

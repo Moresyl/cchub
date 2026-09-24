@@ -42,7 +42,7 @@ interface ProfileEditorViewProps {
   isStructured: boolean;
   draftTargetTools: string[];
   structuredInstalledTools: DetectedTool[];
-  handleDraftToolChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  handleDraftToolChange: (value: string) => void;
   handleDraftNameChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleToggleDraftTargetTool: (toolId: string) => void;
 

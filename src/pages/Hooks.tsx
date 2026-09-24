@@ -11,6 +11,8 @@ import ErrorState from "../components/states/ErrorState";
 import LoadingState from "../components/states/LoadingState";
 import { queryKeys } from "../hooks/queries";
 import { useDeleteHookFromSettingsMutation, useUpdateHookInSettingsMutation } from "../hooks/mutations";
+import { Input } from "../components/ui/input";
+import { SimpleSelect } from "../components/ui/simple-select";
 
 type Hook = HookCardHook;
 
@@ -281,20 +283,18 @@ export default function Hooks() {
             {/* Event */}
             <div style={{ marginBottom: 20 }}>
               <label className="field-label">{i.hooks.event}</label>
-              <select className="input" value={editEvent} onChange={(e) => setEditEvent(e.target.value)}>
-                {HOOK_EVENTS.map((ev) => (
-                  <option key={ev} value={ev}>
-                    {ev}
-                  </option>
-                ))}
-              </select>
+              <SimpleSelect
+                value={editEvent}
+                onValueChange={setEditEvent}
+                options={HOOK_EVENTS.map((value) => ({ value, label: value }))}
+                ariaLabel={i.hooks.event}
+              />
             </div>
 
             {/* Matcher */}
             <div style={{ marginBottom: 20 }}>
               <label className="field-label">{i.hooks.matcher}</label>
-              <input
-                className="input"
+              <Input
                 value={editMatcher}
                 onChange={(e) => setEditMatcher(e.target.value)}
                 placeholder={i.hooks.matcherPlaceholder}
@@ -303,14 +303,15 @@ export default function Hooks() {
 
             <div style={{ marginBottom: 20 }}>
               <label className="field-label">{i.hooks.scope}</label>
-              <select
-                className="input"
+              <SimpleSelect
                 value={editScope}
-                onChange={(e) => setEditScope(e.target.value as "global" | "project")}
-              >
-                <option value="global">{i.hooks.global}</option>
-                <option value="project">{i.hooks.project}</option>
-              </select>
+                onValueChange={(value) => setEditScope(value as "global" | "project")}
+                options={[
+                  { value: "global", label: i.hooks.global },
+                  { value: "project", label: i.hooks.project },
+                ]}
+                ariaLabel={i.hooks.scope}
+              />
             </div>
 
             {editScope === "project" && (

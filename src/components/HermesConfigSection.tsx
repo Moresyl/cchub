@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Download, RefreshCw } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { SimpleSelect } from "./ui/simple-select";
 import {
   buildStructuredConfig,
   createDefaultStructuredFields,
@@ -14,9 +15,11 @@ type HermesFieldKey = "baseUrl" | "apiKey" | "model" | "hermesProvider" | "herme
 
 function HermesConfigSectionComponent() {
   const locale = getLocale();
-  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  ), [locale]);
+  const uiText = useCallback(
+    (zhText: string, enText: string, jaText?: string) =>
+      locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+    [locale],
+  );
   const [draft, setDraft] = useState<StructuredDraftFields>(() => createDefaultStructuredFields("hermes"));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -72,7 +75,16 @@ function HermesConfigSectionComponent() {
 
   return (
     <div className="card" style={{ padding: "16px 18px", marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "center",
+          marginBottom: 14,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
           <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("Hermes 配置面板", "Hermes Config Panel")}</h4>
           <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
@@ -82,17 +94,25 @@ function HermesConfigSectionComponent() {
             )}
           </p>
           {rootOverride && (
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-              Root Override: {rootOverride}
-            </p>
+            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Root Override: {rootOverride}</p>
           )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => void loadConfig()} disabled={loading} style={{ gap: 6 }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => void loadConfig()}
+            disabled={loading}
+            style={{ gap: 6 }}
+          >
             {loading ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
             {uiText("重新读取", "Reload")}
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => void saveConfig()} disabled={saving} style={{ gap: 6 }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => void saveConfig()}
+            disabled={saving}
+            style={{ gap: 6 }}
+          >
             {saving ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Download size={14} />}
             {uiText("保存配置", "Save Config")}
           </button>
@@ -102,27 +122,52 @@ function HermesConfigSectionComponent() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label className="field-label">Provider</label>
-          <select className="input" value={draft.hermesProvider} onChange={(event) => updateDraft("hermesProvider", event.target.value)}>
-            {["nous", "openrouter", "gemini", "zai", "kimi-coding", "anthropic", "custom"].map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
+          <SimpleSelect
+            value={draft.hermesProvider}
+            onValueChange={(value) => updateDraft("hermesProvider", value)}
+            options={["nous", "openrouter", "gemini", "zai", "kimi-coding", "anthropic", "custom"].map((option) => ({
+              value: option,
+              label: option,
+            }))}
+            ariaLabel="Provider"
+          />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label className="field-label">API Key Env</label>
-          <input className="input" value={draft.hermesApiKeyEnv} onChange={(event) => updateDraft("hermesApiKeyEnv", event.target.value)} placeholder="OPENROUTER_API_KEY" />
+          <input
+            className="input"
+            value={draft.hermesApiKeyEnv}
+            onChange={(event) => updateDraft("hermesApiKeyEnv", event.target.value)}
+            placeholder="OPENROUTER_API_KEY"
+          />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label className="field-label">Base URL</label>
-          <input className="input" value={draft.baseUrl} onChange={(event) => updateDraft("baseUrl", event.target.value)} placeholder="https://openrouter.ai/api/v1" />
+          <input
+            className="input"
+            value={draft.baseUrl}
+            onChange={(event) => updateDraft("baseUrl", event.target.value)}
+            placeholder="https://openrouter.ai/api/v1"
+          />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label className="field-label">Model</label>
-          <input className="input" value={draft.model} onChange={(event) => updateDraft("model", event.target.value)} placeholder="anthropic/claude-sonnet-4.6" />
+          <input
+            className="input"
+            value={draft.model}
+            onChange={(event) => updateDraft("model", event.target.value)}
+            placeholder="anthropic/claude-sonnet-4.6"
+          />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: "1 / -1" }}>
           <label className="field-label">API Key</label>
-          <input className="input" type="password" value={draft.apiKey} onChange={(event) => updateDraft("apiKey", event.target.value)} placeholder="sk-..." />
+          <input
+            className="input"
+            type="password"
+            value={draft.apiKey}
+            onChange={(event) => updateDraft("apiKey", event.target.value)}
+            placeholder="sk-..."
+          />
         </div>
       </div>
 
@@ -130,7 +175,10 @@ function HermesConfigSectionComponent() {
         <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text-secondary)" }}>
           {uiText("生成后的快照预览", "Generated Snapshot Preview")}
         </div>
-        <pre className="code-block" style={{ margin: 0, whiteSpace: "pre-wrap", maxHeight: 260, overflow: "auto", fontSize: 11 }}>
+        <pre
+          className="code-block"
+          style={{ margin: 0, whiteSpace: "pre-wrap", maxHeight: 260, overflow: "auto", fontSize: 11 }}
+        >
           {preview}
         </pre>
       </div>

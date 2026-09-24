@@ -5,6 +5,8 @@ import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
 import { Checkbox } from "./ui/checkbox";
 import { CheckboxField } from "./ui/checkbox-field";
+import { Input } from "./ui/input";
+import { SimpleSelect } from "./ui/simple-select";
 
 interface SyncConfig {
   autoSyncEnabled: boolean;
@@ -305,26 +307,22 @@ export default function ModelsDevSyncPanel() {
           ) : (
             <>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <input
-                  className="input"
+                <Input
                   style={{ flex: "1 1 240px" }}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder={uiText("搜索模型或供应商", "Search models or providers", "モデル・Provider を検索")}
                 />
-                <select
-                  className="input"
-                  style={{ flex: "0 1 210px" }}
+                <SimpleSelect
+                  className="flex-[0_1_210px]"
                   value={provider}
-                  onChange={(event) => setProvider(event.target.value)}
-                >
-                  <option value="all">{uiText("全部供应商", "All providers", "すべての Provider")}</option>
-                  {providers.map(([id, name]) => (
-                    <option key={id} value={id}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setProvider}
+                  ariaLabel={uiText("供应商", "Provider", "Provider")}
+                  options={[
+                    { value: "all", label: uiText("全部供应商", "All providers", "すべての Provider") },
+                    ...providers.map(([value, label]) => ({ value, label })),
+                  ]}
+                />
               </div>
               <div
                 style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)", fontSize: 11 }}

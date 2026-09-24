@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import type { AutopilotFormState } from "../../stores/autopilotForm";
+import { SimpleSelect } from "../../components/ui/simple-select";
 import {
   formatDateTime,
   getPhaseLabel,
@@ -133,15 +134,16 @@ export function RunSetupPanel(props: {
 
       <div style={{ marginTop: 16 }}>
         <label className="field-label">{uiText("权限模式", "Permission Mode", "権限モード")}</label>
-        <select
-          className="input"
+        <SimpleSelect
           value={permissionMode}
-          onChange={(event) => props.updatePermissionMode(event.target.value as PermissionMode)}
-        >
-          <option value="approval">{uiText("审批", "Approval", "承認")}</option>
-          <option value="fullAuto">Full Auto</option>
-          <option value="bypass">Bypass</option>
-        </select>
+          onValueChange={(value) => props.updatePermissionMode(value as PermissionMode)}
+          ariaLabel={uiText("权限模式", "Permission Mode", "権限モード")}
+          options={[
+            { value: "approval", label: uiText("审批", "Approval", "承認") },
+            { value: "fullAuto", label: "Full Auto" },
+            { value: "bypass", label: "Bypass" },
+          ]}
+        />
         {permissionMode === "bypass" && (
           <div
             style={{

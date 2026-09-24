@@ -16,6 +16,8 @@ import {
   useDeleteMcpClientMutation,
   useUpdateMcpClientAccessMutation,
 } from "../hooks/mutations";
+import MasterDetailLayout from "../components/layout/MasterDetailLayout";
+import { Input } from "../components/ui/input";
 
 type McpClient = McpClientCardClient;
 
@@ -250,159 +252,154 @@ export default function McpClients() {
           }
         />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, flex: 1, minHeight: 0 }}>
-          {/* Client List */}
-          <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
-            {/* Create form */}
-            {showCreate && (
-              <div className="section-card" style={{ marginBottom: 8 }}>
-                <div
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}
-                >
-                  <h3 style={{ fontSize: 14, fontWeight: 600 }}>
-                    {uiText("新建客户端", "New Client", "クライアントを新規作成")}
-                  </h3>
-                  <button
-                    className="btn btn-ghost btn-icon-sm"
-                    aria-label={uiText("关闭", "Close", "閉じる")}
-                    title={uiText("关闭", "Close", "閉じる")}
-                    onClick={closeCreate}
+        <MasterDetailLayout
+          className="mcp-clients-workspace"
+          detailLabel={uiText("客户端详情", "Client details", "クライアント詳細")}
+          list={
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
+              {/* Create form */}
+              {showCreate && (
+                <div className="section-card" style={{ marginBottom: 8 }}>
+                  <div
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}
                   >
-                    <X size={14} />
-                  </button>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <input
-                    className="input"
-                    placeholder={uiText(
-                      "客户端名称（如 Claude Desktop）",
-                      "Client name (e.g. Claude Desktop)",
-                      "クライアント名（例: Claude Desktop）",
-                    )}
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                  />
-                  <input
-                    className="input"
-                    placeholder={uiText(
-                      "配置文件路径（可选）",
-                      "Config file path (optional)",
-                      "設定ファイルパス（任意）",
-                    )}
-                    value={newConfigPath}
-                    onChange={(e) => setNewConfigPath(e.target.value)}
-                    style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
-                  />
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={handleCreate}
-                    disabled={!newName.trim()}
-                    style={{ alignSelf: "flex-end" }}
-                  >
-                    <Plus size={14} />
-                    {uiText("创建", "Create", "作成")}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {clients.map((client) => {
-              const accessCount = Object.values(client.server_access).filter(Boolean).length;
-              return (
-                <McpClientCard
-                  key={client.id}
-                  client={client}
-                  selected={selected?.id === client.id}
-                  serverCountLabel={uiText(
-                    `可访问 ${accessCount}/${servers.length} 个服务器`,
-                    `${accessCount}/${servers.length} servers accessible`,
-                    `${accessCount}/${servers.length} 個のサーバーにアクセス可能`,
-                  )}
-                  deleteTitle={uiText("删除客户端", "Delete client", "クライアントを削除")}
-                  onSelect={handleSelectClient}
-                  onDelete={handleDelete}
-                />
-              );
-            })}
-          </div>
-
-          {/* Detail Panel */}
-          <div style={{ overflowY: "auto" }}>
-            {selected ? (
-              <div className="section-card" style={{ position: "sticky", top: 0 }}>
-                <div
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <Monitor size={18} style={{ color: "var(--text-secondary)" }} />
-                    <h3 style={{ fontSize: 15, fontWeight: 700 }}>{selected.name}</h3>
-                  </div>
-                  {editing ? (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={stopEditing}>
-                        <X size={14} />
-                        {uiText("取消", "Cancel", "キャンセル")}
-                      </button>
-                      <button className="btn btn-primary btn-sm" onClick={handleSaveAccess}>
-                        <Save size={14} />
-                        {uiText("保存", "Save", "保存")}
-                      </button>
-                    </div>
-                  ) : (
-                    <button className="btn btn-secondary btn-sm" onClick={handleStartEditSelected}>
-                      <Shield size={14} />
-                      {uiText("管理权限", "Manage Access", "アクセス権を管理")}
+                    <h3 style={{ fontSize: 14, fontWeight: 600 }}>
+                      {uiText("新建客户端", "New Client", "クライアントを新規作成")}
+                    </h3>
+                    <button
+                      className="btn btn-ghost btn-icon-sm"
+                      aria-label={uiText("关闭", "Close", "閉じる")}
+                      title={uiText("关闭", "Close", "閉じる")}
+                      onClick={closeCreate}
+                    >
+                      <X size={14} />
                     </button>
-                  )}
-                </div>
-
-                {selected.config_path && (
-                  <div style={{ marginBottom: 18 }}>
-                    <span className="field-label">{uiText("配置路径", "Config Path", "設定パス")}</span>
-                    <div className="code-block" style={{ fontSize: 11 }}>
-                      {selected.config_path}
-                    </div>
                   </div>
-                )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <Input
+                      placeholder={uiText(
+                        "客户端名称（如 Claude Desktop）",
+                        "Client name (e.g. Claude Desktop)",
+                        "クライアント名（例: Claude Desktop）",
+                      )}
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                    />
+                    <Input
+                      placeholder={uiText(
+                        "配置文件路径（可选）",
+                        "Config file path (optional)",
+                        "設定ファイルパス（任意）",
+                      )}
+                      value={newConfigPath}
+                      onChange={(e) => setNewConfigPath(e.target.value)}
+                      style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
+                    />
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={handleCreate}
+                      disabled={!newName.trim()}
+                      style={{ alignSelf: "flex-end" }}
+                    >
+                      <Plus size={14} />
+                      {uiText("创建", "Create", "作成")}
+                    </button>
+                  </div>
+                </div>
+              )}
 
-                <div>
-                  <span className="field-label">{uiText("服务器访问权限", "Server Access", "サーバーアクセス権")}</span>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {servers.map((server) => {
-                      const hasAccess = editing
-                        ? (editAccess[server.id] ?? true)
-                        : (selected.server_access[server.id] ?? true);
-                      return (
-                        <McpClientAccessRow
-                          key={server.id}
-                          server={server}
-                          hasAccess={hasAccess}
-                          editing={editing}
-                          allowedLabel={uiText("允许", "Allowed", "許可")}
-                          deniedLabel={uiText("拒绝", "Denied", "拒否")}
-                          onToggle={handleToggleServerAccess}
-                        />
-                      );
-                    })}
+              {clients.map((client) => {
+                const accessCount = Object.values(client.server_access).filter(Boolean).length;
+                return (
+                  <McpClientCard
+                    key={client.id}
+                    client={client}
+                    selected={selected?.id === client.id}
+                    serverCountLabel={uiText(
+                      `可访问 ${accessCount}/${servers.length} 个服务器`,
+                      `${accessCount}/${servers.length} servers accessible`,
+                      `${accessCount}/${servers.length} 個のサーバーにアクセス可能`,
+                    )}
+                    deleteTitle={uiText("删除客户端", "Delete client", "クライアントを削除")}
+                    onSelect={handleSelectClient}
+                    onDelete={handleDelete}
+                  />
+                );
+              })}
+            </div>
+          }
+          detail={
+            selected ? (
+              <div className="entity-detail">
+                <header className="entity-detail-header">
+                  <div className="entity-detail-heading">
+                    <Monitor size={18} style={{ color: "var(--text-secondary)" }} />
+                    <h3 className="entity-detail-title">{selected.name}</h3>
+                  </div>
+                  <div className="entity-detail-actions">
+                    {editing ? (
+                      <>
+                        <button className="btn btn-secondary btn-sm" onClick={stopEditing}>
+                          <X size={14} />
+                          {uiText("取消", "Cancel", "キャンセル")}
+                        </button>
+                        <button className="btn btn-primary btn-sm" onClick={handleSaveAccess}>
+                          <Save size={14} />
+                          {uiText("保存", "Save", "保存")}
+                        </button>
+                      </>
+                    ) : (
+                      <button className="btn btn-secondary btn-sm" onClick={handleStartEditSelected}>
+                        <Shield size={14} />
+                        {uiText("管理权限", "Manage Access", "アクセス権を管理")}
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-ghost btn-icon-sm"
+                      onClick={clearSelectedClient}
+                      title={uiText("关闭", "Close", "閉じる")}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </header>
+                <div className="entity-detail-scroll">
+                  <div className="detail-section-stack">
+                    {selected.config_path && (
+                      <section>
+                        <span className="field-label">{uiText("配置路径", "Config Path", "設定パス")}</span>
+                        <div className="code-block break-all text-[11px]">{selected.config_path}</div>
+                      </section>
+                    )}
+                    <section>
+                      <span className="field-label">
+                        {uiText("服务器访问权限", "Server Access", "サーバーアクセス権")}
+                      </span>
+                      <div className="detail-row-list">
+                        {servers.map((server) => {
+                          const hasAccess = editing
+                            ? (editAccess[server.id] ?? true)
+                            : (selected.server_access[server.id] ?? true);
+                          return (
+                            <McpClientAccessRow
+                              key={server.id}
+                              server={server}
+                              hasAccess={hasAccess}
+                              editing={editing}
+                              allowedLabel={uiText("允许", "Allowed", "許可")}
+                              deniedLabel={uiText("拒绝", "Denied", "拒否")}
+                              onToggle={handleToggleServerAccess}
+                            />
+                          );
+                        })}
+                      </div>
+                    </section>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div
-                className="card"
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200 }}
-              >
-                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                  {uiText(
-                    "选择一个客户端查看详情",
-                    "Select a client to view details",
-                    "クライアントを選択して詳細を表示",
-                  )}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
+            ) : undefined
+          }
+        />
       )}
       <ConfirmDialog
         isOpen={!!pendingDelete}

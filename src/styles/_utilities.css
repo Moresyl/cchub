@@ -192,7 +192,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--text-primary) 70%, transparent) !important;
+  outline: 2px solid var(--focus-ring) !important;
   outline-offset: 2px;
 }
 

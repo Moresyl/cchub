@@ -11,6 +11,8 @@ import {
   useSaveHermesProviderMutation,
   useSetHermesActiveProviderMutation,
 } from "../hooks/mutations";
+import { Input } from "../components/ui/input";
+import { SimpleSelect } from "../components/ui/simple-select";
 
 interface HermesProvider {
   name: string;
@@ -326,8 +328,8 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label className="field-label">{i.hermesProviders.name}</label>
-                <input
-                  className="input input-sm"
+                <Input
+                  className="h-7"
                   value={editing.name}
                   onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                   placeholder={i.hermesProviders.namePlaceholder}
@@ -336,17 +338,13 @@ export default function HermesProviders({ embedded = false }: HermesProvidersPro
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <label className="field-label">{i.hermesProviders.apiMode}</label>
-                <select
-                  className="input input-sm"
+                <SimpleSelect
+                  className="h-7"
                   value={editing.apiMode}
-                  onChange={(e) => setEditing({ ...editing, apiMode: e.target.value })}
-                >
-                  {API_MODES.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={(value) => setEditing({ ...editing, apiMode: value })}
+                  options={API_MODES}
+                  ariaLabel={i.hermesProviders.apiMode}
+                />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
                 <label className="field-label">{i.hermesProviders.baseUrl}</label>

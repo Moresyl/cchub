@@ -29,6 +29,9 @@ import {
 import McpServerEditView from "./mcp-servers/EditView";
 import McpServerWizardView from "./mcp-servers/WizardView";
 import McpServerDetailPanel from "./mcp-servers/DetailPanel";
+import MasterDetailLayout from "../components/layout/MasterDetailLayout";
+import { Input } from "../components/ui/input";
+import { SimpleSelect } from "../components/ui/simple-select";
 
 const MCP_SYNCABLE_APPS = [
   { id: "claude", label: "Claude" },
@@ -530,7 +533,7 @@ export default function McpServers() {
           <h2 className="page-title">{i.mcp.title}</h2>
           <p className="page-subtitle">{tReplace(i.mcp.serverCount, { count: servers.length })}</p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="page-action-group">
           <button className="btn btn-primary btn-sm" onClick={openWizard} style={{ gap: 6 }}>
             <PackagePlus size={14} />
             {zh ? "安装向导" : "Install Wizard"}
@@ -559,46 +562,27 @@ export default function McpServers() {
         </div>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
-        <div style={{ position: "relative", flex: "1 1 280px", minWidth: 220 }}>
-          <Search
-            size={14}
-            style={{
-              position: "absolute",
-              left: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--text-muted)",
-            }}
-          />
-          <input
-            className="input"
+      <div className="page-filter-bar">
+        <div className="page-search-field">
+          <Search size={14} />
+          <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder={i.mcp.searchPlaceholder}
             aria-label={i.mcp.searchPlaceholder}
-            style={{ width: "100%", paddingLeft: 32 }}
           />
         </div>
         {availableMcpApps.length > 0 && (
-          <div
-            className="section-card"
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", flex: "0 1 auto" }}
-          >
-            <span style={{ fontSize: 12, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{i.mcp.bulkApp}</span>
-            <select
-              className="input"
+          <div className="bulk-action-strip">
+            <span className="bulk-action-strip-label">{i.mcp.bulkApp}</span>
+            <SimpleSelect
               value={bulkApp}
-              onChange={(event) => setBulkApp(event.target.value)}
+              onValueChange={setBulkApp}
               disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending}
-              style={{ minWidth: 130, width: "auto", padding: "5px 8px" }}
-            >
-              {availableMcpApps.map((app) => (
-                <option key={app.id} value={app.id}>
-                  {app.label}
-                </option>
-              ))}
-            </select>
+              ariaLabel={i.mcp.bulkApp}
+              className="w-[138px]"
+              options={availableMcpApps.map((app) => ({ value: app.id, label: app.label }))}
+            />
             <span className="badge badge-muted" title={zh ? "已同步数量 / 总数量" : "Synced / total"}>
               {appStatusLoading ? "..." : `${bulkEnabledCount}/${servers.length}`}
             </span>
@@ -711,38 +695,38 @@ export default function McpServers() {
           icon={<Plug size={28} style={{ color: "var(--text-muted)" }} />}
         />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 24, flex: 1, minHeight: 0 }}>
-          {/* Server List */}
-          <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }} className="stagger">
-            {filteredServers.map((server) => (
-              <McpServerCard
-                key={server.id}
-                server={server}
-                selected={selected?.id === server.id}
-                sourceBadge={getSourceBadge(server.source)}
-                sourceLabel={getSourceLabel(server.source)}
-                healthStatus={healthResults[server.id]?.status ?? null}
-                healthTitle={
-                  healthResults[server.id]
-                    ? healthResults[server.id]?.status === "healthy"
-                      ? i.mcp.healthy
-                      : healthResults[server.id]?.status === "unhealthy"
-                        ? i.mcp.unhealthy
-                        : i.mcp.unknown
-                    : null
-                }
-                editTitle={i.mcp.edit}
-                deleteTitle={i.mcp.remove}
-                onSelect={handleSelectServer}
-                onEdit={handleEditServer}
-                onDelete={handleDeleteServer}
-              />
-            ))}
-          </div>
-
-          {/* Detail Panel */}
-          <div style={{ overflowY: "auto" }}>
-            {selected ? (
+        <MasterDetailLayout
+          detailLabel={selected ? `${selected.name} ${i.mcp.detail}` : i.mcp.detail}
+          list={
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }} className="stagger">
+              {filteredServers.map((server) => (
+                <McpServerCard
+                  key={server.id}
+                  server={server}
+                  selected={selected?.id === server.id}
+                  sourceBadge={getSourceBadge(server.source)}
+                  sourceLabel={getSourceLabel(server.source)}
+                  healthStatus={healthResults[server.id]?.status ?? null}
+                  healthTitle={
+                    healthResults[server.id]
+                      ? healthResults[server.id]?.status === "healthy"
+                        ? i.mcp.healthy
+                        : healthResults[server.id]?.status === "unhealthy"
+                          ? i.mcp.unhealthy
+                          : i.mcp.unknown
+                      : null
+                  }
+                  editTitle={i.mcp.edit}
+                  deleteTitle={i.mcp.remove}
+                  onSelect={handleSelectServer}
+                  onEdit={handleEditServer}
+                  onDelete={handleDeleteServer}
+                />
+              ))}
+            </div>
+          }
+          detail={
+            selected ? (
               <McpServerDetailPanel
                 selected={selected}
                 i={i}
@@ -758,17 +742,11 @@ export default function McpServers() {
                 toolSyncStatus={toolSyncStatus}
                 syncingTo={syncingTo}
                 toggleToolSync={toggleToolSync}
+                onClose={() => setSelected(null)}
               />
-            ) : (
-              <div
-                className="card"
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200 }}
-              >
-                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>{i.mcp.selectServer}</p>
-              </div>
-            )}
-          </div>
-        </div>
+            ) : undefined
+          }
+        />
       )}
       <ConfirmDialog
         isOpen={!!pendingDelete}

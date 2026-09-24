@@ -1,4 +1,5 @@
-import { memo, type ChangeEvent } from "react";
+import { memo } from "react";
+import { SimpleSelect } from "./ui/simple-select";
 
 export interface Hello2ccSelectOption {
   value: string;
@@ -26,16 +27,12 @@ function Hello2ccSelectFieldComponent({
     <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
       <span style={{ fontSize: 11, color: "var(--text-muted)", minHeight: 32 }}>{description}</span>
-      <select
-        className="input"
+      <SimpleSelect
         value={value}
-        onChange={(event: ChangeEvent<HTMLSelectElement>) => onChange(fieldKey, event.target.value)}
-        style={{ fontSize: 12 }}
-      >
-        {options.map((option) => (
-          <option key={`${fieldKey}-${option.value || "blank"}`} value={option.value}>{option.label}</option>
-        ))}
-      </select>
+        onValueChange={(nextValue) => onChange(fieldKey, nextValue)}
+        options={options}
+        ariaLabel={label}
+      />
     </label>
   );
 }

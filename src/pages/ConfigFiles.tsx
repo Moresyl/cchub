@@ -13,6 +13,8 @@ import HermesConfigSection from "../components/HermesConfigSection";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 import { Checkbox } from "../components/ui/checkbox";
 import { CheckboxField } from "../components/ui/checkbox-field";
+import { Input } from "../components/ui/input";
+import { SimpleSelect } from "../components/ui/simple-select";
 import { useConfigFiles } from "../hooks/queries";
 import {
   isCodexConfigToml,
@@ -380,7 +382,7 @@ export default function ConfigFiles() {
       {activeRoot === "openclaw" && <OpenClawConfigSection />}
       {activeRoot === "hermes" && <HermesConfigSection />}
 
-      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "320px minmax(0, 1fr)", gap: 16 }}>
+      <div className="config-files-workspace">
         <ConfigFilesTreePanel
           title={i.configFiles.folders}
           rootPath={activeRootMeta?.path || i.common.na}
@@ -529,8 +531,7 @@ export default function ConfigFiles() {
                   >
                     <div>
                       <label className="field-label">{zh ? "模型 Provider" : "Model Provider"}</label>
-                      <input
-                        className="input"
+                      <Input
                         value={codexStructuredConfig.modelProvider}
                         onChange={(event) => updateCodexConfig({ modelProvider: event.target.value || "custom" })}
                         placeholder="custom"
@@ -538,8 +539,7 @@ export default function ConfigFiles() {
                     </div>
                     <div>
                       <label className="field-label">{zh ? "Provider 显示名" : "Provider Label"}</label>
-                      <input
-                        className="input"
+                      <Input
                         value={codexStructuredConfig.providerLabel}
                         onChange={(event) => updateCodexConfig({ providerLabel: event.target.value })}
                         placeholder="custom"
@@ -547,8 +547,7 @@ export default function ConfigFiles() {
                     </div>
                     <div>
                       <label className="field-label">{zh ? "模型 ID" : "Model ID"}</label>
-                      <input
-                        className="input"
+                      <Input
                         value={codexStructuredConfig.model}
                         onChange={(event) => updateCodexConfig({ model: event.target.value })}
                         placeholder="gpt-5.6-sol"
@@ -556,8 +555,7 @@ export default function ConfigFiles() {
                     </div>
                     <div>
                       <label className="field-label">{zh ? "Base URL" : "Base URL"}</label>
-                      <input
-                        className="input"
+                      <Input
                         value={codexStructuredConfig.baseUrl}
                         onChange={(event) => updateCodexConfig({ baseUrl: event.target.value })}
                         placeholder="https://api.example.com/v1"
@@ -566,8 +564,7 @@ export default function ConfigFiles() {
                     <div>
                       <label className="field-label">{zh ? "API Key" : "API Key"}</label>
                       <div style={{ position: "relative" }}>
-                        <input
-                          className="input"
+                        <Input
                           type={showCodexApiKey ? "text" : "password"}
                           value={codexApiKey}
                           onChange={(event) => setCodexApiKey(event.target.value)}
@@ -586,50 +583,40 @@ export default function ConfigFiles() {
                     </div>
                     <div>
                       <label className="field-label">{zh ? "推理强度" : "Reasoning Effort"}</label>
-                      <select
-                        className="input"
+                      <SimpleSelect
                         value={codexStructuredConfig.reasoningEffort}
-                        onChange={(event) => updateCodexConfig({ reasoningEffort: event.target.value })}
-                      >
-                        {["low", "medium", "high", "xhigh"].map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel={zh ? "推理强度" : "Reasoning effort"}
+                        options={["low", "medium", "high", "xhigh"].map((option) => ({
+                          value: option,
+                          label: option,
+                        }))}
+                        onValueChange={(value) => updateCodexConfig({ reasoningEffort: value })}
+                      />
                     </div>
                     <div>
                       <label className="field-label">{zh ? "Wire API" : "Wire API"}</label>
-                      <select
-                        className="input"
+                      <SimpleSelect
                         value={codexStructuredConfig.wireApi}
-                        onChange={(event) => updateCodexConfig({ wireApi: event.target.value })}
-                      >
-                        {["responses", "chat"].map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel={zh ? "Wire API" : "Wire API"}
+                        options={["responses", "chat"].map((option) => ({ value: option, label: option }))}
+                        onValueChange={(value) => updateCodexConfig({ wireApi: value })}
+                      />
                     </div>
                     <div>
                       <label className="field-label">{zh ? "执行人格" : "Personality"}</label>
-                      <select
-                        className="input"
+                      <SimpleSelect
                         value={codexStructuredConfig.personality}
-                        onChange={(event) => updateCodexConfig({ personality: event.target.value })}
-                      >
-                        {["pragmatic", "full-auto", "auto-edit", "explain"].map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                        ariaLabel={zh ? "执行人格" : "Personality"}
+                        options={["pragmatic", "full-auto", "auto-edit", "explain"].map((option) => ({
+                          value: option,
+                          label: option,
+                        }))}
+                        onValueChange={(value) => updateCodexConfig({ personality: value })}
+                      />
                     </div>
                     <div>
                       <label className="field-label">{zh ? "上下文窗口" : "Context Window"}</label>
-                      <input
-                        className="input"
+                      <Input
                         value={codexStructuredConfig.modelContextWindow}
                         onChange={(event) =>
                           updateCodexConfig({ modelContextWindow: event.target.value.replace(/[,_\s]/g, "") })
@@ -639,8 +626,7 @@ export default function ConfigFiles() {
                     </div>
                     <div>
                       <label className="field-label">{zh ? "自动压缩阈值" : "Auto Compact Limit"}</label>
-                      <input
-                        className="input"
+                      <Input
                         value={codexStructuredConfig.modelAutoCompactTokenLimit}
                         onChange={(event) =>
                           updateCodexConfig({ modelAutoCompactTokenLimit: event.target.value.replace(/[,_\s]/g, "") })

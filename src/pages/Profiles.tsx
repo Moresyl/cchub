@@ -735,8 +735,7 @@ export default function Profiles() {
     void handleSaveFragment();
   }, [handleSaveFragment]);
   const handleDraftToolChange = useCallback(
-    async (event: ChangeEvent<HTMLSelectElement>) => {
-      const toolId = event.target.value;
+    async (toolId: string) => {
       setDraftTool(toolId);
       setNewTool(toolId);
       setFetchingModels(false);

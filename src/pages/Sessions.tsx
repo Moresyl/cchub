@@ -2,7 +2,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Copy, FolderOpen, History, RefreshCw, Search, SquareCheckBig, Trash2 } from "lucide-react";
+import { Copy, FolderOpen, History, RefreshCw, Search, SquareCheckBig, Trash2, X } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { type ManagedAppId } from "../lib/appPreferences";
 import { showToast } from "../components/Toast";
@@ -464,16 +464,11 @@ export default function Sessions() {
           </div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(320px, 420px) minmax(0, 1fr)",
-            gap: 16,
-            flex: 1,
-            minHeight: 0,
-          }}
-        >
-          <div className="section-card" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div className={`sessions-workspace ${selectedSession ? "sessions-detail-open" : ""}`}>
+          <div
+            className="section-card sessions-list-card"
+            style={{ display: "flex", flexDirection: "column", minHeight: 0 }}
+          >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <History size={15} style={{ color: "var(--text-secondary)" }} />
@@ -552,7 +547,10 @@ export default function Sessions() {
             </div>
           </div>
 
-          <div className="section-card" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div
+            className="section-card sessions-detail-card"
+            style={{ display: "flex", flexDirection: "column", minHeight: 0 }}
+          >
             {!selectedSession ? (
               <div
                 style={{
@@ -642,15 +640,26 @@ export default function Sessions() {
                       <HighlightedText text={detail.session.title} query={detailQuery} />
                     </h3>
                   </div>
-                  <button
-                    className="btn btn-danger btn-xs"
-                    onClick={() => setPendingDelete(detail.session)}
-                    disabled={!detail.session.can_delete || deletingId === detail.session.id}
-                    style={{ flexShrink: 0 }}
-                  >
-                    <Trash2 size={12} />
-                    {uiText("删除", "Delete", "削除")}
-                  </button>
+                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    <button
+                      className="btn btn-danger btn-xs"
+                      onClick={() => setPendingDelete(detail.session)}
+                      disabled={!detail.session.can_delete || deletingId === detail.session.id}
+                    >
+                      <Trash2 size={12} />
+                      {uiText("删除", "Delete", "削除")}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon-sm"
+                      onClick={() => {
+                        setSelectedSession(null);
+                        setDetail(null);
+                      }}
+                      title={uiText("关闭详情", "Close details", "詳細を閉じる")}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Resume command & directory — compact single bar */}

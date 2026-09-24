@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { Copy, ExternalLink, Github, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { SimpleSelect } from "./ui/simple-select";
 
 interface GitHubAccount {
   id: string;
@@ -306,8 +307,8 @@ function CopilotAuthSectionComponent({
   }, [startDeviceFlow]);
 
   const handleProviderAccountSelect = useCallback(
-    (event: ChangeEvent<HTMLSelectElement>) => {
-      onAccountSelect?.(event.target.value || null);
+    (value: string) => {
+      onAccountSelect?.(value || null);
     },
     [onAccountSelect],
   );
@@ -411,19 +412,15 @@ function CopilotAuthSectionComponent({
           <label className="field-label">
             {uiText("Provider 绑定账号", "Provider Account Binding", "Provider の紐付けアカウント")}
           </label>
-          <select
-            className="input"
+          <SimpleSelect
             value={selectedAccountId || ""}
-            onChange={handleProviderAccountSelect}
-            style={{ fontSize: 13 }}
-          >
-            <option value="">{uiText("使用默认账号", "Use default account", "既定アカウントを使用")}</option>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.login}
-              </option>
-            ))}
-          </select>
+            onValueChange={handleProviderAccountSelect}
+            ariaLabel={uiText("Provider 绑定账号", "Provider Account Binding", "Provider の紐付けアカウント")}
+            options={[
+              { value: "", label: uiText("使用默认账号", "Use default account", "既定アカウントを使用") },
+              ...accounts.map((account) => ({ value: account.id, label: account.login })),
+            ]}
+          />
         </div>
       ) : null}
 

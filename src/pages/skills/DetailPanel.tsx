@@ -1,4 +1,5 @@
-import { Check, Edit3, FileText, Trash2, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Edit3, FileText, Trash2, X, Zap } from "lucide-react";
 
 import MarkdownPreview from "../../components/MarkdownPreview";
 import type { I18n, Locale } from "../../lib/i18n";
@@ -18,8 +19,7 @@ interface SkillsDetailPanelProps {
   handleDeleteSkill: (skill: Skill) => void;
   setEditingSkill: (value: boolean) => void;
   setSelectedSkill: (skill: Skill | null) => void;
-  // mutations are typed as `any` here because their full input shapes leak
-  // implementation details; the original parent passes the exact hook results.
+  // Mutation input shapes are owned by the parent hooks.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   copySkillBetweenToolsMutation: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,6 +27,8 @@ interface SkillsDetailPanelProps {
   locale: Locale;
   i: I18n;
 }
+
+type DetailTab = "overview" | "content" | "sync";
 
 export default function SkillsDetailPanel(p: SkillsDetailPanelProps) {
   const {
@@ -47,234 +49,198 @@ export default function SkillsDetailPanel(p: SkillsDetailPanelProps) {
     locale,
     i,
   } = p;
+  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const syncTargets = tools.filter((tool) => tool.installed && tool.id !== selectedSkill.tool_id);
+  const zh = locale === "zh";
+
+  useEffect(() => {
+    setActiveTab("overview");
+  }, [selectedSkill.id]);
+
+  const removeSync = async (tool: DetectedTool) => {
+    const skillName = selectedSkill.file_path
+      ?.split(/[\\/]/)
+      .pop()
+      ?.replace(/\.disabled$/, "");
+    if (!skillName) return;
+    try {
+      await removeSyncedSkillMutation.mutateAsync({ skillName, targetSkillsDir: tool.skills_dir });
+      setSyncedSkills((current) => {
+        const next = { ...current };
+        const ids = new Set(next[selectedSkill.id]);
+        ids.delete(tool.id);
+        next[selectedSkill.id] = ids;
+        return next;
+      });
+    } catch (error) {
+      console.error("Failed to remove synced skill", error);
+    }
+  };
+
+  const addSync = async (tool: DetectedTool) => {
+    if (!selectedSkill.file_path) return;
+    try {
+      await copySkillBetweenToolsMutation.mutateAsync({
+        path: selectedSkill.file_path,
+        targetSkillsDir: tool.skills_dir,
+        method: skillSyncMethod,
+      });
+      setSyncedSkills((current) => ({
+        ...current,
+        [selectedSkill.id]: new Set([...(current[selectedSkill.id] || []), tool.id]),
+      }));
+    } catch (error) {
+      console.error("Failed to copy skill", error);
+    }
+  };
+
   return (
-    <div style={{ width: 520, overflowY: "auto", flexShrink: 0 }}>
-      <div className="section-card" style={{ position: "sticky", top: 0 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              className="icon-box"
-              style={{ background: "var(--warning-subtle)", width: 42, height: 42, borderRadius: 8 }}
-            >
-              <Zap size={20} style={{ color: "var(--warning)" }} />
-            </div>
-            <div>
-              <h3 style={{ fontSize: 15, fontWeight: 700 }}>{selectedSkill.name}</h3>
-              {selectedSkill.plugin_id && (
-                <span className="badge badge-muted" style={{ marginTop: 4 }}>
-                  {selectedSkill.plugin_id}
-                </span>
-              )}
-            </div>
+    <div className="entity-detail">
+      <header className="entity-detail-header">
+        <div className="entity-detail-heading">
+          <div className="icon-box size-9 bg-[var(--warning-subtle)]">
+            <Zap size={17} className="text-[var(--warning)]" />
           </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {selectedSkill.file_path && !editingSkill && (
-              <>
-                <button
-                  onClick={() => handleToggleSkill(selectedSkill)}
-                  title={
-                    selectedSkill.file_path.endsWith(".disabled")
-                      ? locale === "zh"
-                        ? "启用"
-                        : "Enable"
-                      : locale === "zh"
-                        ? "禁用"
-                        : "Disable"
-                  }
-                  className="btn btn-ghost btn-icon-sm"
-                  style={{
-                    color: selectedSkill.file_path.endsWith(".disabled") ? "var(--text-muted)" : "var(--success)",
-                  }}
-                >
-                  <Check size={14} />
-                </button>
-                <button
-                  className="btn btn-ghost btn-icon-sm"
-                  onClick={() => setEditingSkill(true)}
-                  title={locale === "zh" ? "编辑" : "Edit"}
-                >
-                  <Edit3 size={14} />
-                </button>
-                <button
-                  className="btn btn-ghost btn-icon-sm"
-                  onClick={() => handleDeleteSkill(selectedSkill)}
-                  title={locale === "zh" ? "删除" : "Delete"}
-                  style={{ color: "var(--danger)" }}
-                >
-                  <Trash2 size={14} />
-                </button>
-                <button
-                  className="btn btn-ghost btn-icon-sm"
-                  onClick={() => setSelectedSkill(null)}
-                  title={locale === "zh" ? "关闭" : "Close"}
-                >
-                  ×
-                </button>
-              </>
-            )}
+          <div className="min-w-0 flex-1">
+            <h3 className="entity-detail-title">{selectedSkill.name}</h3>
+            <p className="mt-0.5 truncate text-[11px] text-[var(--text-muted)]">
+              {selectedSkill.plugin_id || (zh ? "本地技能" : "Local skill")}
+            </p>
           </div>
         </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {selectedSkill.description && (
-            <div>
-              <div className="field-label" style={{ marginBottom: 6 }}>
-                {locale === "zh" ? "描述" : "Description"}
-              </div>
-              <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                {selectedSkill.description}
-              </p>
-            </div>
+        <div className="entity-detail-actions">
+          {selectedSkill.file_path && !editingSkill && (
+            <>
+              <button
+                onClick={() => handleToggleSkill(selectedSkill)}
+                title={
+                  selectedSkill.file_path.endsWith(".disabled") ? (zh ? "启用" : "Enable") : zh ? "禁用" : "Disable"
+                }
+                className="btn btn-ghost btn-icon-sm"
+              >
+                <Check size={14} />
+              </button>
+              <button
+                className="btn btn-ghost btn-icon-sm"
+                onClick={() => setEditingSkill(true)}
+                title={zh ? "编辑" : "Edit"}
+              >
+                <Edit3 size={14} />
+              </button>
+              <button
+                className="btn btn-danger-ghost btn-icon-sm"
+                onClick={() => handleDeleteSkill(selectedSkill)}
+                title={zh ? "删除" : "Delete"}
+              >
+                <Trash2 size={14} />
+              </button>
+            </>
           )}
+          <button
+            className="btn btn-ghost btn-icon-sm"
+            onClick={() => setSelectedSkill(null)}
+            title={zh ? "关闭" : "Close"}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      </header>
 
-          {selectedSkill.trigger_command && (
-            <div>
-              <div className="field-label" style={{ marginBottom: 6 }}>
-                {locale === "zh" ? "触发命令" : "Trigger Command"}
-              </div>
-              <div className="code-block" style={{ fontSize: 12 }}>
-                /{selectedSkill.trigger_command}
-              </div>
-            </div>
-          )}
+      <div className="entity-detail-tabs" role="tablist" aria-label={zh ? "技能详情视图" : "Skill detail views"}>
+        {(
+          [
+            ["overview", zh ? "概览" : "Overview"],
+            ["content", zh ? "内容" : "Content"],
+            ["sync", zh ? "同步" : "Sync"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            className={`entity-detail-tab ${activeTab === id ? "entity-detail-tab-active" : ""}`}
+            role="tab"
+            aria-selected={activeTab === id}
+            onClick={() => setActiveTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-          {selectedSkill.file_path && (
-            <div>
-              <div className="field-label" style={{ marginBottom: 6 }}>
-                {locale === "zh" ? "文件路径" : "File Path"}
-              </div>
-              <div className="code-block" style={{ fontSize: 11 }}>
-                {selectedSkill.file_path}
-              </div>
-            </div>
-          )}
+      <div className="entity-detail-scroll">
+        {activeTab === "overview" && (
+          <div className="detail-section-stack">
+            {selectedSkill.description && (
+              <section>
+                <div className="field-label">{zh ? "描述" : "Description"}</div>
+                <p className="text-[13px] leading-6 text-[var(--text-secondary)]">{selectedSkill.description}</p>
+              </section>
+            )}
+            {selectedSkill.trigger_command && (
+              <section>
+                <div className="field-label">{zh ? "触发命令" : "Trigger command"}</div>
+                <div className="code-block text-xs">/{selectedSkill.trigger_command}</div>
+              </section>
+            )}
+            {selectedSkill.file_path && (
+              <section>
+                <div className="field-label">{zh ? "文件路径" : "File path"}</div>
+                <div className="code-block break-all text-[11px]">{selectedSkill.file_path}</div>
+              </section>
+            )}
+          </div>
+        )}
 
-          {/* 同步到其他工具 */}
-          {selectedSkill.file_path && (
-            <div>
-              <div className="field-label" style={{ marginBottom: 8 }}>
-                {locale === "zh" ? "同步到其他工具" : "Sync to other tools"}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {tools
-                  .filter((t) => t.installed && t.id !== selectedSkill.tool_id)
-                  .map((tool) => {
-                    const isSynced = syncedSkills[selectedSkill.id]?.has(tool.id);
-                    return (
-                      <div
-                        key={tool.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "8px 10px",
-                          background: "var(--bg-card)",
-                          border: "1px solid var(--border-default)",
-                          borderRadius: 4,
-                        }}
-                      >
-                        <span style={{ fontSize: 12 }}>{tool.name}</span>
-                        {isSynced ? (
-                          <button
-                            className="btn btn-ghost btn-xs"
-                            style={{ color: "var(--danger)" }}
-                            onClick={async () => {
-                              const skillName = selectedSkill.file_path
-                                ?.split(/[\\/]/)
-                                .pop()
-                                ?.replace(/\.disabled$/, "");
-                              if (!skillName) return;
-                              try {
-                                await removeSyncedSkillMutation.mutateAsync({
-                                  skillName,
-                                  targetSkillsDir: tool.skills_dir,
-                                });
-                                setSyncedSkills((prev) => {
-                                  const next = { ...prev };
-                                  if (next[selectedSkill.id]) {
-                                    const s = new Set(next[selectedSkill.id]);
-                                    s.delete(tool.id);
-                                    next[selectedSkill.id] = s;
-                                  }
-                                  return next;
-                                });
-                              } catch (error) {
-                                console.error("Failed to remove synced skill", error);
-                              }
-                            }}
-                          >
-                            {locale === "zh" ? "取消同步" : "Unsync"}
-                          </button>
-                        ) : (
-                          <button
-                            className="btn btn-secondary btn-xs"
-                            onClick={async () => {
-                              if (!selectedSkill.file_path) return;
-                              try {
-                                await copySkillBetweenToolsMutation.mutateAsync({
-                                  path: selectedSkill.file_path,
-                                  targetSkillsDir: tool.skills_dir,
-                                  method: skillSyncMethod,
-                                });
-                                setSyncedSkills((prev) => {
-                                  const next = { ...prev };
-                                  if (!next[selectedSkill.id]) next[selectedSkill.id] = new Set();
-                                  next[selectedSkill.id] = new Set([...next[selectedSkill.id], tool.id]);
-                                  return next;
-                                });
-                              } catch (error) {
-                                console.error("Failed to copy skill", error);
-                              }
-                            }}
-                          >
-                            {locale === "zh" ? "同步" : "Sync"}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                {tools.filter((t) => t.installed && t.id !== selectedSkill.tool_id).length === 0 && (
-                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    {locale === "zh" ? "没有其他已安装的工具" : "No other installed tools"}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* 内容预览 */}
-          <div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 8,
-              }}
-            >
-              <div className="field-label" style={{ marginBottom: 0 }}>
-                <FileText size={12} style={{ marginRight: 6, verticalAlign: "middle" }} />
-                {locale === "zh" ? "内容预览" : "Content Preview"}
-              </div>
+        {activeTab === "content" && (
+          <section className="detail-section-stack">
+            <div className="field-label flex items-center gap-1.5">
+              <FileText size={12} />
+              {zh ? "内容预览" : "Content preview"}
             </div>
             {loadingContent ? (
-              <div className="code-block" style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>
-                {i.skills.loading}
-              </div>
+              <div className="code-block py-8 text-center text-[var(--text-muted)]">{i.skills.loading}</div>
             ) : skillContent ? (
-              <div
-                className="markdown-preview"
-                style={{ maxHeight: 500, overflowY: "auto", fontSize: 13, lineHeight: 1.8 }}
-              >
+              <div className="markdown-preview text-[13px] leading-7">
                 <MarkdownPreview content={skillContent} />
               </div>
             ) : (
-              <div className="code-block" style={{ textAlign: "center", padding: 20, color: "var(--text-muted)" }}>
-                {locale === "zh" ? "无可用内容" : "No content available"}
+              <div className="code-block py-8 text-center text-[var(--text-muted)]">
+                {zh ? "无可用内容" : "No content available"}
               </div>
             )}
-          </div>
-        </div>
+          </section>
+        )}
+
+        {activeTab === "sync" && (
+          <section className="detail-section-stack">
+            <div>
+              <div className="field-label">{zh ? "同步到其他工具" : "Sync to other tools"}</div>
+              <p className="text-xs leading-5 text-[var(--text-muted)]">
+                {zh ? "选择要共享此技能的已安装工具。" : "Choose which installed tools can use this skill."}
+              </p>
+            </div>
+            <div className="detail-row-list">
+              {syncTargets.map((tool) => {
+                const isSynced = syncedSkills[selectedSkill.id]?.has(tool.id);
+                return (
+                  <div key={tool.id} className="detail-row">
+                    <span className="truncate text-[13px]">{tool.name}</span>
+                    <button
+                      className={`btn btn-xs ${isSynced ? "btn-ghost text-[var(--danger)]" : "btn-secondary"}`}
+                      onClick={() => void (isSynced ? removeSync(tool) : addSync(tool))}
+                    >
+                      {isSynced ? (zh ? "取消同步" : "Unsync") : zh ? "同步" : "Sync"}
+                    </button>
+                  </div>
+                );
+              })}
+              {syncTargets.length === 0 && (
+                <p className="py-8 text-center text-xs text-[var(--text-muted)]">
+                  {zh ? "没有其他已安装的工具" : "No other installed tools"}
+                </p>
+              )}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

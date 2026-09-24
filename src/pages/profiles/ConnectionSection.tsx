@@ -8,6 +8,8 @@ import XaiOAuthAuthSection from "../../components/XaiOAuthAuthSection";
 import ProfileEndpointProbePanel from "../../components/ProfileEndpointProbePanel";
 import { CheckboxField } from "../../components/ui/checkbox-field";
 import { Textarea } from "../../components/ui/textarea";
+import { Input } from "../../components/ui/input";
+import { SimpleSelect } from "../../components/ui/simple-select";
 import {
   type ApiFormat,
   type ClaudeAuthField,
@@ -76,7 +78,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input className="input" style={{ ...SMALL_INPUT_STYLE, ...(props.style || {}) }} {...props} />;
+  return <Input style={{ ...SMALL_INPUT_STYLE, ...(props.style || {}) }} {...props} />;
 }
 
 const SelectField = memo(function SelectFieldFn({
@@ -89,13 +91,12 @@ const SelectField = memo(function SelectFieldFn({
   options: string[];
 }) {
   return (
-    <select className="input" value={value} onChange={(e) => onChange(e.target.value)} style={SMALL_INPUT_STYLE}>
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-    </select>
+    <SimpleSelect
+      value={value}
+      onValueChange={onChange}
+      options={options.map((option) => ({ value: option, label: option }))}
+      className="h-7"
+    />
   );
 });
 
@@ -356,23 +357,20 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
               />
             </Field>
             <Field label={locale === "zh" ? "Thinking Level" : "Thinking Level"}>
-              <select
-                className="input"
-                value={draftOpenCodeThinkingLevel}
-                onChange={(event) =>
+              <SimpleSelect
+                value={draftOpenCodeThinkingLevel || "none"}
+                ariaLabel="Thinking Level"
+                options={[
+                  { value: "none", label: locale === "zh" ? "无" : "None" },
+                  ...THINKING_LEVEL_OPTIONS.map((option) => ({ value: option, label: option })),
+                ]}
+                onValueChange={(value) =>
                   onDraftChange(draftTool, {
-                    openCodeThinkingLevel: event.target.value as OpenCodeThinkingLevel | "",
+                    openCodeThinkingLevel: (value === "none" ? "" : value) as OpenCodeThinkingLevel | "",
                   })
                 }
-                style={SMALL_INPUT_STYLE}
-              >
-                <option value="">{locale === "zh" ? "无" : "None"}</option>
-                {THINKING_LEVEL_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+                className="h-7"
+              />
             </Field>
           </div>
         )}

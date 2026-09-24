@@ -41,6 +41,8 @@ import SkillsConfirmDialogs from "./skills/Dialogs";
 import SkillsBackupList from "./skills/BackupList";
 import PluginInstallDialog from "./skills/PluginInstallDialog";
 import SkillsPageHeader from "./skills/PageHeader";
+import MasterDetailLayout from "../components/layout/MasterDetailLayout";
+import { Input } from "../components/ui/input";
 export default function Skills() {
   const queryClient = useQueryClient();
   const cachedSkillsPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchSkillsPageData>>>(
@@ -624,8 +626,8 @@ export default function Skills() {
         </div>
       )}
       {/* Search + Category Tabs */}
-      <div style={{ display: "flex", gap: 16, marginBottom: 20, alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
+      <div className="skills-filter-bar">
+        <div className="skills-search-field">
           <Search
             size={15}
             style={{
@@ -636,9 +638,8 @@ export default function Skills() {
               color: "var(--text-muted)",
             }}
           />
-          <input
+          <Input
             ref={searchInputRef}
-            className="input"
             style={{ paddingLeft: 40 }}
             placeholder={i.skills.searchPlaceholder}
             value={search}
@@ -679,182 +680,184 @@ export default function Skills() {
         </div>
       </div>
       {/* Content Area */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 24 }}>
-        {/* List */}
-        <div
-          style={{ flex: selectedSkill ? 1.2 : 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}
-        >
-          {/* Skills */}
-          {filteredSkills.length > 0 && (
-            <div className="stagger">
-              {category === "all" && filteredPlugins.length > 0 && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, paddingLeft: 4 }}>
-                  <Zap size={14} style={{ color: "var(--warning)" }} />
-                  <span
+      <MasterDetailLayout
+        className="skills-workspace"
+        detailLabel={locale === "zh" ? "技能详情" : "Skill details"}
+        list={
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {/* Skills */}
+            {filteredSkills.length > 0 && (
+              <div className="stagger">
+                {category === "all" && filteredPlugins.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, paddingLeft: 4 }}>
+                    <Zap size={14} style={{ color: "var(--warning)" }} />
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "var(--text-muted)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      {i.skills.categorySkills} ({filteredSkills.length})
+                    </span>
+                  </div>
+                )}
+                {filteredSkills.map((skill) => (
+                  <SkillCard
+                    key={skill.id}
+                    skill={skill}
+                    selected={selectedSkill?.id === skill.id}
+                    disabledLabel={locale === "zh" ? "已禁用" : "Disabled"}
+                    editTitle={locale === "zh" ? "编辑" : "Edit"}
+                    deleteTitle={locale === "zh" ? "删除" : "Delete"}
+                    enableTitle={locale === "zh" ? "启用" : "Enable"}
+                    disableTitle={locale === "zh" ? "禁用" : "Disable"}
+                    updateAvailable={hasSkillUpdate(skill)}
+                    updateLabel={locale === "zh" ? "有更新" : "Update"}
+                    latestLabel={locale === "zh" ? "最新" : "Latest"}
+                    checkingUpdates={checkingSkillIds.includes(skill.file_path || skill.id)}
+                    onView={handleViewSkill}
+                    onToggle={handleToggleSkill}
+                    onEdit={handleOpenEditSkill}
+                    onDelete={handleDeleteSkill}
+                  />
+                ))}
+              </div>
+            )}
+            {/* Plugins */}
+            {filteredPlugins.length > 0 && (
+              <div className="stagger">
+                {category === "all" && filteredSkills.length > 0 && (
+                  <div
                     style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "var(--text-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 6,
+                      marginTop: 8,
+                      paddingLeft: 4,
                     }}
                   >
-                    {i.skills.categorySkills} ({filteredSkills.length})
-                  </span>
-                </div>
-              )}
-              {filteredSkills.map((skill) => (
-                <SkillCard
-                  key={skill.id}
-                  skill={skill}
-                  selected={selectedSkill?.id === skill.id}
-                  disabledLabel={locale === "zh" ? "已禁用" : "Disabled"}
-                  editTitle={locale === "zh" ? "编辑" : "Edit"}
-                  deleteTitle={locale === "zh" ? "删除" : "Delete"}
-                  enableTitle={locale === "zh" ? "启用" : "Enable"}
-                  disableTitle={locale === "zh" ? "禁用" : "Disable"}
-                  updateAvailable={hasSkillUpdate(skill)}
-                  updateLabel={locale === "zh" ? "有更新" : "Update"}
-                  latestLabel={locale === "zh" ? "最新" : "Latest"}
-                  checkingUpdates={checkingSkillIds.includes(skill.file_path || skill.id)}
-                  onView={handleViewSkill}
-                  onToggle={handleToggleSkill}
-                  onEdit={handleOpenEditSkill}
-                  onDelete={handleDeleteSkill}
-                />
-              ))}
-            </div>
-          )}
-          {/* Plugins */}
-          {filteredPlugins.length > 0 && (
-            <div className="stagger">
-              {category === "all" && filteredSkills.length > 0 && (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginBottom: 6,
-                    marginTop: 8,
-                    paddingLeft: 4,
-                  }}
-                >
-                  <Package size={14} style={{ color: "var(--success)" }} />
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "var(--text-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    {i.skills.categoryPlugins} ({filteredPlugins.length})
-                  </span>
-                </div>
-              )}
-              {filteredPlugins.map((plugin) => (
-                <div key={plugin.id} className="card card-hover" style={{ padding: "14px 18px", marginBottom: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
-                      <div
-                        className="icon-box"
-                        style={{ background: "var(--success-subtle)", width: 34, height: 34, borderRadius: 6 }}
-                      >
-                        <Package size={15} style={{ color: "var(--success)" }} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600 }}>{plugin.name}</span>
-                          {plugin.version && (
-                            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>v{plugin.version}</span>
+                    <Package size={14} style={{ color: "var(--success)" }} />
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "var(--text-muted)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      {i.skills.categoryPlugins} ({filteredPlugins.length})
+                    </span>
+                  </div>
+                )}
+                {filteredPlugins.map((plugin) => (
+                  <div key={plugin.id} className="card card-hover" style={{ padding: "14px 18px", marginBottom: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
+                        <div
+                          className="icon-box"
+                          style={{ background: "var(--success-subtle)", width: 34, height: 34, borderRadius: 6 }}
+                        >
+                          <Package size={15} style={{ color: "var(--success)" }} />
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600 }}>{plugin.name}</span>
+                            {plugin.version && (
+                              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>v{plugin.version}</span>
+                            )}
+                          </div>
+                          {plugin.description && (
+                            <p
+                              style={{
+                                fontSize: 12,
+                                color: "var(--text-muted)",
+                                marginTop: 2,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {plugin.description}
+                            </p>
                           )}
                         </div>
-                        {plugin.description && (
-                          <p
-                            style={{
-                              fontSize: 12,
-                              color: "var(--text-muted)",
-                              marginTop: 2,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                        {plugin.source_url && (
+                          <span className="badge badge-accent" style={{ gap: 5 }}>
+                            <ExternalLink size={11} />
+                            GitHub
+                          </span>
+                        )}
+                        {!plugin.id.includes("@") && (
+                          <button
+                            className="btn btn-danger-ghost btn-icon-sm"
+                            onClick={() => handleDeletePlugin(plugin)}
+                            title={locale === "zh" ? "删除" : "Delete"}
                           >
-                            {plugin.description}
-                          </p>
+                            <Trash2 size={14} />
+                          </button>
                         )}
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                      {plugin.source_url && (
-                        <span className="badge badge-accent" style={{ gap: 5 }}>
-                          <ExternalLink size={11} />
-                          GitHub
-                        </span>
-                      )}
-                      {!plugin.id.includes("@") && (
-                        <button
-                          className="btn btn-danger-ghost btn-icon-sm"
-                          onClick={() => handleDeletePlugin(plugin)}
-                          title={locale === "zh" ? "删除" : "Delete"}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Empty */}
-          {filteredSkills.length === 0 && filteredPlugins.length === 0 && (
-            <EmptyState
-              icon={<Zap size={28} style={{ color: "var(--text-muted)" }} />}
-              title={
-                search
-                  ? locale === "zh"
-                    ? "未找到匹配结果"
-                    : "No results found"
-                  : category === "plugin"
-                    ? i.skills.noPlugins
-                    : i.skills.noSkills
-              }
-              description={
-                search
-                  ? locale === "zh"
-                    ? "尝试其他关键词"
-                    : "Try different keywords"
-                  : category === "plugin"
-                    ? i.skills.noPluginsTip
-                    : i.skills.noSkillsTip
-              }
+                ))}
+              </div>
+            )}
+            {/* Empty */}
+            {filteredSkills.length === 0 && filteredPlugins.length === 0 && (
+              <EmptyState
+                icon={<Zap size={28} style={{ color: "var(--text-muted)" }} />}
+                title={
+                  search
+                    ? locale === "zh"
+                      ? "未找到匹配结果"
+                      : "No results found"
+                    : category === "plugin"
+                      ? i.skills.noPlugins
+                      : i.skills.noSkills
+                }
+                description={
+                  search
+                    ? locale === "zh"
+                      ? "尝试其他关键词"
+                      : "Try different keywords"
+                    : category === "plugin"
+                      ? i.skills.noPluginsTip
+                      : i.skills.noSkillsTip
+                }
+              />
+            )}
+          </div>
+        }
+        detail={
+          selectedSkill ? (
+            <SkillsDetailPanel
+              selectedSkill={selectedSkill}
+              skillContent={skillContent}
+              loadingContent={loadingContent}
+              editingSkill={editingSkill}
+              syncedSkills={syncedSkills}
+              setSyncedSkills={setSyncedSkills}
+              tools={tools}
+              skillSyncMethod={skillSyncMethod}
+              handleToggleSkill={handleToggleSkill}
+              handleDeleteSkill={handleDeleteSkill}
+              setEditingSkill={setEditingSkill}
+              setSelectedSkill={setSelectedSkill}
+              copySkillBetweenToolsMutation={copySkillBetweenToolsMutation}
+              removeSyncedSkillMutation={removeSyncedSkillMutation}
+              locale={locale}
+              i={i}
             />
-          )}
-        </div>
-        {/* Detail Panel */}
-        {selectedSkill && (
-          <SkillsDetailPanel
-            selectedSkill={selectedSkill}
-            skillContent={skillContent}
-            loadingContent={loadingContent}
-            editingSkill={editingSkill}
-            syncedSkills={syncedSkills}
-            setSyncedSkills={setSyncedSkills}
-            tools={tools}
-            skillSyncMethod={skillSyncMethod}
-            handleToggleSkill={handleToggleSkill}
-            handleDeleteSkill={handleDeleteSkill}
-            setEditingSkill={setEditingSkill}
-            setSelectedSkill={setSelectedSkill}
-            copySkillBetweenToolsMutation={copySkillBetweenToolsMutation}
-            removeSyncedSkillMutation={removeSyncedSkillMutation}
-            locale={locale}
-            i={i}
-          />
-        )}
-      </div>
+          ) : undefined
+        }
+      />
       <SkillsConfirmDialogs
         pendingDelete={pendingDelete}
         setPendingDelete={setPendingDelete}

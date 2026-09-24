@@ -7,6 +7,8 @@ import LoadingState from "../components/states/LoadingState";
 import CircuitBreakerPanel from "../components/CircuitBreakerPanel";
 import FailoverQueueManager from "../components/FailoverQueueManager";
 import { useSaveProxyAdvancedConfigMutation } from "../hooks/mutations";
+import { Input } from "../components/ui/input";
+import { SimpleSelect } from "../components/ui/simple-select";
 
 interface MappingRule {
   from: string;
@@ -374,7 +376,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                     </label>
                     {config.modelMapperRules.map((rule, idx) => (
                       <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-                        <input
+                        <Input
                           className="input input-sm"
                           style={{ width: 160 }}
                           placeholder={i.proxyAdvanced.fromModel}
@@ -386,7 +388,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                           }}
                         />
                         <ArrowRight size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                        <input
+                        <Input
                           className="input input-sm"
                           style={{ width: 160 }}
                           placeholder={i.proxyAdvanced.toModel}
@@ -397,19 +399,20 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                             update({ modelMapperRules: rules });
                           }}
                         />
-                        <select
-                          className="input input-sm"
-                          style={{ width: 100 }}
+                        <SimpleSelect
+                          className="h-7 w-[100px]"
                           value={rule.matchMode}
-                          onChange={(e) => {
+                          ariaLabel={i.proxyAdvanced.mappingRules}
+                          options={[
+                            { value: "contains", label: "Contains" },
+                            { value: "exact", label: "Exact" },
+                          ]}
+                          onValueChange={(value) => {
                             const rules = [...config.modelMapperRules];
-                            rules[idx] = { ...rule, matchMode: e.target.value as "contains" | "exact" };
+                            rules[idx] = { ...rule, matchMode: value as "contains" | "exact" };
                             update({ modelMapperRules: rules });
                           }}
-                        >
-                          <option value="contains">Contains</option>
-                          <option value="exact">Exact</option>
-                        </select>
+                        />
                         <button
                           className="btn btn-ghost btn-icon-sm"
                           onClick={() => {

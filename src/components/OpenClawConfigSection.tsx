@@ -5,6 +5,8 @@ import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
 import EmptyState from "./states/EmptyState";
 import LoadingState from "./states/LoadingState";
+import { Input } from "./ui/input";
+import { SimpleSelect } from "./ui/simple-select";
 import {
   buildStructuredConfig,
   createDefaultStructuredFields,
@@ -77,8 +79,7 @@ function OpenClawTextFieldComponent({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <label className="field-label">{label}</label>
-      <input
-        className="input"
+      <Input
         type={type}
         value={value}
         placeholder={placeholder}
@@ -94,17 +95,12 @@ function OpenClawSelectFieldComponent({ label, value, options, onValueChange }: 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <label className="field-label">{label}</label>
-      <select
-        className="input"
+      <SimpleSelect
         value={value}
-        onChange={(event: ChangeEvent<HTMLSelectElement>) => onValueChange(event.target.value as OpenClawApiProtocol)}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        onValueChange={(nextValue) => onValueChange(nextValue as OpenClawApiProtocol)}
+        options={options.map((option) => ({ value: option, label: option }))}
+        ariaLabel={label}
+      />
     </div>
   );
 }

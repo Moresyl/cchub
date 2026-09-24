@@ -8,6 +8,7 @@ import ProfileTargetToolToggle from "../../components/ProfileTargetToolToggle";
 import ModelSelector, { type ModelInfo } from "../../components/ModelSelector";
 import LoadingState from "../../components/states/LoadingState";
 import { CheckboxField } from "../../components/ui/checkbox-field";
+import { SimpleSelect } from "../../components/ui/simple-select";
 import { getPresetCategories, type StructuredDraftFields } from "../../lib/configProfiles";
 import {
   FIELD_STACK_STYLE,
@@ -113,7 +114,7 @@ interface ProfileBasicInfoSectionProps {
   syncTargetsLocked: boolean;
   draftTargetTools: string[];
   structuredInstalledTools: DetectedTool[];
-  onToolChange: (event: ChangeEvent<HTMLSelectElement>) => void;
+  onToolChange: (value: string) => void;
   onNameChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onToggleDraftTargetTool: (toolId: string) => void;
 }
@@ -137,19 +138,14 @@ export const ProfileBasicInfoSection = memo(function ProfileBasicInfoSection({
       <SectionTitle>{locale === "zh" ? "基本信息" : "Basic Info"}</SectionTitle>
       <div style={TWO_COLUMN_GRID_STYLE}>
         <Field label={locale === "zh" ? "工具" : "Tool"}>
-          <select
-            className="input"
+          <SimpleSelect
             value={draftTool}
             disabled={syncTargetsLocked}
-            onChange={onToolChange}
-            style={SMALL_INPUT_STYLE}
-          >
-            {tools.map((tool) => (
-              <option key={tool.id} value={tool.id}>
-                {tool.name}
-              </option>
-            ))}
-          </select>
+            onValueChange={onToolChange}
+            ariaLabel={locale === "zh" ? "工具" : "Tool"}
+            options={tools.map((tool) => ({ value: tool.id, label: tool.name }))}
+            className="h-7"
+          />
         </Field>
         <Field label={locale === "zh" ? "配置名称" : "Name"}>
           <TextInput

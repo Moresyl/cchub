@@ -14,6 +14,8 @@ import { getLocale } from "../lib/i18n";
 import { fetchLogsPageData, queryKeys } from "../hooks/queries";
 import { useDeleteModelPricingMutation, useSaveModelPricingMutation } from "../hooks/mutations";
 import { CheckboxField } from "../components/ui/checkbox-field";
+import { Input } from "../components/ui/input";
+import { SimpleSelect } from "../components/ui/simple-select";
 
 interface ActivityItem {
   id: number;
@@ -568,21 +570,16 @@ export default function Logs() {
               label={uiText("自动刷新", "Auto Refresh", "自動更新")}
               className="text-[12px] text-[var(--text-secondary)]"
             />
-            <select
-              className="input"
+            <SimpleSelect
               value={String(autoRefreshInterval)}
-              onChange={(event) =>
-                setAutoRefreshInterval(Number(event.target.value) as (typeof AUTO_REFRESH_INTERVALS)[number])
+              onValueChange={(value) =>
+                setAutoRefreshInterval(Number(value) as (typeof AUTO_REFRESH_INTERVALS)[number])
               }
               disabled={!autoRefreshEnabled}
-              style={{ width: 96, fontSize: 12 }}
-            >
-              {AUTO_REFRESH_INTERVALS.map((seconds) => (
-                <option key={seconds} value={seconds}>
-                  {seconds}s
-                </option>
-              ))}
-            </select>
+              className="w-24"
+              ariaLabel={uiText("刷新间隔", "Refresh interval", "更新間隔")}
+              options={AUTO_REFRESH_INTERVALS.map((seconds) => ({ value: String(seconds), label: `${seconds}s` }))}
+            />
             {autoRefreshEnabled && (
               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                 {refreshing
@@ -605,44 +602,41 @@ export default function Logs() {
             marginBottom: 12,
           }}
         >
-          <select
-            className="input"
+          <SimpleSelect
             value={proxyFilters.toolId}
-            onChange={(event) => setProxyFilters((current) => ({ ...current, toolId: event.target.value }))}
-          >
-            <option value="">{uiText("全部应用", "All Apps", "すべてのアプリ")}</option>
-            {Object.entries(TOOL_LABELS).map(([toolId, label]) => (
-              <option key={toolId} value={toolId}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="input"
+            onValueChange={(value) => setProxyFilters((current) => ({ ...current, toolId: value }))}
+            ariaLabel={uiText("应用筛选", "App filter", "アプリ絞り込み")}
+            options={[
+              { value: "", label: uiText("全部应用", "All Apps", "すべてのアプリ") },
+              ...Object.entries(TOOL_LABELS).map(([value, label]) => ({ value, label })),
+            ]}
+          />
+          <SimpleSelect
             value={proxyFilters.status}
-            onChange={(event) => setProxyFilters((current) => ({ ...current, status: event.target.value }))}
-          >
-            <option value="all">{uiText("全部状态", "All Statuses", "すべての状態")}</option>
-            <option value="success">{uiText("仅成功", "Success Only", "成功のみ")}</option>
-            <option value="error">{uiText("仅错误", "Errors Only", "エラーのみ")}</option>
-          </select>
-          <select
-            className="input"
+            onValueChange={(value) => setProxyFilters((current) => ({ ...current, status: value }))}
+            ariaLabel={uiText("状态筛选", "Status filter", "状態絞り込み")}
+            options={[
+              { value: "all", label: uiText("全部状态", "All Statuses", "すべての状態") },
+              { value: "success", label: uiText("仅成功", "Success Only", "成功のみ") },
+              { value: "error", label: uiText("仅错误", "Errors Only", "エラーのみ") },
+            ]}
+          />
+          <SimpleSelect
             value={proxyFilters.streamMode}
-            onChange={(event) => setProxyFilters((current) => ({ ...current, streamMode: event.target.value }))}
-          >
-            <option value="all">{uiText("全部模式", "All Modes", "すべてのモード")}</option>
-            <option value="streaming">{uiText("仅流式", "Streaming Only", "ストリームのみ")}</option>
-            <option value="non_streaming">{uiText("仅非流式", "Non-stream Only", "非ストリームのみ")}</option>
-          </select>
-          <input
-            className="input"
+            onValueChange={(value) => setProxyFilters((current) => ({ ...current, streamMode: value }))}
+            ariaLabel={uiText("模式筛选", "Mode filter", "モード絞り込み")}
+            options={[
+              { value: "all", label: uiText("全部模式", "All Modes", "すべてのモード") },
+              { value: "streaming", label: uiText("仅流式", "Streaming Only", "ストリームのみ") },
+              { value: "non_streaming", label: uiText("仅非流式", "Non-stream Only", "非ストリームのみ") },
+            ]}
+          />
+          <Input
             value={proxyFilters.providerQuery}
             onChange={(event) => setProxyFilters((current) => ({ ...current, providerQuery: event.target.value }))}
             placeholder={uiText("筛选 Provider 名称", "Filter provider", "Provider 名で絞り込み")}
           />
-          <input
-            className="input"
+          <Input
             value={proxyFilters.modelQuery}
             onChange={(event) => setProxyFilters((current) => ({ ...current, modelQuery: event.target.value }))}
             placeholder={uiText("筛选模型", "Filter model", "モデルで絞り込み")}

@@ -21,7 +21,7 @@ export interface BuildEditorPropsInput {
   isStructured: boolean;
   draftTargetTools: string[];
   structuredInstalledTools: DetectedTool[];
-  handleDraftToolChange: (event: ChangeEvent<HTMLSelectElement>) => void;
+  handleDraftToolChange: (value: string) => void;
   handleDraftNameChange: (event: ChangeEvent<HTMLInputElement>) => void;
   handleToggleDraftTargetTool: (toolId: string) => void;
   presetCategories: ReturnType<typeof getPresetCategories>;

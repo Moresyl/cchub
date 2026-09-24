@@ -34,6 +34,8 @@ The compact neutral light/dark workspace has a collapsible sidebar and `Ctrl+K` 
 | --------------------------------------------------- | ----------------------------------------------------- |
 | ![CCHub dark workspace](screenshots/dark-theme.png) | ![CCHub light workspace](screenshots/light-theme.png) |
 
+Screenshots are from the desktop app; the example endpoint has been anonymized.
+
 ### Configuration editor
 
 ![CCHub configuration editor with structured options and syntax highlighting](screenshots/profile-editor.png)

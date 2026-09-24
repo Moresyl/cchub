@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Edit3, Trash2, Zap } from "lucide-react";
+import { Switch } from "./ui/switch";
 
 export interface SkillCardSkill {
   id: string;
@@ -122,41 +123,15 @@ function SkillCardComponent({
           )}
           {skill.file_path && (
             <>
-              <button
+              <Switch
+                checked={!isDisabled}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onToggle(skill);
                 }}
+                onCheckedChange={() => onToggle(skill)}
                 title={isDisabled ? enableTitle : disableTitle}
                 aria-label={isDisabled ? enableTitle : disableTitle}
-                aria-pressed={!isDisabled}
-                style={{
-                  position: "relative",
-                  width: 40,
-                  height: 22,
-                  borderRadius: 11,
-                  border: "none",
-                  cursor: "pointer",
-                  background: isDisabled ? "var(--border-strong)" : "var(--success)",
-                  transition: "background 0.2s",
-                  padding: 0,
-                  flexShrink: 0,
-                }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    top: 2,
-                    left: isDisabled ? 2 : 20,
-                    width: 18,
-                    height: 18,
-                    borderRadius: "50%",
-                    background: "#fff",
-                    transition: "left 0.2s",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                  }}
-                />
-              </button>
+              />
               <button
                 className="btn btn-ghost btn-icon-sm"
                 onClick={(event) => {

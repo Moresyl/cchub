@@ -1,0 +1,23 @@
+@font-face {
+  font-family: "CCHub Sans";
+  src: url("../assets/fonts/cchub-sans-regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "CCHub Sans";
+  src: url("../assets/fonts/cchub-sans-medium.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 510;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "CCHub Sans";
+  src: url("../assets/fonts/cchub-sans-semibold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 590;
+  font-display: swap;
+}

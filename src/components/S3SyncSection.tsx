@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { CheckCircle, Cloud, Download, Loader2, RefreshCw, Save, Upload, Wifi } from "lucide-react";
+import { Cloud, Download, Loader2, RefreshCw, Save, Upload, Wifi } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { Switch } from "./ui/switch";
 
 interface S3SyncSettings {
   enabled: boolean;
@@ -280,16 +281,10 @@ function Toggle({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <button
-      className="btn btn-secondary btn-sm"
-      type="button"
-      disabled={disabled}
-      aria-pressed={value}
-      onClick={() => onChange(!value)}
-    >
-      <CheckCircle size={13} style={{ color: value ? "var(--success)" : "var(--text-muted)" }} />
-      {label}
-    </button>
+    <label className="inline-flex min-h-8 items-center gap-2.5 rounded-lg border border-[var(--border-default)] bg-[var(--control-background)] px-2.5 text-xs font-medium text-[var(--text-secondary)]">
+      <Switch checked={value} disabled={disabled} onCheckedChange={onChange} aria-label={label} />
+      <span>{label}</span>
+    </label>
   );
 }
 

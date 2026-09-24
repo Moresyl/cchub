@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown, ArrowUp, Check, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
 import { SimpleSelect } from "./ui/simple-select";
+import { Switch } from "./ui/switch";
 
 type AppType = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes";
 interface QueueItem {
@@ -107,14 +108,15 @@ export default function FailoverQueueManager({ appType }: { appType?: AppType })
             )}
           </div>
         </div>
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={() => void toggle()}
-          disabled={loading}
-          aria-pressed={enabled}
-        >
-          <Check size={13} /> {enabled ? text("已启用", "Enabled") : text("已停用", "Disabled")}
-        </button>
+        <div className="flex shrink-0 items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
+          <span>{enabled ? text("已启用", "Enabled") : text("已停用", "Disabled")}</span>
+          <Switch
+            checked={enabled}
+            onCheckedChange={() => void toggle()}
+            disabled={loading}
+            aria-label={text("自动故障转移", "Automatic failover")}
+          />
+        </div>
       </div>
       <SimpleSelect
         value={selectedApp}

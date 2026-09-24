@@ -189,8 +189,17 @@ a:focus-visible,
 button:not([role="combobox"]):not([role="menuitem"]):focus-visible,
 [role="button"]:not([role="menuitem"]):focus-visible,
 [tabindex]:not([role="combobox"]):not([role="option"]):not([role="menuitem"]):focus-visible {
-  outline: 2px solid var(--focus-ring) !important;
+  outline: 1px solid var(--control-border-focus) !important;
   outline-offset: 2px;
+}
+
+[data-slot="button"]:focus-visible,
+[data-slot="checkbox"]:focus-visible,
+[data-slot="switch"]:focus-visible,
+[data-slot="select-trigger"]:focus-visible,
+[data-slot="dialog-content"]:focus-visible,
+[data-slot="popover-content"]:focus-visible {
+  outline: none !important;
 }
 
 [role="option"]:focus-visible,

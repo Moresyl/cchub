@@ -9,6 +9,7 @@ import FailoverQueueManager from "../components/FailoverQueueManager";
 import { useSaveProxyAdvancedConfigMutation } from "../hooks/mutations";
 import { Input } from "../components/ui/input";
 import { SimpleSelect } from "../components/ui/simple-select";
+import { Switch } from "../components/ui/switch";
 
 interface MappingRule {
   from: string;
@@ -682,33 +683,7 @@ function ToggleRow({
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{label}</div>
         <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{description}</div>
       </div>
-      <button
-        onClick={() => onChange(!checked)}
-        style={{
-          position: "relative",
-          width: 36,
-          height: 20,
-          borderRadius: 10,
-          border: "none",
-          cursor: "pointer",
-          background: checked ? "var(--accent)" : "var(--border-default)",
-          transition: "background 0.2s",
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            position: "absolute",
-            top: 2,
-            left: checked ? 18 : 2,
-            width: 16,
-            height: 16,
-            borderRadius: "50%",
-            background: "#fff",
-            transition: "left 0.2s",
-          }}
-        />
-      </button>
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
     </div>
   );
 }

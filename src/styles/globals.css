@@ -1,12 +1,12 @@
 @import "tailwindcss";
+@import "./_fonts.css";
 
-/* CCHub 全局样式入口 —— 按职责拆分到 _tokens / _layout / _components / _forms /
+/* CCHub 全局样式入口 —— 按职责拆分到 _tokens / _layout / _components /
    _content / _utilities / _mdxeditor，原 1257 行单文件分散到多个 <300 行模块。
    维持原顺序保证 cascade 一致，避免任何视觉回归。 */
 @import "./_tokens.css";
 @import "./_layout.css";
 @import "./_components.css";
-@import "./_forms.css";
 @import "./_content.css";
 @import "./_utilities.css";
 @import "./_mdxeditor.css";

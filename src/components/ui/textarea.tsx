@@ -3,7 +3,7 @@ import { cn } from "../../lib/cn";
 
 export const Textarea = forwardRef<HTMLTextAreaElement, ComponentPropsWithoutRef<"textarea">>(
   ({ className, ...props }, ref) => (
-    <textarea ref={ref} className={cn("input min-h-24 resize-y", className)} {...props} />
+    <textarea ref={ref} data-slot="textarea" className={cn("input min-h-24 resize-y", className)} {...props} />
   ),
 );
 Textarea.displayName = "Textarea";

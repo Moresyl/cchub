@@ -4,6 +4,7 @@ import type { Locale } from "../lib/i18n";
 import SettingsManagedBackupRow, { type SettingsManagedBackupRowBackup } from "./SettingsManagedBackupRow";
 import EmptyState from "./states/EmptyState";
 import LoadingState from "./states/LoadingState";
+import { Switch } from "./ui/switch";
 
 interface SettingsBackupManagementSectionProps {
   locale: Locale;
@@ -88,13 +89,12 @@ function SettingsBackupManagementSectionComponent({
                   )
                 : uiText(locale, "未启用", "Disabled", "無効")}
             </div>
-            <button
-              className={`toggle ${autoBackupEnabled ? "on" : "off"}`}
-              onClick={onToggleAutoBackup}
+            <Switch
+              checked={autoBackupEnabled}
+              onCheckedChange={() => void onToggleAutoBackup()}
               disabled={savingBackupPreferences}
-            >
-              <div className="toggle-knob" />
-            </button>
+              aria-label={uiText(locale, "每小时自动备份", "Hourly auto backup", "毎時自動バックアップ")}
+            />
           </div>
         </div>
 

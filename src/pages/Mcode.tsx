@@ -15,6 +15,7 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
 import { getLocale } from "../lib/i18n";
 import {
@@ -287,15 +288,16 @@ export default function Mcode() {
                   onChange={(event) => setDraft({ ...draft, models: event.target.value })}
                 />
               </label>
-              <Button
-                variant={draft.enabled ? "secondary" : "ghost"}
-                size="sm"
-                aria-pressed={draft.enabled}
-                onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
-              >
-                <Check size={14} className={draft.enabled ? "opacity-100" : "opacity-0"} />
-                {label("启用", "Enabled", "有効")}
-              </Button>
+              <div className="flex min-h-8 items-center justify-between gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--control-background)] px-3">
+                <span className="text-xs font-medium text-[var(--text-secondary)]">
+                  {label("启用供应商", "Enable provider", "プロバイダーを有効化")}
+                </span>
+                <Switch
+                  checked={draft.enabled}
+                  onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
+                  aria-label={label("启用供应商", "Enable provider", "プロバイダーを有効化")}
+                />
+              </div>
               {error && (
                 <p role="alert" className="text-xs text-[var(--danger)]">
                   {error}

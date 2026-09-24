@@ -13,15 +13,16 @@ export const SelectTrigger = forwardRef<
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
+    data-slot="select-trigger"
     className={cn(
-      "flex h-[var(--control-height-md)] w-full items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2.5 text-xs font-medium text-foreground shadow-[0_1px_2px_-1px_rgba(0,0,0,0.08)] outline-none backdrop-blur-lg transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:outline-none focus-visible:ring-0 data-[state=open]:border-[var(--control-border-focus)] data-[state=open]:bg-[var(--control-background-hover)] disabled:cursor-default disabled:opacity-25 [&>span]:truncate",
+      "flex h-[var(--control-height-sm)] w-full items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2 text-xs font-[510] text-foreground outline-none transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--control-border-focus)] data-[state=open]:border-[var(--control-border-focus)] data-[state=open]:bg-[var(--control-background-hover)] disabled:cursor-default disabled:opacity-25 [&>span]:truncate",
       className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown size={14} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+      <ChevronDown size={12} className="shrink-0 text-muted-foreground" aria-hidden="true" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -63,8 +64,9 @@ export const SelectContent = forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       position={position}
+      data-slot="select-content"
       className={cn(
-        "relative z-[2100] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[8rem] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-card-solid)] text-foreground shadow-[var(--shadow-xl)] data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
+        "relative z-[2100] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[8rem] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-card-solid)] text-foreground shadow-[var(--shadow-popover)] outline-none data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className,
@@ -98,7 +100,7 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex min-h-8 w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-3 text-sm outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[var(--bg-card-hover)] data-[state=checked]:font-semibold data-[disabled]:opacity-25",
+      "relative flex min-h-9 w-full cursor-default select-none items-center gap-1.5 rounded-lg py-2 pl-8 pr-3 text-sm text-secondary-foreground outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[var(--bg-card-hover)] data-[highlighted]:text-foreground data-[state=checked]:font-[590] data-[disabled]:opacity-25",
       className,
     )}
     {...props}

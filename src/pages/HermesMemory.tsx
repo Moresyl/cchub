@@ -5,6 +5,7 @@ import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import MarkdownEditor from "../components/MarkdownEditor";
 import LoadingState from "../components/states/LoadingState";
+import { Switch } from "../components/ui/switch";
 import { useSaveHermesMemoryContentMutation, useToggleHermesMemoryEnabledMutation } from "../hooks/mutations";
 
 type MemoryKind = "memory" | "user";
@@ -124,37 +125,16 @@ function HermesMemory() {
           </button>
         </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
             {currentEnabled ? i.hermesMemory.enabled : i.hermesMemory.disabled}
           </span>
-          <button
-            onClick={() => void handleToggle(!currentEnabled)}
-            style={{
-              position: "relative",
-              width: 36,
-              height: 20,
-              borderRadius: 10,
-              border: "none",
-              cursor: "pointer",
-              background: currentEnabled ? "var(--accent)" : "var(--border-default)",
-              transition: "background 0.2s",
-            }}
-          >
-            <span
-              style={{
-                position: "absolute",
-                top: 2,
-                left: currentEnabled ? 18 : 2,
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                background: "#fff",
-                transition: "left 0.2s",
-              }}
-            />
-          </button>
-        </label>
+          <Switch
+            checked={currentEnabled}
+            onCheckedChange={(checked) => void handleToggle(checked)}
+            aria-label={currentEnabled ? i.hermesMemory.enabled : i.hermesMemory.disabled}
+          />
+        </div>
       </div>
 
       {/* Editor area */}

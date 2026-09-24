@@ -1,5 +1,6 @@
 import { memo, useCallback, type ChangeEvent } from "react";
 import { Copy, type LucideIcon } from "lucide-react";
+import { Switch } from "../ui/switch";
 
 export interface WebDavSyncSettings {
   enabled: boolean;
@@ -160,9 +161,7 @@ function WebDavToggleCardComponent({ title, description, enabled, disabled, onTo
         }}
       >
         <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{description}</div>
-        <button className={`toggle ${enabled ? "on" : "off"}`} onClick={onToggle} disabled={disabled}>
-          <div className="toggle-knob" />
-        </button>
+        <Switch checked={enabled} onCheckedChange={onToggle} disabled={disabled} aria-label={title} />
       </div>
     </div>
   );

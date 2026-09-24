@@ -16,8 +16,9 @@ export const PopoverContent = forwardRef<
       align={align}
       sideOffset={sideOffset}
       collisionPadding={collisionPadding}
+      data-slot="popover-content"
       className={cn(
-        "z-[2200] rounded-xl border border-[var(--border-strong)] bg-[var(--bg-card-solid)] text-foreground shadow-[var(--shadow-xl)] outline-none data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
+        "z-[2200] rounded-xl border border-[var(--border-strong)] bg-[var(--bg-card-solid)] text-foreground shadow-[var(--shadow-popover)] outline-none data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
         className,
       )}
       {...props}

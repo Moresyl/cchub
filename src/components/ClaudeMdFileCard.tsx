@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { FileText, Pencil, Trash2 } from "lucide-react";
+import { Switch } from "./ui/switch";
 
 interface ClaudeMdFileCardItem {
   path: string;
@@ -53,7 +54,15 @@ function ClaudeMdFileCardComponent({
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
               {file.project_name}
             </span>
             {file.disabled && (
@@ -62,58 +71,37 @@ function ClaudeMdFileCardComponent({
               </span>
             )}
             <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{sizeLabel}</span>
-            {file.modified_at && (
-              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{file.modified_at}</span>
-            )}
+            {file.modified_at && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{file.modified_at}</span>}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              marginTop: 3,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {metaLabel}
           </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => onEdit(file)}
-          >
-            <Pencil size={13} />{editLabel}
+          <button className="btn btn-secondary btn-sm" onClick={() => onEdit(file)}>
+            <Pencil size={13} />
+            {editLabel}
           </button>
 
-          <button
-            onClick={() => onToggle(file)}
+          <Switch
+            checked={!file.disabled}
+            onCheckedChange={() => onToggle(file)}
             disabled={toggling}
             title={file.disabled ? enableTitle : disableTitle}
-            style={{
-              position: "relative",
-              width: 40,
-              height: 22,
-              borderRadius: 11,
-              border: "none",
-              cursor: toggling ? "wait" : "pointer",
-              background: file.disabled ? "var(--border-strong)" : "var(--success)",
-              transition: "background 0.2s",
-              padding: 0,
-              flexShrink: 0,
-            }}
-          >
-            <span style={{
-              position: "absolute",
-              top: 2,
-              left: file.disabled ? 2 : 20,
-              width: 18,
-              height: 18,
-              borderRadius: "50%",
-              background: "#fff",
-              transition: "left 0.2s",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-            }} />
-          </button>
+            aria-label={file.disabled ? enableTitle : disableTitle}
+          />
 
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            title={deleteTitle}
-            onClick={() => onDelete(file)}
-          >
+          <button className="btn btn-ghost btn-icon-sm" title={deleteTitle} onClick={() => onDelete(file)}>
             <Trash2 size={14} style={{ color: "var(--danger)" }} />
           </button>
         </div>

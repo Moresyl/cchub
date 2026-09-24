@@ -1,4 +1,5 @@
 import { memo, type ReactNode } from "react";
+import { Switch } from "./ui/switch";
 
 interface SettingsToggleRowProps {
   title: string;
@@ -26,13 +27,7 @@ function SettingsToggleRowComponent({
         </div>
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{description}</p>
       </div>
-      <button
-        className={`toggle ${enabled ? "on" : "off"}`}
-        onClick={onToggle}
-        disabled={disabled}
-      >
-        <div className="toggle-knob" />
-      </button>
+      <Switch checked={enabled} onCheckedChange={() => void onToggle()} disabled={disabled} aria-label={title} />
     </div>
   );
 }

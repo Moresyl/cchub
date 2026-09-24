@@ -297,32 +297,37 @@
   font-family: inherit;
 }
 
+.btn:focus-visible {
+  outline: 1px solid var(--control-border-focus);
+  outline-offset: 2px;
+}
+
 .btn:disabled {
   cursor: default;
   opacity: 0.25;
 }
 
 .btn-md {
-  min-height: var(--control-height-lg);
-  padding: 0 14px;
-  font-size: 13px;
+  min-height: var(--control-height-md);
+  padding: 0 12px;
+  font-size: 12px;
   border-radius: var(--control-radius);
 }
 .btn-sm {
-  min-height: var(--control-height-md);
-  padding: 0 10px;
+  min-height: var(--control-height-sm);
+  padding: 0 9px;
   font-size: 12px;
   border-radius: var(--control-radius);
 }
 .btn-xs {
-  min-height: var(--control-height-sm);
-  padding: 0 8px;
+  min-height: var(--control-height-2xs);
+  padding: 0 6px;
   font-size: 11px;
   border-radius: var(--control-radius);
 }
 .btn-icon {
-  width: var(--control-height-lg);
-  height: var(--control-height-lg);
+  width: var(--control-height-md);
+  height: var(--control-height-md);
   padding: 0;
   justify-content: center;
   border-radius: var(--control-radius);
@@ -424,8 +429,8 @@
 .input {
   width: 100%;
   min-width: 0;
-  height: var(--control-height-md);
-  padding: 0 10px;
+  height: var(--control-height-sm);
+  padding: 0 8px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
   outline: none;
@@ -435,9 +440,7 @@
   font-size: 12px;
   font-weight: 400;
   line-height: 1.5;
-  box-shadow: 0 1px 2px -1px rgba(0, 0, 0, 0.08);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  box-shadow: none;
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease,
@@ -453,7 +456,7 @@
 .input:focus-visible {
   border-color: var(--control-border-focus);
   outline: none !important;
-  box-shadow: 0 0 0 1px var(--control-border-focus);
+  box-shadow: inset 0 0 0 0.5px var(--control-border-focus);
 }
 .input:disabled {
   cursor: default;
@@ -478,12 +481,12 @@ textarea.input {
 }
 
 .input-compact {
-  height: var(--control-height-sm);
+  height: var(--control-height-3xs);
   padding-inline: 8px;
 }
 
 .input-large {
-  height: var(--control-height-lg);
+  height: var(--control-height-md);
   font-size: 13px;
 }
 
@@ -565,15 +568,16 @@ select.input option {
   gap: 8px;
   width: 100%;
   min-width: 0;
-  height: 36px;
-  padding: 0 9px;
+  height: var(--control-height-sm);
+  padding: 0 8px;
   border: 1px solid var(--control-border);
-  border-radius: 8px;
+  border-radius: var(--control-radius);
   outline: none;
-  background: var(--bg-input);
+  background: var(--control-background);
   color: var(--text-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 510;
   text-align: left;
   transition:
     background-color 0.15s ease,
@@ -616,8 +620,8 @@ select.input option {
 
 .model-selector-clear {
   position: absolute;
-  top: 6px;
-  right: 25px;
+  top: 2px;
+  right: 23px;
   z-index: 1;
   width: 24px;
   height: 24px;
@@ -628,9 +632,9 @@ select.input option {
 }
 
 .model-selector-fallback {
-  height: 36px;
-  border-radius: 8px;
-  font-size: 13px;
+  height: var(--control-height-sm);
+  border-radius: var(--control-radius);
+  font-size: 12px;
 }
 
 .model-selector-popover {
@@ -649,7 +653,7 @@ select.input option {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
+  height: 34px;
   padding: 0 9px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-muted);
@@ -663,7 +667,7 @@ select.input option {
   background: transparent;
   color: var(--text-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   box-shadow: none !important;
 }
 
@@ -685,8 +689,8 @@ select.input option {
   align-items: center;
   gap: 7px;
   min-height: 36px;
-  padding: 6px 8px;
-  border-radius: 7px;
+  padding: 8px 10px;
+  border-radius: 8px;
   outline: none;
   color: var(--text-secondary);
   cursor: default;

@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { Switch } from "./ui/switch";
 
 export interface McpClientAccessRowServer {
   id: string;
@@ -30,13 +31,11 @@ function McpClientAccessRowComponent({
         <span style={{ fontSize: 13, fontWeight: 500 }}>{server.name}</span>
       </div>
       {editing ? (
-        <button
-          className={`toggle ${hasAccess ? "on" : "off"}`}
-          onClick={() => onToggle(server.id)}
-          style={{ width: 36, height: 20 }}
-        >
-          <div className="toggle-knob" style={{ width: 14, height: 14, top: 3 }} />
-        </button>
+        <Switch
+          checked={hasAccess}
+          onCheckedChange={() => onToggle(server.id)}
+          aria-label={`${server.name}: ${hasAccess ? allowedLabel : deniedLabel}`}
+        />
       ) : (
         <span className={`badge ${hasAccess ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
           {hasAccess ? allowedLabel : deniedLabel}

@@ -24,7 +24,7 @@
 
 CCHub opens directly into configuration switching. Filter and search saved provider profiles by tool, see which profile is active, and apply another in one click. You can also create, edit, duplicate, ping, and stream-check profiles. Shared providers and project profiles remain available as advanced options.
 
-The compact neutral light/dark workspace has a collapsible sidebar and `Ctrl+K` quick switching. Configuration files, MCP servers, and Skills are secondary destinations. Former standalone pages such as Autopilot, session analytics, Marketplace, and security audit are no longer product entry points; upgrading does not delete existing configuration data.
+The compact neutral light/dark workspace uses a unified frameless desktop title bar, native window actions, a collapsible sidebar, and `Ctrl+K` quick switching. New profiles start from an official default or a blank custom template; existing saved profiles remain compatible. Configuration files, MCP servers, and Skills are secondary destinations. Former standalone pages such as Autopilot, session analytics, Marketplace, and security audit are no longer product entry points; upgrading does not delete existing configuration data.
 
 ---
 

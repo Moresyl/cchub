@@ -14,18 +14,21 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 统一桌面工作台字体：Windows 优先使用 Segoe UI Variable Text，中文回退微软雅黑 UI，代码与路径使用 Cascadia Code；启动画面和配置编辑器同步调整
-    - 调整侧边栏、顶部导航、配置切换首页和设置分组的层级与间距，设置项改用更轻的分隔线布局
-    - 配置切换、设置和通知中的按钮与选中状态进一步统一，保留已有的配置管理与编辑功能
+    - 新增统一的 36px 无边框桌面顶栏，将历史导航、侧栏开关、页面身份、项目切换和窗口操作收纳到同一层
+    - Windows 与 Linux 使用应用内最小化、最大化/还原和关闭按钮；macOS 保留原生交通灯并使用覆盖式标题栏
+    - 明暗主题改用系统桌面字体与中性灰阶：暗色侧栏为纯黑底层，内容面、控件面和文字层级按统一 token 对齐
+    - 新建配置的预设入口只展示官方默认值和空白自定义模板，减少无关选项
 
     ### 变更与安全
-    - 本版本仅调整桌面界面与交互，不修改数据库结构、配置格式、供应商协议或安装路径
-    - README 的明暗主题工作台及配置编辑器截图已更新为原生桌面包画面，示例端点已匿名化
+    - 为自定义标题栏增加最小化、最大化、关闭与拖动窗口权限；不扩大文件、网络或命令执行权限
+    - 已保存配置、数据库结构、配置格式、供应商协议和安装路径均未改变，无需迁移
+    - 旧配置仍可读取和编辑；本次仅精简新建页面中可选择的预设模板
 
     ### 问题修复与打磨
-    - 环境变量冲突横幅与通知改为顺序排布，避免提示覆盖页面标题和操作按钮
-    - 移除技术文本中未打包字体的硬编码引用，避免不同页面退回不一致的等宽字体
-    - 移除设置页重复标题，收紧部分按钮和标签状态；补充通知交互测试
+    - 移除 Windows 原生标题栏与应用工具栏叠加造成的双层顶部区域
+    - 最大化后窗口按钮会切换为“还原”状态，并在窗口尺寸变化时保持同步
+    - 收紧顶栏按钮、项目切换器和窗口控件尺寸，修复桌面顶栏偏厚及视觉层级不一致的问题
+    - 更新 README 明暗主题原生桌面截图，并对示例端点进行匿名化处理
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -33,9 +36,10 @@ env:
 
     ## English Summary
 
-    - Aligns the desktop UI with native Windows typography and gives code, paths, and JSON a consistent monospace stack.
-    - Refines the sidebar, top navigation, profile workspace, settings groups, and notification styling.
-    - Keeps conflict warnings and toasts in document flow so they do not cover actions; adds toast interaction tests.
+    - Adds a unified 36px frameless title bar with navigation, project switching, sidebar control, and native window actions.
+    - Uses the native macOS traffic lights while Windows and Linux receive in-app minimize, maximize/restore, and close controls.
+    - Aligns both themes to the desktop system font and a neutral surface palette.
+    - Limits new-profile templates to official defaults and blank custom entries while preserving existing saved profiles.
     - Refreshes anonymized desktop screenshots. Database and configuration formats are unchanged; no migration is required.
 
     ## 下载 / Download

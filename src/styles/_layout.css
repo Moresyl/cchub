@@ -2,12 +2,18 @@
 
 .app-layout {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
   width: 100%;
   height: 100vh;
-  padding: 4px;
   overflow: hidden;
   background: var(--bg-window);
+}
+
+.workspace-frame {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar-shell {
@@ -21,25 +27,9 @@
   height: 100%;
   overflow: hidden;
   background: var(--bg-sidebar);
-  border-radius: 8px;
+  border-radius: 0;
 }
 
-.sidebar-window-controls {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  height: 48px;
-  padding: 4px 8px;
-}
-
-.sidebar-history-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.sidebar-window-controls button,
 .sidebar-settings-link {
   width: 30px;
   height: 30px;
@@ -49,7 +39,7 @@
 .sidebar-primary-actions {
   display: grid;
   gap: 1px;
-  padding: 4px 8px 15px;
+  padding: 10px 8px 15px;
 }
 
 .sidebar-primary-action {
@@ -237,11 +227,6 @@
   min-width: 52px;
 }
 
-.sidebar-collapsed .sidebar-window-controls {
-  justify-content: center;
-  padding-inline: 7px;
-}
-
 .sidebar-collapsed .sidebar-primary-actions {
   padding-inline: 7px;
 }
@@ -296,38 +281,87 @@
   min-width: 0;
   overflow: hidden;
   background: var(--bg-app);
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  box-shadow: var(--shadow-sm);
+  border-left: 1px solid var(--border-subtle);
 }
 
-.topbar {
+.desktop-titlebar {
   display: flex;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  height: 48px;
-  padding: 0 16px 0 20px;
-  background: var(--bg-app);
+  width: 100%;
+  height: 36px;
+  user-select: none;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.topbar-title {
+.titlebar-sidebar-zone {
   display: flex;
-  min-width: 0;
+  flex: 0 0 var(--sidebar-width, 264px);
   align-items: center;
-  gap: 6px;
+  width: var(--sidebar-width, 264px);
+  min-width: var(--sidebar-width, 264px);
+  height: 36px;
+  padding: 0 8px;
+  background: var(--bg-sidebar);
+  transition:
+    width 0.16s ease,
+    min-width 0.16s ease,
+    flex-basis 0.16s ease;
+}
+
+.titlebar-sidebar-zone button,
+.topbar-actions > button {
+  width: 28px;
+  height: 28px;
   color: var(--text-muted);
 }
 
-.topbar-section {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.titlebar-sidebar-collapsed {
+  flex-basis: 52px;
+  width: 52px;
+  min-width: 52px;
+  padding-inline: 7px;
 }
 
-.topbar-page {
+.titlebar-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.titlebar-sidebar-drag,
+.titlebar-drag-spacer {
+  flex: 1;
+  align-self: stretch;
+}
+
+.titlebar-sidebar-toggle {
+  flex: 0 0 auto;
+}
+
+.titlebar-sidebar-collapsed .titlebar-history-actions {
+  display: none;
+}
+
+.titlebar-main-zone {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  height: 36px;
+  background: var(--bg-app);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.titlebar-page-identity {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  padding-left: 16px;
+}
+
+.titlebar-page-name {
   overflow: hidden;
   color: var(--text-primary);
   font-size: 13px;
@@ -336,11 +370,107 @@
   white-space: nowrap;
 }
 
+.titlebar-section-name {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar-section-name::before {
+  margin-right: 8px;
+  content: "·";
+}
+
 .topbar-actions {
   display: flex;
   flex-shrink: 0;
   align-items: center;
+  gap: 3px;
+  padding-left: 8px;
+}
+
+.project-profile-switcher {
+  display: flex;
+  align-items: center;
   gap: 4px;
+}
+
+.project-profile-trigger {
+  width: 168px;
+  height: 28px;
+  border-color: var(--border-subtle);
+  background: var(--bg-surface);
+  box-shadow: none;
+}
+
+.project-profile-switcher > button {
+  width: 28px;
+  height: 28px;
+}
+
+.window-controls {
+  display: flex;
+  align-self: stretch;
+  margin-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.window-controls .window-control-button {
+  width: 44px;
+  height: 35px;
+  padding: 0;
+  border-radius: 0;
+  color: var(--text-secondary);
+}
+
+.window-controls .window-control-button:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
+.window-controls .window-control-close:hover {
+  color: #ffffff;
+  background: #c42b1c;
+}
+
+.platform-macos .titlebar-sidebar-zone:not(.titlebar-sidebar-collapsed) {
+  padding-left: 78px;
+}
+
+.platform-macos .titlebar-sidebar-collapsed {
+  flex-basis: 80px;
+  width: 80px;
+  min-width: 80px;
+  padding-left: 48px;
+}
+
+.platform-macos .topbar-actions {
+  padding-right: 10px;
+}
+
+.topbar-actions {
+  color: var(--text-muted);
+}
+
+.topbar-actions button {
+  flex-shrink: 0;
+}
+
+.topbar-actions > * {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-page-identity,
+.titlebar-sidebar-drag,
+.titlebar-drag-spacer {
+  cursor: default;
+}
+
+.titlebar-main-zone {
+  background: var(--bg-app);
 }
 
 .env-warning-banner {
@@ -473,11 +603,6 @@
 }
 
 @media (max-width: 900px) {
-  .app-layout {
-    gap: 3px;
-    padding: 3px;
-  }
-
   .sidebar-shell {
     flex-basis: 220px;
     width: 220px;
@@ -488,6 +613,22 @@
     flex-basis: 52px;
     width: 52px;
     min-width: 52px;
+  }
+
+  .titlebar-sidebar-zone {
+    flex-basis: 220px;
+    width: 220px;
+    min-width: 220px;
+  }
+
+  .titlebar-sidebar-collapsed {
+    flex-basis: 52px;
+    width: 52px;
+    min-width: 52px;
+  }
+
+  .project-profile-trigger {
+    width: 142px;
   }
 
   .page-content {
@@ -517,8 +658,25 @@
     margin-top: 2px;
   }
 
-  .app-layout {
+  .workspace-frame {
     flex-direction: column;
+  }
+
+  .titlebar-sidebar-zone,
+  .titlebar-sidebar-collapsed {
+    flex-basis: 48px;
+    width: 48px;
+    min-width: 48px;
+  }
+
+  .titlebar-history-actions,
+  .titlebar-page-identity,
+  .project-profile-switcher {
+    display: none;
+  }
+
+  .titlebar-sidebar-toggle {
+    width: 34px;
   }
 
   .sidebar-shell,
@@ -532,7 +690,6 @@
     max-height: 94px;
   }
 
-  .sidebar-window-controls,
   .sidebar-context-footer,
   .sidebar-view-toolbar,
   .sidebar-tree-heading {
@@ -586,17 +743,8 @@
     display: inline;
   }
 
-  .main-area {
-    border-radius: 10px;
-  }
-
-  .topbar {
-    height: 46px;
-    padding-inline: 12px;
-  }
-
-  .topbar-title {
-    display: none;
+  .window-controls {
+    margin-left: 4px;
   }
 
   .page-content {

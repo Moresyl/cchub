@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildStructuredConfig,
   createDefaultStructuredFields,
+  getPresetCategories,
   parseStructuredConfig,
   normalizeEndpointList,
   normalizeRequestHeaders,
@@ -14,6 +15,19 @@ describe("configProfiles", () => {
     expect(supportsStructuredConfig("claude")).toBe(true);
     expect(supportsStructuredConfig("codex")).toBe(true);
     expect(supportsStructuredConfig("unknown-tool")).toBe(false);
+  });
+
+  it("only exposes first-party and custom templates for selection", () => {
+    const presetIds = (toolId: string) =>
+      getPresetCategories(toolId).flatMap((category) => category.presets.map((preset) => preset.id));
+
+    expect(presetIds("claude")).toEqual(["claude-official", "claude-custom"]);
+    expect(presetIds("codex")).toEqual(["codex-official", "codex-custom"]);
+    expect(presetIds("gemini")).toEqual(["gemini-official", "gemini-custom"]);
+    expect(presetIds("openclaw")).toEqual(["openclaw-custom"]);
+    expect(presetIds("opencode")).toEqual(["opencode-custom"]);
+    expect(presetIds("hermes")).toEqual(["hermes-nous", "hermes-custom"]);
+    expect(presetIds("pi")).toEqual(["pi-custom"]);
   });
 
   it("builds and parses Claude structured config", () => {

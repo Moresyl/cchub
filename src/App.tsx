@@ -324,64 +324,66 @@ function AppShell() {
         </Suspense>
       )}
       <div className="app-layout" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
-        <Sidebar collapsed={sidebarCollapsed} width={sidebarWidth} onResize={resizeSidebar} onToggle={toggleSidebar} />
-        <div className={`main-area ${location.pathname === "/" ? "main-area-home" : ""}`}>
-          <NavigationProgress />
-          <Header />
-          {showConflictBanner && (
-            <div className="env-warning-banner">
-              <div className="env-warning-content">
-                <AlertTriangle size={16} className="env-warning-icon" aria-hidden="true" />
-                <div className="env-warning-copy">
-                  <div className="env-warning-title">
-                    {uiText(
-                      `检测到 ${envConflicts.length} 项环境变量冲突`,
-                      `${envConflicts.length} environment override warning(s) detected`,
-                      `${envConflicts.length} 件の環境変数上書き警告を検出しました`,
-                    )}
-                  </div>
-                  <div className="env-warning-description">
-                    {uiText(
-                      `这些变量可能覆盖 CCHub 的配置切换: ${highlightVariables.join(", ")}`,
-                      `These variables may override CCHub-managed settings: ${highlightVariables.join(", ")}`,
-                      `これらの変数により CCHub 管理設定が上書きされる可能性があります: ${highlightVariables.join(", ")}`,
-                    )}
+        <Header sidebarCollapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
+        <div className="workspace-frame">
+          <Sidebar collapsed={sidebarCollapsed} width={sidebarWidth} onResize={resizeSidebar} />
+          <div className={`main-area ${location.pathname === "/" ? "main-area-home" : ""}`}>
+            <NavigationProgress />
+            {showConflictBanner && (
+              <div className="env-warning-banner">
+                <div className="env-warning-content">
+                  <AlertTriangle size={16} className="env-warning-icon" aria-hidden="true" />
+                  <div className="env-warning-copy">
+                    <div className="env-warning-title">
+                      {uiText(
+                        `检测到 ${envConflicts.length} 项环境变量冲突`,
+                        `${envConflicts.length} environment override warning(s) detected`,
+                        `${envConflicts.length} 件の環境変数上書き警告を検出しました`,
+                      )}
+                    </div>
+                    <div className="env-warning-description">
+                      {uiText(
+                        `这些变量可能覆盖 CCHub 的配置切换: ${highlightVariables.join(", ")}`,
+                        `These variables may override CCHub-managed settings: ${highlightVariables.join(", ")}`,
+                        `これらの変数により CCHub 管理設定が上書きされる可能性があります: ${highlightVariables.join(", ")}`,
+                      )}
+                    </div>
                   </div>
                 </div>
+                <div className="env-warning-actions">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="env-warning-settings"
+                    onClick={() => navigate("/settings")}
+                  >
+                    <Settings2 size={14} aria-hidden="true" />
+                    {uiText("查看设置", "Open Settings", "設定を開く")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="env-warning-dismiss"
+                    onClick={() => setBannerDismissed(true)}
+                    aria-label={uiText("关闭", "Dismiss", "閉じる")}
+                    title={uiText("关闭", "Dismiss", "閉じる")}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </Button>
+                </div>
               </div>
-              <div className="env-warning-actions">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="env-warning-settings"
-                  onClick={() => navigate("/settings")}
-                >
-                  <Settings2 size={14} aria-hidden="true" />
-                  {uiText("查看设置", "Open Settings", "設定を開く")}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="env-warning-dismiss"
-                  onClick={() => setBannerDismissed(true)}
-                  aria-label={uiText("关闭", "Dismiss", "閉じる")}
-                  title={uiText("关闭", "Dismiss", "閉じる")}
-                >
-                  <X size={14} aria-hidden="true" />
-                </Button>
-              </div>
+            )}
+            <div className="toast-anchor">
+              <ToastContainer />
             </div>
-          )}
-          <div className="toast-anchor">
-            <ToastContainer />
+            <main className={`page-content ${location.pathname === "/" ? "profile-page-content" : ""}`}>
+              <ErrorBoundary resetKey={location.pathname}>
+                <RouteProfiler pathname={location.pathname}>
+                  <ActiveRoute pathname={location.pathname} />
+                </RouteProfiler>
+              </ErrorBoundary>
+            </main>
           </div>
-          <main className={`page-content ${location.pathname === "/" ? "profile-page-content" : ""}`}>
-            <ErrorBoundary resetKey={location.pathname}>
-              <RouteProfiler pathname={location.pathname}>
-                <ActiveRoute pathname={location.pathname} />
-              </RouteProfiler>
-            </ErrorBoundary>
-          </main>
         </div>
       </div>
     </>

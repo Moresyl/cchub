@@ -1,19 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Blocks,
-  CircleUserRound,
-  FileJson2,
-  Folder,
-  Gauge,
-  Hash,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  Search,
-  Settings,
-} from "lucide-react";
+import { Blocks, CircleUserRound, FileJson2, Folder, Gauge, Hash, Plus, Search, Settings } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { getLocale, t } from "../../lib/i18n";
 import { getNavigationSection, navigationSections, type NavigationItem } from "../../lib/navigation";
@@ -25,7 +11,6 @@ interface SidebarProps {
   collapsed: boolean;
   width: number;
   onResize: (width: number) => void;
-  onToggle: () => void;
 }
 
 const CONFIG_ITEMS: readonly NavigationItem[] = [
@@ -34,7 +19,7 @@ const CONFIG_ITEMS: readonly NavigationItem[] = [
 ];
 const OPERATION_ITEMS = navigationSections[2].items;
 
-function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps) {
+function SidebarComponent({ collapsed, width, onResize }: SidebarProps) {
   const i = t();
   const location = useLocation();
   const navigate = useNavigate();
@@ -119,49 +104,6 @@ function SidebarComponent({ collapsed, width, onResize, onToggle }: SidebarProps
 
   return (
     <aside className={`sidebar-shell ${collapsed ? "sidebar-collapsed" : ""}`} aria-label={i.app.name}>
-      <div className="sidebar-window-controls">
-        {!collapsed && (
-          <div className="sidebar-history-actions">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => window.history.back()}
-              aria-label={text("后退", "Back", "戻る")}
-              title={text("后退", "Back", "戻る")}
-            >
-              <ArrowLeft size={15} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => window.history.forward()}
-              aria-label={text("前进", "Forward", "進む")}
-              title={text("前进", "Forward", "進む")}
-            >
-              <ArrowRight size={15} />
-            </Button>
-          </div>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="sidebar-collapse-button"
-          onClick={onToggle}
-          aria-label={
-            collapsed
-              ? text("展开侧栏", "Expand sidebar", "サイドバーを展開")
-              : text("折叠侧栏", "Collapse sidebar", "サイドバーを折りたたむ")
-          }
-          title={
-            collapsed
-              ? text("展开侧栏", "Expand sidebar", "サイドバーを展開")
-              : text("折叠侧栏", "Collapse sidebar", "サイドバーを折りたたむ")
-          }
-        >
-          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-        </Button>
-      </div>
-
       <div className="sidebar-primary-actions">
         {primaryActions.map((action) => {
           const Icon = action.icon;

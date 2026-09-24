@@ -58,7 +58,7 @@ export default function ProjectProfileSwitcher() {
   const active = profiles.find((profile) => profile.isActive);
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="project-profile-switcher">
       <Select
         value={active?.id}
         disabled={busyId !== null}
@@ -68,7 +68,7 @@ export default function ProjectProfileSwitcher() {
         }}
       >
         <SelectTrigger
-          className="w-[180px]"
+          className="project-profile-trigger"
           title={text("切换项目配置档案", "Switch project profile", "プロジェクト設定を切り替え")}
         >
           <Layers size={14} className="shrink-0 text-muted-foreground" aria-hidden="true" />

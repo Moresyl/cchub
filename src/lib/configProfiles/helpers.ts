@@ -2,6 +2,20 @@
 import type { ConfigPreset, StructuredConfigTool, StructuredDraftFields, TemplateValueConfig } from "./types";
 import { PRESETS } from "./presets";
 
+const SELECTABLE_PRESET_IDS = new Set([
+  "claude-official",
+  "claude-custom",
+  "codex-official",
+  "codex-custom",
+  "gemini-official",
+  "gemini-custom",
+  "openclaw-custom",
+  "hermes-nous",
+  "hermes-custom",
+  "opencode-custom",
+  "pi-custom",
+]);
+
 export function findTomlValue(content: string, key: string) {
   const pattern = new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"`, "m");
   return content.match(pattern)?.[1] || "";
@@ -130,7 +144,7 @@ export function getConfigPresets(toolId: string): ConfigPreset[] {
 }
 
 export function getPresetCategories(toolId: string): { category: string; label: string; presets: ConfigPreset[] }[] {
-  const presets = getConfigPresets(toolId);
+  const presets = getConfigPresets(toolId).filter((preset) => SELECTABLE_PRESET_IDS.has(preset.id));
   if (presets.length === 0) return [];
   const grouped = new Map<string, ConfigPreset[]>();
   for (const preset of presets) {

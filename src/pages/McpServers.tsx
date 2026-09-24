@@ -681,9 +681,7 @@ export default function McpServers() {
                   <span className={`dot ${dep.installed ? "dot-active" : "dot-disabled"}`} />
                   <span style={{ fontSize: 12, fontWeight: 500 }}>{dep.display_name}</span>
                   {dep.version && (
-                    <span
-                      style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}
-                    >
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
                       {dep.version}
                     </span>
                   )}

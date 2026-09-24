@@ -1,5 +1,33 @@
 /* Profile switching workspace */
 
+.settings-workspace {
+  width: min(100%, 1060px);
+  margin-inline: auto;
+}
+
+.settings-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.settings-sections > .section-card {
+  padding: 18px 0 24px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-sections > .section-card:last-child {
+  border-bottom: 0;
+}
+
+.settings-sections > .section-card .section-card-title {
+  margin-bottom: 18px;
+  font-size: 14px;
+}
+
 .profile-workspace {
   min-height: 100%;
   color: var(--text-primary);
@@ -29,12 +57,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 42px;
-  margin-top: 16px;
-  padding: 5px 7px 5px 12px;
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-card) 68%, transparent);
+  min-height: 32px;
+  margin-top: 12px;
+  padding: 0 2px;
   color: var(--text-secondary);
   font-size: 12px;
 }

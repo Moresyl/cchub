@@ -23,9 +23,19 @@ interface SettingsToolPathCardProps {
   customPath?: SettingsToolPathCardCustomPath;
   locale: Locale;
   saved: boolean;
-  onSaveMcpPath: (toolId: string, value: string, defaultValue: string, customPath?: SettingsToolPathCardCustomPath) => void | Promise<void>;
+  onSaveMcpPath: (
+    toolId: string,
+    value: string,
+    defaultValue: string,
+    customPath?: SettingsToolPathCardCustomPath,
+  ) => void | Promise<void>;
   onPickMcpPath: (toolId: string, customPath?: SettingsToolPathCardCustomPath) => void | Promise<void>;
-  onSaveSkillsDir: (toolId: string, value: string, defaultValue: string, customPath?: SettingsToolPathCardCustomPath) => void | Promise<void>;
+  onSaveSkillsDir: (
+    toolId: string,
+    value: string,
+    defaultValue: string,
+    customPath?: SettingsToolPathCardCustomPath,
+  ) => void | Promise<void>;
   onPickSkillsDir: (toolId: string, customPath?: SettingsToolPathCardCustomPath) => void | Promise<void>;
   onCopyInstallCommand: (command: string, toolName: string) => void | Promise<void>;
 }
@@ -54,12 +64,21 @@ function SettingsToolPathCardComponent({
   };
 
   return (
-    <div style={{ padding: "12px 16px", borderRadius: 8, background: "var(--bg-input)", opacity: tool.installed ? 1 : 0.6 }}>
+    <div
+      style={{
+        padding: "12px 16px",
+        borderRadius: 8,
+        background: "var(--bg-input)",
+        opacity: tool.installed ? 1 : 0.6,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>{tool.name}</span>
           <span className={`badge ${tool.installed ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
-            {tool.installed ? uiText(locale, "已安装", "Installed", "インストール済み") : uiText(locale, "未安装", "Not installed", "未インストール")}
+            {tool.installed
+              ? uiText(locale, "已安装", "Installed", "インストール済み")
+              : uiText(locale, "未安装", "Not installed", "未インストール")}
           </span>
         </div>
         {saved && <Check size={14} style={{ color: "var(--success)" }} />}
@@ -69,7 +88,7 @@ function SettingsToolPathCardComponent({
           <span style={{ fontSize: 11, color: "var(--text-muted)", width: 80, flexShrink: 0 }}>MCP</span>
           <input
             className="input"
-            style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: "4px 8px", height: 28, flex: 1 }}
+            style={{ fontSize: 11, fontFamily: "var(--font-code)", padding: "4px 8px", height: 28, flex: 1 }}
             defaultValue={customPath?.mcp_config_path || tool.mcp_config_path}
             onBlur={handleMcpBlur}
           />
@@ -85,7 +104,7 @@ function SettingsToolPathCardComponent({
           <span style={{ fontSize: 11, color: "var(--text-muted)", width: 80, flexShrink: 0 }}>Skills</span>
           <input
             className="input"
-            style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", padding: "4px 8px", height: 28, flex: 1 }}
+            style={{ fontSize: 11, fontFamily: "var(--font-code)", padding: "4px 8px", height: 28, flex: 1 }}
             defaultValue={customPath?.skills_dir || tool.skills_dir}
             onBlur={handleSkillsBlur}
           />
@@ -100,7 +119,9 @@ function SettingsToolPathCardComponent({
       </div>
       {!tool.installed && tool.install_command && (
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
-          <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{tool.install_command}</code>
+          <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
+            {tool.install_command}
+          </code>
           <button
             className="btn btn-ghost btn-icon-sm"
             onClick={() => void onCopyInstallCommand(tool.install_command, tool.name)}

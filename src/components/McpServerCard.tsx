@@ -136,7 +136,8 @@ function McpServerCardComponent({
         <p
           style={{
             fontSize: 12,
-            fontFamily: "'JetBrains Mono', monospace",
+            fontFamily: "var(--font-code)",
+            fontWeight: 400,
             color: "var(--text-muted)",
             marginTop: 8,
             overflow: "hidden",

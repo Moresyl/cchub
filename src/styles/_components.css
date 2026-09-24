@@ -446,7 +446,7 @@
 textarea.input {
   resize: vertical;
   min-height: 110px;
-  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: var(--font-code);
   font-size: 12px;
   line-height: 1.7;
   padding: 12px 14px;
@@ -459,7 +459,7 @@ textarea.input {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 12px 14px;
-  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: var(--font-code);
   font-size: 12px;
   line-height: 1.7;
   color: var(--text-secondary);
@@ -606,4 +606,55 @@ textarea.input {
 }
 .dot-error {
   background: var(--danger);
+}
+.app-toast-stack {
+  display: flex;
+  width: min(400px, calc(100% - 32px));
+  margin: 8px 16px 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.app-toast {
+  display: flex;
+  width: max-content;
+  min-width: min(240px, 100%);
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-left: 3px solid;
+  border-radius: 7px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-md);
+  animation: fadeIn 0.16s ease-out;
+  pointer-events: auto;
+}
+
+.app-toast-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 6px;
+}
+
+.app-toast-message {
+  min-width: 0;
+  flex: 1;
+  padding-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.app-toast-close {
+  width: 26px;
+  height: 26px;
+  margin: -2px -2px 0 0;
 }

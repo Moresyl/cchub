@@ -49,23 +49,21 @@ function SettingsPendingRootCardComponent({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>{oldPathLabel}</div>
-          <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>{item.project_root}</div>
+          <div style={{ fontSize: 12, fontFamily: "var(--font-code)", wordBreak: "break-all" }}>
+            {item.project_root}
+          </div>
         </div>
         <span className="badge badge-muted">{filesLabel}</span>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <input
           className="input"
-          style={{ flex: 1, minWidth: 220, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+          style={{ flex: 1, minWidth: 220, fontFamily: "var(--font-code)", fontSize: 12 }}
           placeholder={newPathPlaceholder}
           value={targetValue}
           onChange={(event) => onTargetChange(item.project_root, event.target.value)}
         />
-        <button
-          className="btn btn-secondary btn-sm"
-          type="button"
-          onClick={() => onPick(item.project_root)}
-        >
+        <button className="btn btn-secondary btn-sm" type="button" onClick={() => onPick(item.project_root)}>
           <FolderOpen size={14} />
           {pickLabel}
         </button>

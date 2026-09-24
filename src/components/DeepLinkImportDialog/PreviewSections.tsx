@@ -85,7 +85,7 @@ function ProviderPreviewSectionComponent({
         {primaryEndpoint && (
           <div>
             <div className="field-label">{primaryEndpointLabel}</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+            <div style={{ fontSize: 13, fontFamily: "var(--font-code)", wordBreak: "break-all" }}>
               {primaryEndpoint}
             </div>
           </div>
@@ -111,15 +111,13 @@ function ProviderPreviewSectionComponent({
         {current.apiKey && (
           <div>
             <div className="field-label">API Key</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{maskSecret(current.apiKey)}</div>
+            <div style={{ fontSize: 13, fontFamily: "var(--font-code)" }}>{maskSecret(current.apiKey)}</div>
           </div>
         )}
         {current.usageAccessToken && (
           <div>
             <div className="field-label">{usageAccessTokenLabel}</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>
-              {maskSecret(current.usageAccessToken)}
-            </div>
+            <div style={{ fontSize: 13, fontFamily: "var(--font-code)" }}>{maskSecret(current.usageAccessToken)}</div>
           </div>
         )}
         {current.usageUserId && (
@@ -155,7 +153,7 @@ function ProviderPreviewSectionComponent({
                     background: "var(--bg-input)",
                     border: "1px solid var(--border-default)",
                     fontSize: 12,
-                    fontFamily: "'JetBrains Mono', monospace",
+                    fontFamily: "var(--font-code)",
                   }}
                 >
                   {decodeDeepLinkText(current.usageScript)}
@@ -169,7 +167,7 @@ function ProviderPreviewSectionComponent({
               </>
             )}
             {current.usageApiKey && (
-              <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+              <div style={{ fontSize: 12, fontFamily: "var(--font-code)" }}>
                 {usageApiKeyLabel}: {maskSecret(current.usageApiKey)}
               </div>
             )}
@@ -309,7 +307,7 @@ function McpPreviewSectionComponent({ current, unavailablePreviewLabel, labels }
                       display: "grid",
                       gap: 4,
                       fontSize: 12,
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontFamily: "var(--font-code)",
                       wordBreak: "break-all",
                     }}
                   >
@@ -329,7 +327,7 @@ function McpPreviewSectionComponent({ current, unavailablePreviewLabel, labels }
                     style={{
                       marginTop: 8,
                       fontSize: 12,
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontFamily: "var(--font-code)",
                       wordBreak: "break-all",
                       color: classifyDeepLinkEndpoint(server.url) ? "var(--warning)" : "var(--text-secondary)",
                     }}
@@ -344,7 +342,7 @@ function McpPreviewSectionComponent({ current, unavailablePreviewLabel, labels }
                       display: "grid",
                       gap: 4,
                       fontSize: 12,
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontFamily: "var(--font-code)",
                       wordBreak: "break-all",
                     }}
                   >

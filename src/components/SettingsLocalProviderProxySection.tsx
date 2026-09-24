@@ -67,7 +67,7 @@ function SettingsLocalProviderProxySectionComponent({
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>
             {uiText(locale, "监听地址", "Listen Address", "待受アドレス")}
           </div>
-          <div style={{ fontSize: 13, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>{baseUrl}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, fontFamily: "var(--font-code)" }}>{baseUrl}</div>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
             {status?.running
               ? uiText(locale, "代理服务运行中", "Proxy server is running", "プロキシサーバーは稼働中です")

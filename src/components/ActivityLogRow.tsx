@@ -27,7 +27,7 @@ function ActivityLogRowComponent({ item, recordedAtLabel }: ActivityLogRowProps)
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
         {item.latency_ms != null && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
             {item.latency_ms}ms
           </span>
         )}

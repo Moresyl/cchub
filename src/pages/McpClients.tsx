@@ -291,7 +291,7 @@ export default function McpClients() {
                     )}
                     value={newConfigPath}
                     onChange={(e) => setNewConfigPath(e.target.value)}
-                    style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+                    style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
                   />
                   <button
                     className="btn btn-primary btn-sm"

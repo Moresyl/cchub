@@ -30,7 +30,10 @@ function ModelPricingListItemComponent({
   onDelete,
 }: ModelPricingListItemProps) {
   return (
-    <div className="list-row" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+    <div
+      className="list-row"
+      style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+    >
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>{item.model_id}</span>
@@ -40,7 +43,17 @@ function ModelPricingListItemComponent({
             </span>
           )}
         </div>
-        <div style={{ display: "flex", gap: 12, marginTop: 4, flexWrap: "wrap", fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            marginTop: 4,
+            flexWrap: "wrap",
+            fontSize: 11,
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-code)",
+          }}
+        >
           <span>in {item.input_cost_per_million}</span>
           <span>out {item.output_cost_per_million}</span>
           <span>cache-r {item.cache_read_cost_per_million}</span>

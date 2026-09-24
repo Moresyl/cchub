@@ -1,4 +1,5 @@
 import { Boxes, Database, Info, Settings2, Stethoscope } from "lucide-react";
+import { Button } from "../../components/ui/button";
 
 export type SettingsCategory = "general" | "integrations" | "data" | "diagnostics" | "about";
 
@@ -27,8 +28,10 @@ export default function SettingsCategoryNav({ active, locale, onChange }: Settin
       {items.map((item) => {
         const Icon = item.icon;
         return (
-          <button
+          <Button
             key={item.id}
+            variant="ghost"
+            size="sm"
             className={`tab-item ${active === item.id ? "active" : ""}`}
             type="button"
             aria-pressed={active === item.id}
@@ -37,7 +40,7 @@ export default function SettingsCategoryNav({ active, locale, onChange }: Settin
           >
             <Icon size={14} />
             {item.label}
-          </button>
+          </Button>
         );
       })}
     </nav>

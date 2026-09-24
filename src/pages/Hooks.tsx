@@ -322,7 +322,7 @@ export default function Hooks() {
                     value={editProjectPath}
                     onChange={(e) => setEditProjectPath(e.target.value)}
                     placeholder={i.hooks.projectPathPlaceholder}
-                    style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                    style={{ fontFamily: "var(--font-code)" }}
                   />
                   <button
                     className="btn btn-secondary btn-icon-sm"
@@ -345,7 +345,7 @@ export default function Hooks() {
                 value={editCommand}
                 onChange={(e) => setEditCommand(e.target.value)}
                 placeholder={i.hooks.commandPlaceholder}
-                style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                style={{ fontFamily: "var(--font-code)" }}
               />
             </div>
 

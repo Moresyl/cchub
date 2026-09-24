@@ -72,7 +72,9 @@ function SettingsManualSetupCardComponent({
         gap: 10,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div
+        style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}
+      >
         <div>
           <div style={{ fontSize: 13, fontWeight: 600 }}>{report.tool_name}</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{description}</div>
@@ -80,7 +82,9 @@ function SettingsManualSetupCardComponent({
         <span className="badge badge-muted">{report.tool_id}</span>
       </div>
       {report.manual_setup_path && (
-        <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+        <div
+          style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)", wordBreak: "break-all" }}
+        >
           {report.manual_setup_path}
         </div>
       )}

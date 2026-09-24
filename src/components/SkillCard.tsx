@@ -116,7 +116,7 @@ function SkillCardComponent({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {skill.trigger_command && (
-            <code className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
+            <code className="badge badge-accent" style={{ fontFamily: "var(--font-code)", fontSize: 11 }}>
               {skill.trigger_command}
             </code>
           )}

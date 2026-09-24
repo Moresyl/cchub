@@ -672,7 +672,7 @@ export default function Sessions() {
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <code
                         style={{
-                          fontFamily: "'JetBrains Mono', monospace",
+                          fontFamily: "var(--font-code)",
                           fontSize: 11,
                           flex: 1,
                           minWidth: 0,

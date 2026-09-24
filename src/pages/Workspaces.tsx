@@ -309,7 +309,7 @@ export default function Workspaces() {
                     placeholder={uiText("项目路径（可选）", "Project path (optional)", "プロジェクトパス（任意）")}
                     value={newPath}
                     onChange={(e) => setNewPath(e.target.value)}
-                    style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+                    style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
                   />
                   <button
                     className="btn btn-secondary btn-sm"

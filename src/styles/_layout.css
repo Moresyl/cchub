@@ -307,23 +307,33 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 50px;
+  height: 48px;
   padding: 0 16px 0 20px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--bg-app) 82%, var(--bg-card));
+  background: var(--bg-app);
 }
 
 .topbar-title {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
 }
 
-.topbar-title h1 {
-  font-size: 14px;
+.topbar-section {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-page {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
   font-weight: 600;
-}
-
-.topbar-title p {
-  display: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-actions {
@@ -339,9 +349,71 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 16px;
+  min-height: 40px;
+  padding: 5px 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--warning) 24%, transparent);
   background: var(--warning-subtle);
+}
+
+.env-warning-content {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.env-warning-icon {
+  flex: 0 0 auto;
+  color: var(--warning);
+}
+
+.env-warning-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.env-warning-title {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.env-warning-description {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-warning-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.env-warning-settings {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.env-warning-dismiss {
+  width: 28px;
+  height: 28px;
+}
+
+.toast-anchor {
+  z-index: 40;
+  flex: 0 0 auto;
+  width: 100%;
+  max-height: min(40vh, 240px);
+  overflow-y: auto;
+  pointer-events: none;
 }
 
 .page-content {
@@ -428,6 +500,23 @@
 }
 
 @media (max-width: 680px) {
+  .env-warning-banner {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .env-warning-actions {
+    margin-left: 26px;
+  }
+
+  .env-warning-copy {
+    display: block;
+  }
+
+  .env-warning-description {
+    margin-top: 2px;
+  }
+
   .app-layout {
     flex-direction: column;
   }

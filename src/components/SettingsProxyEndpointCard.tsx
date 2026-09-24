@@ -14,12 +14,7 @@ function uiText(locale: Locale, zhText: string, enText: string, jaText?: string)
   return locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 }
 
-function SettingsProxyEndpointCardComponent({
-  appId,
-  endpoint,
-  locale,
-  onCopy,
-}: SettingsProxyEndpointCardProps) {
+function SettingsProxyEndpointCardComponent({ appId, endpoint, locale, onCopy }: SettingsProxyEndpointCardProps) {
   const appLabel = getAppLabel(appId);
   return (
     <div style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-input)" }}>
@@ -33,7 +28,9 @@ function SettingsProxyEndpointCardComponent({
           <Copy size={12} />
         </button>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+      <div
+        style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "var(--font-code)", wordBreak: "break-all" }}
+      >
         {endpoint}
       </div>
     </div>

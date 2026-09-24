@@ -43,7 +43,7 @@ const jsonLinter = linter((view) => {
 const cmTheme = EditorView.theme({
   "&": {
     fontSize: "12.5px",
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+    fontFamily: "var(--font-code)",
     flex: "1 1 auto",
     minHeight: "0",
     height: "100%",

@@ -23,6 +23,7 @@ import DeepLinkImportHost from "./components/DeepLinkImportHost";
 import NavigationProgress from "./components/NavigationProgress";
 import AppUpdateHost from "./components/AppUpdateHost";
 import { AppDialogProvider } from "./components/AppDialogProvider";
+import { Button } from "./components/ui/button";
 
 // CommandPalette 仅在 Ctrl+K 时显示，懒加载避免 cmdk 进入主 bundle。
 const CommandPalette = lazy(() => import("./components/CommandPalette"));
@@ -297,7 +298,6 @@ function AppShell() {
 
   return (
     <>
-      <ToastContainer />
       <DeepLinkImportHost />
       {welcomeOpen && (
         <Suspense fallback={null}>
@@ -327,29 +327,20 @@ function AppShell() {
         <Sidebar collapsed={sidebarCollapsed} width={sidebarWidth} onResize={resizeSidebar} onToggle={toggleSidebar} />
         <div className={`main-area ${location.pathname === "/" ? "main-area-home" : ""}`}>
           <NavigationProgress />
-          {location.pathname !== "/" && <Header />}
+          <Header />
           {showConflictBanner && (
             <div className="env-warning-banner">
-              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                <AlertTriangle size={16} style={{ color: "var(--warning)", flexShrink: 0 }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700 }}>
+              <div className="env-warning-content">
+                <AlertTriangle size={16} className="env-warning-icon" aria-hidden="true" />
+                <div className="env-warning-copy">
+                  <div className="env-warning-title">
                     {uiText(
                       `检测到 ${envConflicts.length} 项环境变量冲突`,
                       `${envConflicts.length} environment override warning(s) detected`,
                       `${envConflicts.length} 件の環境変数上書き警告を検出しました`,
                     )}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-secondary)",
-                      marginTop: 2,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
+                  <div className="env-warning-description">
                     {uiText(
                       `这些变量可能覆盖 CCHub 的配置切换: ${highlightVariables.join(", ")}`,
                       `These variables may override CCHub-managed settings: ${highlightVariables.join(", ")}`,
@@ -358,21 +349,32 @@ function AppShell() {
                   </div>
                 </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                <button className="btn btn-secondary btn-xs" onClick={() => navigate("/settings")} style={{ gap: 5 }}>
-                  <Settings2 size={12} />
+              <div className="env-warning-actions">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="env-warning-settings"
+                  onClick={() => navigate("/settings")}
+                >
+                  <Settings2 size={14} aria-hidden="true" />
                   {uiText("查看设置", "Open Settings", "設定を開く")}
-                </button>
-                <button
-                  className="btn btn-ghost btn-icon-sm"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="env-warning-dismiss"
                   onClick={() => setBannerDismissed(true)}
+                  aria-label={uiText("关闭", "Dismiss", "閉じる")}
                   title={uiText("关闭", "Dismiss", "閉じる")}
                 >
-                  <X size={14} />
-                </button>
+                  <X size={14} aria-hidden="true" />
+                </Button>
               </div>
             </div>
           )}
+          <div className="toast-anchor">
+            <ToastContainer />
+          </div>
           <main className={`page-content ${location.pathname === "/" ? "profile-page-content" : ""}`}>
             <ErrorBoundary resetKey={location.pathname}>
               <RouteProfiler pathname={location.pathname}>

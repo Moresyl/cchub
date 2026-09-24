@@ -737,7 +737,7 @@ export default function ClaudeMd() {
                 <span className="field-label">{i.claudeMd.createIn}</span>
                 <input
                   className="input"
-                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
+                  style={{ fontFamily: "var(--font-code)", fontSize: 13 }}
                   placeholder={locale === "zh" ? "输入项目目录路径" : "Enter project directory path"}
                   value={newDirPath}
                   onChange={handleNewDirPathChange}

@@ -34,7 +34,7 @@ function MarketplaceCustomSourceRowComponent({
         <div
           style={{
             fontSize: 12,
-            fontFamily: "'JetBrains Mono', monospace",
+            fontFamily: "var(--font-code)",
             color: "var(--text-secondary)",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -47,11 +47,7 @@ function MarketplaceCustomSourceRowComponent({
           {count} {countLabel}
         </span>
       </div>
-      <button
-        className="btn btn-danger-ghost btn-icon-sm"
-        onClick={() => onRemove(index)}
-        title={removeTitle}
-      >
+      <button className="btn btn-danger-ghost btn-icon-sm" onClick={() => onRemove(index)} title={removeTitle}>
         <Trash2 size={13} />
       </button>
     </div>

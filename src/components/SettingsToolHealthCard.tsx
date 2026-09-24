@@ -99,11 +99,15 @@ function SettingsToolHealthCardComponent({
         gap: 10,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div
+        style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>{report.tool_name}</span>
           {issueBadges.map((badge) => (
-            <span key={badge} className="badge badge-muted" style={{ fontSize: 10 }}>{badge}</span>
+            <span key={badge} className="badge badge-muted" style={{ fontSize: 10 }}>
+              {badge}
+            </span>
           ))}
         </div>
         {!report.cli_available && installCommand ? (
@@ -142,41 +146,56 @@ function SettingsToolHealthCardComponent({
         <div style={{ fontSize: 12 }}>
           <div style={{ color: "var(--text-muted)", marginBottom: 4 }}>{cliLabel}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className={`badge ${report.cli_available ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
+            <span
+              className={`badge ${report.cli_available ? "badge-success" : "badge-muted"}`}
+              style={{ fontSize: 10 }}
+            >
               {report.cli_available ? statusOkLabel : statusMissingLabel}
             </span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{report.cli_command}</span>
+            <span style={{ fontFamily: "var(--font-code)" }}>{report.cli_command}</span>
           </div>
         </div>
         <div style={{ fontSize: 12 }}>
           <div style={{ color: "var(--text-muted)", marginBottom: 4 }}>{pathLabel}</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all", color: "var(--text-secondary)" }}>
+          <div style={{ fontFamily: "var(--font-code)", wordBreak: "break-all", color: "var(--text-secondary)" }}>
             {report.config_dir}
           </div>
           {(report.has_custom_config_dir || report.has_custom_mcp_config_path || report.has_custom_skills_dir) && (
             <div style={{ marginTop: 6 }}>
-              <span className="badge badge-accent" style={{ fontSize: 10 }}>{customPathLabel}</span>
+              <span className="badge badge-accent" style={{ fontSize: 10 }}>
+                {customPathLabel}
+              </span>
             </div>
           )}
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
         {detailRows.map(([label, ok, path]) => (
-          <div key={`${report.tool_id}-${label}`} style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg-input)" }}>
+          <div
+            key={`${report.tool_id}-${label}`}
+            style={{ padding: "8px 10px", borderRadius: 8, background: "var(--bg-input)" }}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
               <span className={`badge ${ok ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
                 {ok ? statusOkLabel : statusMissingLabel}
               </span>
               <span style={{ fontSize: 12 }}>{label}</span>
             </div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+                fontFamily: "var(--font-code)",
+                wordBreak: "break-all",
+              }}
+            >
               {path}
             </div>
           </div>
         ))}
       </div>
       {!report.cli_available && installCommand && (
-        <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+        <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
           {installCommand}
         </code>
       )}

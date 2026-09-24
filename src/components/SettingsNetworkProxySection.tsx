@@ -82,7 +82,7 @@ function SettingsNetworkProxySectionComponent({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input
           className="input"
-          style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+          style={{ flex: 1, fontFamily: "var(--font-code)", fontSize: 12 }}
           placeholder={placeholder}
           value={proxyUrl}
           onChange={onProxyChange}

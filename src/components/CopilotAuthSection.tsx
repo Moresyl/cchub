@@ -86,9 +86,7 @@ function CopilotAccountRowComponent({
           {isDefault ? <span className="badge badge-success">{defaultLabel}</span> : null}
           {isSelected ? <span className="badge badge-accent">{boundLabel}</span> : null}
         </div>
-        <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>
-          ID: {account.id}
-        </div>
+        <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>ID: {account.id}</div>
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
         {!isDefault ? (
@@ -124,9 +122,11 @@ function CopilotAuthSectionComponent({
   showDescription = true,
 }: CopilotAuthSectionProps) {
   const locale = getLocale();
-  const uiText = useCallback((zhText: string, enText: string, jaText?: string) => (
-    locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText
-  ), [locale]);
+  const uiText = useCallback(
+    (zhText: string, enText: string, jaText?: string) =>
+      locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+    [locale],
+  );
 
   const [status, setStatus] = useState<CopilotAuthStatus | null>(null);
   const [deviceCode, setDeviceCode] = useState<GitHubDeviceCodeResponse | null>(null);
@@ -136,26 +136,29 @@ function CopilotAuthSectionComponent({
   const [defaultingAccountId, setDefaultingAccountId] = useState<string | null>(null);
   const [removingAccountId, setRemovingAccountId] = useState<string | null>(null);
 
-  const loadStatus = useCallback(async (showError = false) => {
-    try {
-      const next = await invoke<CopilotAuthStatus>("copilot_get_auth_status");
-      setStatus(next);
-    } catch (error) {
-      if (showError) {
-        showToast(
-          "error",
-          uiText(
-            `读取 Copilot 认证状态失败: ${error}`,
-            `Failed to load Copilot auth status: ${error}`,
-            `Copilot 認証状態の読み込みに失敗しました: ${error}`,
-          ),
-        );
+  const loadStatus = useCallback(
+    async (showError = false) => {
+      try {
+        const next = await invoke<CopilotAuthStatus>("copilot_get_auth_status");
+        setStatus(next);
+      } catch (error) {
+        if (showError) {
+          showToast(
+            "error",
+            uiText(
+              `读取 Copilot 认证状态失败: ${error}`,
+              `Failed to load Copilot auth status: ${error}`,
+              `Copilot 認証状態の読み込みに失敗しました: ${error}`,
+            ),
+          );
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [uiText]);
+    },
+    [uiText],
+  );
 
   useEffect(() => {
     void loadStatus();
@@ -200,16 +203,10 @@ function CopilotAuthSectionComponent({
         return;
       }
 
-      timeoutId = window.setTimeout(
-        () => void poll(),
-        Math.max(deviceCode.interval, 2) * 1000,
-      );
+      timeoutId = window.setTimeout(() => void poll(), Math.max(deviceCode.interval, 2) * 1000);
     };
 
-    timeoutId = window.setTimeout(
-      () => void poll(),
-      Math.max(deviceCode.interval, 2) * 1000,
-    );
+    timeoutId = window.setTimeout(() => void poll(), Math.max(deviceCode.interval, 2) * 1000);
 
     return () => {
       cancelled = true;
@@ -241,65 +238,62 @@ function CopilotAuthSectionComponent({
     }
   }, [uiText]);
 
-  const handleSetDefault = useCallback(async (accountId: string) => {
-    setDefaultingAccountId(accountId);
-    try {
-      await invoke("copilot_set_default_account", { accountId });
-      await loadStatus();
-      showToast(
-        "success",
-        uiText("默认账号已更新", "Default account updated", "既定アカウントを更新しました"),
-      );
-      if (!selectedAccountId) {
-        onAccountSelect?.(null);
+  const handleSetDefault = useCallback(
+    async (accountId: string) => {
+      setDefaultingAccountId(accountId);
+      try {
+        await invoke("copilot_set_default_account", { accountId });
+        await loadStatus();
+        showToast("success", uiText("默认账号已更新", "Default account updated", "既定アカウントを更新しました"));
+        if (!selectedAccountId) {
+          onAccountSelect?.(null);
+        }
+      } catch (error) {
+        showToast(
+          "error",
+          uiText(
+            `设置默认账号失败: ${error}`,
+            `Failed to set default account: ${error}`,
+            `既定アカウントの設定に失敗しました: ${error}`,
+          ),
+        );
+      } finally {
+        setDefaultingAccountId(null);
       }
-    } catch (error) {
-      showToast(
-        "error",
-        uiText(
-          `设置默认账号失败: ${error}`,
-          `Failed to set default account: ${error}`,
-          `既定アカウントの設定に失敗しました: ${error}`,
-        ),
-      );
-    } finally {
-      setDefaultingAccountId(null);
-    }
-  }, [loadStatus, onAccountSelect, selectedAccountId, uiText]);
+    },
+    [loadStatus, onAccountSelect, selectedAccountId, uiText],
+  );
 
-  const handleRemoveAccount = useCallback(async (accountId: string) => {
-    setRemovingAccountId(accountId);
-    try {
-      await invoke("copilot_remove_account", { accountId });
-      await loadStatus();
-      showToast(
-        "success",
-        uiText("账号已移除", "Account removed", "アカウントを削除しました"),
-      );
-      if (selectedAccountId === accountId) {
-        onAccountSelect?.(null);
+  const handleRemoveAccount = useCallback(
+    async (accountId: string) => {
+      setRemovingAccountId(accountId);
+      try {
+        await invoke("copilot_remove_account", { accountId });
+        await loadStatus();
+        showToast("success", uiText("账号已移除", "Account removed", "アカウントを削除しました"));
+        if (selectedAccountId === accountId) {
+          onAccountSelect?.(null);
+        }
+      } catch (error) {
+        showToast(
+          "error",
+          uiText(
+            `移除账号失败: ${error}`,
+            `Failed to remove account: ${error}`,
+            `アカウント削除に失敗しました: ${error}`,
+          ),
+        );
+      } finally {
+        setRemovingAccountId(null);
       }
-    } catch (error) {
-      showToast(
-        "error",
-        uiText(
-          `移除账号失败: ${error}`,
-          `Failed to remove account: ${error}`,
-          `アカウント削除に失敗しました: ${error}`,
-        ),
-      );
-    } finally {
-      setRemovingAccountId(null);
-    }
-  }, [loadStatus, onAccountSelect, selectedAccountId, uiText]);
+    },
+    [loadStatus, onAccountSelect, selectedAccountId, uiText],
+  );
 
   const copyUserCode = useCallback(async () => {
     if (!deviceCode?.user_code) return;
     await navigator.clipboard.writeText(deviceCode.user_code);
-    showToast(
-      "success",
-      uiText("授权码已复制", "Code copied", "コードをコピーしました"),
-    );
+    showToast("success", uiText("授权码已复制", "Code copied", "コードをコピーしました"));
   }, [deviceCode?.user_code, uiText]);
 
   const handleRefreshClick = useCallback(() => {
@@ -311,9 +305,12 @@ function CopilotAuthSectionComponent({
     void startDeviceFlow();
   }, [startDeviceFlow]);
 
-  const handleProviderAccountSelect = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
-    onAccountSelect?.(event.target.value || null);
-  }, [onAccountSelect]);
+  const handleProviderAccountSelect = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      onAccountSelect?.(event.target.value || null);
+    },
+    [onAccountSelect],
+  );
 
   const handleCopyUserCodeClick = useCallback(() => {
     void copyUserCode();
@@ -348,7 +345,9 @@ function CopilotAuthSectionComponent({
 
   return (
     <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}
+      >
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700 }}>
             <Github size={16} />
@@ -393,7 +392,11 @@ function CopilotAuthSectionComponent({
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
         <span className={`badge ${accounts.length > 0 ? "badge-success" : "badge-muted"}`}>
           {accounts.length > 0
-            ? uiText(`已授权 ${accounts.length} 个账号`, `${accounts.length} account(s) connected`, `${accounts.length} 件のアカウント接続済み`)
+            ? uiText(
+                `已授权 ${accounts.length} 个账号`,
+                `${accounts.length} account(s) connected`,
+                `${accounts.length} 件のアカウント接続済み`,
+              )
             : uiText("未授权", "Not connected", "未接続")}
         </span>
         {status?.expires_at ? (
@@ -425,7 +428,14 @@ function CopilotAuthSectionComponent({
       ) : null}
 
       {deviceCode ? (
-        <div style={{ padding: 14, borderRadius: 10, background: "var(--bg-elevated)", border: "1px solid var(--border-color)" }}>
+        <div
+          style={{
+            padding: 14,
+            borderRadius: 10,
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-color)",
+          }}
+        >
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
             {uiText(
               "浏览器打开 GitHub 授权页后，输入下面的设备码完成登录。",
@@ -434,14 +444,27 @@ function CopilotAuthSectionComponent({
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <code className="badge badge-accent" style={{ fontSize: 18, padding: "10px 14px", fontFamily: "'JetBrains Mono', monospace" }}>
+            <code
+              className="badge badge-accent"
+              style={{ fontSize: 18, padding: "10px 14px", fontFamily: "var(--font-code)" }}
+            >
               {deviceCode.user_code}
             </code>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={handleCopyUserCodeClick} style={{ gap: 6 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              onClick={handleCopyUserCodeClick}
+              style={{ gap: 6 }}
+            >
               <Copy size={14} />
               {uiText("复制", "Copy", "コピー")}
             </button>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={handleOpenVerificationPage} style={{ gap: 6 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              onClick={handleOpenVerificationPage}
+              style={{ gap: 6 }}
+            >
               <ExternalLink size={14} />
               {uiText("打开授权页", "Open Browser", "ブラウザで開く")}
             </button>

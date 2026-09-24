@@ -127,7 +127,7 @@ export function McpEditView(props: McpEditViewProps) {
           <span className="field-label">{locale === "zh" ? "命令" : "Command"}</span>
           <input
             className="input"
-            style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+            style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
             value={editCommand}
             onChange={(e) => props.setEditCommand(e.target.value)}
             placeholder="npx, node, python..."

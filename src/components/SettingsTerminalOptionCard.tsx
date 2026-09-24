@@ -39,10 +39,12 @@ function SettingsTerminalOptionCardComponent({
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>{option.label}</span>
         <span className={`badge ${option.installed ? "badge-success" : "badge-muted"}`} style={{ fontSize: 10 }}>
-          {option.installed ? uiText(locale, "已检测", "Detected", "検出済み") : uiText(locale, "未检测", "Missing", "未検出")}
+          {option.installed
+            ? uiText(locale, "已检测", "Detected", "検出済み")
+            : uiText(locale, "未检测", "Missing", "未検出")}
         </span>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{option.command}</div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>{option.command}</div>
     </button>
   );
 }

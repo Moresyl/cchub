@@ -79,13 +79,9 @@ function ProxyRequestRowComponent({
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-            {costLabel}
-          </span>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-            {tokenLabel}
-          </span>
-          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>{costLabel}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>{tokenLabel}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
             {latencyLabel}
           </span>
           <span className={`badge ${success ? "badge-success" : "badge-danger"}`} style={{ fontSize: 10 }}>
@@ -95,7 +91,7 @@ function ProxyRequestRowComponent({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
           {item.request_id}
         </span>
         <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{createdAtLabel}</span>

@@ -98,7 +98,7 @@ export default function McpServerDetailPanel({
               <span
                 style={{
                   fontSize: 11,
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: "var(--font-code)",
                   color: "var(--text-secondary)",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -145,7 +145,7 @@ export default function McpServerDetailPanel({
 
         <div>
           <span className="field-label">{i.mcp.command}</span>
-          <div className="code-block" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+          <div className="code-block" style={{ fontFamily: "var(--font-code)", fontSize: 12 }}>
             {selected.command || i.common.na}
           </div>
         </div>

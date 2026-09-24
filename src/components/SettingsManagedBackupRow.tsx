@@ -58,17 +58,24 @@ function SettingsManagedBackupRowComponent({
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>{backup.name}</span>
-          <span className={`badge ${backup.kind === "scheduled" ? "badge-warning" : "badge-accent"}`} style={{ fontSize: 10 }}>
+          <span
+            className={`badge ${backup.kind === "scheduled" ? "badge-warning" : "badge-accent"}`}
+            style={{ fontSize: 10 }}
+          >
             {backup.kind === "scheduled"
               ? uiText(locale, "自动备份", "Scheduled", "自動バックアップ")
               : uiText(locale, "手动备份", "Manual", "手動バックアップ")}
           </span>
-          <span className="badge badge-muted" style={{ fontSize: 10 }}>{formatBytes(backup.size_bytes)}</span>
+          <span className="badge badge-muted" style={{ fontSize: 10 }}>
+            {formatBytes(backup.size_bytes)}
+          </span>
         </div>
         <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
           {backup.created_at.replace("T", " ").slice(0, 19)}
         </div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+        <div
+          style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)", wordBreak: "break-all" }}
+        >
           {backup.path}
         </div>
       </div>
@@ -93,11 +100,7 @@ function SettingsManagedBackupRowComponent({
             ? uiText(locale, "恢复中...", "Restoring...", "復元中...")
             : uiText(locale, "恢复", "Restore", "復元")}
         </button>
-        <button
-          className="btn btn-danger-ghost btn-sm"
-          disabled={isDeleting}
-          onClick={() => void onDelete(backup)}
-        >
+        <button className="btn btn-danger-ghost btn-sm" disabled={isDeleting} onClick={() => void onDelete(backup)}>
           {isDeleting
             ? uiText(locale, "删除中...", "Deleting...", "削除中...")
             : uiText(locale, "删除", "Delete", "削除")}

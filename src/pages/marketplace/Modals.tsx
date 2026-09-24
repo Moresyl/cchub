@@ -69,7 +69,7 @@ export function EnvModal(props: EnvModalProps) {
               <span className="field-label">{key}</span>
               <input
                 className="input"
-                style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
+                style={{ fontFamily: "var(--font-code)", fontSize: 13 }}
                 placeholder={`${locale === "zh" ? "输入" : "Enter"} ${key}`}
                 value={envValues[key] || ""}
                 onChange={(e) => props.setEnvValues((prev) => ({ ...prev, [key]: e.target.value }))}
@@ -353,7 +353,7 @@ export function CustomSourceModal(props: CustomSourceModalProps) {
               >
                 {repo.enabled ? (locale === "zh" ? "启用" : "On") : locale === "zh" ? "停用" : "Off"}
               </button>
-              <span style={{ flex: 1, fontFamily: "'JetBrains Mono', monospace" }}>
+              <span style={{ flex: 1, fontFamily: "var(--font-code)" }}>
                 {repo.owner}/{repo.name}@{repo.branch}
               </span>
               <button
@@ -394,7 +394,7 @@ export function CustomSourceModal(props: CustomSourceModalProps) {
           <div style={{ display: "flex", gap: 8 }}>
             <input
               className="input"
-              style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, flex: 1 }}
+              style={{ fontFamily: "var(--font-code)", fontSize: 12, flex: 1 }}
               placeholder="https://example.com/skills.json"
               value={customUrl}
               onChange={props.handleCustomUrlChange}
@@ -609,7 +609,7 @@ export function McpPreviewModal(props: McpPreviewModalProps) {
           </span>
           {previewMcp.install_type && <span className="badge badge-muted">{previewMcp.install_type}</span>}
           {previewMcp.package_name && (
-            <span className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>
+            <span className="badge badge-accent" style={{ fontFamily: "var(--font-code)", fontSize: 10 }}>
               {previewMcp.package_name}
             </span>
           )}
@@ -622,7 +622,7 @@ export function McpPreviewModal(props: McpPreviewModalProps) {
               borderRadius: 6,
               background: "var(--bg-input)",
               border: "1px solid var(--border-default)",
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: "var(--font-code)",
               fontSize: 12,
               color: "var(--text-secondary)",
               wordBreak: "break-all",

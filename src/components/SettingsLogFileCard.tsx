@@ -15,14 +15,7 @@ function uiText(locale: Locale, zhText: string, enText: string, jaText?: string)
   return locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText;
 }
 
-function SettingsLogFileCardComponent({
-  label,
-  path,
-  description,
-  locale,
-  onCopy,
-  onOpen,
-}: SettingsLogFileCardProps) {
+function SettingsLogFileCardComponent({ label, path, description, locale, onCopy, onOpen }: SettingsLogFileCardProps) {
   return (
     <div style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-input)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
@@ -47,7 +40,9 @@ function SettingsLogFileCardComponent({
           </button>
         </div>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "'JetBrains Mono', monospace", wordBreak: "break-all" }}>
+      <div
+        style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "var(--font-code)", wordBreak: "break-all" }}
+      >
         {path}
       </div>
     </div>

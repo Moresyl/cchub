@@ -113,7 +113,7 @@ function WorkspaceCardComponent({
                 <div style={{ display: "flex", gap: 6 }}>
                   <input
                     className="input"
-                    style={{ fontSize: 12, padding: "4px 8px", fontFamily: "'JetBrains Mono', monospace" }}
+                    style={{ fontSize: 12, padding: "4px 8px", fontFamily: "var(--font-code)" }}
                     value={editPath}
                     onChange={(event) => onEditPathChange(event.target.value)}
                     placeholder={pathPlaceholder}
@@ -147,9 +147,7 @@ function WorkspaceCardComponent({
                 {workspace.base_path && (
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
                     <FolderOpen size={11} style={{ color: "var(--text-muted)" }} />
-                    <span
-                      style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}
-                    >
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
                       {workspace.base_path}
                     </span>
                   </div>

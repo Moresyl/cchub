@@ -15,7 +15,7 @@ function SkillPreviewSectionComponent({ current, fetchDescription }: SkillPrevie
         {current.repo && (
           <div>
             <div className="field-label">Repository</div>
-            <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>{current.repo}</div>
+            <div style={{ fontSize: 13, fontFamily: "var(--font-code)" }}>{current.repo}</div>
           </div>
         )}
         {(current.branch || current.directory) && (

@@ -80,26 +80,32 @@ function SettingsImportSummaryPanelComponent({
               [filesLabel, String(summary.full_files_restored)],
               [pendingLabel, String(summary.pending_project_files)],
             ].map(([label, value]) => (
-              <SettingsSummaryMetricCard
-                key={String(label)}
-                label={String(label)}
-                value={String(value)}
-              />
+              <SettingsSummaryMetricCard key={String(label)} label={String(label)} value={String(value)} />
             ))}
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>{backupLabel}</div>
-              <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "var(--text-secondary)", wordBreak: "break-all" }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontFamily: "var(--font-code)",
+                  color: "var(--text-secondary)",
+                  wordBreak: "break-all",
+                }}
+              >
                 {summary.safety_backup_path}
               </div>
             </div>
-            <button
-              className="btn btn-secondary btn-sm"
-              type="button"
-              onClick={onOpenBackupPath}
-              style={{ gap: 6 }}
-            >
+            <button className="btn btn-secondary btn-sm" type="button" onClick={onOpenBackupPath} style={{ gap: 6 }}>
               <FolderOpen size={14} />
               {openPathLabel}
             </button>
@@ -121,11 +127,7 @@ function SettingsImportSummaryPanelComponent({
               [workflowsLabel, rescan.workflows],
               [configRootsLabel, rescan.config_roots],
             ].map(([label, value]) => (
-              <SettingsSummaryStatRow
-                key={String(label)}
-                label={String(label)}
-                value={value}
-              />
+              <SettingsSummaryStatRow key={String(label)} label={String(label)} value={value} />
             ))}
           </div>
         ) : (

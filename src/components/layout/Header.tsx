@@ -1,5 +1,5 @@
 import { memo, useCallback } from "react";
-import { Sun, Moon, Monitor, ArrowUpCircle, Search } from "lucide-react";
+import { Sun, Moon, Monitor, ArrowUpCircle, Search, ChevronRight } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { getResolvedTheme, setTheme } from "../../lib/theme";
 import { getLocale, t } from "../../lib/i18n";
@@ -19,14 +19,6 @@ function HeaderComponent() {
   const item = section.items.find((candidate) => candidate.path === location.pathname) ?? section.items[0];
   const pageTitle = i.nav[item.labelKey];
   const sectionTitle = section.key === "settings" ? i.nav.settings : i.navGroups[section.key];
-  const pageSubtitle =
-    location.pathname === "/"
-      ? locale === "zh"
-        ? "切换各工具的当前配置"
-        : locale === "ja"
-          ? "ツールの設定を切り替え"
-          : "Switch active tool configurations"
-      : sectionTitle;
 
   const toggleTheme = useCallback(() => {
     const next = getResolvedTheme() === "dark" ? "light" : "dark";
@@ -35,9 +27,14 @@ function HeaderComponent() {
 
   return (
     <header className="topbar">
-      <div className="topbar-title">
-        <h1>{pageTitle}</h1>
-        <p>{pageSubtitle}</p>
+      <div className="topbar-title" aria-label={`${sectionTitle} / ${pageTitle}`}>
+        {sectionTitle !== pageTitle && (
+          <>
+            <span className="topbar-section">{sectionTitle}</span>
+            <ChevronRight size={14} aria-hidden="true" />
+          </>
+        )}
+        <span className="topbar-page">{pageTitle}</span>
       </div>
       <div className="topbar-actions">
         <ProjectProfileSwitcher />

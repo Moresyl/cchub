@@ -246,7 +246,7 @@ function WebDavInfoCardComponent({
           gap: 8,
           fontSize: valueLarge ? 20 : 13,
           fontWeight: valueLarge ? 700 : 600,
-          fontFamily: mono ? "'JetBrains Mono', monospace" : undefined,
+          fontFamily: mono ? "var(--font-code)" : undefined,
           wordBreak: mono ? "break-all" : undefined,
         }}
       >

@@ -63,7 +63,7 @@ export default function McpServerEditView({
           <span className="field-label">{i.mcp.command}</span>
           <input
             className="input"
-            style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+            style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
             value={editCommand}
             onChange={(e) => setEditCommand(e.target.value)}
             placeholder="npx, node, python..."

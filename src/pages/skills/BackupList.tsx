@@ -77,7 +77,7 @@ export default function SkillsBackupList({
                 style={{
                   fontSize: 11,
                   color: "var(--text-muted)",
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: "var(--font-code)",
                   wordBreak: "break-all",
                 }}
               >

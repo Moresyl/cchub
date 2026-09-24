@@ -1,6 +1,7 @@
 import { memo, useState, useEffect, useCallback } from "react";
 import { CheckCircle, AlertCircle, Info, X } from "lucide-react";
 import { t } from "../lib/i18n";
+import { Button } from "./ui/button";
 
 export type ToastType = "success" | "error" | "info";
 
@@ -24,9 +25,9 @@ export function showToast(type: ToastType, message: string, duration?: number) {
 function ToastItemComponent({ toast, onDismiss }: ToastItemProps) {
   const icons = { success: CheckCircle, error: AlertCircle, info: Info };
   const colors = {
-    success: { bg: "var(--success-subtle)", border: "var(--success)", icon: "var(--success)" },
-    error: { bg: "var(--danger-subtle)", border: "var(--danger)", icon: "var(--danger)" },
-    info: { bg: "var(--accent-subtle)", border: "var(--accent)", icon: "var(--accent)" },
+    success: { bg: "var(--success-subtle)", icon: "var(--success)" },
+    error: { bg: "var(--danger-subtle)", icon: "var(--danger)" },
+    info: { bg: "var(--accent-subtle)", icon: "var(--accent)" },
   };
   const Icon = icons[toast.type];
   const color = colors[toast.type];
@@ -36,27 +37,25 @@ function ToastItemComponent({ toast, onDismiss }: ToastItemProps) {
 
   return (
     <div
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 10,
-        padding: "12px 16px",
-        borderRadius: 8,
-        background: color.bg,
-        border: `1px solid ${color.border}`,
-        animation: "slideIn 0.2s ease",
-      }}
+      role={toast.type === "error" ? "alert" : "status"}
+      className="app-toast"
+      style={{ borderLeftColor: color.icon }}
     >
-      <Icon size={16} style={{ color: color.icon, flexShrink: 0, marginTop: 1 }} />
-      <span style={{ fontSize: 13, color: "var(--text-primary)", flex: 1, lineHeight: 1.5 }}>{toast.message}</span>
-      <button
+      <span className="app-toast-icon" style={{ color: color.icon, background: color.bg }}>
+        <Icon size={16} aria-hidden="true" />
+      </span>
+      <span className="app-toast-message">{toast.message}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="app-toast-close"
         aria-label={t().common.close}
         title={t().common.close}
         onClick={handleDismiss}
-        style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "var(--text-muted)" }}
       >
-        <X size={14} />
-      </button>
+        <X size={14} aria-hidden="true" />
+      </Button>
     </div>
   );
 }
@@ -93,22 +92,7 @@ export const ToastContainer = memo(function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div
-      aria-live="polite"
-      aria-relevant="additions"
-      style={{
-        position: "fixed",
-        top: 12,
-        left: "50%",
-        transform: "translateX(-50%)",
-        zIndex: 9999,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        maxWidth: 480,
-        minWidth: 300,
-      }}
-    >
+    <div className="app-toast-stack" aria-live="polite" aria-relevant="additions">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={dismissToast} />
       ))}

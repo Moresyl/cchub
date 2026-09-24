@@ -42,10 +42,12 @@ function HookCardComponent({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <span className="dot dot-active" />
-          <span className="badge badge-accent" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>{hook.event}</span>
+          <span className="badge badge-accent" style={{ fontFamily: "var(--font-code)", fontSize: 11 }}>
+            {hook.event}
+          </span>
           {hook.matcher && (
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {matcherLabel}: <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{hook.matcher}</span>
+              {matcherLabel}: <span style={{ fontFamily: "var(--font-code)" }}>{hook.matcher}</span>
             </span>
           )}
           {hook.timeout && (
@@ -69,12 +71,14 @@ function HookCardComponent({
           </button>
         </div>
       </div>
-      <div className="code-block" style={{ marginTop: 14 }}>{hook.command}</div>
+      <div className="code-block" style={{ marginTop: 14 }}>
+        {hook.command}
+      </div>
       {hook.project_path && (
         <p
           style={{
             fontSize: 11,
-            fontFamily: "'JetBrains Mono', monospace",
+            fontFamily: "var(--font-code)",
             color: "var(--text-muted)",
             marginTop: 10,
             overflow: "hidden",

@@ -559,16 +559,10 @@ export default function Settings() {
   const migrationCenterLabels = useMemo(() => buildMigrationCenterLabels(i, loc), [i, loc]);
 
   return (
-    <div className="animate-in">
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">{i.settings.title}</h2>
-        </div>
-      </div>
-
+    <div className="animate-in settings-workspace">
       <SettingsCategoryNav active={activeCategory} locale={loc} onChange={setActiveCategory} />
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <div className="settings-sections">
         {activeCategory === "general" && (
           <SettingsAppearanceSection
             title={i.settings.appearance}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -117,7 +117,7 @@ describe("ProfilesListView", () => {
     expect(screen.getByText("Shared provider controls")).toBeTruthy();
   });
 
-  it("keeps secondary profile actions in a focused menu", () => {
+  it("keeps secondary profile actions in a focused menu", async () => {
     const props = createProps();
     renderListView(props);
 
@@ -125,8 +125,11 @@ describe("ProfilesListView", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Claude (1)" }));
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
     expect(screen.getByRole("menu")).toBeTruthy();
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByRole("menu")).toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    fireEvent.pointerDown(document.body, { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(document.body, { button: 0, pointerType: "mouse" });
+    fireEvent.click(document.body);
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "复制" }));

@@ -123,14 +123,8 @@
   position: relative;
 }
 .profile-card-menu {
-  position: fixed;
-  z-index: 30;
   width: 190px;
   padding: 5px;
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-  background: var(--bg-card-solid);
-  box-shadow: var(--shadow-lg);
 }
 .profile-card-menu-item {
   width: 100%;
@@ -459,7 +453,7 @@
 .input:focus-visible {
   border-color: var(--control-border-focus);
   outline: none !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 28%, transparent);
+  box-shadow: 0 0 0 1px var(--control-border-focus);
 }
 .input:disabled {
   cursor: default;
@@ -553,6 +547,196 @@ select.input {
 select.input option {
   color: var(--text-primary);
   background: var(--bg-card-solid);
+}
+
+/* Searchable model combobox */
+
+.model-selector-control {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.model-selector-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.model-selector-trigger:hover:not(:disabled),
+.model-selector-trigger[data-state="open"] {
+  border-color: var(--control-border-hover);
+  background: var(--control-background-hover);
+}
+
+.model-selector-trigger:focus-visible {
+  border-color: var(--control-border-focus);
+  outline: none !important;
+  box-shadow: 0 0 0 1px var(--control-border-focus);
+}
+
+.model-selector-trigger:disabled {
+  cursor: default;
+  opacity: 0.25;
+}
+
+.model-selector-value,
+.model-selector-placeholder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-selector-placeholder,
+.model-selector-chevron {
+  color: var(--text-muted);
+}
+
+.model-selector-chevron {
+  flex: none;
+}
+
+.model-selector-clear {
+  position: absolute;
+  top: 6px;
+  right: 25px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+}
+
+.model-selector-control:has(.model-selector-clear) .model-selector-trigger {
+  padding-right: 52px;
+}
+
+.model-selector-fallback {
+  height: 36px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.model-selector-popover {
+  width: var(--radix-popover-trigger-width);
+  min-width: min(360px, calc(100vw - 24px));
+  max-width: min(520px, calc(100vw - 24px));
+  overflow: hidden;
+  padding: 6px;
+}
+
+.model-selector-command {
+  background: transparent;
+}
+
+.model-selector-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.model-selector-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0 !important;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  box-shadow: none !important;
+}
+
+.model-selector-search input::placeholder {
+  color: var(--control-placeholder);
+}
+
+.model-selector-list {
+  max-height: min(216px, var(--radix-popover-content-available-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-top: 5px;
+  scrollbar-gutter: stable;
+}
+
+.model-selector-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  outline: none;
+  color: var(--text-secondary);
+  cursor: default;
+  user-select: none;
+}
+
+.model-selector-item[data-selected="true"],
+.model-selector-item:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.model-selector-item-check {
+  display: grid;
+  width: 18px;
+  place-items: center;
+}
+
+.model-selector-item-main {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.model-selector-item-id {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 510;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-selector-item-name,
+.model-selector-item-meta {
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.model-selector-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-selector-empty {
+  padding: 18px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 /* ═══ Code Block ═══ */

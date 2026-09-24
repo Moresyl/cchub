@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { memo, useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Download, RefreshCw } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { buildStructuredConfig, parseStructuredConfig, supportsStructuredConfig } from "../lib/configProfiles";
 import { showToast } from "./Toast";
+import ModelSelector, { type ModelInfo } from "./ModelSelector";
 import { Textarea } from "./ui/textarea";
 import {
   OMO_BUILTIN_AGENTS,
@@ -44,10 +45,10 @@ interface VariantEditorState {
 
 interface OmoModelFieldProps {
   label: string;
-  listId: string;
   value: string;
   placeholder: string;
   suggestedLabel: string;
+  models: ModelInfo[];
   recommended?: string;
   onChange: (value: string) => void;
 }
@@ -117,24 +118,17 @@ function normalizeVariantData(data: OmoLocalConfigData): VariantEditorState {
 
 function OmoModelFieldComponent({
   label,
-  listId,
   value,
   placeholder,
   suggestedLabel,
+  models,
   recommended,
   onChange,
 }: OmoModelFieldProps) {
-  const handleChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      onChange(event.target.value);
-    },
-    [onChange],
-  );
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <label className="field-label">{label}</label>
-      <input className="input" list={listId} value={value} onChange={handleChange} placeholder={placeholder} />
+      <ModelSelector value={value} models={models} onChange={onChange} placeholder={placeholder} />
       {recommended ? (
         <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
           {suggestedLabel}: {recommended}
@@ -183,7 +177,7 @@ function VariantEditor({
   const customAgentKeys = Object.keys(state.agents).filter((key) => !builtinAgentKeys.has(key));
   const customCategoryKeys = Object.keys(state.categories).filter((key) => !builtinCategoryKeys.has(key));
   const preview = buildPreview(state.agents, state.categories, state.otherFieldsText, variant === "standard");
-  const modelListId = `omo-model-list-${variant}`;
+  const modelOptions = useMemo<ModelInfo[]>(() => modelSuggestions.map((id) => ({ id })), [modelSuggestions]);
   const suggestedLabel = uiText("建议", "Suggested", "推奨");
   const otherFieldsPlaceholder = uiText(
     "可选。填写额外 JSON 对象字段，会原样并入 OMO 配置。",
@@ -276,12 +270,6 @@ function VariantEditor({
         </div>
       ) : null}
 
-      <datalist id={modelListId}>
-        {modelSuggestions.map((model) => (
-          <option key={model} value={model} />
-        ))}
-      </datalist>
-
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
@@ -292,7 +280,7 @@ function VariantEditor({
               <OmoModelField
                 key={agent.key}
                 label={agent.display}
-                listId={modelListId}
+                models={modelOptions}
                 value={(state.agents[agent.key]?.model as string) || ""}
                 onChange={(value) => onModelChange("agents", agent.key, value)}
                 placeholder={agent.recommended || uiText("输入模型 ID", "Enter model ID", "モデル ID を入力")}
@@ -313,7 +301,7 @@ function VariantEditor({
                 <OmoModelField
                   key={category.key}
                   label={category.display}
-                  listId={modelListId}
+                  models={modelOptions}
                   value={(state.categories[category.key]?.model as string) || ""}
                   onChange={(value) => onModelChange("categories", category.key, value)}
                   placeholder={category.recommended || uiText("输入模型 ID", "Enter model ID", "モデル ID を入力")}

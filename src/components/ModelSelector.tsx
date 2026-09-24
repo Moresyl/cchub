@@ -1,5 +1,9 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { Command } from "cmdk";
+import { Check, ChevronDown, Search, X } from "lucide-react";
+import { memo, useCallback, useMemo, useState } from "react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 export interface ModelInfo {
   id: string;
@@ -18,54 +22,50 @@ interface ModelSelectorProps {
   disabled?: boolean;
 }
 
-function formatTokens(n: number | null | undefined): string {
-  if (!n) return "";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return String(n);
+function formatTokens(value: number | null | undefined): string {
+  if (!value) return "";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
+  return String(value);
 }
 
 function ModelSelectorComponent({ value, models, onChange, placeholder, disabled }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return models;
-    const q = search.toLowerCase();
+  const filteredModels = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    if (!query) return models;
     return models.filter(
-      (m) => m.id.toLowerCase().includes(q) || m.displayName?.toLowerCase().includes(q),
+      (model) => model.id.toLocaleLowerCase().includes(query) || model.displayName?.toLocaleLowerCase().includes(query),
     );
   }, [models, search]);
 
-  const handleSelect = useCallback((id: string) => {
-    onChange(id);
-    setOpen(false);
-    setSearch("");
-  }, [onChange]);
+  const trimmedSearch = search.trim();
+  const canUseCustomValue =
+    trimmedSearch.length > 0 &&
+    !models.some((model) => model.id.toLocaleLowerCase() === trimmedSearch.toLocaleLowerCase());
 
-  const handleBlur = useCallback((e: React.FocusEvent) => {
-    if (!containerRef.current?.contains(e.relatedTarget as Node)) {
-      setOpen(false);
-      setSearch("");
-    }
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) setSearch("");
   }, []);
 
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value;
-    setSearch(v);
-    onChange(v);
-    if (!open) setOpen(true);
-  }, [onChange, open]);
+  const handleSelect = useCallback(
+    (nextValue: string) => {
+      onChange(nextValue);
+      setSearch("");
+      setOpen(false);
+    },
+    [onChange],
+  );
 
   if (models.length === 0) {
     return (
-      <input
-        className="input"
-        style={{ fontSize: 12, height: 30, padding: "0 8px" }}
+      <Input
+        className="input model-selector-fallback"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         disabled={disabled}
       />
@@ -73,98 +73,98 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
   }
 
   return (
-    <div ref={containerRef} style={{ position: "relative" }} onBlur={handleBlur}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          border: "1px solid var(--border-default)",
-          borderRadius: 6,
-          background: "var(--bg-surface)",
-          height: 30,
-          cursor: disabled ? "not-allowed" : "pointer",
-          opacity: disabled ? 0.5 : 1,
-        }}
-        onClick={() => { if (!disabled) { setOpen(!open); setTimeout(() => inputRef.current?.focus(), 0); } }}
-      >
-        <input
-          ref={inputRef}
-          style={{
-            flex: 1,
-            border: "none",
-            background: "transparent",
-            outline: "none",
-            fontSize: 12,
-            padding: "0 8px",
-            color: "var(--text-primary)",
-            minWidth: 0,
-          }}
-          value={open ? search : value}
-          onChange={handleInputChange}
-          onFocus={() => { if (!open) { setOpen(true); setSearch(value); } }}
-          placeholder={value || placeholder}
-          disabled={disabled}
-        />
-        {value && !open && (
-          <button
-            style={{ border: "none", background: "none", cursor: "pointer", padding: "0 4px", color: "var(--text-muted)" }}
-            onClick={(e) => { e.stopPropagation(); onChange(""); }}
-            tabIndex={-1}
+    <div className="model-selector-control">
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="model-selector-trigger"
+            role="combobox"
+            aria-label={placeholder || "选择模型"}
+            aria-expanded={open}
+            disabled={disabled}
           >
-            <X size={11} />
-          </button>
-        )}
-        <ChevronDown size={12} style={{ marginRight: 6, color: "var(--text-muted)", flexShrink: 0 }} />
-      </div>
+            <span className={value ? "model-selector-value" : "model-selector-placeholder"}>
+              {value || placeholder || "选择模型"}
+            </span>
+            <ChevronDown size={13} className="model-selector-chevron" aria-hidden="true" />
+          </Button>
+        </PopoverTrigger>
 
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            right: 0,
-            maxHeight: 240,
-            overflowY: "auto",
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 6,
-            zIndex: 100,
-            boxShadow: "0 4px 12px rgba(0,0,0,.15)",
-          }}
-        >
-          {filtered.length === 0 ? (
-            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-muted)" }}>
-              No matches
-            </div>
-          ) : (
-            filtered.map((m) => (
-              <div
-                key={m.id}
-                style={{
-                  padding: "6px 10px",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  background: m.id === value ? "var(--bg-hover)" : undefined,
+        <PopoverContent className="model-selector-popover" onOpenAutoFocus={(event) => event.preventDefault()}>
+          <Command shouldFilter={false} className="model-selector-command" label="搜索模型">
+            <div className="model-selector-search">
+              <Search size={14} aria-hidden="true" />
+              <Command.Input
+                value={search}
+                onValueChange={setSearch}
+                placeholder="搜索或输入模型 ID"
+                aria-label="搜索模型"
+                autoFocus
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && canUseCustomValue) {
+                    event.preventDefault();
+                    handleSelect(trimmedSearch);
+                  }
                 }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleSelect(m.id)}
-              >
-                <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  <span style={{ fontWeight: m.id === value ? 600 : 400 }}>{m.id}</span>
-                  {m.displayName && m.displayName !== m.id && (
-                    <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-muted)" }}>{m.displayName}</span>
-                  )}
-                </div>
-                <ModelMeta model={m} />
-              </div>
-            ))
-          )}
-        </div>
+              />
+            </div>
+
+            <Command.List className="model-selector-list">
+              {filteredModels.length === 0 && !canUseCustomValue && (
+                <Command.Empty className="model-selector-empty">没有匹配的模型</Command.Empty>
+              )}
+              {canUseCustomValue && (
+                <Command.Item
+                  value={`custom:${trimmedSearch}`}
+                  onSelect={() => handleSelect(trimmedSearch)}
+                  className="model-selector-item"
+                >
+                  <span className="model-selector-item-check" />
+                  <span className="model-selector-item-main">
+                    <span className="model-selector-item-id">使用 “{trimmedSearch}”</span>
+                    <span className="model-selector-item-name">自定义模型 ID</span>
+                  </span>
+                </Command.Item>
+              )}
+              {filteredModels.map((model) => (
+                <Command.Item
+                  key={model.id}
+                  value={model.id}
+                  onSelect={() => handleSelect(model.id)}
+                  className="model-selector-item"
+                  aria-selected={model.id === value}
+                >
+                  <span className="model-selector-item-check">
+                    {model.id === value && <Check size={13} aria-hidden="true" />}
+                  </span>
+                  <span className="model-selector-item-main">
+                    <span className="model-selector-item-id">{model.id}</span>
+                    {model.displayName && model.displayName !== model.id && (
+                      <span className="model-selector-item-name">{model.displayName}</span>
+                    )}
+                  </span>
+                  <ModelMeta model={model} />
+                </Command.Item>
+              ))}
+            </Command.List>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      {value && !disabled && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="model-selector-clear"
+          onClick={() => onChange("")}
+          aria-label="清除模型"
+          title="清除模型"
+        >
+          <X size={12} aria-hidden="true" />
+        </Button>
       )}
     </div>
   );
@@ -175,14 +175,8 @@ const ModelMeta = memo(function ModelMeta({ model }: { model: ModelInfo }) {
   if (model.contextWindow) parts.push(`ctx:${formatTokens(model.contextWindow)}`);
   if (model.maxOutputTokens) parts.push(`out:${formatTokens(model.maxOutputTokens)}`);
   if (model.inputPrice) parts.push(`$${model.inputPrice}/in`);
-
   if (parts.length === 0) return null;
-
-  return (
-    <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
-      {parts.join(" · ")}
-    </span>
-  );
+  return <span className="model-selector-item-meta">{parts.join(" · ")}</span>;
 });
 
 export default memo(ModelSelectorComponent);

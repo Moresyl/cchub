@@ -105,7 +105,7 @@ function WebDavSyncSectionComponent() {
     return () => {
       unlisten.then((dispose) => dispose());
     };
-  }, [handleSyncEvent]);
+  }, [loadState]);
 
   const busy = actionState !== "idle";
   const activePreset = useMemo(() => WEBDAV_PRESETS.find((preset) => preset.id === presetId), [presetId]);

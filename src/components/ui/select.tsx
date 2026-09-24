@@ -14,7 +14,7 @@ export const SelectTrigger = forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-[var(--control-height-md)] w-full items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2.5 text-xs font-medium text-foreground shadow-[0_1px_2px_-1px_rgba(0,0,0,0.08)] outline-none backdrop-blur-lg transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--focus-ring)_28%,transparent)] disabled:cursor-default disabled:opacity-25 [&>span]:truncate",
+      "flex h-[var(--control-height-md)] w-full items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2.5 text-xs font-medium text-foreground shadow-[0_1px_2px_-1px_rgba(0,0,0,0.08)] outline-none backdrop-blur-lg transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:outline-none focus-visible:ring-0 data-[state=open]:border-[var(--control-border-focus)] data-[state=open]:bg-[var(--control-background-hover)] disabled:cursor-default disabled:opacity-25 [&>span]:truncate",
       className,
     )}
     {...props}
@@ -64,7 +64,7 @@ export const SelectContent = forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        "relative z-[2100] max-h-72 min-w-[8rem] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-popover text-popover-foreground shadow-[var(--shadow-lg)] data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
+        "relative z-[2100] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[8rem] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-card-solid)] text-foreground shadow-[var(--shadow-xl)] data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className,

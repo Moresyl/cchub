@@ -188,11 +188,13 @@ interface SettingsMigrationCenterSectionProps {
 }
 
 function hasToolHealthIssue(report: ToolEnvironmentReportItem) {
-  return !report.cli_available
-    || !report.config_dir_exists
-    || !report.config_exists
-    || !report.mcp_config_exists
-    || !report.skills_dir_exists;
+  return (
+    !report.cli_available ||
+    !report.config_dir_exists ||
+    !report.config_exists ||
+    !report.mcp_config_exists ||
+    !report.skills_dir_exists
+  );
 }
 
 function SettingsMigrationCenterSectionComponent({
@@ -236,44 +238,64 @@ function SettingsMigrationCenterSectionComponent({
   const toolHealthIssues = toolReports.filter(hasToolHealthIssue);
   const manualSetupReports = toolReports.filter((report) => !!report.manual_setup_kind);
   const pendingProjectFiles = pendingProjectRoots.reduce((sum, item) => sum + item.file_count, 0);
-  const migrationReady = pendingProjectRoots.length === 0 && toolHealthIssues.length === 0 && manualSetupReports.length === 0;
+  const migrationReady =
+    pendingProjectRoots.length === 0 && toolHealthIssues.length === 0 && manualSetupReports.length === 0;
 
   const migrationOverviewCards = [
     {
       panel: "pending" as const,
       label: labels.pendingImports,
       value: pendingProjectRoots.length,
-      tone: pendingProjectRoots.length > 0 ? "warning" as const : "ready" as const,
-      helper: pendingProjectRoots.length > 0
-        ? (locale === "zh" ? "需要恢复路径" : "Needs path repair")
-        : (locale === "zh" ? "已处理" : "Resolved"),
+      tone: pendingProjectRoots.length > 0 ? ("warning" as const) : ("ready" as const),
+      helper:
+        pendingProjectRoots.length > 0
+          ? locale === "zh"
+            ? "需要恢复路径"
+            : "Needs path repair"
+          : locale === "zh"
+            ? "已处理"
+            : "Resolved",
     },
     {
       panel: "summary" as const,
       label: labels.importSummaryPending,
       value: pendingProjectFiles,
-      tone: pendingProjectFiles > 0 ? "warning" as const : "neutral" as const,
+      tone: pendingProjectFiles > 0 ? ("warning" as const) : ("neutral" as const),
       helper: lastImportSummary
-        ? (locale === "zh" ? "查看最近导入" : "Review latest import")
-        : (locale === "zh" ? "暂无导入记录" : "No recent import"),
+        ? locale === "zh"
+          ? "查看最近导入"
+          : "Review latest import"
+        : locale === "zh"
+          ? "暂无导入记录"
+          : "No recent import",
     },
     {
       panel: "health" as const,
       label: labels.migrationHealth,
       value: toolHealthIssues.length,
-      tone: toolHealthIssues.length > 0 ? "danger" as const : "ready" as const,
-      helper: toolHealthIssues.length > 0
-        ? (locale === "zh" ? "优先处理环境缺失" : "Fix environment gaps first")
-        : (locale === "zh" ? "环境正常" : "Environment ready"),
+      tone: toolHealthIssues.length > 0 ? ("danger" as const) : ("ready" as const),
+      helper:
+        toolHealthIssues.length > 0
+          ? locale === "zh"
+            ? "优先处理环境缺失"
+            : "Fix environment gaps first"
+          : locale === "zh"
+            ? "环境正常"
+            : "Environment ready",
     },
     {
       panel: "auth" as const,
       label: labels.authGuide,
       value: manualSetupReports.length,
-      tone: manualSetupReports.length > 0 ? "warning" as const : "ready" as const,
-      helper: manualSetupReports.length > 0
-        ? (locale === "zh" ? "仍需手动认证" : "Manual auth still required")
-        : (locale === "zh" ? "无需补全" : "No manual auth needed"),
+      tone: manualSetupReports.length > 0 ? ("warning" as const) : ("ready" as const),
+      helper:
+        manualSetupReports.length > 0
+          ? locale === "zh"
+            ? "仍需手动认证"
+            : "Manual auth still required"
+          : locale === "zh"
+            ? "无需补全"
+            : "No manual auth needed",
     },
   ];
 
@@ -283,14 +305,19 @@ function SettingsMigrationCenterSectionComponent({
         <Archive size={17} style={{ color: "var(--text-secondary)" }} />
         {labels.title}
       </div>
-      <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-        {labels.description}
-      </p>
+      <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>{labels.description}</p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 10,
+          marginBottom: 16,
+        }}
+      >
         {migrationOverviewCards.map(({ panel, label, value, tone, helper }) => (
           <SettingsMigrationOverviewCard
-            key={label}
+            key={panel}
             panel={panel}
             label={label}
             value={value}
@@ -323,21 +350,11 @@ function SettingsMigrationCenterSectionComponent({
           <Upload size={14} className={importingBackup ? "spin" : ""} />
           {importingBackup ? labels.migrationImporting : labels.migrationImport}
         </button>
-        <button
-          className="btn btn-secondary btn-sm"
-          style={{ gap: 6 }}
-          disabled={repairingAll}
-          onClick={onRepairAll}
-        >
+        <button className="btn btn-secondary btn-sm" style={{ gap: 6 }} disabled={repairingAll} onClick={onRepairAll}>
           <RefreshCw size={14} className={repairingAll ? "spin" : ""} />
           {repairingAll ? labels.pendingImportsRepairingAll : labels.pendingImportsRepairAll}
         </button>
-        <button
-          className="btn btn-secondary btn-sm"
-          style={{ gap: 6 }}
-          disabled={rescanningAll}
-          onClick={onFullRescan}
-        >
+        <button className="btn btn-secondary btn-sm" style={{ gap: 6 }} disabled={rescanningAll} onClick={onFullRescan}>
           <RefreshCw size={14} className={rescanningAll ? "spin" : ""} />
           {rescanningAll ? labels.fullRescanning : labels.fullRescan}
         </button>
@@ -359,7 +376,9 @@ function SettingsMigrationCenterSectionComponent({
           onToggle={onSummaryToggle}
           style={{ borderRadius: 10, background: "var(--bg-input)" }}
         >
-          <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
+          <summary
+            style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}
+          >
             {labels.importSummary}
           </summary>
           <SettingsImportSummaryPanel
@@ -392,14 +411,26 @@ function SettingsMigrationCenterSectionComponent({
           onToggle={onPendingToggle}
           style={{ borderRadius: 10, background: "var(--bg-input)" }}
         >
-          <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
+          <summary
+            style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}
+          >
             {labels.pendingImports}
           </summary>
           <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", gap: 12, justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                flexWrap: "wrap",
+              }}
+            >
               <div>
                 <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{labels.pendingImportsDesc}</p>
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>{labels.pendingImportsAutoMatchDesc}</p>
+                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
+                  {labels.pendingImportsAutoMatchDesc}
+                </p>
               </div>
               <button
                 className="btn btn-secondary btn-sm"
@@ -441,11 +472,21 @@ function SettingsMigrationCenterSectionComponent({
           onToggle={onHealthToggle}
           style={{ borderRadius: 10, background: "var(--bg-input)" }}
         >
-          <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
+          <summary
+            style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}
+          >
             {labels.migrationHealth}
           </summary>
           <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                alignItems: "flex-start",
+                flexWrap: "wrap",
+              }}
+            >
               <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{labels.migrationHealthDesc}</p>
               <button
                 className="btn btn-secondary btn-sm"
@@ -458,7 +499,9 @@ function SettingsMigrationCenterSectionComponent({
               </button>
             </div>
             {toolHealthIssues.length === 0 ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-secondary)" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-secondary)" }}
+              >
                 <CheckCircle size={16} style={{ color: "var(--success)" }} />
                 {labels.migrationHealthReady}
               </div>
@@ -486,7 +529,9 @@ function SettingsMigrationCenterSectionComponent({
                   mcpConfigLabel={labels.migrationHealthMcpConfig}
                   skillsDirLabel={labels.migrationHealthSkillsDir}
                   customPathLabel={labels.migrationHealthCustomPath}
-                  installCommandToastLabel={locale === "zh" ? `${report.tool_name} 安装命令` : `${report.tool_name} install command`}
+                  installCommandToastLabel={
+                    locale === "zh" ? `${report.tool_name} 安装命令` : `${report.tool_name} install command`
+                  }
                   onCopy={onCopy}
                   onBootstrap={onBootstrapTool}
                 />
@@ -501,13 +546,17 @@ function SettingsMigrationCenterSectionComponent({
           onToggle={onAuthToggle}
           style={{ borderRadius: 10, background: "var(--bg-input)" }}
         >
-          <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
+          <summary
+            style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}
+          >
             {labels.authGuide}
           </summary>
           <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{labels.authGuideDesc}</p>
             {manualSetupReports.length === 0 ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-secondary)" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-secondary)" }}
+              >
                 <CheckCircle size={16} style={{ color: "var(--success)" }} />
                 {labels.authGuideReady}
               </div>
@@ -516,11 +565,13 @@ function SettingsMigrationCenterSectionComponent({
                 <SettingsManualSetupCard
                   key={`${report.tool_id}-auth`}
                   report={report}
-                  description={report.manual_setup_kind === "codex_login"
-                    ? labels.authGuideCodexLogin
-                    : report.manual_setup_kind === "gemini_api_key"
-                      ? labels.authGuideGeminiKey
-                      : report.manual_setup_kind || ""}
+                  description={
+                    report.manual_setup_kind === "codex_login"
+                      ? labels.authGuideCodexLogin
+                      : report.manual_setup_kind === "gemini_api_key"
+                        ? labels.authGuideGeminiKey
+                        : report.manual_setup_kind || ""
+                  }
                   installUrl={tools.find((tool) => tool.id === report.tool_id)?.install_url ?? null}
                   bootstrapping={bootstrappingToolId === report.tool_id}
                   copyCommandLabel={labels.authGuideCopyCommand}
@@ -529,7 +580,9 @@ function SettingsMigrationCenterSectionComponent({
                   prepareFileLabel={labels.authGuidePrepareFile}
                   openDocsLabel={labels.authGuideOpenDocs}
                   bootstrappingLabel={labels.migrationHealthBootstrapping}
-                  commandToastLabel={locale === "zh" ? `${report.tool_name} 认证命令` : `${report.tool_name} auth command`}
+                  commandToastLabel={
+                    locale === "zh" ? `${report.tool_name} 认证命令` : `${report.tool_name} auth command`
+                  }
                   pathToastLabel={locale === "zh" ? `${report.tool_name} 路径` : `${report.tool_name} path`}
                   openPathToastLabel={locale === "zh" ? `${report.tool_name} 路径` : `${report.tool_name} path`}
                   docsToastLabel={locale === "zh" ? `${report.tool_name} 说明页` : `${report.tool_name} docs`}

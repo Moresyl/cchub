@@ -186,14 +186,16 @@
 /* ═══ Keyboard & Motion Accessibility ═══ */
 
 a:focus-visible,
-button:focus-visible,
-[role="button"]:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
+button:not([role="combobox"]):not([role="menuitem"]):focus-visible,
+[role="button"]:not([role="menuitem"]):focus-visible,
+[tabindex]:not([role="combobox"]):not([role="option"]):not([role="menuitem"]):focus-visible {
   outline: 2px solid var(--focus-ring) !important;
   outline-offset: 2px;
+}
+
+[role="option"]:focus-visible,
+[role="menuitem"]:focus-visible {
+  outline: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

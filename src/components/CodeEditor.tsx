@@ -120,6 +120,10 @@ const lightHighlightStyle = HighlightStyle.define([
 
 const themeCompartment = new Compartment();
 
+export function getEditorCspNonce() {
+  return document.querySelector<HTMLStyleElement>("style[nonce]")?.nonce ?? "";
+}
+
 function getThemeExtensions() {
   const isLight = document.documentElement.getAttribute("data-theme") === "light";
   return [cmTheme, syntaxHighlighting(isLight ? lightHighlightStyle : darkHighlightStyle)];
@@ -159,6 +163,7 @@ function CodeEditorComponent({
   const extensions = useMemo(() => {
     const nextExtensions = [
       basicSetup,
+      EditorView.cspNonce.of(getEditorCspNonce()),
       ...getLangExtension(language),
       themeCompartment.of(getThemeExtensions()),
       EditorView.lineWrapping,

@@ -14,21 +14,22 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 新增统一的 36px 无边框桌面顶栏，将历史导航、侧栏开关、页面身份、项目切换和窗口操作收纳到同一层
-    - Windows 与 Linux 使用应用内最小化、最大化/还原和关闭按钮；macOS 保留原生交通灯并使用覆盖式标题栏
-    - 明暗主题改用系统桌面字体与中性灰阶：暗色侧栏为纯黑底层，内容面、控件面和文字层级按统一 token 对齐
-    - 新建配置的预设入口只展示官方默认值和空白自定义模板，减少无关选项
+    - 统一输入框、文本域、选择器与按钮的尺寸、圆角、边框、焦点环、禁用态和明暗主题反馈
+    - MCP 服务、技能与客户端页面改为响应式主从工作区；宽屏并排查看，窄窗口以独立详情抽屉承载编辑内容
+    - MCP 与技能详情按概览、配置或内容、同步目标分区，常用操作和关闭入口固定在清晰位置
+    - 配置文件编辑器、会话详情和用量表格补齐窄窗口布局，减少横向滚动和内容挤压
 
     ### 变更与安全
-    - 为自定义标题栏增加最小化、最大化、关闭与拖动窗口权限；不扩大文件、网络或命令执行权限
-    - 已保存配置、数据库结构、配置格式、供应商协议和安装路径均未改变，无需迁移
-    - 旧配置仍可读取和编辑；本次仅精简新建页面中可选择的预设模板
+    - 配置页、服务页、日志、Hooks、远程同步与高级设置统一使用应用级选择器，键盘焦点和空值选项行为保持一致
+    - 本次未新增文件、网络或命令执行权限，也未修改数据库结构、配置格式和供应商协议
+    - 已保存配置可以继续读取和编辑，从旧版本升级无需迁移数据
 
     ### 问题修复与打磨
-    - 移除 Windows 原生标题栏与应用工具栏叠加造成的双层顶部区域
-    - 最大化后窗口按钮会切换为“还原”状态，并在窗口尺寸变化时保持同步
-    - 收紧顶栏按钮、项目切换器和窗口控件尺寸，修复桌面顶栏偏厚及视觉层级不一致的问题
-    - 更新 README 明暗主题原生桌面截图，并对示例端点进行匿名化处理
+    - 修复配置文件双栏在窄窗口中被过度压缩的问题，树形列表与编辑区域会自动纵向排列
+    - 修复会话详情在中等宽度窗口中只剩狭窄内容列的问题，改为不透明侧滑详情层
+    - 修复技能筛选工具栏、详情面板和批量操作在小尺寸窗口中的拥挤与遮挡
+    - 为用量统计表补齐列宽、对齐、截断与行悬停样式，避免数据撑破页面
+    - 更新 README 明暗主题与配置编辑器截图，示例配置与端点已匿名化
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -36,11 +37,11 @@ env:
 
     ## English Summary
 
-    - Adds a unified 36px frameless title bar with navigation, project switching, sidebar control, and native window actions.
-    - Uses the native macOS traffic lights while Windows and Linux receive in-app minimize, maximize/restore, and close controls.
-    - Aligns both themes to the desktop system font and a neutral surface palette.
-    - Limits new-profile templates to official defaults and blank custom entries while preserving existing saved profiles.
-    - Refreshes anonymized desktop screenshots. Database and configuration formats are unchanged; no migration is required.
+    - Unifies inputs, textareas, selects, and buttons across light and dark themes with consistent focus, disabled, and validation states.
+    - Adds responsive master-detail workspaces for MCP services, skills, and clients, including drawer-based details on narrow windows.
+    - Improves configuration editing, session details, filters, and usage tables at compact window sizes.
+    - Replaces remaining native selectors with accessible application controls and consistent empty-value behavior.
+    - Refreshes anonymized desktop screenshots. Permissions, database schema, and configuration formats are unchanged; no migration is required.
 
     ## 下载 / Download
 

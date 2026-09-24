@@ -14,23 +14,26 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 模型配置改为可搜索选择器，支持键盘筛选、自定义模型 ID、清空当前值，并展示模型名称与上下文信息
-    - 新增统一的锚点弹层组件，模型列表与配置卡片操作菜单会根据窗口边缘自动翻转和避让
-    - 模型列表采用固定可视高度和独立滚动，长列表不会再挤压后续配置项
-    - OMO Agent 与 Category 模型字段统一接入新的模型选择器，不再依赖浏览器原生候选列表
+    - 内置 CCHub 桌面界面字体，统一常规、中等和半粗三档字重，改善中英文信息层级与跨平台显示一致性
+    - 新增共享 Switch 控件，设置、同步、技能、工作流、记忆管理与供应商配置中的二元选项统一为标准开关交互
+    - 按 4px 网格重新统一按钮、输入框、选择器、复选框、弹层和对话框的尺寸、圆角、间距与字重
+    - 更新深色、浅色和配置编辑器文档截图，展示新的控件体系、模型选择器与 JSON 语法高亮
 
     ### 变更与安全
-    - 输入框、应用选择器和下拉选项统一采用中性焦点反馈；明暗主题下弹层均使用不透明应用背景
-    - 配置卡片的次级操作菜单改为共享弹层实现，滚动、窗口缩放和边缘位置下保持正确对齐
+    - 输入框、选择器和按钮改用中性边框焦点反馈，复选框与开关保留清晰的键盘操作状态
+    - 通用对话框采用 450px 桌面宽度和 460px 最大高度，并在 768px 以下自动切换为全屏布局
+    - 弹出菜单使用独立不透明表面、统一阴影与层级；模型长列表保持固定高度和独立滚动
+    - 启动界面移除渐变方块与旧旋转器，改为中性品牌字形、细进度条和 180ms 淡出
+    - 为减少动态效果的系统偏好补充降级样式
     - 本次未新增文件、网络或命令执行权限，也未修改数据库结构、配置格式和供应商协议
     - 已保存配置可以继续读取和编辑，从旧版本升级无需迁移数据
 
     ### 问题修复与打磨
-    - 修复模型下拉框错位、透底、覆盖范围失控以及窄窗口越界的问题
-    - 修复输入框和下拉选项点击后出现高亮蓝框、组件焦点样式叠加的问题
-    - 修复配置卡片操作菜单在滚动容器与窗口边缘处定位不稳定的问题
-    - 修复设置页中文迁移统计卡片使用重复 React key 的警告
-    - 修复 WebDAV 设置区反复注册事件监听并连续重新加载造成的后台空转
+    - 修复输入框、下拉框和按钮点击后出现蓝色或重复焦点轮廓的问题
+    - 修复模型选择器弹层宽度、透明背景、滚动边界与窗口缩放时的对齐问题
+    - 修复长表单对话框在窄窗口中内容受限、底部操作区难以触达的问题
+    - 修复多个页面用普通按钮模拟开关导致状态语义和键盘操作不一致的问题
+    - 优化配置编辑器、设置页、同步面板及供应商表单的紧凑度和可扫描性
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -38,11 +41,11 @@ env:
 
     ## English Summary
 
-    - Rebuilds model selection with search, keyboard filtering, custom IDs, metadata, clearing, and constrained scrolling.
-    - Uses shared collision-aware popovers for model lists and profile action menus, with opaque surfaces in both themes.
-    - Removes stacked blue focus outlines and fixes dropdown alignment, clipping, transparency, and narrow-window overflow.
-    - Migrates OMO model fields away from native browser suggestions.
-    - Fixes duplicate settings keys and repeated WebDAV listener registration. Permissions, schemas, and configuration formats are unchanged; no migration is required.
+    - Bundles the CCHub UI font family and aligns control typography, sizing, spacing, radii, and focus feedback across both themes.
+    - Introduces a shared accessible switch and migrates binary settings across configuration, sync, skills, workflows, memory, and provider surfaces.
+    - Refines selects, model popovers, checkboxes, dialogs, and the startup screen while fixing stacked blue focus rings and narrow-window overflow.
+    - Dialogs now use compact desktop dimensions and switch to a full-screen layout below 768px; reduced-motion preferences are respected.
+    - Refreshes all README product screenshots. Permissions, schemas, configuration formats, and provider protocols are unchanged; no migration is required.
 
     ## 下载 / Download
 

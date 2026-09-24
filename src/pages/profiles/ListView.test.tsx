@@ -98,10 +98,9 @@ describe("ProfilesListView", () => {
     const props = createProps();
     renderListView(props);
 
-    expect(screen.queryByText("Primary API")).toBeNull();
+    expect(screen.getByText("Primary API")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Claude (1)" }));
     expect(props.handleToggleFilterTool).not.toHaveBeenCalled();
-    expect(screen.getByText("Primary API")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "启用" }));
     expect(props.doApply).toHaveBeenCalledWith(profile);
     fireEvent.click(screen.getByRole("button", { name: "新增配置" }));
@@ -135,14 +134,14 @@ describe("ProfilesListView", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("keeps the first screen calm and collapses the profile drawer", () => {
+  it("shows configurations immediately and still allows collapsing the list", () => {
     renderListView();
 
-    expect(screen.queryByLabelText("配置列表")).toBeNull();
-    fireEvent.focus(screen.getByPlaceholderText("搜索配置，选择后立即切换"));
     expect(screen.getByLabelText("配置列表")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "收起配置" }));
     expect(screen.queryByLabelText("配置列表")).toBeNull();
+    fireEvent.focus(screen.getByPlaceholderText("搜索配置，选择后立即切换"));
+    expect(screen.getByLabelText("配置列表")).toBeTruthy();
   });
 
   it("shows available tools in the compact switcher and changes the active filter", () => {
@@ -162,7 +161,8 @@ describe("ProfilesListView", () => {
     renderListView(props);
 
     const switcher = screen.getByRole("tablist", { name: "工具" });
-    expect(switcher.children).toHaveLength(2);
+    expect(switcher.children).toHaveLength(3);
+    expect(screen.getByRole("tab", { name: "全部1" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Gemini (0)" })).toBeNull();
     expect(screen.getByRole("tab", { name: "Claude (1)" }).getAttribute("aria-selected")).toBe("true");
 

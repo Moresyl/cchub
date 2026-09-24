@@ -20,7 +20,6 @@ import {
   buildSessionDeleteTarget,
   buildSessionListLabels,
   countSessionHits,
-  entryBadgeColor,
   formatTokenCount,
   matchesEntry,
   type SessionDetail,
@@ -28,6 +27,7 @@ import {
   sessionSelectionKey,
   TOOL_ORDER,
 } from "./sessions/helpers";
+import SessionEntries from "./sessions/Entries";
 
 export default function Sessions() {
   const queryClient = useQueryClient();
@@ -757,85 +757,11 @@ export default function Sessions() {
                   </span>
                 </div>
 
-                {/* Entries — full width, no TOC sidebar */}
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                  {filteredEntries.length === 0 ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        height: "100%",
-                        color: "var(--text-muted)",
-                        fontSize: 13,
-                      }}
-                    >
-                      {uiText("没有匹配的记录", "No entries matched", "一致する記録はありません")}
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      {filteredEntries.map((entry) => (
-                        <section
-                          key={entry.id}
-                          id={`session-entry-${entry.id}`}
-                          style={{
-                            border: "1px solid var(--border-default)",
-                            borderRadius: 8,
-                            padding: 12,
-                            background: "var(--bg-card)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              gap: 8,
-                              alignItems: "center",
-                              marginBottom: 8,
-                            }}
-                          >
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                              <span className={`badge ${entryBadgeColor(entry.kind)}`} style={{ fontSize: 10 }}>
-                                {entry.kind}
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                <HighlightedText text={entry.title} query={detailQuery} />
-                              </span>
-                            </div>
-                            {entry.timestamp && (
-                              <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
-                                {entry.timestamp}
-                              </span>
-                            )}
-                          </div>
-                          <pre
-                            style={{
-                              margin: 0,
-                              fontSize: 11,
-                              lineHeight: 1.5,
-                              color: "var(--text-secondary)",
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              fontFamily: "'JetBrains Mono', monospace",
-                              maxHeight: 320,
-                              overflow: "auto",
-                            }}
-                          >
-                            <HighlightedText text={entry.content} query={detailQuery} />
-                          </pre>
-                        </section>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <SessionEntries
+                  entries={filteredEntries}
+                  query={detailQuery}
+                  emptyLabel={uiText("没有匹配的记录", "No entries matched", "一致する記録はありません")}
+                />
               </>
             ) : (
               <div

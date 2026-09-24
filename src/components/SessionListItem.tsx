@@ -114,10 +114,36 @@ function SessionListItemComponent({
               </span>
             )}
           </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.35 }}>
+          <div
+            title={session.title}
+            style={{
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 2,
+              overflow: "hidden",
+              overflowWrap: "anywhere",
+              fontSize: 14,
+              fontWeight: 700,
+              color: "var(--text-primary)",
+              lineHeight: 1.35,
+            }}
+          >
             <HighlightedText text={session.title} query={query} />
           </div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5 }}>
+          <div
+            title={session.preview}
+            style={{
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 2,
+              overflow: "hidden",
+              overflowWrap: "anywhere",
+              fontSize: 12,
+              color: "var(--text-muted)",
+              marginTop: 6,
+              lineHeight: 1.5,
+            }}
+          >
             <HighlightedText text={session.preview} query={query} />
           </div>
           <div

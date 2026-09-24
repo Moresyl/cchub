@@ -24,7 +24,6 @@ import EmptyState from "../../components/states/EmptyState";
 import UniversalProviderManager from "../../components/UniversalProviderManager";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import appIconUrl from "../../../src-tauri/icons/icon.png";
 
 import {
   TOOL_ICONS,
@@ -101,35 +100,16 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
   const { locale, localeText, profiles, activeIds, tools, installedTools, toolCounts, filterTool } = props;
   const navigate = useNavigate();
   const [showSharedProviders, setShowSharedProviders] = useState(false);
-  const [showProfiles, setShowProfiles] = useState(false);
+  const [showProfiles, setShowProfiles] = useState(true);
   const activeTool = tools.find((tool) => tool.id === filterTool);
   const visibleTools = tools.filter(
     (tool) => tool.installed || (toolCounts[tool.id] || 0) > 0 || tool.id === filterTool,
   );
-  const hour = new Date().getHours();
-  const greeting =
-    hour < 6
-      ? localeText("夜深了", "Working late", "夜遅くまでお疲れさまです")
-      : hour < 12
-        ? localeText("早上好", "Good morning", "おはようございます")
-        : hour < 18
-          ? localeText("下午好", "Good afternoon", "こんにちは")
-          : localeText("晚上好", "Good evening", "こんばんは");
-
   return (
     <section className="profile-workspace">
       <div className="profile-workspace-inner">
         <div className="profile-hero">
-          <div className="profile-hero-mark" aria-hidden="true">
-            <img src={appIconUrl} alt="" />
-          </div>
-          <h2>
-            {localeText(
-              `${greeting}呀，选择配置继续吧`,
-              `${greeting}! Pick a configuration to continue.`,
-              `${greeting}。設定を選んで続けましょう`,
-            )}
-          </h2>
+          <h2>{localeText("配置切换", "Configuration Switcher", "設定の切り替え")}</h2>
         </div>
 
         <div className="profile-status-bar">
@@ -254,6 +234,19 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
         </div>
 
         <div className="profile-tool-tabs" role="tablist" aria-label={localeText("工具", "Tools", "ツール")}>
+          <Button
+            variant="ghost"
+            className={`profile-tool-tab ${filterTool === "" ? "active" : ""}`}
+            role="tab"
+            aria-selected={filterTool === ""}
+            onClick={() => {
+              setShowProfiles(true);
+              if (filterTool) props.handleToggleFilterTool(filterTool);
+            }}
+          >
+            {localeText("全部", "All", "すべて")}
+            <span className="profile-tool-tab-count">{profiles.length}</span>
+          </Button>
           {visibleTools.map((tool) => (
             <ProfileToolFilterTab
               key={tool.id}
@@ -263,9 +256,8 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
               active={filterTool === tool.id}
               dimmed={!tool.installed && (toolCounts[tool.id] || 0) === 0}
               onToggle={(toolId) => {
-                const opensCurrentTool = !showProfiles && toolId === filterTool;
                 setShowProfiles(true);
-                if (!opensCurrentTool) props.handleToggleFilterTool(toolId);
+                if (toolId !== filterTool) props.handleToggleFilterTool(toolId);
               }}
             />
           ))}

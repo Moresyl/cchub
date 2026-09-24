@@ -6,6 +6,8 @@ import { getLocale } from "../lib/i18n";
 import LoadingState from "../components/states/LoadingState";
 import ErrorState from "../components/states/ErrorState";
 import ModelsDevSyncPanel from "../components/ModelsDevSyncPanel";
+import { Button } from "../components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 interface UsageSummary {
   total_requests: number;
@@ -74,6 +76,8 @@ const RANGE_OPTIONS = [
   [30, "近 30 天", "Last 30 days", "過去 30 日"],
   [90, "近 90 天", "Last 90 days", "過去 90 日"],
 ] as const;
+
+const ALL_FILTER = "__all__";
 
 function number(value: number) {
   return Intl.NumberFormat("en-US").format(value);
@@ -183,59 +187,90 @@ export default function Usage() {
             )}
           </p>
         </div>
-        <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()} disabled={loading}>
+        <Button variant="secondary" size="sm" type="button" onClick={() => void load()} disabled={loading}>
           <RefreshCw size={14} className={loading ? "spin" : undefined} />
           {uiText("刷新", "Refresh", "更新")}
-        </button>
+        </Button>
       </div>
 
-      <div className="section-card" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <CalendarDays size={15} style={{ color: "var(--text-secondary)" }} />
-        <div className="segmented-control" role="group" aria-label={uiText("时间范围", "Date range", "期間")}>
-          {RANGE_OPTIONS.map(([value, zh, en, ja]) => (
-            <button key={value} type="button" className={days === value ? "active" : ""} onClick={() => setDays(value)}>
-              {uiText(zh, en, ja)}
-            </button>
-          ))}
+      <div className="space-y-3 border-b border-border pb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <CalendarDays size={15} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+          <div
+            className="inline-flex flex-wrap items-center gap-1 rounded-md border border-border bg-[var(--bg-input)] p-1"
+            role="group"
+            aria-label={uiText("时间范围", "Date range", "期間")}
+          >
+            {RANGE_OPTIONS.map(([value, zh, en, ja]) => (
+              <Button
+                key={value}
+                type="button"
+                variant={days === value ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2.5"
+                aria-pressed={days === value}
+                onClick={() => setDays(value)}
+              >
+                {uiText(zh, en, ja)}
+              </Button>
+            ))}
+          </div>
         </div>
-        <select
-          className="input"
-          value={appId}
-          onChange={(event) => {
-            setAppId(event.target.value);
-            setProviderName("");
-            setModel("");
-          }}
-        >
-          {APP_OPTIONS.map(([value, zh, en, ja]) => (
-            <option key={value} value={value}>
-              {uiText(zh, en, ja)}
-            </option>
-          ))}
-        </select>
-        <select
-          className="input"
-          value={providerName}
-          onChange={(event) => {
-            setProviderName(event.target.value);
-            setModel("");
-          }}
-        >
-          <option value="">{uiText("全部 Provider", "All providers", "すべての Provider")}</option>
-          {providerOptions.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
-        <select className="input" value={model} onChange={(event) => setModel(event.target.value)}>
-          <option value="">{uiText("全部模型", "All models", "すべてのモデル")}</option>
-          {modelOptions.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
+        <div className="grid min-w-0 gap-2 sm:grid-cols-3">
+          <Select
+            value={appId || ALL_FILTER}
+            onValueChange={(value) => {
+              setAppId(value === ALL_FILTER ? "" : value);
+              setProviderName("");
+              setModel("");
+            }}
+          >
+            <SelectTrigger aria-label={uiText("应用", "App", "アプリ")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {APP_OPTIONS.map(([value, zh, en, ja]) => (
+                <SelectItem key={value} value={value || ALL_FILTER}>
+                  {uiText(zh, en, ja)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={providerName || ALL_FILTER}
+            onValueChange={(value) => {
+              setProviderName(value === ALL_FILTER ? "" : value);
+              setModel("");
+            }}
+          >
+            <SelectTrigger aria-label={uiText("Provider", "Provider", "Provider")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_FILTER}>
+                {uiText("全部 Provider", "All providers", "すべての Provider")}
+              </SelectItem>
+              {providerOptions.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={model || ALL_FILTER} onValueChange={(value) => setModel(value === ALL_FILTER ? "" : value)}>
+            <SelectTrigger aria-label={uiText("模型", "Model", "モデル")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_FILTER}>{uiText("全部模型", "All models", "すべてのモデル")}</SelectItem>
+              {modelOptions.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {error ? <div className="inline-error">{error}</div> : null}
@@ -277,37 +312,38 @@ export default function Usage() {
           {uiText("每日趋势", "Daily trend", "日別トレンド")}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-          {(data?.trends ?? []).map((point) => (
-            <div
-              key={point.date}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "86px minmax(80px, 1fr) 76px 76px",
-                gap: 10,
-                alignItems: "center",
-                fontSize: 12,
-              }}
-            >
-              <span style={{ color: "var(--text-muted)" }}>{point.date.slice(5)}</span>
-              <div style={{ height: 8, background: "var(--bg-input)", borderRadius: 4, overflow: "hidden" }}>
-                <div
-                  style={{
-                    width: `${Math.max(2, (point.requests / maxRequests) * 100)}%`,
-                    height: "100%",
-                    background: "var(--accent)",
-                    borderRadius: 4,
-                  }}
-                />
+          {(summary?.total_requests ?? 0) > 0 &&
+            (data?.trends ?? []).map((point) => (
+              <div
+                key={point.date}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "86px minmax(80px, 1fr) 76px 76px",
+                  gap: 10,
+                  alignItems: "center",
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ color: "var(--text-muted)" }}>{point.date.slice(5)}</span>
+                <div style={{ height: 8, background: "var(--bg-input)", borderRadius: 4, overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${Math.max(2, (point.requests / maxRequests) * 100)}%`,
+                      height: "100%",
+                      background: "var(--accent)",
+                      borderRadius: 4,
+                    }}
+                  />
+                </div>
+                <span style={{ textAlign: "right" }}>
+                  {number(point.requests)} {uiText("次", "req", "回")}
+                </span>
+                <span style={{ textAlign: "right", color: "var(--text-muted)" }}>{cost(point.total_cost_usd)}</span>
               </div>
-              <span style={{ textAlign: "right" }}>
-                {number(point.requests)} {uiText("次", "req", "回")}
-              </span>
-              <span style={{ textAlign: "right", color: "var(--text-muted)" }}>{cost(point.total_cost_usd)}</span>
-            </div>
-          ))}
-          {(data?.trends.length ?? 0) === 0 ? (
-            <div className="empty-state">
-              <div className="state-copy">{uiText("暂无用量记录", "No usage records", "使用量の記録はありません")}</div>
+            ))}
+          {(summary?.total_requests ?? 0) === 0 ? (
+            <div className="state-copy" style={{ padding: "32px 0", textAlign: "center" }}>
+              {uiText("暂无用量记录", "No usage records", "使用量の記録はありません")}
             </div>
           ) : null}
         </div>

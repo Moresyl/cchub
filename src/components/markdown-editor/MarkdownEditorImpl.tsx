@@ -22,6 +22,7 @@ import {
   type MDXEditorMethods,
 } from "@mdxeditor/editor";
 import "@mdxeditor/editor/style.css";
+import { getLocale } from "../../lib/i18n";
 import { getTheme } from "../../lib/theme";
 
 interface MarkdownEditorImplProps {
@@ -40,13 +41,10 @@ const CODE_BLOCK_LANGUAGES = {
   json: "JSON",
 };
 
-export default function MarkdownEditorImpl({
-  value,
-  onChange,
-  minHeight = 400,
-}: MarkdownEditorImplProps) {
+export default function MarkdownEditorImpl({ value, onChange, minHeight = 400 }: MarkdownEditorImplProps) {
   const editorRef = useRef<MDXEditorMethods>(null);
   const isDark = getTheme() === "dark";
+  const locale = getLocale();
 
   const handleChange = useCallback(
     (markdown: string) => {
@@ -70,6 +68,12 @@ export default function MarkdownEditorImpl({
         markdown={value}
         onChange={handleChange}
         className={isDark ? "dark-theme" : ""}
+        translation={(_key, defaultValue) => {
+          if (defaultValue === "Block type") {
+            return locale === "zh" ? "段落样式" : locale === "ja" ? "段落スタイル" : defaultValue;
+          }
+          return defaultValue;
+        }}
         contentEditableClassName="mdx-editor-content"
         plugins={[
           headingsPlugin(),

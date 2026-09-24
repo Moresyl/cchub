@@ -14,34 +14,30 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 新增统一的应用内确认与输入对话框，覆盖全量流检、备份重命名/删除/恢复、OAuth 账号移除、WebDAV 恢复、会话用量重建、供应商删除和 Hermes 路径设置
-    - 新增基于 Radix 的统一复选框与带说明选项组件，配置编辑器、配置文件、MCP 向导、日志、模型同步和设置页面使用相同的焦点与选中状态
-    - 配置编辑器新增 JSON、TOML、YAML 与 Markdown 语法支持，并提供语言栏、行号、活动行、错误标记及明暗主题自适应配色
-    - 原始配置区改为三列结构化选项面板，隐藏署名、高强度思考和协作模式的用途与状态更清晰
+    - 配置切换首页打开后直接显示已保存的配置和切换按钮，收紧顶部布局；增加明确的“全部”筛选入口
+    - 用量分析的时间范围改为可辨认的分段按钮，应用、Provider 和模型筛选统一为下拉控件；无请求记录时显示简洁空状态
+    - 会话列表的长标题和摘要限制为两行，浏览和比较会话更稳定
+    - Prompt 编辑器的段落样式入口跟随中文、英文和日文界面语言
 
     ### 变更与安全
-    - 危险操作对话框明确标识删除或覆盖影响，并将取消操作保持为默认焦点，避免浏览器原生弹窗造成的误操作和视觉割裂
-    - CodeMirror 语言支持继续按需加载，不进入配置工作台首屏主包；新增组件均支持键盘焦点与辅助技术标签
-    - 本版本只调整前端控件与编辑体验，不修改数据库、配置文件格式、供应商协议或安装路径
-    - 继续沿用 1.6.3 已固定的 MSI Upgrade Code、品牌安装/卸载资源和升级数据保留策略
+    - 本版本调整桌面界面和前端编辑体验，不修改数据库结构、配置格式、供应商协议或安装路径
+    - README 的明暗主题工作台和配置编辑器截图已换成原生桌面包画面，示例端点已匿名化
 
     ### 问题修复与打磨
-    - 修复原始 JSON/TOML 配置只有纯文本和行号、缺少语法层次的问题
-    - 修复大量原生复选框尺寸、颜色和焦点状态与应用设计系统不一致的问题
-    - 修复高风险操作弹出带“tauri.localhost 显示”标题的系统对话框问题，全部改为应用内一致交互
-    - README 新增真实配置编辑器截图，展示结构化选项、统一复选框和语法高亮后的界面
+    - 修复生产版 WebView2 的内容安全策略阻止 CodeMirror 动态样式，导致 JSON 编辑器行号与正文错位、语法高亮缺失的问题
+    - 修复用量时间筛选项挤成连续文字，以及零用量日期重复铺满趋势图的问题
+    - 修复会话长文本撑高列表项的问题；拆分会话详情组件以保持源文件符合项目行数约束
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
-    - 从 1.6.3 或更早版本升级会保留现有 CCHub 数据库和工具配置，无需迁移；卸载时请仅在确实需要清理数据时勾选删除选项。
+    - 从旧版升级无需迁移数据；安装和卸载流程保持原样。
 
     ## English Summary
 
-    - Replaces native browser confirmations and prompts with consistent in-app dialogs for all audited destructive and input workflows.
-    - Replaces native checkboxes across configuration, MCP, logs, model sync, and settings surfaces with one accessible control system.
-    - Adds theme-aware JSON, TOML, YAML, and Markdown syntax highlighting with polished editor chrome and validation states.
-    - Refines the raw configuration options and documents the updated editor with a real application screenshot.
-    - Existing databases and tool configurations remain compatible; no migration is required.
+    - Fixes CodeMirror styles being blocked by the production WebView2 CSP, restoring aligned line numbers and syntax highlighting.
+    - Shows saved profiles immediately on the switch workspace, improves usage filters and empty states, and clamps long session titles.
+    - Localizes the Prompt editor block-style control and refreshes the anonymized desktop screenshots.
+    - Database and configuration formats are unchanged; no migration is required.
 
     ## 下载 / Download
 

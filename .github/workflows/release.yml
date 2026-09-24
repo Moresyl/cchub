@@ -14,19 +14,18 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 配置切换首页打开后直接显示已保存的配置和切换按钮，收紧顶部布局；增加明确的“全部”筛选入口
-    - 用量分析的时间范围改为可辨认的分段按钮，应用、Provider 和模型筛选统一为下拉控件；无请求记录时显示简洁空状态
-    - 会话列表的长标题和摘要限制为两行，浏览和比较会话更稳定
-    - Prompt 编辑器的段落样式入口跟随中文、英文和日文界面语言
+    - 统一桌面工作台字体：Windows 优先使用 Segoe UI Variable Text，中文回退微软雅黑 UI，代码与路径使用 Cascadia Code；启动画面和配置编辑器同步调整
+    - 调整侧边栏、顶部导航、配置切换首页和设置分组的层级与间距，设置项改用更轻的分隔线布局
+    - 配置切换、设置和通知中的按钮与选中状态进一步统一，保留已有的配置管理与编辑功能
 
     ### 变更与安全
-    - 本版本调整桌面界面和前端编辑体验，不修改数据库结构、配置格式、供应商协议或安装路径
-    - README 的明暗主题工作台和配置编辑器截图已换成原生桌面包画面，示例端点已匿名化
+    - 本版本仅调整桌面界面与交互，不修改数据库结构、配置格式、供应商协议或安装路径
+    - README 的明暗主题工作台及配置编辑器截图已更新为原生桌面包画面，示例端点已匿名化
 
     ### 问题修复与打磨
-    - 修复生产版 WebView2 的内容安全策略阻止 CodeMirror 动态样式，导致 JSON 编辑器行号与正文错位、语法高亮缺失的问题
-    - 修复用量时间筛选项挤成连续文字，以及零用量日期重复铺满趋势图的问题
-    - 修复会话长文本撑高列表项的问题；拆分会话详情组件以保持源文件符合项目行数约束
+    - 环境变量冲突横幅与通知改为顺序排布，避免提示覆盖页面标题和操作按钮
+    - 移除技术文本中未打包字体的硬编码引用，避免不同页面退回不一致的等宽字体
+    - 移除设置页重复标题，收紧部分按钮和标签状态；补充通知交互测试
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -34,10 +33,10 @@ env:
 
     ## English Summary
 
-    - Fixes CodeMirror styles being blocked by the production WebView2 CSP, restoring aligned line numbers and syntax highlighting.
-    - Shows saved profiles immediately on the switch workspace, improves usage filters and empty states, and clamps long session titles.
-    - Localizes the Prompt editor block-style control and refreshes the anonymized desktop screenshots.
-    - Database and configuration formats are unchanged; no migration is required.
+    - Aligns the desktop UI with native Windows typography and gives code, paths, and JSON a consistent monospace stack.
+    - Refines the sidebar, top navigation, profile workspace, settings groups, and notification styling.
+    - Keeps conflict warnings and toasts in document flow so they do not cover actions; adds toast interaction tests.
+    - Refreshes anonymized desktop screenshots. Database and configuration formats are unchanged; no migration is required.
 
     ## 下载 / Download
 

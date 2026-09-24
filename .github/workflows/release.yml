@@ -14,22 +14,23 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 统一输入框、文本域、选择器与按钮的尺寸、圆角、边框、焦点环、禁用态和明暗主题反馈
-    - MCP 服务、技能与客户端页面改为响应式主从工作区；宽屏并排查看，窄窗口以独立详情抽屉承载编辑内容
-    - MCP 与技能详情按概览、配置或内容、同步目标分区，常用操作和关闭入口固定在清晰位置
-    - 配置文件编辑器、会话详情和用量表格补齐窄窗口布局，减少横向滚动和内容挤压
+    - 模型配置改为可搜索选择器，支持键盘筛选、自定义模型 ID、清空当前值，并展示模型名称与上下文信息
+    - 新增统一的锚点弹层组件，模型列表与配置卡片操作菜单会根据窗口边缘自动翻转和避让
+    - 模型列表采用固定可视高度和独立滚动，长列表不会再挤压后续配置项
+    - OMO Agent 与 Category 模型字段统一接入新的模型选择器，不再依赖浏览器原生候选列表
 
     ### 变更与安全
-    - 配置页、服务页、日志、Hooks、远程同步与高级设置统一使用应用级选择器，键盘焦点和空值选项行为保持一致
+    - 输入框、应用选择器和下拉选项统一采用中性焦点反馈；明暗主题下弹层均使用不透明应用背景
+    - 配置卡片的次级操作菜单改为共享弹层实现，滚动、窗口缩放和边缘位置下保持正确对齐
     - 本次未新增文件、网络或命令执行权限，也未修改数据库结构、配置格式和供应商协议
     - 已保存配置可以继续读取和编辑，从旧版本升级无需迁移数据
 
     ### 问题修复与打磨
-    - 修复配置文件双栏在窄窗口中被过度压缩的问题，树形列表与编辑区域会自动纵向排列
-    - 修复会话详情在中等宽度窗口中只剩狭窄内容列的问题，改为不透明侧滑详情层
-    - 修复技能筛选工具栏、详情面板和批量操作在小尺寸窗口中的拥挤与遮挡
-    - 为用量统计表补齐列宽、对齐、截断与行悬停样式，避免数据撑破页面
-    - 更新 README 明暗主题与配置编辑器截图，示例配置与端点已匿名化
+    - 修复模型下拉框错位、透底、覆盖范围失控以及窄窗口越界的问题
+    - 修复输入框和下拉选项点击后出现高亮蓝框、组件焦点样式叠加的问题
+    - 修复配置卡片操作菜单在滚动容器与窗口边缘处定位不稳定的问题
+    - 修复设置页中文迁移统计卡片使用重复 React key 的警告
+    - 修复 WebDAV 设置区反复注册事件监听并连续重新加载造成的后台空转
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
@@ -37,11 +38,11 @@ env:
 
     ## English Summary
 
-    - Unifies inputs, textareas, selects, and buttons across light and dark themes with consistent focus, disabled, and validation states.
-    - Adds responsive master-detail workspaces for MCP services, skills, and clients, including drawer-based details on narrow windows.
-    - Improves configuration editing, session details, filters, and usage tables at compact window sizes.
-    - Replaces remaining native selectors with accessible application controls and consistent empty-value behavior.
-    - Refreshes anonymized desktop screenshots. Permissions, database schema, and configuration formats are unchanged; no migration is required.
+    - Rebuilds model selection with search, keyboard filtering, custom IDs, metadata, clearing, and constrained scrolling.
+    - Uses shared collision-aware popovers for model lists and profile action menus, with opaque surfaces in both themes.
+    - Removes stacked blue focus outlines and fixes dropdown alignment, clipping, transparency, and narrow-window overflow.
+    - Migrates OMO model fields away from native browser suggestions.
+    - Fixes duplicate settings keys and repeated WebDAV listener registration. Permissions, schemas, and configuration formats are unchanged; no migration is required.
 
     ## 下载 / Download
 

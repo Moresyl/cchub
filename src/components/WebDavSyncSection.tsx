@@ -299,13 +299,14 @@ function WebDavSyncSectionComponent() {
       title: uiText("从 WebDAV 恢复", "Restore from WebDAV", "WebDAV から復元"),
       message: allowPlaintext
         ? uiText(
-            "这份旧备份未加密。继续会使用旧格式恢复并覆盖当前数据库，请确认本地工作已保存。",
-            "This older backup is unencrypted. Continuing restores the legacy format and replaces the current database. Make sure local work is saved.",
+            "这份旧备份未加密。恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+            "This older backup is unencrypted. Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
+            "この旧バックアップは暗号化されていません。設定データを復元し、この端末のクラウドアカウント、ツールの保存先、プロキシ設定は保持します。プロジェクトファイルには保存先の指定が必要です。作業を保存してください。",
           )
         : uiText(
-            "远端快照会覆盖当前数据库，请确认本地工作已保存。",
-            "The remote snapshot will replace the current database. Make sure local work is saved.",
-            "リモートスナップショットで現在のデータベースを上書きします。ローカル作業を保存してください。",
+            "恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+            "Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
+            "設定データを復元し、この端末のクラウドアカウント、ツールの保存先、プロキシ設定は保持します。プロジェクトファイルには保存先の指定が必要です。作業を保存してください。",
           ),
       confirmText: uiText("继续恢复", "Restore", "復元を続行"),
       cancelText: uiText("取消", "Cancel", "キャンセル"),

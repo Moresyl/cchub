@@ -10,9 +10,24 @@ pub(crate) fn import_backup_from_path_impl(
     db: &State<'_, DbState>,
     file_path: &Path,
 ) -> Result<String, String> {
+    import_with_mode(db, file_path, false)
+}
+
+pub(crate) fn import_cloud_backup_from_path_impl(
+    db: &State<'_, DbState>,
+    file_path: &Path,
+) -> Result<String, String> {
+    import_with_mode(db, file_path, true)
+}
+
+fn import_with_mode(
+    db: &State<'_, DbState>,
+    file_path: &Path,
+    cloud: bool,
+) -> Result<String, String> {
     let content = std::fs::read_to_string(file_path).map_err(|_| "无法读取备份文件")?;
     let mut conn = db.0.lock().map_err(|_| "数据库当前不可用")?;
-    import_into_connection(&mut conn, &content)
+    import_into_connection_with_mode(&mut conn, &content, cloud)
 }
 
 fn install_database(
@@ -31,9 +46,18 @@ fn install_database(
     Ok(())
 }
 
+#[cfg(test)]
 fn import_into_connection(
     conn: &mut rusqlite::Connection,
     content: &str,
+) -> Result<String, String> {
+    import_into_connection_with_mode(conn, content, false)
+}
+
+fn import_into_connection_with_mode(
+    conn: &mut rusqlite::Connection,
+    content: &str,
+    cloud: bool,
 ) -> Result<String, String> {
     validate_sql_backup_content(content)?;
     let db_path = get_main_db_path(conn)?;
@@ -48,7 +72,13 @@ fn import_into_connection(
     configure_database_connection(&prepared, false)?;
     super::backup_sql::load_backup_sql(&prepared, content)?;
     super::backup_paths::validate_artifact_paths(&prepared)?;
-    let count = super::backups_restore::count_backup_rows(&prepared)?;
+    let preserved_rows = if cloud {
+        super::backup_ownership::preserve_device_state(conn, &prepared)?
+    } else {
+        0
+    };
+    let count =
+        super::backups_restore::count_backup_rows(&prepared)?.saturating_sub(preserved_rows);
 
     let backup_dir = db_dir.join("backups");
     std::fs::create_dir_all(&backup_dir).map_err(|_| "无法创建安全备份目录")?;
@@ -61,6 +91,7 @@ fn import_into_connection(
                 &prepared,
                 count,
                 &mut rollback,
+                cloud,
             )?;
         let now = chrono::Utc::now().to_rfc3339();
         let imported = sync_profiles_from_compatible_databases(&prepared, &now)?;

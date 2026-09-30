@@ -216,3 +216,146 @@ fn skill_restore_includes_every_exported_tool() {
         );
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn project_remap_rolls_back_paths_and_prior_file_writes_on_a_late_failure() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    crate::db::schema::run_migrations(&conn).unwrap();
+    let source = dir.path().join("source").to_string_lossy().into_owned();
+    let target = dir.path().join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("a"), "original a").unwrap();
+    std::fs::write(target.join("b"), "original b").unwrap();
+    conn.execute(
+        "INSERT INTO workspaces (id,name,base_path) VALUES ('w','项目',?1)",
+        [&source],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO hooks (id,event,command,project_path) VALUES ('h','event','noop',?1)",
+        [&source],
+    )
+    .unwrap();
+    super::super::super::config_profiles::set_json_app_setting(
+        &conn,
+        "known_project_roots",
+        &vec![&source],
+    )
+    .unwrap();
+    super::super::backup_project_state::defer_project_root(&conn, &source).unwrap();
+    for name in ["a", "b"] {
+        super::super::project_roots::store_imported_project_file(&conn, &source, name, "bmV3")
+            .unwrap();
+    }
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(3)
+        .open(target.join("b"))
+        .unwrap();
+    assert!(super::super::project_roots::apply_project_root_remap(
+        &conn,
+        &source,
+        &target.to_string_lossy()
+    )
+    .is_err());
+    assert_eq!(
+        std::fs::read_to_string(target.join("a")).unwrap(),
+        "original a"
+    );
+    assert_eq!(
+        std::fs::read_to_string(target.join("b")).unwrap(),
+        "original b"
+    );
+    for query in [
+        "SELECT base_path FROM workspaces WHERE id='w'",
+        "SELECT project_path FROM hooks WHERE id='h'",
+    ] {
+        assert_eq!(
+            conn.query_row(query, [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            source
+        );
+    }
+    assert!(super::super::backup_project_state::deferred_roots(&conn)
+        .unwrap()
+        .contains(&source));
+    let roots: Vec<String> =
+        super::super::super::config_profiles::get_json_app_setting(&conn, "known_project_roots")
+            .unwrap()
+            .unwrap();
+    assert_eq!(roots, vec![source.clone()]);
+    assert!(conn.is_autocommit());
+    drop(held);
+    assert_eq!(
+        super::super::project_roots::apply_project_root_remap(
+            &conn,
+            &source,
+            &target.to_string_lossy()
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(std::fs::read_to_string(target.join("a")).unwrap(), "new");
+    assert!(super::super::backup_project_state::deferred_roots(&conn)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn project_remap_database_failure_after_file_write_restores_files_and_rows() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    let dir = tempfile::tempdir().unwrap();
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    crate::db::schema::run_migrations(&conn).unwrap();
+    let source = dir.path().join("source").to_string_lossy().into_owned();
+    let target = dir.path().join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("file"), "original").unwrap();
+    conn.execute(
+        "INSERT INTO workspaces (id,name,base_path) VALUES ('w','项目',?1)",
+        [&source],
+    )
+    .unwrap();
+    super::super::project_roots::store_imported_project_file(&conn, &source, "file", "bmV3")
+        .unwrap();
+    conn.authorizer(Some(|context: AuthContext<'_>| {
+        if matches!(
+            context.action,
+            AuthAction::Insert {
+                table_name: "imported_project_files"
+            }
+        ) {
+            Authorization::Deny
+        } else {
+            Authorization::Allow
+        }
+    }));
+    assert!(super::super::project_roots::apply_project_root_remap(
+        &conn,
+        &source,
+        &target.to_string_lossy()
+    )
+    .is_err());
+    conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+    assert_eq!(
+        std::fs::read_to_string(target.join("file")).unwrap(),
+        "original"
+    );
+    assert_eq!(
+        conn.query_row("SELECT base_path FROM workspaces WHERE id='w'", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap(),
+        source
+    );
+    assert_eq!(
+        conn.query_row("SELECT project_root FROM imported_project_files", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        source
+    );
+    assert!(conn.is_autocommit());
+}

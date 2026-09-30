@@ -60,6 +60,7 @@ pub(super) fn restore_artifacts_with_rollback(
     conn: &rusqlite::Connection,
     restored_count: usize,
     rollback: &mut FileRollback,
+    defer_projects: bool,
 ) -> Result<RestoreCounts, String> {
     super::backup_paths::validate_artifact_paths(conn)?;
     let temp_rows: usize = conn.query_row("SELECT (SELECT COUNT(*) FROM _backup_meta) + (SELECT COUNT(*) FROM _tool_configs) + (SELECT COUNT(*) FROM _skill_files) + (SELECT COUNT(*) FROM _backup_files)", [], |row| row.get(0)).map_err(|_| "无法读取备份记录")?;
@@ -128,7 +129,7 @@ pub(super) fn restore_artifacts_with_rollback(
                 path: path.clone(),
                 content: content.clone(),
             });
-            if !std::path::Path::new(project_root).exists() {
+            if defer_projects || !std::path::Path::new(project_root).exists() {
                 pending += 1;
                 continue;
             }
@@ -189,6 +190,12 @@ pub(super) fn restore_artifacts_with_rollback(
     for file in &projects {
         store_imported_project_file(conn, &file.root, &file.path, &file.content)?;
     }
+    if defer_projects {
+        super::backup_project_state::defer_project_roots(
+            conn,
+            projects.iter().map(|file| file.root.as_str()),
+        )?;
+    }
     conn.execute_batch("DROP TABLE _backup_meta; DROP TABLE _tool_configs; DROP TABLE _skill_files; DROP TABLE _backup_files;").map_err(|_| "无法完成备份记录整理")?;
     Ok((
         restored_count.saturating_sub(temp_rows),
@@ -206,7 +213,7 @@ pub fn restore_imported_artifacts(
 ) -> Result<RestoreCounts, String> {
     let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
     let mut rollback = FileRollback::new(temp.path())?;
-    match restore_artifacts_with_rollback(conn, count, &mut rollback) {
+    match restore_artifacts_with_rollback(conn, count, &mut rollback, false) {
         Ok(counts) => {
             rollback.commit();
             Ok(counts)

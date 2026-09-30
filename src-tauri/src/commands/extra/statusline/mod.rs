@@ -2,7 +2,9 @@
 mod backup_artifacts;
 mod backup_file_rollback;
 mod backup_import;
+mod backup_ownership;
 mod backup_paths;
+mod backup_project_state;
 mod backup_sql;
 mod backups_commands;
 mod backups_restore;
@@ -12,7 +14,7 @@ mod hud;
 mod openclaw;
 mod project_roots;
 
-pub(crate) use backup_import::import_backup_from_path_impl;
+pub(crate) use backup_import::{import_backup_from_path_impl, import_cloud_backup_from_path_impl};
 pub use backups_commands::*;
 pub use backups_restore::*;
 pub use diagnostics::*;

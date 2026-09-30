@@ -2,6 +2,7 @@ mod claude_md;
 mod cloud_backup;
 mod cloud_credentials;
 mod cloud_revision;
+mod cloud_sync;
 mod cloud_transfer;
 mod codex_oauth;
 mod commands;

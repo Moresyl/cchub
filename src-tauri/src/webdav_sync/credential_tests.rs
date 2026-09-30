@@ -228,3 +228,30 @@ fn upload_status_keeps_concurrent_edits_and_does_not_mark_another_target_synced(
     assert_eq!(loaded.profile, "other");
     assert!(loaded.last_sync_at.is_none());
 }
+
+#[test]
+fn failed_transfer_preserves_last_success_and_cannot_mark_a_changed_account() {
+    let conn = connection();
+    let store = MemoryStore::default();
+    let original = write_settings_with_store(&conn, configured(), true, &store).unwrap();
+    update_upload_status(&conn, &original, "last success".into()).unwrap();
+    update_transfer_status(&conn, &original, None, Some("failed transfer".into())).unwrap();
+    let loaded = read_settings_with_store(&conn, &store).unwrap();
+    assert_eq!(loaded.last_sync_at.as_deref(), Some("last success"));
+    assert_eq!(loaded.last_error.as_deref(), Some("failed transfer"));
+    for field in ["base_url", "username", "remote_root", "profile"] {
+        let mut changed = original.clone();
+        match field {
+            "base_url" => changed.base_url = "https://other.test".into(),
+            "username" => changed.username = "other".into(),
+            "remote_root" => changed.remote_root = "other".into(),
+            _ => changed.profile = "other".into(),
+        }
+        set_json_app_setting(&conn, WEBDAV_SYNC_SETTINGS_KEY, &changed).unwrap();
+        update_transfer_status(&conn, &original, None, Some("late error".into())).unwrap();
+        let current: WebDavSyncSettings = get_json_app_setting(&conn, WEBDAV_SYNC_SETTINGS_KEY)
+            .unwrap()
+            .unwrap();
+        assert!(current.last_error.is_none(), "changed {field}");
+    }
+}

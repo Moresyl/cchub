@@ -81,6 +81,79 @@ fn an_existing_safety_backup_is_never_overwritten() {
 }
 
 #[test]
+fn cloud_restore_uses_local_tool_paths_and_keeps_current_cloud_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut conn = live(dir.path());
+    let local = dir.path().join("local");
+    let foreign = dir.path().join("foreign");
+    std::fs::create_dir(&local).unwrap();
+    std::fs::create_dir(&foreign).unwrap();
+    conn.execute(
+        "INSERT INTO custom_paths (tool_id,config_dir) VALUES ('claude',?1)",
+        [local.to_string_lossy()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO app_settings VALUES ('s3_sync_settings','current device account')",
+        [],
+    )
+    .unwrap();
+    let sql=dump(&format!("{}INSERT INTO app_settings VALUES ('s3_sync_settings','foreign account'); INSERT INTO app_settings VALUES ('common_config_snippets','remote library'); INSERT INTO _tool_configs VALUES ('claude-settings','','{{\"env\":{{}}}}');",path_row("claude",&foreign)));
+    import_into_connection_with_mode(&mut conn, &sql, true).unwrap();
+    let summary: LastImportSummary = get_json_app_setting(&conn, "last_import_summary")
+        .unwrap()
+        .unwrap();
+    // Four seeded pricing records and the shared library; local account/path
+    // records are retained rather than restored from the remote backup.
+    assert_eq!(summary.db_rows_restored, 5);
+    assert!(local.join("settings.json").exists());
+    assert!(!foreign.join("settings.json").exists());
+    assert_eq!(
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key='s3_sync_settings'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "current device account"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key='common_config_snippets'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "remote library"
+    );
+}
+
+#[test]
+fn existing_foreign_project_paths_are_deferred_until_explicit_mapping() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut conn = live(dir.path());
+    let project = dir.path().join("foreign project");
+    std::fs::create_dir(&project).unwrap();
+    let file = project.join("AGENTS.md");
+    std::fs::write(&file, "original").unwrap();
+    let root = project.to_string_lossy().replace('\'', "''");
+    let sql=dump(&format!("INSERT INTO _backup_files (root_key,relative_path,content_base64) VALUES ('project:{root}','AGENTS.md','cmVzdG9yZWQ=');"));
+    import_into_connection_with_mode(&mut conn, &sql, true).unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "original");
+    let pending = get_pending_imported_project_roots_from_conn(&conn).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        apply_project_root_remap(&conn, &pending[0].project_root, &pending[0].project_root)
+            .unwrap(),
+        1
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "restored");
+    assert!(get_pending_imported_project_roots_from_conn(&conn)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
 fn legacy_raw_claude_configuration_retains_comments_and_exact_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let mut conn = live(dir.path());

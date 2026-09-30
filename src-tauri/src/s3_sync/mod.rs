@@ -13,8 +13,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::cloud_credentials::{self, CredentialStore, KeyringStore};
 use crate::cloud_revision::{self, ObservedRevision, UploadReview, WriteCondition};
 use crate::commands::extra_commands::{
-    generate_sql_backup, get_json_app_setting, get_text_app_setting, import_backup_from_path_impl,
-    set_json_app_setting,
+    generate_sql_backup, get_json_app_setting, get_text_app_setting,
+    import_cloud_backup_from_path_impl, set_json_app_setting,
 };
 use crate::db::DbState;
 
@@ -443,6 +443,7 @@ pub async fn upload(
     reviewed_revision: Option<String>,
 ) -> Result<S3RemoteInfo, String> {
     let _guard = sync_lock().lock().await;
+    let _workflow = crate::cloud_sync::workflow_lock().lock().await;
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let settings = read_settings(&conn)?;
@@ -539,6 +540,7 @@ pub async fn upload(
 
 pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<String, String> {
     let _guard = sync_lock().lock().await;
+    let _workflow = crate::cloud_sync::workflow_lock().lock().await;
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let settings = read_settings(&conn)?;
@@ -566,12 +568,9 @@ pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<
     let temp_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
     let temp_file = temp_dir.path().join("cchub-s3-sync.sql");
     std::fs::write(&temp_file, bytes.as_slice()).map_err(|error| error.to_string())?;
-    let message = import_backup_from_path_impl(db, &temp_file)?;
+    let message = import_cloud_backup_from_path_impl(db, &temp_file)?;
     let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let mut saved = settings.masked_for_frontend();
-    saved.last_sync_at = Some(Utc::now().to_rfc3339());
-    saved.last_error = None;
-    set_json_app_setting(&conn, SETTINGS_KEY, &saved)?;
+    update_upload_status(&conn, &settings, Utc::now().to_rfc3339())?;
     cloud_revision::accept(&KeyringStore, &backup_scope(&settings), &revision)?;
     Ok(message)
 }

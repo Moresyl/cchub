@@ -5,10 +5,58 @@ use super::super::config_profiles::*;
 use super::super::types::*;
 use super::*;
 
+#[cfg(test)]
 pub fn restore_imported_project_root_snapshot(
     conn: &rusqlite::Connection,
     source_path: &str,
     target_path: &str,
+) -> Result<usize, String> {
+    project_restore_transaction(conn, |rollback| {
+        restore_project_snapshot(conn, source_path, target_path, rollback)
+    })
+}
+
+fn project_restore_transaction(
+    conn: &rusqlite::Connection,
+    restore: impl FnOnce(&mut super::backup_file_rollback::FileRollback) -> Result<usize, String>,
+) -> Result<usize, String> {
+    let directory = conn
+        .path()
+        .and_then(|path| std::path::Path::new(path).parent())
+        .filter(|path| path.is_dir())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(std::env::temp_dir);
+    let mut rollback = super::backup_file_rollback::FileRollback::new(&directory)?;
+    let savepoint = format!("cchub_project_{}", uuid::Uuid::new_v4().simple());
+    conn.execute_batch(&format!("SAVEPOINT {savepoint};"))
+        .map_err(|_| "无法开始项目路径迁移")?;
+    let result = restore(&mut rollback).and_then(|count| {
+        conn.execute_batch(&format!("RELEASE {savepoint};"))
+            .map_err(|_| "无法提交项目路径迁移")?;
+        Ok(count)
+    });
+    match result {
+        Ok(count) => {
+            rollback.commit();
+            Ok(count)
+        }
+        Err(error) => {
+            let database_rollback =
+                conn.execute_batch(&format!("ROLLBACK TO {savepoint}; RELEASE {savepoint};"));
+            let error = rollback.rollback(error);
+            if database_rollback.is_err() {
+                return Err(format!("{error}；项目路径的数据库回滚未完成"));
+            }
+            Err(error)
+        }
+    }
+}
+
+fn restore_project_snapshot(
+    conn: &rusqlite::Connection,
+    source_path: &str,
+    target_path: &str,
+    rollback: &mut super::backup_file_rollback::FileRollback,
 ) -> Result<usize, String> {
     let Some(source_root) = normalize_project_root_path(source_path) else {
         return Ok(0);
@@ -48,7 +96,11 @@ pub fn restore_imported_project_root_snapshot(
             ))
         })
         .collect::<Result<Vec<_>, String>>()?;
+    for (target, _) in &planned {
+        rollback.capture(target)?;
+    }
     for (target_path, bytes) in planned {
+        rollback.before_write(std::slice::from_ref(&target_path))?;
         if let Some(parent) = target_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -72,6 +124,7 @@ pub fn restore_imported_project_root_snapshot(
         .map_err(|e| e.to_string())?;
     }
 
+    super::backup_project_state::release_project_root(conn, source_root)?;
     Ok(restored)
 }
 
@@ -102,6 +155,17 @@ pub fn apply_project_root_remap(
     source_path: &str,
     target_path: &str,
 ) -> Result<usize, String> {
+    project_restore_transaction(conn, |rollback| {
+        remap_project_root(conn, source_path, target_path, rollback)
+    })
+}
+
+fn remap_project_root(
+    conn: &rusqlite::Connection,
+    source_path: &str,
+    target_path: &str,
+    rollback: &mut super::backup_file_rollback::FileRollback,
+) -> Result<usize, String> {
     let Some(source_root) = normalize_project_root_path(source_path) else {
         return Ok(0);
     };
@@ -110,6 +174,9 @@ pub fn apply_project_root_remap(
     };
 
     if project_root_paths_match(source_root, target_root) {
+        if super::backup_project_state::deferred_roots(conn)?.contains(source_root) {
+            return restore_project_snapshot(conn, source_root, target_root, rollback);
+        }
         return Ok(0);
     }
 
@@ -125,7 +192,7 @@ pub fn apply_project_root_remap(
     .map_err(|e| e.to_string())?;
     sync_known_project_root(conn, Some(source_root), Some(target_root))?;
 
-    restore_imported_project_root_snapshot(conn, source_root, target_root)
+    restore_project_snapshot(conn, source_root, target_root, rollback)
 }
 
 pub fn get_pending_imported_project_roots_from_conn(
@@ -149,9 +216,14 @@ pub fn get_pending_imported_project_roots_from_conn(
         })
         .map_err(|e| e.to_string())?;
 
+    let deferred = super::backup_project_state::deferred_roots(conn)?;
     Ok(rows
-        .filter_map(|row| row.ok())
-        .filter(|item| !PathBuf::from(&item.project_root).exists())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|item| {
+            deferred.contains(&item.project_root) || !PathBuf::from(&item.project_root).exists()
+        })
         .collect())
 }
 

@@ -209,12 +209,12 @@ export default function S3SyncSection() {
       title: text("从 S3 恢复", "Restore from S3"),
       message: allowPlaintext
         ? text(
-            "这份旧备份未加密。继续会使用旧格式恢复并覆盖当前数据库，请确认本地工作已保存。",
-            "This older backup is unencrypted. Continuing restores the legacy format and replaces the current database. Make sure local work is saved.",
+            "这份旧备份未加密。恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+            "This older backup is unencrypted. Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
           )
         : text(
-            "远端备份会覆盖当前数据库，请确认本地工作已保存。",
-            "The remote backup will replace the current database. Make sure local work is saved.",
+            "恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+            "Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
           ),
       confirmText: text("继续恢复", "Restore"),
       cancelText: text("取消", "Cancel"),

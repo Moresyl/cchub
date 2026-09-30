@@ -7,8 +7,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::cloud_credentials::{self, CredentialStore, KeyringStore};
 use crate::cloud_revision::{self, UploadReview, WriteCondition};
 use crate::commands::extra_commands::{
-    generate_sql_backup, get_json_app_setting, get_text_app_setting, import_backup_from_path_impl,
-    set_json_app_setting,
+    generate_sql_backup, get_json_app_setting, get_text_app_setting,
+    import_cloud_backup_from_path_impl, set_json_app_setting,
 };
 use crate::db::DbState;
 
@@ -293,39 +293,8 @@ fn write_settings_with_store(
     Ok(incoming.masked_for_frontend())
 }
 
-pub fn update_sync_status(
-    conn: &rusqlite::Connection,
-    last_sync_at: Option<String>,
-    last_error: Option<String>,
-) -> Result<WebDavSyncSettings, String> {
-    let mut settings = read_settings(conn)?;
-    settings.last_sync_at = last_sync_at;
-    settings.last_error = last_error;
-    settings.has_password = settings.has_password || !settings.password.trim().is_empty();
-    settings.password.clear();
-    set_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY, &settings)?;
-    Ok(settings.masked_for_frontend())
-}
-
-fn update_upload_status(
-    conn: &rusqlite::Connection,
-    expected: &WebDavSyncSettings,
-    synced_at: String,
-) -> Result<(), String> {
-    let mut current: WebDavSyncSettings =
-        get_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY)?.unwrap_or_default();
-    current.normalize();
-    if same_remote(&current, expected) {
-        current.last_sync_at = Some(synced_at);
-        current.last_error = None;
-        set_json_app_setting(
-            conn,
-            WEBDAV_SYNC_SETTINGS_KEY,
-            &current.masked_for_frontend(),
-        )?;
-    }
-    Ok(())
-}
+mod status;
+use status::{update_transfer_status, update_upload_status};
 
 pub async fn test_connection(
     mut settings: WebDavSyncSettings,
@@ -440,11 +409,16 @@ pub async fn upload(
     reviewed_revision: Option<String>,
 ) -> Result<WebDavRemoteInfo, String> {
     let _guard = webdav_sync_lock().lock().await;
-    match upload_inner(db, reviewed_revision).await {
+    let _workflow = crate::cloud_sync::workflow_lock().lock().await;
+    let settings = {
+        let conn = db.0.lock().map_err(|error| error.to_string())?;
+        read_settings(&conn)?
+    };
+    match upload_inner(db, &settings, reviewed_revision).await {
         Ok(info) => Ok(info),
         Err(error) => {
             if let Ok(conn) = db.0.lock() {
-                let _ = update_sync_status(&conn, None, Some(error.clone()));
+                let _ = update_transfer_status(&conn, &settings, None, Some(error.clone()));
             }
             Err(error)
         }
@@ -453,17 +427,13 @@ pub async fn upload(
 
 async fn upload_inner(
     db: &State<'_, DbState>,
+    settings: &WebDavSyncSettings,
     reviewed_revision: Option<String>,
 ) -> Result<WebDavRemoteInfo, String> {
-    let settings = {
-        let conn = db.0.lock().map_err(|error| error.to_string())?;
-        let settings = read_settings(&conn)?;
-        if !settings.enabled {
-            return Err("WebDAV sync is not enabled".to_string());
-        }
-        crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
-        settings
-    };
+    if !settings.enabled {
+        return Err("WebDAV sync is not enabled".to_string());
+    }
+    crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
 
     let client = build_client(&settings)?;
     let remote = fetch_manifest_with_fallback(&client, &settings).await?;
@@ -591,26 +561,30 @@ async fn upload_inner(
 
 pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<String, String> {
     let _guard = webdav_sync_lock().lock().await;
-    match download_inner(db, allow_plaintext).await {
+    let _workflow = crate::cloud_sync::workflow_lock().lock().await;
+    let settings = {
+        let conn = db.0.lock().map_err(|error| error.to_string())?;
+        read_settings(&conn)?
+    };
+    match download_inner(db, &settings, allow_plaintext).await {
         Ok(message) => Ok(message),
         Err(error) => {
             if let Ok(conn) = db.0.lock() {
-                let _ = update_sync_status(&conn, None, Some(error.clone()));
+                let _ = update_transfer_status(&conn, &settings, None, Some(error.clone()));
             }
             Err(error)
         }
     }
 }
 
-async fn download_inner(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<String, String> {
-    let settings = {
-        let conn = db.0.lock().map_err(|error| error.to_string())?;
-        let settings = read_settings(&conn)?;
-        if !settings.enabled {
-            return Err("WebDAV sync is not enabled".to_string());
-        }
-        settings
-    };
+async fn download_inner(
+    db: &State<'_, DbState>,
+    settings: &WebDavSyncSettings,
+    allow_plaintext: bool,
+) -> Result<String, String> {
+    if !settings.enabled {
+        return Err("WebDAV sync is not enabled".to_string());
+    }
 
     let client = build_client(&settings)?;
     let (manifest, layout, revision) = fetch_manifest_with_fallback(&client, &settings)
@@ -643,11 +617,11 @@ async fn download_inner(db: &State<'_, DbState>, allow_plaintext: bool) -> Resul
     let temp_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
     let temp_file = temp_dir.path().join("cchub-webdav-sync.sql");
     std::fs::write(&temp_file, bytes.as_slice()).map_err(|error| error.to_string())?;
-    let message = import_backup_from_path_impl(db, &temp_file)?;
+    let message = import_cloud_backup_from_path_impl(db, &temp_file)?;
 
     {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        let _ = update_sync_status(&conn, Some(chrono::Utc::now().to_rfc3339()), None)?;
+        update_upload_status(&conn, &settings, chrono::Utc::now().to_rfc3339())?;
     }
 
     cloud_revision::accept(&KeyringStore, &backup_scope(&settings), &revision)?;

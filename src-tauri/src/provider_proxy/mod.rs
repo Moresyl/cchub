@@ -36,7 +36,7 @@ use upstream::{
     build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
     build_upstream_request_url, extract_request_insights, extract_upstream_target,
     is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
-    read_response_body_limited, reqwest_client, transform_claude_request_body,
+    reqwest_client, transform_claude_request_body,
 };
 
 use crate::db::DbState;

@@ -2,8 +2,7 @@
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
-use bytes::{Bytes, BytesMut};
-use futures_util::StreamExt;
+use bytes::Bytes;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
@@ -767,31 +766,6 @@ pub(super) fn build_forward_response_from_parts(
             format!("Failed to build proxy response: {error}"),
         ),
     }
-}
-
-pub(super) async fn read_response_body_limited(
-    response: reqwest::Response,
-    max_bytes: usize,
-) -> Result<(StatusCode, reqwest::header::HeaderMap, Bytes), String> {
-    let status = response.status();
-    let headers = response.headers().clone();
-    if response
-        .content_length()
-        .is_some_and(|length| length > max_bytes as u64)
-    {
-        return Err(format!("Upstream response body exceeds {max_bytes} bytes"));
-    }
-
-    let mut body = BytesMut::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| format!("Response body could not be read: {error}"))?;
-        if body.len().saturating_add(chunk.len()) > max_bytes {
-            return Err(format!("Upstream response body exceeds {max_bytes} bytes"));
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok((status, headers, body.freeze()))
 }
 
 pub(super) fn build_json_response_from_value(

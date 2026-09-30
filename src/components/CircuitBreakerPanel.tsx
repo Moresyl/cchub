@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Activity, RefreshCw, RotateCcw } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import { Button } from "./ui/button";
 
 interface CircuitEntry {
   scope: "profile" | "endpoint";
@@ -59,21 +60,26 @@ export default function CircuitBreakerPanel() {
   return (
     <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
       <div
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 10,
+        }}
       >
         <div>
           <div
             style={{
               fontSize: 12,
-              fontWeight: 700,
+              fontWeight: "var(--font-weight-semibold)",
               color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: 1,
             }}
           >
             {text("实时熔断状态", "Live Circuit Status")}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
             {text(
               "观察 Profile 与上游端点的健康状态，故障恢复后可安全重置。",
               "Inspect profile and upstream endpoint health; reset after recovery.",
@@ -81,22 +87,24 @@ export default function CircuitBreakerPanel() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button
-            className="btn btn-ghost btn-sm"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => void refresh()}
             disabled={loading || resetting}
             title={text("刷新", "Refresh")}
+            aria-label={text("刷新熔断状态", "Refresh circuit status")}
           >
             <RefreshCw size={13} className={loading ? "animate-spin" : undefined} />
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => void reset()}
             disabled={resetting || loading || stats.entries.length === 0}
           >
             <RotateCcw size={13} />
             {text("重置", "Reset")}
-          </button>
+          </Button>
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -137,7 +145,7 @@ export default function CircuitBreakerPanel() {
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
-                  fontFamily: "var(--font-mono)",
+                  fontFamily: "var(--font-code)",
                 }}
               >
                 {entry.key}
@@ -169,7 +177,7 @@ function StatusPill({ label, value, tone }: { label: string; value: number; tone
     <span
       style={{
         border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
-        borderRadius: 999,
+        borderRadius: 6,
         padding: "3px 8px",
         color,
         fontSize: 11,

@@ -16,6 +16,8 @@ use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use tauri::{App, AppHandle, Manager};
 use tokio::sync::Notify;
 
+#[path = "deadline_tests.rs"]
+mod deadline_tests;
 #[path = "streaming_tests.rs"]
 mod streaming_tests;
 
@@ -422,7 +424,9 @@ async fn stream_timeout_is_failure_instead_of_healthy_headers() {
     open_profile(&app, "p1", true);
     let response = forward(app.handle().clone(), true).await;
     assert_eq!(profile(&app, "p1").consecutive_successes, 0);
-    assert!(to_bytes(response.into_body(), 1024).await.is_err());
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+    assert!(String::from_utf8_lossy(&bytes).contains("first byte timeout"));
     assert_eq!(profile(&app, "p1").state, CircuitState::Open);
     assert_eq!(endpoint(&app, "p1", &upstream.url).consecutive_failures, 1);
     streaming_tests::assert_single_outcome(&app, 502, 0, 0);

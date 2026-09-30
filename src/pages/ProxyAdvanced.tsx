@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowRight, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { t } from "../lib/i18n";
@@ -8,6 +8,8 @@ import CircuitBreakerPanel from "../components/CircuitBreakerPanel";
 import FailoverQueueManager from "../components/FailoverQueueManager";
 import { useSaveProxyAdvancedConfigMutation } from "../hooks/mutations";
 import { Input } from "../components/ui/input";
+import { Button } from "../components/ui/button";
+import NumberRow from "./ProxyAdvanced/NumberRow";
 import { SimpleSelect } from "../components/ui/simple-select";
 import { Switch } from "../components/ui/switch";
 
@@ -42,6 +44,7 @@ interface OptimizerConfig {
   maxProfileRetries: number;
   streamingFirstByteTimeout: number;
   streamingIdleTimeout: number;
+  nonStreamingTimeout: number;
 }
 
 interface RectifierConfig {
@@ -71,7 +74,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
   async function loadConfig() {
     try {
       const data = await invoke<OptimizerConfig>("get_optimizer_config");
-      setConfig(data);
+      setConfig({ ...data, nonStreamingTimeout: data.nonStreamingTimeout ?? 600 });
     } catch {
       setConfig({
         enabled: false,
@@ -98,6 +101,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
         maxProfileRetries: 3,
         streamingFirstByteTimeout: 60,
         streamingIdleTimeout: 120,
+        nonStreamingTimeout: 600,
       });
     }
   }
@@ -135,7 +139,15 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {!embedded && (
-        <div className="page-header">
+        <div
+          className="page-header"
+          style={{
+            padding: "16px 20px",
+            marginBottom: 0,
+            flexShrink: 0,
+            borderBottom: "1px solid var(--border-default)",
+          }}
+        >
           <div>
             <h2 className="page-title">{i.proxyAdvanced.title}</h2>
             <p className="page-subtitle">{i.proxyAdvanced.subtitle}</p>
@@ -159,10 +171,8 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             <div
               style={{
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: "var(--font-weight-semibold)",
                 color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
                 marginBottom: 10,
               }}
             >
@@ -206,10 +216,8 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             <div
               style={{
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: "var(--font-weight-semibold)",
                 color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
                 marginBottom: 10,
               }}
             >
@@ -229,14 +237,19 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
         )}
 
         {mode !== "codex" && (
-          <div
+          <fieldset
+            disabled={!config.enabled}
             style={{
+              border: 0,
+              minWidth: 0,
               borderTop: "1px solid var(--border-default)",
+              margin: 0,
+              padding: 0,
               paddingTop: 16,
               opacity: config.enabled ? 1 : 0.5,
-              pointerEvents: config.enabled ? "auto" : "none",
             }}
           >
+            <legend className="sr-only">{i.proxyAdvanced.optimizerTitle}</legend>
             {/* Thinking Optimizer */}
             <ToggleRow
               label={i.proxyAdvanced.thinkingOptimizer}
@@ -255,11 +268,11 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
               />
               {config.cacheInjection && (
                 <div style={{ marginTop: 8, paddingLeft: 28 }}>
-                  <label style={{ fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+                  <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
                     {i.proxyAdvanced.cacheTtl}
                   </label>
-                  <input
-                    className="input input-sm"
+                  <Input
+                    aria-label={i.proxyAdvanced.cacheTtl}
                     style={{ width: 120 }}
                     value={config.cacheTtl}
                     onChange={(e) => update({ cacheTtl: e.target.value })}
@@ -279,7 +292,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
               />
               {config.bodyFilter && (
                 <div style={{ marginTop: 8, paddingLeft: 28 }}>
-                  <label style={{ fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+                  <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
                     {i.proxyAdvanced.whitelist}
                   </label>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
@@ -291,34 +304,29 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                           alignItems: "center",
                           gap: 4,
                           padding: "2px 8px",
-                          borderRadius: 12,
+                          borderRadius: 6,
                           background: "var(--bg-app)",
                           border: "1px solid var(--border-default)",
                           fontSize: 11,
                         }}
                       >
                         {item}
-                        <button
-                          style={{
-                            border: "none",
-                            background: "none",
-                            cursor: "pointer",
-                            padding: 0,
-                            color: "var(--text-muted)",
-                            fontSize: 11,
-                          }}
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`${i.common.delete} ${item}`}
                           onClick={() =>
                             update({ bodyFilterWhitelist: config.bodyFilterWhitelist.filter((_, i) => i !== idx) })
                           }
                         >
                           ×
-                        </button>
+                        </Button>
                       </span>
                     ))}
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <input
-                      className="input input-sm"
+                    <Input
+                      aria-label={i.proxyAdvanced.whitelist}
                       style={{ width: 180 }}
                       placeholder="_fieldName"
                       value={newWhitelist}
@@ -330,8 +338,11 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                         }
                       }}
                     />
-                    <button
-                      className="btn btn-secondary btn-sm"
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      aria-label={i.proxyAdvanced.addWhitelistField}
+                      disabled={!newWhitelist.trim()}
                       onClick={() => {
                         if (newWhitelist.trim()) {
                           update({ bodyFilterWhitelist: [...config.bodyFilterWhitelist, newWhitelist.trim()] });
@@ -339,8 +350,8 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                         }
                       }}
                     >
-                      +
-                    </button>
+                      <Plus size={14} />
+                    </Button>
                   </div>
                 </div>
               )}
@@ -358,12 +369,12 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                 <div style={{ marginTop: 8, paddingLeft: 28, display: "flex", flexDirection: "column", gap: 10 }}>
                   {/* Default model */}
                   <div>
-                    <label style={{ fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
                       {i.proxyAdvanced.defaultModel}
                     </label>
-                    <input
-                      className="input input-sm"
-                      style={{ width: 280 }}
+                    <Input
+                      aria-label={i.proxyAdvanced.defaultModel}
+                      style={{ width: 280, maxWidth: "100%" }}
                       placeholder="claude-sonnet-4-20250514"
                       value={config.modelMapperDefault}
                       onChange={(e) => update({ modelMapperDefault: e.target.value })}
@@ -372,13 +383,16 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
 
                   {/* Rules */}
                   <div>
-                    <label style={{ fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 6 }}>
+                    <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "block", marginBottom: 6 }}>
                       {i.proxyAdvanced.mappingRules}
                     </label>
                     {config.modelMapperRules.map((rule, idx) => (
-                      <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                      <div
+                        key={idx}
+                        style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}
+                      >
                         <Input
-                          className="input input-sm"
+                          aria-label={`${i.proxyAdvanced.fromModel} ${idx + 1}`}
                           style={{ width: 160 }}
                           placeholder={i.proxyAdvanced.fromModel}
                           value={rule.from}
@@ -390,7 +404,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                         />
                         <ArrowRight size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
                         <Input
-                          className="input input-sm"
+                          aria-label={`${i.proxyAdvanced.toModel} ${idx + 1}`}
                           style={{ width: 160 }}
                           placeholder={i.proxyAdvanced.toModel}
                           value={rule.to}
@@ -401,7 +415,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                           }}
                         />
                         <SimpleSelect
-                          className="h-7 w-[100px]"
+                          className="w-[100px]"
                           value={rule.matchMode}
                           ariaLabel={i.proxyAdvanced.mappingRules}
                           options={[
@@ -414,19 +428,20 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                             update({ modelMapperRules: rules });
                           }}
                         />
-                        <button
-                          className="btn btn-ghost btn-icon-sm"
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${i.common.delete} ${i.proxyAdvanced.mappingRules} ${idx + 1}`}
                           onClick={() => {
                             update({ modelMapperRules: config.modelMapperRules.filter((_, i) => i !== idx) });
                           }}
                         >
                           <Trash2 size={12} />
-                        </button>
+                        </Button>
                       </div>
                     ))}
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      style={{ display: "flex", alignItems: "center", gap: 5 }}
+                    <Button
+                      variant="secondary"
                       onClick={() =>
                         update({
                           modelMapperRules: [...config.modelMapperRules, { from: "", to: "", matchMode: "contains" }],
@@ -435,7 +450,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                     >
                       <Plus size={12} />
                       {i.proxyAdvanced.addRule}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -490,7 +505,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                 </div>
               )}
             </div>
-          </div>
+          </fieldset>
         )}
 
         {/* Circuit Breaker */}
@@ -499,10 +514,8 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             <div
               style={{
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: "var(--font-weight-semibold)",
                 color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
                 marginBottom: 10,
               }}
             >
@@ -546,10 +559,8 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             <div
               style={{
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: "var(--font-weight-semibold)",
                 color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
                 marginBottom: 10,
               }}
             >
@@ -576,41 +587,45 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
           </div>
         )}
 
-        {/* Stream Timeout */}
-        {mode !== "codex" && (
-          <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
-                marginBottom: 10,
-              }}
-            >
-              {i.proxyAdvanced.streamTimeoutTitle}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <NumberRow
-                label={i.proxyAdvanced.streamFirstByte}
-                description={i.proxyAdvanced.streamFirstByteDesc}
-                value={config.streamingFirstByteTimeout}
-                onChange={(v) => update({ streamingFirstByteTimeout: v })}
-                min={0}
-                max={600}
-              />
-              <NumberRow
-                label={i.proxyAdvanced.streamIdle}
-                description={i.proxyAdvanced.streamIdleDesc}
-                value={config.streamingIdleTimeout}
-                onChange={(v) => update({ streamingIdleTimeout: v })}
-                min={0}
-                max={600}
-              />
-            </div>
+        {/* Request Timeout */}
+        <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: "var(--font-weight-semibold)",
+              color: "var(--text-muted)",
+              marginBottom: 10,
+            }}
+          >
+            {i.proxyAdvanced.streamTimeoutTitle}
           </div>
-        )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <NumberRow
+              label={i.proxyAdvanced.nonStreamTimeout}
+              description={i.proxyAdvanced.nonStreamTimeoutDesc}
+              value={config.nonStreamingTimeout}
+              onChange={(v) => update({ nonStreamingTimeout: v })}
+              min={0}
+              max={86400}
+            />
+            <NumberRow
+              label={i.proxyAdvanced.streamFirstByte}
+              description={i.proxyAdvanced.streamFirstByteDesc}
+              value={config.streamingFirstByteTimeout}
+              onChange={(v) => update({ streamingFirstByteTimeout: v })}
+              min={0}
+              max={86400}
+            />
+            <NumberRow
+              label={i.proxyAdvanced.streamIdle}
+              description={i.proxyAdvanced.streamIdleDesc}
+              value={config.streamingIdleTimeout}
+              onChange={(v) => update({ streamingIdleTimeout: v })}
+              min={0}
+              max={86400}
+            />
+          </div>
+        </div>
 
         {/* Codex OAuth */}
         {mode !== "claude" && (
@@ -623,10 +638,8 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             <div
               style={{
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: "var(--font-weight-semibold)",
                 color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: 1,
                 marginBottom: 10,
               }}
             >
@@ -652,15 +665,10 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
           marginTop: embedded ? 12 : 0,
         }}
       >
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          style={{ display: "flex", alignItems: "center", gap: 6 }}
-        >
+        <Button onClick={() => void handleSave()} disabled={saving}>
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           {i.proxyAdvanced.save}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -677,52 +685,18 @@ function ToggleRow({
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const descriptionId = useId();
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{label}</div>
-        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{description}</div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: "var(--font-weight-medium)", color: "var(--text-primary)" }}>
+          {label}
+        </div>
+        <div id={descriptionId} style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+          {description}
+        </div>
       </div>
-      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
-    </div>
-  );
-}
-
-function NumberRow({
-  label,
-  description,
-  value,
-  onChange,
-  min,
-  max,
-}: {
-  label: string;
-  description: string;
-  value: number;
-  onChange: (v: number) => void;
-  min?: number;
-  max?: number;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{label}</div>
-        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>{description}</div>
-      </div>
-      <input
-        className="input input-sm"
-        type="number"
-        style={{ width: 80, textAlign: "right", flexShrink: 0 }}
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => {
-          const n = parseInt(e.target.value, 10);
-          if (isNaN(n)) return;
-          const clamped = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, n));
-          onChange(clamped);
-        }}
-      />
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} aria-describedby={descriptionId} />
     </div>
   );
 }

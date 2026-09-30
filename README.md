@@ -63,6 +63,8 @@ Recovery allows one probe at a time, and cancellation releases its slot. Health 
 
 Usage statistics follow the final request outcome. Failover does not count the same request twice. Interrupted or errored streams are recorded as failures; cancellation is recorded as 499 while retaining usage already reported. Request details and daily totals are saved together so a failed statistics write cannot leave a partial update.
 
+Request deadlines are configured in the advanced proxy settings. Ordinary responses have a per-attempt total deadline covering request transmission, headers, and body (600 seconds by default). Streaming requests allow 60 seconds from transmission to the first raw byte and 120 seconds of upstream inactivity; heartbeats keep the stream alive. A stalled endpoint can fail over before client headers are committed. Set a timeout to `0` to disable it; values above 86400 seconds are rejected. These deadlines do not include credential acquisition or reading the incoming client body.
+
 ### Native configuration and usage sync
 
 OpenCode uses the existing `opencode.jsonc` or `opencode.json`. Profiles retain the native provider ID and selected model, SDK extension options, and other model definitions. Applying a profile updates its provider and default model. Invalid syntax, duplicate fields, or an external change detected before writing stops the update with an actionable error.

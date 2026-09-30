@@ -2,7 +2,6 @@
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
-use std::time::Duration;
 use tauri::AppHandle;
 
 use super::{ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
@@ -205,8 +204,6 @@ pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(
     tool_id: String,
     upstream: UpstreamTarget,
     insights: ProxyRequestInsights,
-    first_byte_timeout_secs: u64,
-    idle_timeout_secs: u64,
     upstream_status: u16,
     started_at: std::time::Instant,
     health: super::forward::streaming_health::StreamHealth,
@@ -231,25 +228,10 @@ where
     async_stream::stream! {
         let mut log = log;
         let mut buffer = String::new();
-        let mut is_first_chunk = true;
         tokio::pin!(stream);
         loop {
-            let timeout_secs = if is_first_chunk { first_byte_timeout_secs } else { idle_timeout_secs };
-            let next_chunk = if timeout_secs > 0 {
-                match tokio::time::timeout(Duration::from_secs(timeout_secs), stream.next()).await {
-                    Ok(chunk) => chunk,
-                    Err(_) => {
-                        let kind = if is_first_chunk { "first byte" } else { "idle" };
-                        let msg = format!("Stream {kind} timeout after {timeout_secs}s");
-                        log.fail(msg.clone());
-                        yield Err(std::io::Error::new(std::io::ErrorKind::TimedOut, msg));
-                        return;
-                    }
-                }
-            } else { stream.next().await };
-            match next_chunk {
+            match stream.next().await {
                 Some(Ok(bytes)) => {
-                    is_first_chunk = false;
                     let normalized = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
                     scan_stream_usage_buffer(&mut buffer, &normalized, &mut log.usage);
                     if buffer.len() > 1024 * 1024 { buffer.clear(); }

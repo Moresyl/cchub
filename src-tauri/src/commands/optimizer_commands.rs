@@ -27,6 +27,7 @@ pub fn set_optimizer_config(
     db: State<'_, DbState>,
     config: OptimizerConfig,
 ) -> Result<(), String> {
+    config.validate_timeouts()?;
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let payload = serde_json::to_string(&config).map_err(|e| e.to_string())?;
     conn.execute(

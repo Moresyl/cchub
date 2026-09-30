@@ -22,6 +22,8 @@ mod body;
 mod streaming;
 #[path = "forward/streaming_health.rs"]
 pub(super) mod streaming_health;
+#[path = "forward/timeouts.rs"]
+mod timeouts;
 use super::optimizer::{apply_proxy_optimizers, read_optimizer_config, read_rectifier_config};
 use super::profiles::{
     endpoint_circuit_key, is_claude_messages_path, ordered_upstream_base_urls, profile_circuit_key,
@@ -33,11 +35,12 @@ use super::{
     build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
     build_upstream_request_url, extract_request_insights, extract_upstream_target,
     is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
-    read_local_provider_proxy_settings_from_conn, read_response_body_limited, reqwest_client,
-    transform_claude_request_body, ClaudeApiFormat, LocalProviderProxyRuntime,
-    MAX_PROXY_BODY_BYTES, MAX_PROXY_RESPONSE_BODY_BYTES,
+    read_local_provider_proxy_settings_from_conn, reqwest_client, transform_claude_request_body,
+    ClaudeApiFormat, LocalProviderProxyRuntime, MAX_PROXY_BODY_BYTES,
+    MAX_PROXY_RESPONSE_BODY_BYTES,
 };
 use body::apply_local_proxy_body_override;
+use timeouts::{read_response_body_limited, AttemptBudget};
 
 pub(super) async fn forward_proxy_request<R: tauri::Runtime>(
     app_handle: AppHandle<R>,
@@ -159,6 +162,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     let mut last_response: Option<body::RetainedReply> = None;
     let rectifier_config = read_rectifier_config(&app_handle);
     let optimizer_config = read_optimizer_config(&app_handle);
+    if let Err(error) = optimizer_config.validate_timeouts() {
+        return build_proxy_error(StatusCode::INTERNAL_SERVER_ERROR, error);
+    }
 
     let runtime = app_handle.state::<LocalProviderProxyRuntime>().0.clone();
     let profile_budget = if optimizer_config.failover_enabled {
@@ -362,7 +368,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                     builder = builder.body(request_body_bytes.clone());
                 }
 
-                match builder.send().await {
+                let budget = AttemptBudget::new(&optimizer_config, request_insights.is_streaming);
+                match timeouts::send(builder, budget).await {
                     Ok(response) => {
                         let status = response.status();
                         let is_retryable_status = is_retryable_upstream_status(status);
@@ -376,6 +383,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                 match read_response_body_limited(
                                     response,
                                     MAX_PROXY_RESPONSE_BODY_BYTES,
+                                    budget,
                                 )
                                 .await
                                 {
@@ -433,6 +441,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             match read_response_body_limited(
                                 response,
                                 MAX_PROXY_RESPONSE_BODY_BYTES,
+                                budget,
                             )
                             .await
                             {
@@ -673,7 +682,19 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                 desktop_model,
                                 health.clone(),
                                 started_at,
-                            );
+                                budget.first,
+                            )
+                            .await;
+                            let body = match body {
+                                Ok(body) => body,
+                                Err(error) => {
+                                    log_attempt(None, 502, Some(&error));
+                                    endpoint_lease.failure();
+                                    endpoint_failed = true;
+                                    last_error = Some(error);
+                                    continue 'endpoints;
+                                }
+                            };
                             return build_forward_response_from_parts(
                                 status,
                                 &headers,
@@ -693,8 +714,12 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                         } else {
                             Some(format!("Upstream returned HTTP {}", status.as_u16()))
                         };
-                        match read_response_body_limited(response, MAX_PROXY_RESPONSE_BODY_BYTES)
-                            .await
+                        match read_response_body_limited(
+                            response,
+                            MAX_PROXY_RESPONSE_BODY_BYTES,
+                            budget,
+                        )
+                        .await
                         {
                             Ok((status, headers, bytes)) => {
                                 log_attempt(None, status.as_u16(), error_message.as_deref());

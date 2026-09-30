@@ -48,6 +48,27 @@ pub struct OptimizerConfig {
     pub streaming_first_byte_timeout: u64,
     #[serde(default = "default_streaming_idle_timeout")]
     pub streaming_idle_timeout: u64,
+    #[serde(default = "default_non_streaming_timeout")]
+    pub non_streaming_timeout: u64,
+}
+
+impl OptimizerConfig {
+    pub fn validate_timeouts(&self) -> Result<(), String> {
+        for (name, seconds) in [
+            (
+                "streamingFirstByteTimeout",
+                self.streaming_first_byte_timeout,
+            ),
+            ("streamingIdleTimeout", self.streaming_idle_timeout),
+            ("nonStreamingTimeout", self.non_streaming_timeout),
+            ("circuitTimeoutSecs", self.circuit_timeout_secs),
+        ] {
+            if seconds > 86_400 {
+                return Err(format!("{name} must not exceed 86400 seconds"));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for OptimizerConfig {
@@ -77,6 +98,7 @@ impl Default for OptimizerConfig {
             max_profile_retries: 3,
             streaming_first_byte_timeout: 60,
             streaming_idle_timeout: 120,
+            non_streaming_timeout: 600,
         }
     }
 }
@@ -98,6 +120,9 @@ fn default_streaming_first_byte_timeout() -> u64 {
 }
 fn default_streaming_idle_timeout() -> u64 {
     120
+}
+fn default_non_streaming_timeout() -> u64 {
+    600
 }
 
 pub const OPTIMIZER_CONFIG_SETTINGS_KEY: &str = "proxy_optimizer_config";

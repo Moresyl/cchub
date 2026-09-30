@@ -5,6 +5,7 @@ import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
 import { SimpleSelect } from "./ui/simple-select";
 import { Switch } from "./ui/switch";
+import { Button } from "./ui/button";
 
 type AppType = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes";
 interface QueueItem {
@@ -87,21 +88,26 @@ export default function FailoverQueueManager({ appType }: { appType?: AppType })
   return (
     <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 16 }}>
       <div
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 10,
+        }}
       >
         <div>
           <div
             style={{
               fontSize: 12,
-              fontWeight: 700,
+              fontWeight: "var(--font-weight-semibold)",
               color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: 1,
             }}
           >
             {text("故障转移队列", "Failover Queue")}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
             {text(
               "按优先级切换供应商，自动跳过熔断中的 Profile。",
               "Switch providers by priority and skip profiles with an open circuit.",
@@ -122,7 +128,7 @@ export default function FailoverQueueManager({ appType }: { appType?: AppType })
         value={selectedApp}
         onValueChange={(value) => setSelectedApp(value as AppType)}
         disabled={loading}
-        className="mb-2.5 h-7"
+        className="mb-2.5"
         options={appOptions.map(([value, label]) => ({ value, label }))}
         ariaLabel={text("应用", "Application")}
       />
@@ -155,22 +161,24 @@ export default function FailoverQueueManager({ appType }: { appType?: AppType })
                 {item.providerName}
               </span>
               <span style={{ display: "flex", gap: 3 }}>
-                <button
-                  className="btn btn-ghost btn-icon-sm"
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => move(index, -1)}
                   disabled={index === 0 || loading}
                   aria-label={text("上移", "Move up")}
                 >
                   <ArrowUp size={12} />
-                </button>
-                <button
-                  className="btn btn-ghost btn-icon-sm"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => move(index, 1)}
                   disabled={index === items.length - 1 || loading}
                   aria-label={text("下移", "Move down")}
                 >
                   <ArrowDown size={12} />
-                </button>
+                </Button>
               </span>
             </div>
           ))}

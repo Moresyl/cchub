@@ -1,10 +1,10 @@
 use axum::body::Body;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use std::pin::Pin;
 use tauri::AppHandle;
 
 use super::streaming_health::{observe, StreamHealth};
+use super::timeouts::{prepare_raw_stream, Deadline, ResponseStream};
 use crate::provider_proxy::desktop;
 use crate::provider_proxy::usage::create_usage_tracking_stream;
 use crate::provider_proxy::{ClaudeApiFormat, ProxyRequestInsights, UpstreamTarget};
@@ -13,8 +13,6 @@ use crate::provider_proxy_transform::{
     create_anthropic_sse_stream_from_responses, normalize_sse_stream,
 };
 use crate::proxy_optimizer::OptimizerConfig;
-
-type ResponseStream = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>;
 
 fn boxed<S, E>(stream: S) -> ResponseStream
 where
@@ -25,7 +23,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn streaming_body<R: tauri::Runtime>(
+pub(super) async fn streaming_body<R: tauri::Runtime>(
     response: reqwest::Response,
     transform: Option<ClaudeApiFormat>,
     app_handle: AppHandle<R>,
@@ -38,17 +36,19 @@ pub(super) fn streaming_body<R: tauri::Runtime>(
     desktop_model: Option<String>,
     health: StreamHealth,
     started_at: std::time::Instant,
-) -> Body {
+    first_deadline: Deadline,
+) -> Result<Body, String> {
     let upstream_status = response.status().as_u16();
     let is_sse = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"));
+    let raw = prepare_raw_stream(response, first_deadline, config.streaming_idle_timeout).await?;
     let source = if transform.is_some() || is_sse {
-        boxed(normalize_sse_stream(response.bytes_stream()))
+        boxed(normalize_sse_stream(raw))
     } else {
-        boxed(response.bytes_stream())
+        raw
     };
     let observed = observe(source, health.clone());
     let stream = match transform {
@@ -72,18 +72,16 @@ pub(super) fn streaming_body<R: tauri::Runtime>(
         tool_id,
         upstream,
         insights,
-        config.streaming_first_byte_timeout,
-        config.streaming_idle_timeout,
         upstream_status,
         started_at,
         health,
     ));
     if is_desktop {
-        Body::from_stream(desktop::restore_stream_model(
+        Ok(Body::from_stream(desktop::restore_stream_model(
             body.into_data_stream(),
             desktop_model,
-        ))
+        )))
     } else {
-        body
+        Ok(body)
     }
 }

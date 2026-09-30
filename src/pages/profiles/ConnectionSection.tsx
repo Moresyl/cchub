@@ -95,7 +95,6 @@ const SelectField = memo(function SelectFieldFn({
       value={value}
       onValueChange={onChange}
       options={options.map((option) => ({ value: option, label: option }))}
-      className="h-7"
     />
   );
 });

@@ -1,0 +1,87 @@
+/* All desktop controls use the same density ladder. */
+[data-control-size="xs"] {
+  --control-size: var(--control-height-xs);
+}
+[data-control-size="sm"] {
+  --control-size: var(--control-height-sm);
+}
+[data-control-size="md"] {
+  --control-size: var(--control-height-md);
+}
+[data-control-size="lg"] {
+  --control-size: var(--control-height-lg);
+}
+
+.input[data-control-size] {
+  height: var(--control-size);
+}
+
+[data-slot="select-trigger"] {
+  font-size: 12px;
+  font-weight: 510;
+}
+
+.collapsible-section-trigger {
+  width: 100%;
+  padding-inline: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.collapsible-section-title {
+  font-size: 14px;
+  font-weight: 590;
+}
+
+.collapsible-section-summary {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapsible-section-trigger > svg {
+  flex-shrink: 0;
+  transition: transform 150ms ease;
+}
+
+.collapsible-section-chevron-open {
+  transform: rotate(180deg);
+}
+
+.collapsible-section-content:not([hidden]) {
+  margin-top: 12px;
+}
+
+.input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.input[type="number"]::-webkit-inner-spin-button,
+.input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+@supports (corner-shape: superellipse(1.5)) {
+  :root {
+    --corner-radius-scale: 1.25;
+    --corner-shape: superellipse(1.5);
+    --control-radius: calc(var(--radius-sm) * var(--corner-radius-scale));
+  }
+
+  .btn,
+  .input,
+  [data-slot="button"],
+  [data-slot="input"],
+  [data-slot="textarea"],
+  [data-slot="select-trigger"],
+  [data-slot="select-content"],
+  [data-slot="popover-content"],
+  [data-slot="dialog-content"] {
+    corner-shape: var(--corner-shape);
+  }
+}

@@ -137,7 +137,7 @@ export const CODEX_WIRE_API_OPTIONS: CodexWireApi[] = ["responses", "chat"];
 export const THINKING_LEVEL_OPTIONS: OpenCodeThinkingLevel[] = ["minimal", "low", "medium", "high"];
 export const SECTION_TITLE_STYLE = {
   fontSize: 14,
-  fontWeight: 600,
+  fontWeight: 590,
   color: "var(--text-primary)",
   marginBottom: 12,
   letterSpacing: 0,
@@ -147,7 +147,7 @@ export const FIELD_STACK_STYLE = {
   flexDirection: "column",
   gap: 6,
 } as const;
-export const SMALL_INPUT_STYLE = { fontSize: 13 } as const;
+export const SMALL_INPUT_STYLE = { fontSize: 12 } as const;
 export const TWO_COLUMN_GRID_STYLE = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } as const;
 
 export function formatTime(value: string | null) {

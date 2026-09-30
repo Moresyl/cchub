@@ -42,10 +42,10 @@ function ProfileEditorComponent({
 
       <footer className="profile-editor-footer">
         <div className="profile-editor-footer-inner">
-          <Button variant="secondary" size="sm" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             取消
           </Button>
-          <Button size="sm" onClick={onSave} disabled={saveDisabled}>
+          <Button onClick={onSave} disabled={saveDisabled}>
             {saving ? <div className="spinner profile-editor-save-spinner" /> : <Save size={14} />}
             保存
           </Button>

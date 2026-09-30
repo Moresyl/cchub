@@ -7,25 +7,29 @@ export const Select = SelectPrimitive.Root;
 export const SelectGroup = SelectPrimitive.Group;
 export const SelectValue = SelectPrimitive.Value;
 
-export const SelectTrigger = forwardRef<
-  ElementRef<typeof SelectPrimitive.Trigger>,
-  ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Trigger
-    ref={ref}
-    data-slot="select-trigger"
-    className={cn(
-      "flex h-[var(--control-height-sm)] w-full items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2 text-xs font-[510] text-foreground outline-none transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--control-border-focus)] data-[state=open]:border-[var(--control-border-focus)] data-[state=open]:bg-[var(--control-background-hover)] disabled:cursor-default disabled:opacity-25 [&>span]:truncate",
-      className,
-    )}
-    {...props}
-  >
-    {children}
-    <SelectPrimitive.Icon asChild>
-      <ChevronDown size={12} className="shrink-0 text-muted-foreground" aria-hidden="true" />
-    </SelectPrimitive.Icon>
-  </SelectPrimitive.Trigger>
-));
+type SelectTriggerProps = ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
+  controlSize?: "xs" | "sm" | "md" | "lg";
+};
+
+export const SelectTrigger = forwardRef<ElementRef<typeof SelectPrimitive.Trigger>, SelectTriggerProps>(
+  ({ className, children, controlSize = "md", ...props }, ref) => (
+    <SelectPrimitive.Trigger
+      ref={ref}
+      data-slot="select-trigger"
+      data-control-size={controlSize}
+      className={cn(
+        "flex h-[var(--control-size)] w-full items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2 text-xs font-[510] text-foreground outline-none transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--control-border-focus)] data-[state=open]:border-[var(--control-border-focus)] data-[state=open]:bg-[var(--control-background-hover)] disabled:cursor-default disabled:opacity-25 [&>span]:truncate",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <SelectPrimitive.Icon asChild>
+        <ChevronDown size={12} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+  ),
+);
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName;
 
 export const SelectScrollUpButton = forwardRef<

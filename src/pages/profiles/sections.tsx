@@ -9,6 +9,9 @@ import ModelSelector, { type ModelInfo } from "../../components/ModelSelector";
 import LoadingState from "../../components/states/LoadingState";
 import { CheckboxField } from "../../components/ui/checkbox-field";
 import { SimpleSelect } from "../../components/ui/simple-select";
+import { Input } from "../../components/ui/input";
+import { Button } from "../../components/ui/button";
+import CollapsibleSection from "../../components/CollapsibleSection";
 import { getPresetCategories, type StructuredDraftFields } from "../../lib/configProfiles";
 import {
   FIELD_STACK_STYLE,
@@ -99,7 +102,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input className="input" style={{ ...SMALL_INPUT_STYLE, ...(props.style || {}) }} {...props} />;
+  return <Input style={{ ...SMALL_INPUT_STYLE, ...(props.style || {}) }} {...props} />;
 }
 
 // SelectField primitive used to live here; ConnectionSection.tsx now embeds its own copy.
@@ -144,7 +147,6 @@ export const ProfileBasicInfoSection = memo(function ProfileBasicInfoSection({
             onValueChange={onToolChange}
             ariaLabel={locale === "zh" ? "工具" : "Tool"}
             options={tools.map((tool) => ({ value: tool.id, label: tool.name }))}
-            className="h-7"
           />
         </Field>
         <Field label={locale === "zh" ? "配置名称" : "Name"}>
@@ -249,8 +251,18 @@ export const ProfilePresetSection = memo(function ProfilePresetSection({
         </div>
       </div>
 
-      <div>
-        <SectionTitle>{localeText("公共配置片段", "Shared Fragments", "共有フラグメント")}</SectionTitle>
+      <CollapsibleSection
+        title={localeText("公共配置片段", "Shared Fragments", "共有フラグメント")}
+        summary={
+          providerFragments.length
+            ? localeText(
+                `${providerFragments.length} 个片段`,
+                `${providerFragments.length} fragments`,
+                `${providerFragments.length} 件`,
+              )
+            : localeText("保存和复用表单", "Save and reuse fields", "フォームを保存・再利用")
+        }
+      >
         <div className="card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
             <Field label={localeText("片段名称", "Fragment Name", "フラグメント名")}>
@@ -264,8 +276,8 @@ export const ProfilePresetSection = memo(function ProfilePresetSection({
                 )}
               />
             </Field>
-            <button
-              className="btn btn-secondary btn-sm"
+            <Button
+              variant="secondary"
               type="button"
               onClick={onSaveFragment}
               disabled={!draftFragmentName.trim() || savingFragment}
@@ -273,7 +285,7 @@ export const ProfilePresetSection = memo(function ProfilePresetSection({
             >
               {savingFragment ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Save size={14} />}
               {localeText("保存当前表单", "Save Current Form", "現在のフォームを保存")}
-            </button>
+            </Button>
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {localeText(
@@ -316,7 +328,7 @@ export const ProfilePresetSection = memo(function ProfilePresetSection({
             ))
           )}
         </div>
-      </div>
+      </CollapsibleSection>
     </>
   );
 });
@@ -399,8 +411,8 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
       >
         <SectionTitle>{locale === "zh" ? "模型配置" : "Models"}</SectionTitle>
         {canFetchModels && (
-          <button
-            className="btn btn-secondary btn-sm"
+          <Button
+            variant="secondary"
             type="button"
             onClick={onFetchModels}
             disabled={fetchingModels}
@@ -408,7 +420,7 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
           >
             {fetchingModels ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
             {localeText("拉取模型列表", "Fetch Models", "モデル一覧を取得")}
-          </button>
+          </Button>
         )}
       </div>
       {(modelFetchError || fetchedModels.length > 0) && (

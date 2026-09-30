@@ -46,7 +46,6 @@ import { buildEditorViewProps } from "./profiles/editorProps";
 import {
   performCloseModal,
   performBatchStreamCheck,
-  performFetchModels,
   performOpenEditModal,
   getBatchStreamCheckDialog,
   useFilteredProfiles,
@@ -54,6 +53,7 @@ import {
   useProfileDragHandlers,
   useProfilesKeyboardShortcuts,
 } from "./profiles/hooks";
+import { useModelDiscovery } from "./profiles/modelDiscovery";
 import ProfilesConfirmDialogs from "./profiles/Dialogs";
 import ProfileEditorView from "./profiles/EditorView";
 import ProfilesListView from "./profiles/ListView";
@@ -670,36 +670,24 @@ export default function Profiles() {
     },
     [draftTool, updateStructuredDraft],
   );
-  const handleFetchModels = useCallback(
-    () =>
-      performFetchModels({
-        fetchingModels,
-        draftTool,
-        draftProviderType: draftFields.providerType,
-        draftOAuthAccountId: draftFields.oauthAccountId,
-        draftApiKey,
-        draftUseFullUrl,
-        draftBaseUrl,
-        draftCustomUserAgent,
-        draftRequestHeaders,
-        localeText,
-        setFetchingModels,
-        setModelFetchError,
-        setFetchedModelDetails,
-        setFetchedModels,
-      }),
-    [
+  const handleFetchModels = useModelDiscovery(
+    {
+      fetchingModels,
+      draftTool,
+      draftProviderType: draftFields.providerType,
+      draftOAuthAccountId: draftFields.oauthAccountId,
       draftApiKey,
+      draftUseFullUrl,
       draftBaseUrl,
       draftCustomUserAgent,
-      draftFields.oauthAccountId,
-      draftFields.providerType,
       draftRequestHeaders,
-      draftTool,
-      draftUseFullUrl,
-      fetchingModels,
       localeText,
-    ],
+      setFetchingModels,
+      setModelFetchError,
+      setFetchedModelDetails,
+      setFetchedModels,
+    },
+    editingProfile?.id ?? (showCreateModal ? "new" : "closed"),
   );
   const handleRequestFragmentDelete = useCallback(
     (fragmentId: string) => {

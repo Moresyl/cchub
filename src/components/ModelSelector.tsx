@@ -93,7 +93,7 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
         </PopoverTrigger>
 
         <PopoverContent className="model-selector-popover" onOpenAutoFocus={(event) => event.preventDefault()}>
-          <Command shouldFilter={false} className="model-selector-command" label="搜索模型">
+          <Command defaultValue={value} shouldFilter={false} className="model-selector-command" label="搜索模型">
             <div className="model-selector-search">
               <Search size={14} aria-hidden="true" />
               <Command.Input
@@ -103,7 +103,12 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
                 aria-label="搜索模型"
                 autoFocus
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && canUseCustomValue) {
+                  if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                  }
+                  if (event.key === "Enter" && canUseCustomValue && filteredModels.length === 0) {
                     event.preventDefault();
                     handleSelect(trimmedSearch);
                   }
@@ -114,19 +119,6 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
             <Command.List className="model-selector-list">
               {filteredModels.length === 0 && !canUseCustomValue && (
                 <Command.Empty className="model-selector-empty">没有匹配的模型</Command.Empty>
-              )}
-              {canUseCustomValue && (
-                <Command.Item
-                  value={`custom:${trimmedSearch}`}
-                  onSelect={() => handleSelect(trimmedSearch)}
-                  className="model-selector-item"
-                >
-                  <span className="model-selector-item-check" />
-                  <span className="model-selector-item-main">
-                    <span className="model-selector-item-id">使用 “{trimmedSearch}”</span>
-                    <span className="model-selector-item-name">自定义模型 ID</span>
-                  </span>
-                </Command.Item>
               )}
               {filteredModels.map((model) => (
                 <Command.Item
@@ -148,6 +140,19 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
                   <ModelMeta model={model} />
                 </Command.Item>
               ))}
+              {canUseCustomValue && (
+                <Command.Item
+                  value={`custom:${trimmedSearch}`}
+                  onSelect={() => handleSelect(trimmedSearch)}
+                  className="model-selector-item"
+                >
+                  <span className="model-selector-item-check" />
+                  <span className="model-selector-item-main">
+                    <span className="model-selector-item-id">使用 “{trimmedSearch}”</span>
+                    <span className="model-selector-item-name">自定义模型 ID</span>
+                  </span>
+                </Command.Item>
+              )}
             </Command.List>
           </Command>
         </PopoverContent>
@@ -175,6 +180,7 @@ const ModelMeta = memo(function ModelMeta({ model }: { model: ModelInfo }) {
   if (model.contextWindow) parts.push(`ctx:${formatTokens(model.contextWindow)}`);
   if (model.maxOutputTokens) parts.push(`out:${formatTokens(model.maxOutputTokens)}`);
   if (model.inputPrice) parts.push(`$${model.inputPrice}/in`);
+  if (model.outputPrice) parts.push(`$${model.outputPrice}/out`);
   if (parts.length === 0) return null;
   return <span className="model-selector-item-meta">{parts.join(" · ")}</span>;
 });

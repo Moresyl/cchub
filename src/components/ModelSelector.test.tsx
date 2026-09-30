@@ -35,6 +35,18 @@ beforeAll(() => {
 });
 
 describe("ModelSelector", () => {
+  it("starts keyboard navigation at the current model", async () => {
+    const onChange = vi.fn();
+    render(<ModelSelector value="model-beta" models={models} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "选择模型" }));
+    const search = await screen.findByRole("combobox", { name: "搜索模型" });
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /model-beta/ }).getAttribute("data-selected")).toBe("true"),
+    );
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("model-beta");
+  });
+
   it("opens, filters, and selects a model", async () => {
     const onChange = vi.fn();
     render(<ModelSelector value="model-alpha" models={models} onChange={onChange} />);
@@ -60,6 +72,30 @@ describe("ModelSelector", () => {
     fireEvent.keyDown(search, { key: "Enter" });
 
     expect(onChange).toHaveBeenCalledWith("custom-model");
+  });
+
+  it("uses a matching catalog model when Enter follows a partial name", async () => {
+    const onChange = vi.fn();
+    render(<ModelSelector value="" models={models} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "选择模型" }));
+    const search = await screen.findByRole("combobox", { name: "搜索模型" });
+    fireEvent.change(search, { target: { value: "beta" } });
+    const beta = screen.getByRole("option", { name: /model-beta/ });
+    await waitFor(() => expect(beta.getAttribute("data-selected")).toBe("true"));
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("model-beta");
+    expect(onChange).not.toHaveBeenCalledWith("beta");
+  });
+
+  it("does not commit a model while an IME composition is confirmed", async () => {
+    const onChange = vi.fn();
+    render(<ModelSelector value="" models={models} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "选择模型" }));
+    const search = await screen.findByRole("combobox", { name: "搜索模型" });
+    fireEvent.change(search, { target: { value: "custom" } });
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true, keyCode: 229 });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox", { name: "搜索模型" })).toBeTruthy();
   });
 
   it("clears the current model", () => {

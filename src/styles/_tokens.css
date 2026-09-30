@@ -43,14 +43,18 @@
   --control-border-hover: rgba(255, 255, 255, 0.3);
   --control-border-focus: rgba(255, 255, 255, 0.5);
   --control-placeholder: #8f8f8f;
-  --control-height-4xs: 20px;
-  --control-height-3xs: 22px;
   --control-height-2xs: 24px;
-  --control-height-xs: 26px;
+  --control-height-xs: 24px;
   --control-radius: 6px;
   --control-height-sm: 28px;
   --control-height-md: 32px;
-  --control-height-lg: 36px;
+  --control-height-lg: 40px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --corner-radius-scale: 1;
+  --corner-shape: round;
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 8px 24px -16px rgba(0, 0, 0, 0.72);
   --shadow-md: 0 18px 48px -22px rgba(0, 0, 0, 0.82);
@@ -166,16 +170,6 @@ input,
 textarea,
 select {
   font: inherit;
-}
-
-@supports (corner-shape: superellipse(1.5)) {
-  :root {
-    --control-radius: 7.5px;
-  }
-
-  :where(.btn, .input, [data-radix-popper-content-wrapper] > *, [role="dialog"]) {
-    corner-shape: superellipse(1.5);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

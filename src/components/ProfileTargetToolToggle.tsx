@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Check } from "lucide-react";
+import { Button } from "./ui/button";
 
 interface ProfileTargetToolToggleProps {
   toolId: string;
@@ -17,16 +18,17 @@ function ProfileTargetToolToggleComponent({
   onToggle,
 }: ProfileTargetToolToggleProps) {
   return (
-    <button
+    <Button
       type="button"
-      className={`btn btn-sm ${selected ? "btn-primary" : "btn-secondary"}`}
+      variant={selected ? "default" : "secondary"}
+      aria-pressed={selected}
       onClick={() => onToggle(toolId)}
       disabled={disabled}
       style={{ gap: 6 }}
     >
       {toolName}
       {selected && <Check size={12} />}
-    </button>
+    </Button>
   );
 }
 

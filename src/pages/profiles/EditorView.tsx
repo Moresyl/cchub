@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import ProfileEditor from "../../components/ProfileEditor";
 import ProfileTransportSettings from "../../components/ProfileTransportSettings";
+import CollapsibleSection from "../../components/CollapsibleSection";
 import { type ModelInfo } from "../../components/ModelSelector";
 import {
   type ApiFormat,
@@ -209,15 +210,6 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
             onToggleApiKeyVisibility={props.handleToggleShowApiKey}
           />
 
-          <ProfileTransportSettings
-            localeText={localeText}
-            customUserAgent={props.draftCustomUserAgent}
-            requestHeaders={props.draftRequestHeaders}
-            requestHeaderOverrides={props.draftRequestHeaderOverrides}
-            requestBodyOverrides={props.draftRequestBodyOverrides}
-            onChange={(next) => props.updateStructuredDraft(props.draftTool, next)}
-          />
-
           <ProfileModelsSection
             locale={locale}
             localeText={localeText}
@@ -250,6 +242,28 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
             onDraftChange={props.updateStructuredDraft}
             onContentChange={props.setDraftContent}
           />
+
+          <CollapsibleSection
+            title={localeText("请求设置", "Request settings", "リクエスト設定")}
+            summary={localeText("请求头与参数覆盖", "Headers and overrides", "ヘッダーとパラメータ")}
+            defaultOpen={
+              !!(
+                props.draftCustomUserAgent ||
+                Object.keys(props.draftRequestHeaders).length ||
+                props.draftRequestHeaderOverrides ||
+                props.draftRequestBodyOverrides
+              )
+            }
+          >
+            <ProfileTransportSettings
+              localeText={localeText}
+              customUserAgent={props.draftCustomUserAgent}
+              requestHeaders={props.draftRequestHeaders}
+              requestHeaderOverrides={props.draftRequestHeaderOverrides}
+              requestBodyOverrides={props.draftRequestBodyOverrides}
+              onChange={(next) => props.updateStructuredDraft(props.draftTool, next)}
+            />
+          </CollapsibleSection>
         </>
       )}
 

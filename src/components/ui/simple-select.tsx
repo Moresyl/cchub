@@ -17,6 +17,7 @@ interface SimpleSelectProps {
   disabled?: boolean;
   className?: string;
   contentClassName?: string;
+  controlSize?: "xs" | "sm" | "md" | "lg";
 }
 
 const EMPTY_OPTION_VALUE = "__cchub_empty_option__";
@@ -30,6 +31,7 @@ export function SimpleSelect({
   disabled,
   className,
   contentClassName,
+  controlSize,
 }: SimpleSelectProps) {
   const selectValue = value === "" ? EMPTY_OPTION_VALUE : value;
   return (
@@ -38,7 +40,7 @@ export function SimpleSelect({
       onValueChange={(nextValue) => onValueChange(nextValue === EMPTY_OPTION_VALUE ? "" : nextValue)}
       disabled={disabled}
     >
-      <SelectTrigger className={cn(className)} aria-label={ariaLabel}>
+      <SelectTrigger className={cn(className)} aria-label={ariaLabel} controlSize={controlSize}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent className={contentClassName}>

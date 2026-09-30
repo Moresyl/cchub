@@ -429,7 +429,7 @@
 .input {
   width: 100%;
   min-width: 0;
-  height: var(--control-height-sm);
+  height: var(--control-height-md);
   padding: 0 8px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
@@ -481,13 +481,13 @@ textarea.input {
 }
 
 .input-compact {
-  height: var(--control-height-3xs);
+  height: var(--control-height-xs);
   padding-inline: 8px;
 }
 
 .input-large {
-  height: var(--control-height-md);
-  font-size: 13px;
+  height: var(--control-height-lg);
+  font-size: 14px;
 }
 
 .data-table {
@@ -568,7 +568,7 @@ select.input option {
   gap: 8px;
   width: 100%;
   min-width: 0;
-  height: var(--control-height-sm);
+  height: var(--control-height-md);
   padding: 0 8px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
@@ -620,7 +620,8 @@ select.input option {
 
 .model-selector-clear {
   position: absolute;
-  top: 2px;
+  top: 50%;
+  transform: translateY(-50%);
   right: 23px;
   z-index: 1;
   width: 24px;
@@ -632,7 +633,7 @@ select.input option {
 }
 
 .model-selector-fallback {
-  height: var(--control-height-sm);
+  height: var(--control-height-md);
   border-radius: var(--control-radius);
   font-size: 12px;
 }
@@ -727,7 +728,7 @@ select.input option {
 .model-selector-item-name,
 .model-selector-item-meta {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
 }
 

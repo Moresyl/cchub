@@ -54,6 +54,9 @@ pub async fn webdav_sync_upload(db: State<'_, DbState>) -> Result<WebDavRemoteIn
 }
 
 #[tauri::command]
-pub async fn webdav_sync_download(db: State<'_, DbState>) -> Result<String, String> {
-    webdav_sync::download(&db).await
+pub async fn webdav_sync_download(
+    db: State<'_, DbState>,
+    allow_plaintext: Option<bool>,
+) -> Result<String, String> {
+    webdav_sync::download(&db, allow_plaintext.unwrap_or(false)).await
 }

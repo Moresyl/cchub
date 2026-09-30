@@ -3,6 +3,7 @@ import { Copy, type LucideIcon } from "lucide-react";
 import { Switch } from "../ui/switch";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
+import { EMPTY_BACKUP_ENCRYPTION, type BackupEncryptionSettings } from "../../lib/backupEncryption";
 
 export interface WebDavSyncSettings {
   enabled: boolean;
@@ -13,6 +14,7 @@ export interface WebDavSyncSettings {
   remote_root: string;
   profile: string;
   auto_sync: boolean;
+  backup_encryption: BackupEncryptionSettings;
   last_sync_at: string | null;
   last_error: string | null;
 }
@@ -27,6 +29,7 @@ export interface WebDavRemoteInfo {
   device_name: string | null;
   layout: string | null;
   compatible: boolean;
+  encrypted?: boolean;
   protocol_version: number | null;
   db_compat_version: number | null;
   profile_path: string | null;
@@ -110,6 +113,7 @@ export const EMPTY_SETTINGS: WebDavSyncSettings = {
   remote_root: "cchub-sync",
   profile: "default",
   auto_sync: false,
+  backup_encryption: EMPTY_BACKUP_ENCRYPTION,
   last_sync_at: null,
   last_error: null,
 };

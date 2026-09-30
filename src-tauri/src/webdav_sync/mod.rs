@@ -36,6 +36,7 @@ pub struct WebDavSyncSettings {
     pub password: String,
     pub has_password: bool,
     pub credential_scope: Option<String>,
+    pub backup_encryption: crate::cloud_backup::BackupEncryption,
     pub remote_root: String,
     pub profile: String,
     pub auto_sync: bool,
@@ -54,6 +55,7 @@ impl Default for WebDavSyncSettings {
             password: String::new(),
             has_password: false,
             credential_scope: None,
+            backup_encryption: Default::default(),
             remote_root: "cchub-sync".to_string(),
             profile: "default".to_string(),
             auto_sync: false,
@@ -90,12 +92,22 @@ impl WebDavSyncSettings {
         let mut masked = self.clone();
         masked.has_password = masked.has_password || !masked.password.trim().is_empty();
         masked.password.clear();
+        masked.backup_encryption = masked.backup_encryption.masked();
         masked
     }
 }
 
 fn credential_scope(settings: &WebDavSyncSettings) -> String {
     cloud_credentials::scope("webdav_password", &settings.base_url, &settings.username)
+}
+
+fn backup_scope(settings: &WebDavSyncSettings) -> String {
+    let location =
+        manifest_url_for_layout(settings, WebDavRemoteLayout::Current).unwrap_or_else(|_| {
+            serde_json::to_string(&(&settings.base_url, &settings.remote_root, &settings.profile))
+                .unwrap_or_default()
+        });
+    cloud_credentials::scope("webdav_backup", &location, &settings.username)
 }
 
 fn same_remote(left: &WebDavSyncSettings, right: &WebDavSyncSettings) -> bool {
@@ -137,6 +149,7 @@ pub struct WebDavRemoteInfo {
     pub device_name: Option<String>,
     pub layout: Option<String>,
     pub compatible: bool,
+    pub encrypted: bool,
     pub protocol_version: Option<u32>,
     pub db_compat_version: Option<u32>,
     pub profile_path: Option<String>,
@@ -161,6 +174,7 @@ struct WebDavManifest {
     snapshot_path: String,
     size_bytes: u64,
     sha256: String,
+    payload_format: String,
     device_name: String,
     profile_path: Option<String>,
 }
@@ -220,6 +234,10 @@ fn read_settings_with_store(
             settings.password = credential_store.get(&scope)?.unwrap_or_default();
             settings.has_password = !settings.password.trim().is_empty();
         }
+        let backup_scope = backup_scope(&settings);
+        settings
+            .backup_encryption
+            .load(credential_store, &backup_scope)?;
     }
     settings.proxy_url =
         get_text_app_setting(conn, "proxy_url")?.filter(|value| !value.trim().is_empty());
@@ -255,11 +273,20 @@ fn write_settings_with_store(
     incoming.last_error = if unchanged { existing.last_error } else { None };
     incoming.proxy_url = existing.proxy_url;
     incoming.validate()?;
+    let backup_scope = backup_scope(&incoming);
+    incoming
+        .backup_encryption
+        .prepare_save(credential_store, &backup_scope, incoming.auto_sync)?;
     incoming.has_password = !incoming.password.trim().is_empty();
     let secret = std::mem::take(&mut incoming.password);
     incoming.credential_scope = Some(scope.clone());
     cloud_credentials::save(credential_store, &scope, &secret, || {
-        set_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY, &incoming)
+        cloud_credentials::save(
+            credential_store,
+            &backup_scope,
+            &incoming.backup_encryption.passphrase,
+            || set_json_app_setting(conn, WEBDAV_SYNC_SETTINGS_KEY, &incoming),
+        )
     })?;
     Ok(incoming.masked_for_frontend())
 }
@@ -343,6 +370,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
             device_name: None,
             layout: Some(WebDavRemoteLayout::Current.label().to_string()),
             compatible: true,
+            encrypted: false,
             protocol_version: Some(WEBDAV_PROTOCOL_VERSION),
             db_compat_version: Some(WEBDAV_DB_COMPAT_VERSION),
             profile_path: Some(remote_profile_path(&settings, WebDavRemoteLayout::Current)),
@@ -364,6 +392,10 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
                 device_name: Some(manifest.device_name.clone()),
                 layout: Some(layout.label().to_string()),
                 compatible,
+                encrypted: crate::cloud_backup::encrypted(
+                    &manifest.payload_format,
+                    &manifest.snapshot_path,
+                ),
                 protocol_version: manifest.protocol_version,
                 db_compat_version: manifest.db_compat_version,
                 profile_path: manifest
@@ -382,6 +414,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
             device_name: None,
             layout: Some(WebDavRemoteLayout::Current.label().to_string()),
             compatible: true,
+            encrypted: false,
             protocol_version: Some(WEBDAV_PROTOCOL_VERSION),
             db_compat_version: Some(WEBDAV_DB_COMPAT_VERSION),
             profile_path: Some(remote_profile_path(&settings, WebDavRemoteLayout::Current)),
@@ -409,6 +442,7 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         if !settings.enabled {
             return Err("WebDAV sync is not enabled".to_string());
         }
+        crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
         settings
     };
 
@@ -417,28 +451,32 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         generate_sql_backup(&conn, &home).into_bytes()
     };
-    let size_bytes = sql_bytes.len() as u64;
-    if sql_bytes.len() > MAX_WEBDAV_SYNC_BYTES {
+    if sql_bytes.len() > crate::cloud_backup::PLAINTEXT_LIMIT {
         return Err(format!(
             "WebDAV upload aborted because backup size exceeds {} MB",
             MAX_WEBDAV_SYNC_BYTES / (1024 * 1024)
         ));
     }
 
+    let payload =
+        crate::cloud_backup::seal_async(sql_bytes, settings.backup_encryption.passphrase.clone())
+            .await?;
+    let size_bytes = payload.len() as u64;
+
     let client = build_client(&settings)?;
     ensure_remote_directories(&client, &settings, WebDavRemoteLayout::Current).await?;
 
     let created_at = chrono::Utc::now().to_rfc3339();
-    let snapshot_name = format!("cchub-sync-{}.sql", uuid::Uuid::new_v4());
+    let snapshot_name = format!("cchub-sync-{}.cchub-backup", uuid::Uuid::new_v4());
     let snapshot_path = format!("snapshots/{snapshot_name}");
     let snapshot_target = remote_file_url(&settings, WebDavRemoteLayout::Current, &snapshot_path)?;
-    let digest = crate::cloud_transfer::sha256(&sql_bytes);
+    let digest = crate::cloud_transfer::sha256(&payload);
     upload_bytes(
         &client,
         &settings,
         &snapshot_target,
-        "application/sql",
-        sql_bytes,
+        "application/octet-stream",
+        payload,
     )
     .await?;
 
@@ -453,6 +491,7 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         snapshot_path: snapshot_path.clone(),
         size_bytes,
         sha256: digest,
+        payload_format: crate::cloud_backup::PAYLOAD_FORMAT.into(),
         device_name: device_name.clone(),
         profile_path: Some(remote_profile_path(&settings, WebDavRemoteLayout::Current)),
     };
@@ -482,15 +521,16 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         device_name: Some(device_name),
         layout: Some(WebDavRemoteLayout::Current.label().to_string()),
         compatible: true,
+        encrypted: true,
         protocol_version: Some(WEBDAV_PROTOCOL_VERSION),
         db_compat_version: Some(WEBDAV_DB_COMPAT_VERSION),
         profile_path: manifest.profile_path,
     })
 }
 
-pub async fn download(db: &State<'_, DbState>) -> Result<String, String> {
+pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<String, String> {
     let _guard = webdav_sync_lock().lock().await;
-    match download_inner(db).await {
+    match download_inner(db, allow_plaintext).await {
         Ok(message) => Ok(message),
         Err(error) => {
             if let Ok(conn) = db.0.lock() {
@@ -501,7 +541,7 @@ pub async fn download(db: &State<'_, DbState>) -> Result<String, String> {
     }
 }
 
-async fn download_inner(db: &State<'_, DbState>) -> Result<String, String> {
+async fn download_inner(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<String, String> {
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let settings = read_settings(&conn)?;
@@ -530,10 +570,18 @@ async fn download_inner(db: &State<'_, DbState>) -> Result<String, String> {
         manifest.size_bytes,
         (!manifest.sha256.is_empty()).then_some(manifest.sha256.as_str()),
     )?;
+    let bytes = crate::cloud_backup::open_for_restore(
+        bytes,
+        manifest.payload_format,
+        manifest.snapshot_path,
+        settings.backup_encryption.passphrase.clone(),
+        allow_plaintext,
+    )
+    .await?;
 
     let temp_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
     let temp_file = temp_dir.path().join("cchub-webdav-sync.sql");
-    std::fs::write(&temp_file, &bytes).map_err(|error| error.to_string())?;
+    std::fs::write(&temp_file, bytes.as_slice()).map_err(|error| error.to_string())?;
     let message = import_backup_from_path_impl(db, &temp_file)?;
 
     {
@@ -644,9 +692,10 @@ mod tests {
             password: "secret-token".to_string(),
             has_password: false,
             credential_scope: None,
+            backup_encryption: Default::default(),
             remote_root: " /configs/ ".to_string(),
             profile: " main ".to_string(),
-            auto_sync: true,
+            auto_sync: false,
             proxy_url: None,
             last_sync_at: None,
             last_error: None,
@@ -676,6 +725,7 @@ mod tests {
             password: String::new(),
             has_password: true,
             credential_scope: None,
+            backup_encryption: Default::default(),
             remote_root: "configs".to_string(),
             profile: "main".to_string(),
             auto_sync: false,

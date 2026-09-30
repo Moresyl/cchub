@@ -45,6 +45,7 @@ pub struct S3SyncSettings {
     pub secret_access_key: String,
     pub has_secret_access_key: bool,
     pub credential_scope: Option<String>,
+    pub backup_encryption: crate::cloud_backup::BackupEncryption,
     pub remote_root: String,
     pub profile: String,
     pub auto_sync: bool,
@@ -65,6 +66,7 @@ impl Default for S3SyncSettings {
             secret_access_key: String::new(),
             has_secret_access_key: false,
             credential_scope: None,
+            backup_encryption: Default::default(),
             remote_root: "cchub-sync".to_string(),
             profile: "default".to_string(),
             auto_sync: false,
@@ -112,6 +114,7 @@ impl S3SyncSettings {
         masked.has_secret_access_key =
             masked.has_secret_access_key || !masked.secret_access_key.is_empty();
         masked.secret_access_key.clear();
+        masked.backup_encryption = masked.backup_encryption.masked();
         masked
     }
 }
@@ -125,6 +128,7 @@ pub struct S3RemoteInfo {
     pub updated_at: Option<String>,
     pub size_bytes: Option<u64>,
     pub compatible: bool,
+    pub encrypted: bool,
     pub protocol_version: Option<u32>,
     pub db_compat_version: Option<u32>,
     pub profile_path: String,
@@ -141,12 +145,29 @@ struct S3Manifest {
     snapshot_path: String,
     size_bytes: u64,
     sha256: String,
+    payload_format: String,
     device_name: String,
     profile_path: String,
 }
 
 fn credential_scope(settings: &S3SyncSettings) -> String {
     cloud_credentials::scope("s3_secret", &endpoint(settings), &settings.access_key_id)
+}
+
+fn backup_scope(settings: &S3SyncSettings) -> String {
+    let location = object_url(settings, &object_key(settings, MANIFEST_NAME))
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| {
+            serde_json::to_string(&(
+                &settings.endpoint,
+                &settings.region,
+                &settings.bucket,
+                &settings.remote_root,
+                &settings.profile,
+            ))
+            .unwrap_or_default()
+        });
+    cloud_credentials::scope("s3_backup", &location, &settings.access_key_id)
 }
 
 fn same_remote(left: &S3SyncSettings, right: &S3SyncSettings) -> bool {
@@ -218,6 +239,10 @@ fn read_settings_with_store(
             settings.has_secret_access_key = !settings.secret_access_key.trim().is_empty();
         }
     }
+    if configured {
+        let backup_scope = backup_scope(&settings);
+        settings.backup_encryption.load(store, &backup_scope)?;
+    }
     settings.proxy_url =
         get_text_app_setting(conn, "proxy_url")?.filter(|value| !value.trim().is_empty());
     Ok(settings)
@@ -252,11 +277,20 @@ fn write_settings_with_store(
     incoming.last_error = if unchanged { existing.last_error } else { None };
     incoming.proxy_url = existing.proxy_url;
     incoming.validate()?;
+    let backup_scope = backup_scope(&incoming);
+    incoming
+        .backup_encryption
+        .prepare_save(store, &backup_scope, incoming.auto_sync)?;
     incoming.has_secret_access_key = !incoming.secret_access_key.trim().is_empty();
     let secret = std::mem::take(&mut incoming.secret_access_key);
     incoming.credential_scope = Some(scope.clone());
     cloud_credentials::save(store, &scope, &secret, || {
-        set_json_app_setting(conn, SETTINGS_KEY, &incoming)
+        cloud_credentials::save(
+            store,
+            &backup_scope,
+            &incoming.backup_encryption.passphrase,
+            || set_json_app_setting(conn, SETTINGS_KEY, &incoming),
+        )
     })?;
     Ok(incoming.masked_for_frontend())
 }
@@ -467,6 +501,7 @@ fn device_name() -> String {
 }
 
 fn validate_manifest(manifest: &S3Manifest) -> Result<(), String> {
+    crate::cloud_backup::validate_format(&manifest.payload_format)?;
     if manifest.format != FORMAT {
         return Err("S3 manifest format is incompatible".to_string());
     }
@@ -518,6 +553,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
             updated_at: None,
             size_bytes: None,
             compatible: true,
+            encrypted: false,
             protocol_version: Some(PROTOCOL_VERSION),
             db_compat_version: Some(DB_COMPAT_VERSION),
             profile_path: profile,
@@ -532,6 +568,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
             updated_at: None,
             size_bytes: None,
             compatible: true,
+            encrypted: false,
             protocol_version: Some(PROTOCOL_VERSION),
             db_compat_version: Some(DB_COMPAT_VERSION),
             profile_path: profile,
@@ -540,6 +577,8 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
     let manifest: S3Manifest =
         serde_json::from_slice(&bytes).map_err(|error| format!("Invalid S3 manifest: {error}"))?;
     let compatible = validate_manifest(&manifest).is_ok();
+    let encrypted =
+        crate::cloud_backup::encrypted(&manifest.payload_format, &manifest.snapshot_path);
     Ok(S3RemoteInfo {
         exists: true,
         remote_url,
@@ -547,6 +586,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
         updated_at: Some(manifest.created_at),
         size_bytes: Some(manifest.size_bytes),
         compatible,
+        encrypted,
         protocol_version: Some(manifest.protocol_version),
         db_compat_version: Some(manifest.db_compat_version),
         profile_path: manifest.profile_path,
@@ -561,6 +601,7 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         if !settings.enabled {
             return Err("S3 sync is not enabled".to_string());
         }
+        crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
         settings
     };
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
@@ -568,16 +609,16 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         generate_sql_backup(&conn, &home).into_bytes()
     };
-    if sql_bytes.len() > MAX_SYNC_BYTES {
+    if sql_bytes.len() > crate::cloud_backup::PLAINTEXT_LIMIT {
         return Err("S3 upload aborted because backup exceeds the 15 MB safety limit".to_string());
     }
-    let snapshot_path = format!("snapshots/cchub-sync-{}.sql", uuid::Uuid::new_v4());
-    put_object(
-        &settings,
-        &object_key(&settings, &snapshot_path),
-        sql_bytes.clone(),
-    )
-    .await?;
+    let payload =
+        crate::cloud_backup::seal_async(sql_bytes, settings.backup_encryption.passphrase.clone())
+            .await?;
+    let size_bytes = payload.len() as u64;
+    let digest = sha256_hex(&payload);
+    let snapshot_path = format!("snapshots/cchub-sync-{}.cchub-backup", uuid::Uuid::new_v4());
+    put_object(&settings, &object_key(&settings, &snapshot_path), payload).await?;
     let created_at = Utc::now().to_rfc3339();
     let manifest = S3Manifest {
         format: FORMAT.to_string(),
@@ -586,8 +627,9 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         created_at: created_at.clone(),
         snapshot_path: snapshot_path.clone(),
-        size_bytes: sql_bytes.len() as u64,
-        sha256: sha256_hex(&sql_bytes),
+        size_bytes,
+        sha256: digest,
+        payload_format: crate::cloud_backup::PAYLOAD_FORMAT.into(),
         device_name: device_name(),
         profile_path: profile_path(&settings),
     };
@@ -603,8 +645,9 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         remote_url: object_url(&settings, &object_key(&settings, MANIFEST_NAME))?.to_string(),
         snapshot_path: Some(snapshot_path),
         updated_at: Some(created_at.clone()),
-        size_bytes: Some(sql_bytes.len() as u64),
+        size_bytes: Some(size_bytes),
         compatible: true,
+        encrypted: true,
         protocol_version: Some(PROTOCOL_VERSION),
         db_compat_version: Some(DB_COMPAT_VERSION),
         profile_path: profile_path(&settings),
@@ -614,7 +657,7 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
     Ok(info)
 }
 
-pub async fn download(db: &State<'_, DbState>) -> Result<String, String> {
+pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<String, String> {
     let _guard = sync_lock().lock().await;
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
@@ -634,9 +677,17 @@ pub async fn download(db: &State<'_, DbState>) -> Result<String, String> {
         .await?
         .ok_or("Remote S3 snapshot is missing")?;
     crate::cloud_transfer::verify_snapshot(&bytes, manifest.size_bytes, Some(&manifest.sha256))?;
+    let bytes = crate::cloud_backup::open_for_restore(
+        bytes,
+        manifest.payload_format,
+        manifest.snapshot_path,
+        settings.backup_encryption.passphrase.clone(),
+        allow_plaintext,
+    )
+    .await?;
     let temp_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
     let temp_file = temp_dir.path().join("cchub-s3-sync.sql");
-    std::fs::write(&temp_file, bytes).map_err(|error| error.to_string())?;
+    std::fs::write(&temp_file, bytes.as_slice()).map_err(|error| error.to_string())?;
     let message = import_backup_from_path_impl(db, &temp_file)?;
     let conn = db.0.lock().map_err(|error| error.to_string())?;
     let mut saved = settings.masked_for_frontend();

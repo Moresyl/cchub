@@ -24,6 +24,12 @@ fn manifest_rejects_unsafe_paths_sizes_and_non_hex_hashes() {
     let mut invalid = valid.clone();
     invalid.sha256 = "g".repeat(64);
     assert!(validate_manifest(&invalid).is_err());
+    let mut sealed = valid.clone();
+    sealed.snapshot_path = "snapshots/new.cchub-backup".into();
+    sealed.payload_format = crate::cloud_backup::PAYLOAD_FORMAT.into();
+    validate_manifest(&sealed).unwrap();
+    sealed.payload_format = "future-format".into();
+    assert!(validate_manifest(&sealed).is_err());
     invalid = valid;
     invalid.size_bytes = MAX_SYNC_BYTES as u64 + 1;
     assert!(validate_manifest(&invalid).is_err());

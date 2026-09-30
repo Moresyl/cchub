@@ -56,6 +56,8 @@ base64 = "0.22.1"
 url = "2"
 serde_yaml = "0.9"
 sha2 = "0.10"
+ring = "0.17"
+zeroize = "1.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }

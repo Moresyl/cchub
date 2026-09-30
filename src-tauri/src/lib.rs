@@ -1,4 +1,5 @@
 mod claude_md;
+mod cloud_backup;
 mod cloud_credentials;
 mod cloud_transfer;
 mod codex_oauth;

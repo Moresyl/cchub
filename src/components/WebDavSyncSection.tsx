@@ -8,8 +8,10 @@ import { showToast } from "./Toast";
 import { useSetWebDavSyncSettingsMutation } from "../hooks/mutations";
 import { useAppDialog } from "./AppDialogProvider";
 import { SimpleSelect } from "./ui/simple-select";
-import { cloudSettingsChanged, sameWebDavAccount } from "../lib/cloudSyncSettings";
+import { cloudSettingsChanged, sameWebDavAccount, sameWebDavBackupLocation } from "../lib/cloudSyncSettings";
 import { Button } from "./ui/button";
+import { BackupEncryptionField } from "./cloud-sync/BackupEncryptionField";
+import { backupPasswordAvailable, maskBackupEncryption } from "../lib/backupEncryption";
 
 import {
   EMPTY_SETTINGS,
@@ -49,6 +51,7 @@ function WebDavSyncSectionComponent() {
   const [actionState, setActionState] = useState<ActionState>("loading");
   const dirty =
     passwordTouched ||
+    settings.backup_encryption.passphraseTouched ||
     cloudSettingsChanged(settings, savedSettings, [
       "enabled",
       "base_url",
@@ -61,12 +64,20 @@ function WebDavSyncSectionComponent() {
   const draftRef = useRef(false);
   draftRef.current = dirty;
   const savedAccount = savedSettings !== null && sameWebDavAccount(settings, savedSettings);
+  const sameBackup = savedSettings !== null && sameWebDavBackupLocation(settings, savedSettings);
+  const passwordAvailable = backupPasswordAvailable(settings.backup_encryption, sameBackup);
   const remoteActionsDisabled = actionState !== "idle" || dirty || !savedSettings || !savedSettings.enabled;
 
   const applyLoadedState = useCallback((nextSettings: WebDavSyncSettings, nextRemoteInfo: WebDavRemoteInfo | null) => {
     startTransition(() => {
-      setSettings({ ...EMPTY_SETTINGS, ...nextSettings, password: "" });
-      setSavedSettings({ ...EMPTY_SETTINGS, ...nextSettings, password: "" });
+      const masked = {
+        ...EMPTY_SETTINGS,
+        ...nextSettings,
+        password: "",
+        backup_encryption: maskBackupEncryption(nextSettings.backup_encryption),
+      };
+      setSettings(masked);
+      setSavedSettings(masked);
       setRemoteInfo(nextRemoteInfo);
       setPresetId(detectPreset(nextSettings.base_url));
       setPasswordTouched(false);
@@ -210,7 +221,7 @@ function WebDavSyncSectionComponent() {
   }, [remoteActionsDisabled]);
 
   const handleUpload = useCallback(async () => {
-    if (remoteActionsDisabled) return;
+    if (remoteActionsDisabled || !passwordAvailable) return;
     if (!settings.enabled) {
       showToast(
         "error",
@@ -232,9 +243,9 @@ function WebDavSyncSectionComponent() {
       showToast(
         "success",
         uiText(
-          "已上传当前 SQL 快照到 WebDAV",
-          "Uploaded the current SQL snapshot to WebDAV",
-          "現在の SQL スナップショットを WebDAV にアップロードしました",
+          "已上传加密备份到 WebDAV",
+          "Uploaded the encrypted backup to WebDAV",
+          "暗号化バックアップを WebDAV にアップロードしました",
         ),
       );
     } catch (error) {
@@ -242,10 +253,17 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, [loadState, remoteActionsDisabled, settings.enabled, uiText]);
+  }, [loadState, passwordAvailable, remoteActionsDisabled, settings.enabled, uiText]);
 
   const handleDownload = useCallback(async () => {
-    if (remoteActionsDisabled || !remoteInfo?.exists || !remoteInfo.compatible) return;
+    if (
+      remoteActionsDisabled ||
+      !remoteInfo?.exists ||
+      !remoteInfo.compatible ||
+      (remoteInfo.encrypted && !passwordAvailable)
+    )
+      return;
+    const allowPlaintext = !remoteInfo.encrypted;
     if (!settings.enabled) {
       showToast(
         "error",
@@ -259,11 +277,16 @@ function WebDavSyncSectionComponent() {
     }
     const confirmed = await appDialog.confirm({
       title: uiText("从 WebDAV 恢复", "Restore from WebDAV", "WebDAV から復元"),
-      message: uiText(
-        "远端快照会覆盖当前数据库，请确认本地工作已保存。",
-        "The remote snapshot will replace the current database. Make sure local work is saved.",
-        "リモートスナップショットで現在のデータベースを上書きします。ローカル作業を保存してください。",
-      ),
+      message: allowPlaintext
+        ? uiText(
+            "这份旧备份未加密。继续会使用旧格式恢复并覆盖当前数据库，请确认本地工作已保存。",
+            "This older backup is unencrypted. Continuing restores the legacy format and replaces the current database. Make sure local work is saved.",
+          )
+        : uiText(
+            "远端快照会覆盖当前数据库，请确认本地工作已保存。",
+            "The remote snapshot will replace the current database. Make sure local work is saved.",
+            "リモートスナップショットで現在のデータベースを上書きします。ローカル作業を保存してください。",
+          ),
       confirmText: uiText("继续恢复", "Restore", "復元を続行"),
       cancelText: uiText("取消", "Cancel", "キャンセル"),
       tone: "warning",
@@ -273,7 +296,7 @@ function WebDavSyncSectionComponent() {
     }
     setActionState("downloading");
     try {
-      const message = await invoke<string>("webdav_sync_download");
+      const message = await invoke<string>("webdav_sync_download", { allowPlaintext });
       await loadState(true);
       showToast("success", message);
     } catch (error) {
@@ -281,7 +304,7 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, [appDialog, loadState, remoteActionsDisabled, remoteInfo, settings.enabled, uiText]);
+  }, [appDialog, loadState, passwordAvailable, remoteActionsDisabled, remoteInfo, settings.enabled, uiText]);
 
   const handleToggleEnabled = useCallback(() => {
     updateSettings("enabled", !settings.enabled);
@@ -430,7 +453,9 @@ function WebDavSyncSectionComponent() {
     : "var(--text-secondary)";
   const remoteStatusValue = remoteInfo?.exists
     ? remoteInfo.compatible
-      ? uiText("已发现可兼容快照", "Compatible snapshot found", "互換スナップショットを検出")
+      ? remoteInfo.encrypted
+        ? uiText("加密备份", "Encrypted backup")
+        : uiText("旧备份，未加密", "Legacy, unencrypted backup")
       : uiText(
           "远端备份信息无效或不兼容",
           "Invalid or incompatible remote backup",
@@ -463,8 +488,8 @@ function WebDavSyncSectionComponent() {
 
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
         {uiText(
-          "将配置备份到你的 WebDAV 存储，在其他设备上恢复。密码保存在系统密钥环中，仅用于对应的服务器与账号。",
-          "Back up your configuration to WebDAV and restore it on another device. Passwords stay in the OS keyring and belong to the corresponding server and account.",
+          "将配置加密备份到你的 WebDAV 存储，在其他设备上恢复。登录密码和备份密码分开保存在系统密钥环中。",
+          "Back up encrypted configuration to WebDAV and restore it on another device. Login and backup passwords are stored separately in the OS keyring.",
           "設定を WebDAV にバックアップし、別の端末で復元できます。パスワードはシステムキーチェーンに保存され、対応するサーバーとアカウントにのみ使用されます。",
         )}
       </p>
@@ -506,7 +531,7 @@ function WebDavSyncSectionComponent() {
               : uiText("仅手动同步", "Manual sync only", "手動同期のみ")
           }
           enabled={settings.auto_sync}
-          disabled={busy}
+          disabled={busy || (!settings.auto_sync && !passwordAvailable)}
           onToggle={handleToggleAutoSync}
         />
 
@@ -551,7 +576,22 @@ function WebDavSyncSectionComponent() {
             type={field.type}
           />
         ))}
+        <BackupEncryptionField
+          value={settings.backup_encryption}
+          sameLocation={sameBackup}
+          disabled={busy}
+          text={uiText}
+          onChange={(value) => updateSettings("backup_encryption", value)}
+        />
       </div>
+      {!passwordAvailable && savedSettings && (
+        <p className="mb-3 text-xs text-[var(--text-secondary)]">
+          {uiText(
+            "请设置并保存备份密码以启用上传和加密备份恢复。",
+            "Set and save a backup password to upload or restore encrypted backups.",
+          )}
+        </p>
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         <WebDavActionButton
@@ -595,7 +635,7 @@ function WebDavSyncSectionComponent() {
               : uiText("上传当前快照", "Upload Snapshot", "現在のスナップショットをアップロード")
           }
           loading={actionState === "uploading"}
-          disabled={remoteActionsDisabled}
+          disabled={remoteActionsDisabled || !passwordAvailable}
           icon={Upload}
           onClick={handleUploadClick}
         />
@@ -606,7 +646,12 @@ function WebDavSyncSectionComponent() {
               : uiText("从远端恢复", "Restore From Remote", "リモートから復元")
           }
           loading={actionState === "downloading"}
-          disabled={remoteActionsDisabled || !remoteInfo?.exists || !remoteInfo.compatible}
+          disabled={
+            remoteActionsDisabled ||
+            !remoteInfo?.exists ||
+            !remoteInfo.compatible ||
+            (!!remoteInfo.encrypted && !passwordAvailable)
+          }
           icon={Download}
           onClick={handleDownloadClick}
         />

@@ -14,6 +14,10 @@ fn configured() -> WebDavSyncSettings {
         base_url: "https://dav.test/root".into(),
         username: "alice".into(),
         password: " original secret ".into(),
+        backup_encryption: serde_json::from_value(
+            serde_json::json!({"passphrase": "public-test-passphrase"}),
+        )
+        .unwrap(),
         ..Default::default()
     }
 }
@@ -102,11 +106,89 @@ fn failed_settings_persistence_does_not_replace_credentials() {
     let mut settings = write_settings_with_store(&conn, configured(), true, &store).unwrap();
     conn.execute_batch("CREATE TRIGGER fail_settings BEFORE INSERT ON app_settings BEGIN SELECT RAISE(ABORT, 'failed'); END").unwrap();
     settings.password = "replacement".into();
+    settings.backup_encryption = serde_json::from_value(serde_json::json!({
+        "passphrase": "replacement-backup-password", "passphraseTouched": true
+    }))
+    .unwrap();
     assert!(write_settings_with_store(&conn, settings, true, &store).is_err());
     assert_eq!(
         read_settings_with_store(&conn, &store).unwrap().password,
         " original secret "
     );
+    assert_eq!(
+        read_settings_with_store(&conn, &store)
+            .unwrap()
+            .backup_encryption
+            .passphrase
+            .as_str(),
+        "public-test-passphrase"
+    );
+}
+
+#[test]
+fn backup_password_is_scoped_to_server_account_root_and_profile() {
+    let conn = connection();
+    let store = MemoryStore::default();
+    let original = write_settings_with_store(&conn, configured(), true, &store).unwrap();
+    assert!(original.backup_encryption.has_passphrase);
+    assert!(original.backup_encryption.passphrase.is_empty());
+    let raw: serde_json::Value = get_json_app_setting(&conn, WEBDAV_SYNC_SETTINGS_KEY)
+        .unwrap()
+        .unwrap();
+    assert!(raw["backup_encryption"].get("passphrase").is_none());
+    assert!(raw["backup_encryption"].get("passphraseTouched").is_none());
+    for field in ["server", "account", "root", "profile"] {
+        let mut other = original.clone();
+        other.enabled = false;
+        match field {
+            "server" => other.base_url = "https://other.test".into(),
+            "account" => other.username = "bob".into(),
+            "root" => other.remote_root = "other".into(),
+            _ => other.profile = "other".into(),
+        }
+        let saved = write_settings_with_store(&conn, other, false, &store).unwrap();
+        assert!(!saved.backup_encryption.has_passphrase, "{field}");
+        assert!(read_settings_with_store(&conn, &store)
+            .unwrap()
+            .backup_encryption
+            .passphrase
+            .is_empty());
+        write_settings_with_store(&conn, original.clone(), false, &store).unwrap();
+        assert_eq!(
+            read_settings_with_store(&conn, &store)
+                .unwrap()
+                .backup_encryption
+                .passphrase
+                .as_str(),
+            "public-test-passphrase"
+        );
+    }
+}
+
+#[test]
+fn clearing_backup_password_requires_disabling_auto_upload_and_keeps_login() {
+    let conn = connection();
+    let store = MemoryStore::default();
+    let mut initial = configured();
+    initial.auto_sync = true;
+    let saved = write_settings_with_store(&conn, initial, true, &store).unwrap();
+    let mut cleared = saved.clone();
+    cleared.backup_encryption.passphrase_touched = true;
+    assert!(write_settings_with_store(&conn, cleared.clone(), false, &store).is_err());
+    assert_eq!(
+        read_settings_with_store(&conn, &store)
+            .unwrap()
+            .backup_encryption
+            .passphrase
+            .as_str(),
+        "public-test-passphrase"
+    );
+    cleared.auto_sync = false;
+    let saved = write_settings_with_store(&conn, cleared, false, &store).unwrap();
+    assert!(!saved.backup_encryption.has_passphrase);
+    let loaded = read_settings_with_store(&conn, &store).unwrap();
+    assert!(loaded.backup_encryption.passphrase.is_empty());
+    assert_eq!(loaded.password, " original secret ");
 }
 
 #[test]

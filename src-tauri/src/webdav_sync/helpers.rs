@@ -229,6 +229,7 @@ pub(super) fn validate_manifest_compatibility(
     layout: WebDavRemoteLayout,
 ) -> Result<(), String> {
     crate::cloud_transfer::validate_snapshot_path(&manifest.snapshot_path)?;
+    crate::cloud_backup::validate_format(&manifest.payload_format)?;
     crate::cloud_transfer::validate_size_and_digest(
         manifest.size_bytes,
         (!manifest.sha256.is_empty()).then_some(manifest.sha256.as_str()),

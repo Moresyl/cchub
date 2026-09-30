@@ -2,7 +2,7 @@
 use sha2::{Digest, Sha256};
 
 pub(crate) const MANIFEST_LIMIT: usize = 64 * 1024;
-pub(crate) const SNAPSHOT_LIMIT: usize = 15 * 1024 * 1024;
+pub(crate) const SNAPSHOT_LIMIT: usize = crate::cloud_backup::ENCODED_LIMIT;
 
 pub(crate) async fn read_bounded(
     mut response: reqwest::Response,

@@ -28,6 +28,20 @@ fn old_webdav_manifests_remain_compatible_and_new_hashes_are_validated() {
 }
 
 #[test]
+fn encrypted_manifest_format_is_supported_but_unknown_formats_are_not() {
+    let mut sealed = manifest();
+    sealed.snapshot_path = "snapshots/new.cchub-backup".into();
+    sealed.payload_format = crate::cloud_backup::PAYLOAD_FORMAT.into();
+    validate_manifest_compatibility(&sealed, WebDavRemoteLayout::Current).unwrap();
+    assert!(crate::cloud_backup::encrypted(
+        &sealed.payload_format,
+        &sealed.snapshot_path
+    ));
+    sealed.payload_format = "future-format".into();
+    assert!(validate_manifest_compatibility(&sealed, WebDavRemoteLayout::Current).is_err());
+}
+
+#[test]
 fn remote_info_marks_unsafe_paths_or_sizes_incompatible() {
     for path in [
         "../db.sql",

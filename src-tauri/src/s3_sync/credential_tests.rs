@@ -15,6 +15,10 @@ fn configured() -> S3SyncSettings {
         bucket: "backup".into(),
         access_key_id: "alice".into(),
         secret_access_key: " original secret ".into(),
+        backup_encryption: serde_json::from_value(
+            serde_json::json!({"passphrase": "public-test-passphrase"}),
+        )
+        .unwrap(),
         ..Default::default()
     }
 }
@@ -103,6 +107,10 @@ fn persistence_failure_rolls_back_secret_and_keeps_original_settings() {
     let mut settings = write_settings_with_store(&conn, configured(), true, &store).unwrap();
     conn.execute_batch("CREATE TRIGGER fail_settings BEFORE INSERT ON app_settings BEGIN SELECT RAISE(ABORT, 'failed'); END").unwrap();
     settings.secret_access_key = "replacement".into();
+    settings.backup_encryption = serde_json::from_value(serde_json::json!({
+        "passphrase": "replacement-backup-password", "passphraseTouched": true
+    }))
+    .unwrap();
     assert!(write_settings_with_store(&conn, settings, true, &store).is_err());
     assert_eq!(
         read_settings_with_store(&conn, &store)
@@ -110,6 +118,79 @@ fn persistence_failure_rolls_back_secret_and_keeps_original_settings() {
             .secret_access_key,
         " original secret "
     );
+    assert_eq!(
+        read_settings_with_store(&conn, &store)
+            .unwrap()
+            .backup_encryption
+            .passphrase
+            .as_str(),
+        "public-test-passphrase"
+    );
+}
+
+#[test]
+fn backup_password_is_scoped_to_endpoint_account_bucket_root_and_profile() {
+    let conn = connection();
+    let store = MemoryStore::default();
+    let original = write_settings_with_store(&conn, configured(), true, &store).unwrap();
+    assert!(original.backup_encryption.has_passphrase);
+    assert!(original.backup_encryption.passphrase.is_empty());
+    let raw: serde_json::Value = get_json_app_setting(&conn, SETTINGS_KEY).unwrap().unwrap();
+    assert!(raw["backupEncryption"].get("passphrase").is_none());
+    assert!(raw["backupEncryption"].get("passphraseTouched").is_none());
+    for field in ["endpoint", "account", "bucket", "root", "profile"] {
+        let mut other = original.clone();
+        other.enabled = false;
+        match field {
+            "endpoint" => other.endpoint = "https://other.test".into(),
+            "account" => other.access_key_id = "bob".into(),
+            "bucket" => other.bucket = "other".into(),
+            "root" => other.remote_root = "other".into(),
+            _ => other.profile = "other".into(),
+        }
+        let saved = write_settings_with_store(&conn, other, false, &store).unwrap();
+        assert!(!saved.backup_encryption.has_passphrase, "{field}");
+        assert!(read_settings_with_store(&conn, &store)
+            .unwrap()
+            .backup_encryption
+            .passphrase
+            .is_empty());
+        write_settings_with_store(&conn, original.clone(), false, &store).unwrap();
+        assert_eq!(
+            read_settings_with_store(&conn, &store)
+                .unwrap()
+                .backup_encryption
+                .passphrase
+                .as_str(),
+            "public-test-passphrase"
+        );
+    }
+}
+
+#[test]
+fn clearing_backup_password_requires_disabling_auto_upload_and_keeps_login() {
+    let conn = connection();
+    let store = MemoryStore::default();
+    let mut initial = configured();
+    initial.auto_sync = true;
+    let saved = write_settings_with_store(&conn, initial, true, &store).unwrap();
+    let mut cleared = saved.clone();
+    cleared.backup_encryption.passphrase_touched = true;
+    assert!(write_settings_with_store(&conn, cleared.clone(), false, &store).is_err());
+    assert_eq!(
+        read_settings_with_store(&conn, &store)
+            .unwrap()
+            .backup_encryption
+            .passphrase
+            .as_str(),
+        "public-test-passphrase"
+    );
+    cleared.auto_sync = false;
+    let saved = write_settings_with_store(&conn, cleared, false, &store).unwrap();
+    assert!(!saved.backup_encryption.has_passphrase);
+    let loaded = read_settings_with_store(&conn, &store).unwrap();
+    assert!(loaded.backup_encryption.passphrase.is_empty());
+    assert_eq!(loaded.secret_access_key, " original secret ");
 }
 
 #[test]

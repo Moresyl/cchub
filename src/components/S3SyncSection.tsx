@@ -7,7 +7,14 @@ import { Switch } from "./ui/switch";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { useAppDialog } from "./AppDialogProvider";
-import { cloudSettingsChanged, sameS3Account } from "../lib/cloudSyncSettings";
+import { cloudSettingsChanged, sameS3Account, sameS3BackupLocation } from "../lib/cloudSyncSettings";
+import { BackupEncryptionField } from "./cloud-sync/BackupEncryptionField";
+import {
+  backupPasswordAvailable,
+  EMPTY_BACKUP_ENCRYPTION,
+  maskBackupEncryption,
+  type BackupEncryptionSettings,
+} from "../lib/backupEncryption";
 
 interface S3SyncSettings {
   enabled: boolean;
@@ -20,6 +27,7 @@ interface S3SyncSettings {
   remoteRoot: string;
   profile: string;
   autoSync: boolean;
+  backupEncryption: BackupEncryptionSettings;
   lastSyncAt: string | null;
   lastError: string | null;
 }
@@ -31,6 +39,7 @@ interface S3RemoteInfo {
   updatedAt: string | null;
   sizeBytes: number | null;
   compatible: boolean;
+  encrypted?: boolean;
   profilePath: string;
 }
 
@@ -45,6 +54,7 @@ const DEFAULT_SETTINGS: S3SyncSettings = {
   remoteRoot: "cchub-sync",
   profile: "default",
   autoSync: false,
+  backupEncryption: EMPTY_BACKUP_ENCRYPTION,
   lastSyncAt: null,
   lastError: null,
 };
@@ -63,6 +73,7 @@ export default function S3SyncSection() {
   const busy = action !== "idle";
   const dirty =
     secretTouched ||
+    settings.backupEncryption.passphraseTouched ||
     cloudSettingsChanged(settings, savedSettings, [
       "enabled",
       "endpoint",
@@ -75,15 +86,19 @@ export default function S3SyncSection() {
       "autoSync",
     ]);
   const savedAccount = savedSettings !== null && sameS3Account(settings, savedSettings);
+  const sameBackup = savedSettings !== null && sameS3BackupLocation(settings, savedSettings);
+  const passwordAvailable = backupPasswordAvailable(settings.backupEncryption, sameBackup);
   const remoteActionsDisabled = busy || dirty || !savedSettings || !savedSettings.enabled;
 
   const load = useCallback(async () => {
     setAction("loading");
     try {
+      const response = await invoke<S3SyncSettings>("get_s3_sync_settings");
       const loaded = {
         ...DEFAULT_SETTINGS,
-        ...(await invoke<S3SyncSettings>("get_s3_sync_settings")),
+        ...response,
         secretAccessKey: "",
+        backupEncryption: maskBackupEncryption(response.backupEncryption),
       };
       setSettings(loaded);
       setSavedSettings(loaded);
@@ -108,7 +123,12 @@ export default function S3SyncSection() {
     setAction("saving");
     try {
       const saved = await invoke<S3SyncSettings>("set_s3_sync_settings", { settings, secretTouched });
-      const masked = { ...DEFAULT_SETTINGS, ...saved, secretAccessKey: "" };
+      const masked = {
+        ...DEFAULT_SETTINGS,
+        ...saved,
+        secretAccessKey: "",
+        backupEncryption: maskBackupEncryption(saved.backupEncryption),
+      };
       setSettings(masked);
       setSavedSettings(masked);
       setRemote(null);
@@ -147,7 +167,7 @@ export default function S3SyncSection() {
   };
 
   const upload = async () => {
-    if (remoteActionsDisabled) return;
+    if (remoteActionsDisabled || !passwordAvailable) return;
     setAction("uploading");
     try {
       setRemote(await invoke<S3RemoteInfo>("s3_sync_upload"));
@@ -161,13 +181,20 @@ export default function S3SyncSection() {
   };
 
   const download = async () => {
-    if (remoteActionsDisabled || !remote?.exists || !remote.compatible) return;
+    if (remoteActionsDisabled || !remote?.exists || !remote.compatible || (remote.encrypted && !passwordAvailable))
+      return;
+    const allowPlaintext = !remote.encrypted;
     const confirmed = await appDialog.confirm({
       title: text("从 S3 恢复", "Restore from S3"),
-      message: text(
-        "远端备份会覆盖当前数据库，请确认本地工作已保存。",
-        "The remote backup will replace the current database. Make sure local work is saved.",
-      ),
+      message: allowPlaintext
+        ? text(
+            "这份旧备份未加密。继续会使用旧格式恢复并覆盖当前数据库，请确认本地工作已保存。",
+            "This older backup is unencrypted. Continuing restores the legacy format and replaces the current database. Make sure local work is saved.",
+          )
+        : text(
+            "远端备份会覆盖当前数据库，请确认本地工作已保存。",
+            "The remote backup will replace the current database. Make sure local work is saved.",
+          ),
       confirmText: text("继续恢复", "Restore"),
       cancelText: text("取消", "Cancel"),
       tone: "warning",
@@ -175,7 +202,7 @@ export default function S3SyncSection() {
     if (!confirmed) return;
     setAction("downloading");
     try {
-      await invoke<string>("s3_sync_download");
+      await invoke<string>("s3_sync_download", { allowPlaintext });
       await load();
       showToast("success", text("已从 S3 恢复快照", "Snapshot restored from S3"));
     } catch (error) {
@@ -210,8 +237,8 @@ export default function S3SyncSection() {
       </div>
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
         {text(
-          "将配置备份到 S3 或兼容的对象存储，在其他设备上恢复。密钥保存在系统密钥环中，仅用于对应的服务器与账号；恢复前会验证备份完整性。",
-          "Back up your configuration to S3 or compatible storage and restore it on another device. Keys stay in the OS keyring and belong to the corresponding server and account. Backups are checked for integrity before restoring.",
+          "将配置加密备份到 S3 或兼容的对象存储，在其他设备上恢复。登录密钥和备份密码保存在系统密钥环中；恢复前会验证备份完整性。",
+          "Back up encrypted configuration to S3 or compatible storage and restore it on another device. Login keys and backup passwords stay in the OS keyring. Backups are checked for integrity before restoring.",
         )}
       </p>
       {dirty && (
@@ -237,7 +264,7 @@ export default function S3SyncSection() {
         <Toggle
           label={text("每 15 分钟自动上传", "Upload every 15 minutes")}
           value={settings.autoSync}
-          disabled={busy}
+          disabled={busy || (!settings.autoSync && !passwordAvailable)}
           onChange={(value) => update("autoSync", value)}
         />
       </div>
@@ -277,7 +304,22 @@ export default function S3SyncSection() {
             }}
           />
         </label>
+        <BackupEncryptionField
+          value={settings.backupEncryption}
+          sameLocation={sameBackup}
+          disabled={busy}
+          text={text}
+          onChange={(value) => update("backupEncryption", value)}
+        />
       </div>
+      {!passwordAvailable && savedSettings && (
+        <p className="mb-3 text-xs text-[var(--text-secondary)]">
+          {text(
+            "请设置并保存备份密码以启用上传和加密备份恢复。",
+            "Set and save a backup password to upload or restore encrypted backups.",
+          )}
+        </p>
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         <ActionButton
           icon={Save}
@@ -303,14 +345,16 @@ export default function S3SyncSection() {
         <ActionButton
           icon={Upload}
           label={action === "uploading" ? text("上传中...", "Uploading...") : text("上传快照", "Upload snapshot")}
-          disabled={remoteActionsDisabled}
+          disabled={remoteActionsDisabled || !passwordAvailable}
           loading={action === "uploading"}
           onClick={() => void upload()}
         />
         <ActionButton
           icon={Download}
           label={action === "downloading" ? text("恢复中...", "Restoring...") : text("从远端恢复", "Restore remote")}
-          disabled={remoteActionsDisabled || !remote?.exists || !remote.compatible}
+          disabled={
+            remoteActionsDisabled || !remote?.exists || !remote.compatible || (!!remote.encrypted && !passwordAvailable)
+          }
           loading={action === "downloading"}
           onClick={() => void download()}
         />
@@ -321,7 +365,9 @@ export default function S3SyncSection() {
           value={
             remote?.exists
               ? remote.compatible
-                ? text("可恢复快照", "Compatible snapshot")
+                ? remote.encrypted
+                  ? text("加密备份", "Encrypted backup")
+                  : text("旧备份，未加密", "Legacy, unencrypted backup")
                 : text("备份信息无效或不兼容", "Invalid or incompatible backup")
               : remote
                 ? text("远端暂无备份", "No remote backup")

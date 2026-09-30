@@ -50,8 +50,28 @@ describe("WebDavSyncSection", () => {
     );
   }
 
+  it("keeps connection and remote status available but blocks encrypted restore without a password", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_webdav_sync_settings") return { ...settings, enabled: true };
+      if (command === "webdav_sync_fetch_remote_info") return { exists: true, compatible: true, encrypted: true };
+      return null;
+    });
+    renderSection();
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新远端" }).hasAttribute("disabled")).toBe(false));
+    expect(screen.getByRole("button", { name: "测试连接" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "上传当前快照" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("blocks remote operations on an unsaved draft and removes stale password hints", async () => {
-    const stored = { ...settings, enabled: true, base_url: "https://dav.test", username: "alice", has_password: true };
+    const stored = {
+      ...settings,
+      enabled: true,
+      base_url: "https://dav.test",
+      username: "alice",
+      has_password: true,
+      backup_encryption: { hasPassphrase: true },
+    };
     invokeMock.mockImplementation(async (command: string, args?: { settings: typeof stored }) => {
       if (command === "get_webdav_sync_settings") return stored;
       if (command === "set_webdav_sync_settings") return { ...args?.settings, password: "", has_password: true };
@@ -73,13 +93,18 @@ describe("WebDavSyncSection", () => {
     expect(screen.getByRole("status").textContent).toContain("未保存");
     expect(invokeMock.mock.calls.some(([command]) => command === "webdav_sync_upload")).toBe(false);
     fireEvent.change(password, { target: { value: "new-password" } });
+    fireEvent.change(screen.getByLabelText("备份密码"), { target: { value: "new-backup-password" } });
     fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith(
         "set_webdav_sync_settings",
         expect.objectContaining({
           passwordTouched: true,
-          settings: expect.objectContaining({ username: "bob", password: "new-password" }),
+          settings: expect.objectContaining({
+            username: "bob",
+            password: "new-password",
+            backup_encryption: expect.objectContaining({ passphrase: "new-backup-password", passphraseTouched: true }),
+          }),
         }),
       ),
     );
@@ -87,16 +112,61 @@ describe("WebDavSyncSection", () => {
       expect(screen.getByRole("button", { name: "上传当前快照" }).hasAttribute("disabled")).toBe(false),
     );
     expect(password.value).toBe("");
+    expect((screen.getByLabelText("备份密码") as HTMLInputElement).value).toBe("");
   });
 
   it("preserves a draft when background sync reports completion", async () => {
     renderSection();
     await waitFor(() => expect(screen.getByRole("button", { name: "保存设置" }).hasAttribute("disabled")).toBe(false));
     fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "unsaved-user" } });
+    fireEvent.change(screen.getByLabelText("备份密码"), { target: { value: "unsaved-backup-password" } });
     const callback = listenMock.mock.calls[0][1];
     await act(async () => callback({ payload: { status: "success", message: "done", synced_at: null, error: null } }));
     expect((screen.getByLabelText("用户名") as HTMLInputElement).value).toBe("unsaved-user");
+    expect((screen.getByLabelText("备份密码") as HTMLInputElement).value).toBe("unsaved-backup-password");
     expect(invokeMock.mock.calls.filter(([command]) => command === "get_webdav_sync_settings")).toHaveLength(1);
+  });
+
+  it("requires explicit legacy consent and permits cancellation without restoring", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_webdav_sync_settings")
+        return { ...settings, enabled: true, base_url: "https://dav.test", username: "alice" };
+      if (command === "webdav_sync_fetch_remote_info") return { exists: true, compatible: true, encrypted: false };
+      return "restored";
+    });
+    renderSection();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(false),
+    );
+    expect(screen.getByRole("button", { name: "上传当前快照" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    expect(await screen.findByText(/这份旧备份未加密/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(invokeMock.mock.calls.some(([command]) => command === "webdav_sync_download")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    fireEvent.click(await screen.findByRole("button", { name: "继续恢复" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("webdav_sync_download", { allowPlaintext: true }));
+  });
+
+  it("requires a saved password for encrypted restore and scopes saved hints to the profile", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_webdav_sync_settings")
+        return { ...settings, enabled: true, backup_encryption: { hasPassphrase: true } };
+      if (command === "webdav_sync_fetch_remote_info") return { exists: true, compatible: true, encrypted: true };
+      return "restored";
+    });
+    renderSection();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    fireEvent.click(await screen.findByRole("button", { name: "继续恢复" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("webdav_sync_download", { allowPlaintext: false }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存设置" }).hasAttribute("disabled")).toBe(false));
+    const password = screen.getByLabelText("备份密码") as HTMLInputElement;
+    expect(password.placeholder).toContain("已保存");
+    fireEvent.change(screen.getByLabelText("Profile 名称"), { target: { value: "other" } });
+    expect(password.placeholder).not.toContain("已保存");
   });
 
   it("does not allow saving defaults after settings fail to load", async () => {

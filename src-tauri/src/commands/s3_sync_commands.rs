@@ -60,8 +60,11 @@ pub async fn s3_sync_upload(db: State<'_, DbState>) -> Result<S3RemoteInfo, Stri
 }
 
 #[tauri::command]
-pub async fn s3_sync_download(db: State<'_, DbState>) -> Result<String, String> {
-    match s3_sync::download(&db).await {
+pub async fn s3_sync_download(
+    db: State<'_, DbState>,
+    allow_plaintext: Option<bool>,
+) -> Result<String, String> {
+    match s3_sync::download(&db, allow_plaintext.unwrap_or(false)).await {
         Ok(message) => Ok(message),
         Err(error) => {
             if let Ok(conn) = db.0.lock() {

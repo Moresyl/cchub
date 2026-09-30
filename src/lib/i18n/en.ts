@@ -439,7 +439,7 @@ export const en: I18n = {
     migrationImporting: "Importing...",
     pendingImports: "Pending Project Migration",
     pendingImportsDesc:
-      "After importing a backup, restore project-scoped files here if the old machine paths do not exist on this machine.",
+      "Project files are kept as migration snapshots. Choose a local folder to restore them. Cloud imports require local path confirmation even when the old path exists.",
     pendingImportsEmpty: "No pending project paths",
     pendingImportsOldPath: "Old Project Path",
     pendingImportsNewPath: "New Project Path",

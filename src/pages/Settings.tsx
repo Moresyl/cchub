@@ -381,6 +381,7 @@ export default function Settings() {
     handleApplyPendingTarget,
     handleExportBackup,
     handleImportBackup,
+    handleBackupRestored,
     handleRepairAll,
     handleFullRescan,
     handleOpenSafetyBackupPath,
@@ -710,8 +711,8 @@ export default function Settings() {
         {activeCategory === "integrations" && <SettingsClaudeExtensionSection />}
         {activeCategory === "integrations" && <SettingsCodexHistorySection />}
 
-        {activeCategory === "data" && <WebDavSyncSection />}
-        {activeCategory === "data" && <S3SyncSection />}
+        {activeCategory === "data" && <WebDavSyncSection onRestored={handleBackupRestored} />}
+        {activeCategory === "data" && <S3SyncSection onRestored={handleBackupRestored} />}
 
         {activeCategory === "data" && (
           <SettingsMigrationCenterSection

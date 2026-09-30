@@ -6,6 +6,7 @@ import SettingsManualSetupCard from "./SettingsManualSetupCard";
 import SettingsMigrationOverviewCard from "./SettingsMigrationOverviewCard";
 import SettingsPendingRootCard from "./SettingsPendingRootCard";
 import SettingsToolHealthCard from "./SettingsToolHealthCard";
+import { Button } from "./ui/button";
 
 interface MigrationPanelState {
   summary: boolean;
@@ -244,7 +245,7 @@ function SettingsMigrationCenterSectionComponent({
   const migrationOverviewCards = [
     {
       panel: "pending" as const,
-      label: labels.pendingImports,
+      label: locale === "zh" ? "待迁移项目" : locale === "ja" ? "移行待ちプロジェクト" : "Pending projects",
       value: pendingProjectRoots.length,
       tone: pendingProjectRoots.length > 0 ? ("warning" as const) : ("ready" as const),
       helper:
@@ -258,7 +259,12 @@ function SettingsMigrationCenterSectionComponent({
     },
     {
       panel: "summary" as const,
-      label: labels.importSummaryPending,
+      label:
+        locale === "zh"
+          ? "导入待迁移文件"
+          : locale === "ja"
+            ? "インポート時の移行待ちファイル"
+            : "Imported pending files",
       value: pendingProjectFiles,
       tone: pendingProjectFiles > 0 ? ("warning" as const) : ("neutral" as const),
       helper: lastImportSummary
@@ -332,32 +338,22 @@ function SettingsMigrationCenterSectionComponent({
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        <button
-          className="btn btn-primary btn-sm"
-          style={{ gap: 6 }}
-          onClick={onExportBackup}
-          disabled={exportingBackup}
-        >
+        <Button onClick={onExportBackup} disabled={exportingBackup}>
           <Download size={14} className={exportingBackup ? "spin" : ""} />
           {exportingBackup ? labels.migrationExporting : labels.migrationExport}
-        </button>
-        <button
-          className="btn btn-secondary btn-sm"
-          style={{ gap: 6 }}
-          onClick={onImportBackup}
-          disabled={importingBackup}
-        >
+        </Button>
+        <Button variant="outline" onClick={onImportBackup} disabled={importingBackup}>
           <Upload size={14} className={importingBackup ? "spin" : ""} />
           {importingBackup ? labels.migrationImporting : labels.migrationImport}
-        </button>
-        <button className="btn btn-secondary btn-sm" style={{ gap: 6 }} disabled={repairingAll} onClick={onRepairAll}>
+        </Button>
+        <Button variant="outline" disabled={repairingAll} onClick={onRepairAll}>
           <RefreshCw size={14} className={repairingAll ? "spin" : ""} />
           {repairingAll ? labels.pendingImportsRepairingAll : labels.pendingImportsRepairAll}
-        </button>
-        <button className="btn btn-secondary btn-sm" style={{ gap: 6 }} disabled={rescanningAll} onClick={onFullRescan}>
+        </Button>
+        <Button variant="outline" disabled={rescanningAll} onClick={onFullRescan}>
           <RefreshCw size={14} className={rescanningAll ? "spin" : ""} />
           {rescanningAll ? labels.fullRescanning : labels.fullRescan}
-        </button>
+        </Button>
       </div>
 
       {migrationReady ? (
@@ -432,15 +428,15 @@ function SettingsMigrationCenterSectionComponent({
                   {labels.pendingImportsAutoMatchDesc}
                 </p>
               </div>
-              <button
-                className="btn btn-secondary btn-sm"
+              <Button
+                variant="outline"
                 type="button"
                 disabled={autoMatchingPending || pendingProjectRoots.length === 0}
                 onClick={onAutoMatchPending}
               >
                 <RefreshCw size={14} className={autoMatchingPending ? "spin" : ""} />
                 {autoMatchingPending ? labels.pendingImportsAutoMatching : labels.pendingImportsAutoMatch}
-              </button>
+              </Button>
             </div>
             {pendingProjectRoots.length === 0 ? (
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{labels.pendingImportsEmpty}</div>
@@ -488,15 +484,15 @@ function SettingsMigrationCenterSectionComponent({
               }}
             >
               <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{labels.migrationHealthDesc}</p>
-              <button
-                className="btn btn-secondary btn-sm"
+              <Button
+                variant="outline"
                 onClick={onRefreshMigrationHealth}
                 disabled={refreshingMigrationHealth}
                 style={{ gap: 6 }}
               >
                 <RefreshCw size={14} className={refreshingMigrationHealth ? "spin" : ""} />
                 {refreshingMigrationHealth ? labels.migrationHealthRefreshing : labels.migrationHealthRefresh}
-              </button>
+              </Button>
             </div>
             {toolHealthIssues.length === 0 ? (
               <div

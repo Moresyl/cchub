@@ -2,6 +2,7 @@ import { memo } from "react";
 import { FolderOpen } from "lucide-react";
 import SettingsSummaryMetricCard from "./SettingsSummaryMetricCard";
 import SettingsSummaryStatRow from "./SettingsSummaryStatRow";
+import { Button } from "./ui/button";
 
 export interface SettingsImportSummaryPanelSummary {
   imported_at: string;
@@ -67,13 +68,25 @@ function SettingsImportSummaryPanelComponent({
   configRootsLabel,
   onOpenBackupPath,
 }: SettingsImportSummaryPanelProps) {
+  const importedDate = summary ? new Date(summary.imported_at) : null;
+  const importedAt =
+    importedDate && !Number.isNaN(importedDate.getTime())
+      ? importedDate.toLocaleString(undefined, {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+      : (summary?.imported_at ?? "");
   return (
     <div style={{ padding: "0 14px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
       {summary ? (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
             {[
-              [importedAtLabel, summary.imported_at],
+              [importedAtLabel, importedAt],
               [dataLabel, String(summary.db_rows_restored)],
               [toolConfigsLabel, String(summary.tool_configs_restored)],
               [skillsLabel, String(summary.skills_restored)],
@@ -105,10 +118,10 @@ function SettingsImportSummaryPanelComponent({
                 {summary.safety_backup_path}
               </div>
             </div>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={onOpenBackupPath} style={{ gap: 6 }}>
+            <Button variant="outline" type="button" onClick={onOpenBackupPath}>
               <FolderOpen size={14} />
               {openPathLabel}
-            </button>
+            </Button>
           </div>
         </>
       ) : (

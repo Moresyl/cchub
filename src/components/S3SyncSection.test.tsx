@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import S3SyncSection from "./S3SyncSection";
+import { showToast } from "./Toast";
 
 const { invokeMock, confirmMock } = vi.hoisted(() => ({ invokeMock: vi.fn(), confirmMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
@@ -46,6 +47,59 @@ beforeEach(() => {
 });
 
 describe("S3 cloud sync", () => {
+  it("refreshes restored state only after the download commits and keeps refresh failures separate", async () => {
+    let finishRestore!: (message: string) => void;
+    const onRestored = vi.fn(async () => {
+      throw new Error("refresh unavailable");
+    });
+    confirmMock.mockResolvedValue(true);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_s3_sync_settings") return stored;
+      if (command === "s3_sync_fetch_remote_info") return remote;
+      if (command === "s3_sync_download")
+        return new Promise<string>((resolve) => {
+          finishRestore = resolve;
+        });
+      return null;
+    });
+    render(<S3SyncSection onRestored={onRestored} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新远端" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "刷新远端" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("s3_sync_download", { allowPlaintext: false }));
+    expect(onRestored).not.toHaveBeenCalled();
+    await act(async () => finishRestore("restored"));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("info", expect.stringContaining("快照已恢复")));
+    expect(onRestored).toHaveBeenCalledOnce();
+    expect(invokeMock.mock.calls.filter(([command]) => command === "s3_sync_download")).toHaveLength(1);
+    expect(vi.mocked(showToast).mock.calls.some(([type]) => type === "error")).toBe(false);
+  });
+
+  it("does not refresh restored state after cancellation or a failed restore", async () => {
+    const onRestored = vi.fn(async () => {});
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_s3_sync_settings") return stored;
+      if (command === "s3_sync_fetch_remote_info") return remote;
+      throw new Error("restore rejected");
+    });
+    render(<S3SyncSection onRestored={onRestored} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新远端" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "刷新远端" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(false),
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "从远端恢复" })));
+    expect(onRestored).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.some(([command]) => command === "s3_sync_download")).toBe(false);
+    confirmMock.mockResolvedValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("error", expect.stringContaining("restore rejected")));
+    expect(onRestored).not.toHaveBeenCalled();
+  });
+
   it("shows backup review instead of upload progress while awaiting replacement confirmation", async () => {
     let finishReview!: (confirmed: boolean) => void;
     confirmMock.mockImplementation(

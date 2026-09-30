@@ -131,6 +131,12 @@ pub fn detect_tools_for_conn(conn: &Connection) -> Vec<DetectedTool> {
 const DETECT_TOOLS_TTL: Duration = Duration::from_millis(1500);
 static DETECT_TOOLS_CACHE: Mutex<Option<(Instant, Vec<DetectedTool>)>> = Mutex::new(None);
 
+pub(crate) fn invalidate_detect_tools_cache() {
+    if let Ok(mut cache) = DETECT_TOOLS_CACHE.lock() {
+        *cache = None;
+    }
+}
+
 fn base_dir_for_candidate(
     candidate: &ToolCandidate,
     home: &std::path::Path,

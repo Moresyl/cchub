@@ -1,5 +1,7 @@
 import { memo } from "react";
 import { FolderOpen } from "lucide-react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 
 export interface SettingsPendingRootCardItem {
   project_root: string;
@@ -56,25 +58,24 @@ function SettingsPendingRootCardComponent({
         <span className="badge badge-muted">{filesLabel}</span>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <input
-          className="input"
-          style={{ flex: 1, minWidth: 220, fontFamily: "var(--font-code)", fontSize: 12 }}
+        <Input
+          className="flex-1 min-w-[min(220px,100%)] font-mono"
+          aria-label={newPathPlaceholder}
           placeholder={newPathPlaceholder}
           value={targetValue}
           onChange={(event) => onTargetChange(item.project_root, event.target.value)}
         />
-        <button className="btn btn-secondary btn-sm" type="button" onClick={() => onPick(item.project_root)}>
+        <Button variant="outline" type="button" onClick={() => onPick(item.project_root)}>
           <FolderOpen size={14} />
           {pickLabel}
-        </button>
-        <button
-          className="btn btn-primary btn-sm"
+        </Button>
+        <Button
           type="button"
           disabled={applying || !targetValue.trim()}
           onClick={() => onApply(item.project_root, targetValue)}
         >
           {applying ? applyingLabel : applyLabel}
-        </button>
+        </Button>
       </div>
     </div>
   );

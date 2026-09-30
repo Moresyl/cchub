@@ -109,6 +109,7 @@ fn import_into_connection_with_mode(
         // No placeholder connection, close/rename window, or fallback to an empty
         // database. SQLite commits the page copy while the application mutex stays held.
         install_database(&prepared, conn)?;
+        crate::skills::tools::invalidate_detect_tools_cache();
         let mut message = format!("已恢复 {rows} 条数据记录, {configs} 个工具配置, {skills} 个技能文件, {files} 个附属文件。安全备份: {}", safety.display());
         if pending > 0 {
             message.push_str(&format!("；另有 {pending} 个项目文件已保留为迁移快照，修改工作区/项目路径后会自动恢复到新路径"));

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppDialogProvider } from "./AppDialogProvider";
 import WebDavSyncSection from "./WebDavSyncSection";
+import { showToast } from "./Toast";
 
 const { invokeMock, listenMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -29,6 +30,7 @@ const settings = {
 
 describe("WebDavSyncSection", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     invokeMock.mockReset();
     listenMock.mockReset();
     invokeMock.mockImplementation(async (command: string) => {
@@ -39,16 +41,61 @@ describe("WebDavSyncSection", () => {
     listenMock.mockResolvedValue(vi.fn());
   });
 
-  function renderSection() {
+  function renderSection(onRestored?: () => Promise<void>) {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     return render(
       <QueryClientProvider client={client}>
         <AppDialogProvider>
-          <WebDavSyncSection />
+          <WebDavSyncSection onRestored={onRestored} />
         </AppDialogProvider>
       </QueryClientProvider>,
     );
   }
+
+  it("refreshes after successful restore and does not report refresh failures as a failed restore", async () => {
+    const onRestored = vi.fn(async () => {
+      throw new Error("refresh unavailable");
+    });
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_webdav_sync_settings")
+        return { ...settings, enabled: true, backup_encryption: { hasPassphrase: true } };
+      if (command === "webdav_sync_fetch_remote_info") return { exists: true, compatible: true, encrypted: true };
+      return "restored";
+    });
+    renderSection(onRestored);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    expect(onRestored).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "继续恢复" }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("info", expect.stringContaining("快照已恢复")));
+    expect(onRestored).toHaveBeenCalledOnce();
+    expect(invokeMock.mock.calls.filter(([command]) => command === "webdav_sync_download")).toHaveLength(1);
+    expect(vi.mocked(showToast).mock.calls.some(([type]) => type === "error")).toBe(false);
+  });
+
+  it("does not refresh restored state after cancellation or a failed restore", async () => {
+    const onRestored = vi.fn(async () => {});
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_webdav_sync_settings")
+        return { ...settings, enabled: true, backup_encryption: { hasPassphrase: true } };
+      if (command === "webdav_sync_fetch_remote_info") return { exists: true, compatible: true, encrypted: true };
+      throw new Error("restore rejected");
+    });
+    renderSection(onRestored);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+    expect(onRestored).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.some(([command]) => command === "webdav_sync_download")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
+    fireEvent.click(await screen.findByRole("button", { name: "继续恢复" }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("error", expect.stringContaining("restore rejected")));
+    expect(onRestored).not.toHaveBeenCalled();
+  });
 
   it("confirms a new remote revision and sends exactly that revision once", async () => {
     const remote = {

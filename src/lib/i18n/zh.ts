@@ -432,7 +432,8 @@ export const zh = {
     migrationImport: "导入 SQL 备份",
     migrationImporting: "导入中...",
     pendingImports: "待迁移项目文件",
-    pendingImportsDesc: "导入备份后，如果旧电脑的项目路径在当前机器不存在，可以在这里把项目级配置文件恢复到新路径。",
+    pendingImportsDesc:
+      "项目文件已保留为迁移快照。选择本机目录后恢复；云端导入的项目即使旧路径存在，也需要确认本机路径。",
     pendingImportsEmpty: "没有待迁移的项目路径",
     pendingImportsOldPath: "旧项目路径",
     pendingImportsNewPath: "新项目路径",

@@ -11,6 +11,7 @@ import { cloudSettingsChanged, sameS3Account, sameS3BackupLocation } from "../li
 import { BackupEncryptionField } from "./cloud-sync/BackupEncryptionField";
 import { CloudUploadStatus } from "./cloud-sync/CloudUploadStatus";
 import { confirmCloudUpload, type CloudUploadReview } from "../lib/cloudUploadReview";
+import { refreshBackupRestoreState } from "../lib/backupRestoreState";
 import {
   backupPasswordAvailable,
   EMPTY_BACKUP_ENCRYPTION,
@@ -64,7 +65,7 @@ const DEFAULT_SETTINGS: S3SyncSettings = {
 
 type Action = "idle" | "loading" | "saving" | "testing" | "refreshing" | "reviewing" | "uploading" | "downloading";
 
-export default function S3SyncSection() {
+export default function S3SyncSection({ onRestored }: { onRestored?: () => Promise<void> }) {
   const appDialog = useAppDialog();
   const locale = getLocale();
   const [settings, setSettings] = useState<S3SyncSettings>(DEFAULT_SETTINGS);
@@ -224,8 +225,17 @@ export default function S3SyncSection() {
     setAction("downloading");
     try {
       await invoke<string>("s3_sync_download", { allowPlaintext });
+      const refreshed = await refreshBackupRestoreState(onRestored);
       await load();
-      showToast("success", text("已从 S3 恢复快照", "Snapshot restored from S3"));
+      showToast(
+        refreshed ? "success" : "info",
+        refreshed
+          ? text("已从 S3 恢复快照", "Snapshot restored from S3")
+          : text(
+              "快照已恢复，部分页面未刷新，请重新打开相关页面。",
+              "Snapshot restored. Some views could not refresh; reopen them.",
+            ),
+      );
     } catch (error) {
       showToast("error", `${text("S3 恢复失败", "S3 restore failed")}: ${error}`);
     } finally {

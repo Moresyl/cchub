@@ -14,6 +14,7 @@ import { BackupEncryptionField } from "./cloud-sync/BackupEncryptionField";
 import { CloudUploadStatus } from "./cloud-sync/CloudUploadStatus";
 import { confirmCloudUpload } from "../lib/cloudUploadReview";
 import { backupPasswordAvailable, maskBackupEncryption } from "../lib/backupEncryption";
+import { refreshBackupRestoreState } from "../lib/backupRestoreState";
 
 import {
   EMPTY_SETTINGS,
@@ -34,7 +35,7 @@ import {
   type WebDavTextFieldProps,
 } from "./webdav-sync/parts";
 
-function WebDavSyncSectionComponent() {
+function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise<void> }) {
   const appDialog = useAppDialog();
   const loc = getLocale();
   const i = t();
@@ -317,15 +318,34 @@ function WebDavSyncSectionComponent() {
     }
     setActionState("downloading");
     try {
-      const message = await invoke<string>("webdav_sync_download", { allowPlaintext });
+      await invoke<string>("webdav_sync_download", { allowPlaintext });
+      const refreshed = await refreshBackupRestoreState(onRestored);
       await loadState(true);
-      showToast("success", message);
+      showToast(
+        refreshed ? "success" : "info",
+        refreshed
+          ? uiText("已从 WebDAV 恢复快照", "Snapshot restored from WebDAV", "WebDAV のスナップショットを復元しました")
+          : uiText(
+              "快照已恢复，部分页面未刷新，请重新打开相关页面。",
+              "Snapshot restored. Some views could not refresh; reopen them.",
+              "復元は完了しました。一部の画面を再度開いてください。",
+            ),
+      );
     } catch (error) {
       showToast("error", String(error));
     } finally {
       setActionState("idle");
     }
-  }, [appDialog, loadState, passwordAvailable, remoteActionsDisabled, remoteInfo, settings.enabled, uiText]);
+  }, [
+    appDialog,
+    loadState,
+    onRestored,
+    passwordAvailable,
+    remoteActionsDisabled,
+    remoteInfo,
+    settings.enabled,
+    uiText,
+  ]);
 
   const handleToggleEnabled = useCallback(() => {
     updateSettings("enabled", !settings.enabled);

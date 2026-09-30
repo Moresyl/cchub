@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../components/Toast";
 import { useAppDialog } from "../components/AppDialogProvider";
 import type { Locale } from "../lib/i18n";
+import { refreshBackupRestoreState } from "../lib/backupRestoreState";
 import {
   useDeleteManagedBackupMutation,
   useSaveBackupToFileMutation,
@@ -188,6 +189,25 @@ export function useSettingsMigrationState({
     ]);
   }, [loadLastImportSummary, loadManagedBackups, loadPendingProjectRoots, loadToolReports, loadToolsAndPaths]);
 
+  const handleBackupRestored = useCallback(async () => {
+    const [tools, paths, reports, roots, summary, backups] = await Promise.all([
+      invoke<DetectedTool[]>("detect_tools"),
+      invoke<CustomPath[]>("get_custom_paths"),
+      invoke<ToolEnvironmentReport[]>("get_tool_environment_report"),
+      invoke<PendingImportedProjectRoot[]>("get_pending_imported_project_roots"),
+      invoke<LastImportSummary | null>("get_last_import_summary"),
+      invoke<ManagedBackupFile[]>("list_managed_backups"),
+    ]);
+    setTools(tools);
+    setCustomPaths(paths);
+    setToolReports(reports);
+    applyPendingProjectRoots(roots);
+    setLastImportSummary(summary);
+    setManagedBackups(backups);
+    setLastRescan(null);
+    setMigrationPanelsOpen((current) => ({ ...current, summary: true, pending: roots.length > 0 }));
+  }, [applyPendingProjectRoots, setCustomPaths, setTools]);
+
   const fetchMigrationStatusCounts = useCallback(async () => {
     const [roots, reports] = await Promise.all([
       invoke<PendingImportedProjectRoot[]>("get_pending_imported_project_roots"),
@@ -242,14 +262,21 @@ export function useSettingsMigrationState({
     setImportingBackup(true);
     try {
       const message = await invoke<string>("import_backup_from_file");
-      await refreshMigrationState();
-      showToast("success", message);
+      const refreshed = await refreshBackupRestoreState(handleBackupRestored);
+      showToast(
+        refreshed ? "success" : "info",
+        refreshed
+          ? message
+          : locale === "zh"
+            ? "备份已恢复，部分页面未刷新，请重新打开相关页面。"
+            : "Backup restored. Some views could not refresh; reopen them.",
+      );
     } catch (error) {
       if (String(error) !== "Cancelled") showToast("error", String(error));
     } finally {
       setImportingBackup(false);
     }
-  }, [refreshMigrationState]);
+  }, [handleBackupRestored, locale]);
 
   const handleCreateManagedBackup = useCallback(async () => {
     setCreatingManagedBackup(true);
@@ -350,15 +377,22 @@ export function useSettingsMigrationState({
       setRestoringBackupPath(backup.path);
       try {
         const message = await invoke<string>("restore_managed_backup", { path: backup.path });
-        await refreshMigrationState();
-        showToast("success", message);
+        const refreshed = await refreshBackupRestoreState(handleBackupRestored);
+        showToast(
+          refreshed ? "success" : "info",
+          refreshed
+            ? message
+            : locale === "zh"
+              ? "备份已恢复，部分页面未刷新，请重新打开相关页面。"
+              : "Backup restored. Some views could not refresh; reopen them.",
+        );
       } catch (error) {
         showToast("error", String(error));
       } finally {
         setRestoringBackupPath((current) => (current === backup.path ? null : current));
       }
     },
-    [appDialog, locale, refreshMigrationState],
+    [appDialog, handleBackupRestored, locale],
   );
 
   const handleToggleAutoBackup = useCallback(() => {
@@ -647,6 +681,7 @@ export function useSettingsMigrationState({
     handleApplyPendingTarget,
     handleExportBackup,
     handleImportBackup,
+    handleBackupRestored,
     handleRepairAll,
     handleFullRescan,
     handleOpenSafetyBackupPath,

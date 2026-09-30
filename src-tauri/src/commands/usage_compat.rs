@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::State;
 
-use crate::commands::extra_commands::read_all_config_profiles_from_conn;
+use crate::commands::extra_commands::{read_all_config_profiles_from_conn, ConfigProfile};
 use crate::db::DbState;
 use crate::shared::usage_http::FailureKind;
 
@@ -46,7 +46,7 @@ fn endpoint_candidates(base: &url::Url, paths: &[&str]) -> Vec<url::Url> {
 mod normalize;
 use normalize::{normalize_usage, quota_from_usage};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct ConfiguredUsageScript {
     code: String,
     timeout: Option<u64>,
@@ -96,7 +96,7 @@ async fn query_usage(base_url: &str, api_key: &str, paths: &[&str]) -> Result<Va
     if key.is_empty() {
         return Ok(failure("API key is required".into()));
     }
-    let client = crate::shared::usage_http::client()?;
+    let client = crate::shared::usage_http::client_for_url(&base)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let mut last_error = None;
     let mut transient_error = None;
@@ -299,19 +299,36 @@ pub async fn queryProviderUsage(
     app: String,
     db: State<'_, DbState>,
 ) -> Result<Value, String> {
-    let (base_url, api_key, profile_snapshot) = {
+    let profile = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let profile = read_all_config_profiles_from_conn(&conn)?
             .into_iter()
             .find(|profile| profile.id == provider_id && profile.tool_id == app)
             .ok_or_else(|| format!("Provider not found: {provider_id}"))?;
-        let (base_url, api_key) = config_credentials(&app, &profile.config_snapshot)?;
-        (base_url, api_key, profile.config_snapshot)
+        profile
     };
-    if let Some(script) = configured_usage_script(&profile_snapshot)? {
+    query_profile_usage(&profile).await
+}
+
+pub(crate) fn usage_identity(profile: &ConfigProfile) -> Result<String, String> {
+    let (base_url, api_key) = config_credentials(&profile.tool_id, &profile.config_snapshot)?;
+    let value = if let Some(mut script) = configured_usage_script(&profile.config_snapshot)? {
+        script.api_key = Some(script.api_key.unwrap_or(api_key));
+        script.base_url = Some(script.base_url.unwrap_or(base_url));
+        json!([profile.tool_id, script])
+    } else {
+        json!([profile.tool_id, base_url.trim(), api_key.trim()])
+    };
+    Ok(crate::usage_alerts::engine::hash(&value.to_string()))
+}
+
+pub(crate) async fn query_profile_usage(profile: &ConfigProfile) -> Result<Value, String> {
+    let provider_id = profile.id.clone();
+    let (base_url, api_key) = config_credentials(&profile.tool_id, &profile.config_snapshot)?;
+    if let Some(script) = configured_usage_script(&profile.config_snapshot)? {
         let result = crate::commands::extended_compat::testUsageScript(
-            provider_id,
-            app,
+            provider_id.clone(),
+            profile.tool_id.clone(),
             script.code,
             script.timeout,
             script.api_key.or_else(|| Some(api_key.clone())),
@@ -321,7 +338,14 @@ pub async fn queryProviderUsage(
             script.template_type,
         )
         .await?;
-        return serde_json::to_value(result).map_err(|error| error.to_string());
+        return if result.success {
+            Ok(normalize_usage(
+                &provider_id,
+                result.data.as_ref().unwrap_or(&Value::Null),
+            ))
+        } else {
+            serde_json::to_value(result).map_err(|error| error.to_string())
+        };
     };
     if base_url.trim().is_empty() {
         return Ok(json!({

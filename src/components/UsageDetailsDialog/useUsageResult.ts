@@ -7,6 +7,8 @@ export interface UsageResult {
   provider?: string;
   data?: unknown;
   error?: string;
+  asOf?: unknown;
+  stale?: boolean;
 }
 
 interface QueryState {

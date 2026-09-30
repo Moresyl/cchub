@@ -74,3 +74,16 @@ fn distinct_metrics_in_the_same_window_survive_normalization() {
     let quota = quota_from_usage("zhipu", &result);
     assert_eq!(quota["tiers"][1]["metric"], "credit_limit");
 }
+#[test]
+fn preserves_freshness_and_account_identity_and_drops_explicit_failed_rows() {
+    let payload = serde_json::json!({"stale":true,"asOf":"previous","data":[
+        {"remaining":1,"unit":"USD","accountId":"account","asOf":"old","stale":true},
+        {"utilization":95,"success":false}
+    ]});
+    let result = super::normalize_usage("provider", &payload);
+    assert_eq!(result["stale"], true);
+    assert_eq!(result["asOf"], "previous");
+    assert_eq!(result["data"].as_array().unwrap().len(), 1);
+    assert_eq!(result["data"][0]["accountId"], "account");
+    assert_eq!(result["data"][0]["asOf"], "old");
+}

@@ -79,6 +79,12 @@ The profile usage dialog shows every reported currency and quota window, includi
 
 Refreshing after a network failure retains the same configuration's last successful reading with a visible stale-data notice. Credential failures replace the result. Switching profiles, tools or configuration invalidates previous readings and late requests. The expandable read-only JSON view supports syntax highlighting and scrolling through long responses.
 
+### Balance and quota alerts
+
+Enable alerts in a profile’s usage and balance dialog. Monitoring defaults off and checks approximately every five minutes while CCHub runs; it uses that profile’s configured usage script or provider API. Quota thresholds and balance thresholds are separate, with balances matched by currency or credit unit. Changing the query account pauses monitoring until the settings are saved again. Failed or stale readings do not trigger alerts.
+
+The titlebar notification center retains up to 200 local history entries, supports marking them read, and offers manual checks. Known quota windows alert once per window; windows without reset times and recharged balances use hysteresis to prevent repeated alerts near the threshold. Optional OS notifications retry failed submissions up to six times. “Submitted to system” means the OS accepted the request, not that the user saw it. An interruption between system submission and storing the acknowledgement can result in a repeated OS notification; the in-app event is stored before submission. Cloud restoration preserves this device’s alert settings and history. Local loopback usage endpoints connect directly, so system proxy bypass settings do not interfere with local relays; remote endpoints retain the existing proxy behavior.
+
 ### Cloud backup settings
 
 WebDAV passwords and S3 secrets stay in the OS keyring and are bound to their server and account. Changing either requires the corresponding credentials; switching back can reuse that account's saved credential. Save edited settings before reading, uploading, or restoring remote backups. Background sync preserves form drafts, and restoring asks before replacing the local database.

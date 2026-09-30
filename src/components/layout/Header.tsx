@@ -19,6 +19,7 @@ import ProjectProfileSwitcher from "../ProjectProfileSwitcher";
 import { useAppUpdate } from "../AppUpdateHost";
 import { Button } from "../ui/button";
 import WindowControls, { detectDesktopPlatform } from "./WindowControls";
+import NotificationCenter from "../usageAlerts/NotificationCenter";
 
 interface HeaderProps {
   sidebarCollapsed: boolean;
@@ -100,6 +101,7 @@ function HeaderComponent({ sidebarCollapsed, onToggleSidebar }: HeaderProps) {
         <div className="titlebar-drag-spacer" data-tauri-drag-region />
         <div className="topbar-actions">
           <ProjectProfileSwitcher />
+          <NotificationCenter locale={locale} />
           <Button
             variant="ghost"
             size="icon"

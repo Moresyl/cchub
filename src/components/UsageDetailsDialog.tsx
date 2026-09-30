@@ -16,6 +16,7 @@ import LoadingState from "./states/LoadingState";
 import { useUsageResult } from "./UsageDetailsDialog/useUsageResult";
 import { UsageCards } from "./UsageDetailsDialog/UsageCards";
 import { text, usageRows } from "./UsageDetailsDialog/presentation";
+import UsageAlertRule from "./usageAlerts/UsageAlertRule";
 
 const CodeEditor = lazy(() => import("./CodeEditor"));
 
@@ -31,6 +32,9 @@ export default function UsageDetailsDialog({ profile, locale, onClose }: UsageDe
   const rows = useMemo(() => (result?.success ? usageRows(result.data) : []), [result]);
   const json = useMemo(() => JSON.stringify(result ?? {}, null, 2), [result]);
   const failure = error || result?.error;
+  const cached = Boolean(
+    result?.stale || result?.asOf != null || rows.some((row) => row.stale === true || row.asOf != null),
+  );
   const stale = Boolean(error && result?.success);
   if (!profile) return null;
 
@@ -65,7 +69,7 @@ export default function UsageDetailsDialog({ profile, locale, onClose }: UsageDe
             <div className="min-w-0 space-y-1 text-xs" role="status" aria-live="polite">
               <p
                 className={
-                  failure
+                  failure || cached
                     ? "text-[var(--warning)]"
                     : result?.success
                       ? "text-[var(--success)]"
@@ -81,23 +85,30 @@ export default function UsageDetailsDialog({ profile, locale, onClose }: UsageDe
                         "更新中です。前回の結果を表示しています…",
                       )
                     : text(locale, "正在查询…", "Querying…", "照会中…")
-                  : stale
+                  : cached
                     ? text(
                         locale,
-                        "刷新失败，下方为上次成功查询的数据",
-                        "Refresh failed; showing the last successful result",
-                        "更新に失敗しました。前回成功した結果を表示しています",
+                        "供应商返回了缓存数据，请留意数据时间",
+                        "The result includes provider-cached data; check the data timestamp",
+                        "キャッシュデータが含まれます。データの日時を確認してください",
                       )
-                    : failure
-                      ? text(locale, "查询失败", "Query failed", "照会に失敗しました")
-                      : rows.length
-                        ? text(locale, "查询成功", "Query succeeded", "照会成功")
-                        : text(
-                            locale,
-                            "暂无可识别的用量数据",
-                            "No recognized usage data",
-                            "認識できる使用量データがありません",
-                          )}
+                    : stale
+                      ? text(
+                          locale,
+                          "刷新失败，下方为上次成功查询的数据",
+                          "Refresh failed; showing the last successful result",
+                          "更新に失敗しました。前回成功した結果を表示しています",
+                        )
+                      : failure
+                        ? text(locale, "查询失败", "Query failed", "照会に失敗しました")
+                        : rows.length
+                          ? text(locale, "查询成功", "Query succeeded", "照会成功")
+                          : text(
+                              locale,
+                              "暂无可识别的用量数据",
+                              "No recognized usage data",
+                              "認識できる使用量データがありません",
+                            )}
               </p>
               {updatedAt && (
                 <p className="text-muted-foreground">
@@ -131,6 +142,11 @@ export default function UsageDetailsDialog({ profile, locale, onClose }: UsageDe
             />
           )}
           {rows.length > 0 && <UsageCards rows={rows} locale={locale} />}
+          <UsageAlertRule
+            key={JSON.stringify([profile.id, profile.tool_id, profile.config_snapshot])}
+            profileId={profile.id}
+            locale={locale}
+          />
           {!loading && !failure && rows.length === 0 && (
             <p className="rounded-md border border-border p-4 text-xs leading-relaxed text-muted-foreground">
               {text(

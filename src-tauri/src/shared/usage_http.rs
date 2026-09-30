@@ -47,7 +47,28 @@ pub(crate) fn official_url(raw: &str) -> Option<url::Url> {
 }
 
 pub(crate) fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+    client_with_proxy(false)
+}
+
+pub(crate) fn client_for_url(url: &url::Url) -> Result<reqwest::Client, String> {
+    client_with_proxy(loopback(url))
+}
+
+fn loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => {
+            host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
+        }
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => {
+            ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|ip| ip.is_loopback())
+        }
+        None => false,
+    }
+}
+
+fn client_with_proxy(bypass: bool) -> Result<reqwest::Client, String> {
+    let builder = reqwest::Client::builder()
         .user_agent("CCHub Usage")
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             let same_origin = attempt
@@ -59,7 +80,15 @@ pub(crate) fn client() -> Result<reqwest::Client, String> {
             } else {
                 attempt.stop()
             }
-        }))
+        }));
+    // Local relays must not depend on ambient system proxy bypass lists.
+    // Test HTTP fixtures always connect directly to their controlled servers.
+    let builder = if bypass || cfg!(test) {
+        builder.no_proxy()
+    } else {
+        builder
+    };
+    builder
         .build()
         .map_err(|_| "Failed to initialize usage HTTP client".into())
 }

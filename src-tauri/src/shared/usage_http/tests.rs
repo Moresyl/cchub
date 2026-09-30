@@ -196,3 +196,24 @@ async fn invalid_header_errors_do_not_echo_credentials_or_url_parameters() {
     assert!(!error.message.contains("query-secret"));
     assert_eq!(error.kind, FailureKind::InvalidRequest);
 }
+#[test]
+fn identifies_only_loopback_origins_for_direct_usage_queries() {
+    for raw in [
+        "http://127.0.0.1:1234",
+        "http://127.2.3.4",
+        "http://localhost:1234",
+        "http://localhost.",
+        "http://[::1]",
+        "http://[::ffff:127.0.0.1]",
+    ] {
+        assert!(super::loopback(&url::Url::parse(raw).unwrap()), "{raw}");
+    }
+    for raw in [
+        "https://api.example.com",
+        "http://localhost.example.com",
+        "http://192.168.1.2",
+        "http://[2001:db8::1]",
+    ] {
+        assert!(!super::loopback(&url::Url::parse(raw).unwrap()), "{raw}");
+    }
+}

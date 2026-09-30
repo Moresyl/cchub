@@ -32,6 +32,7 @@ mod shared;
 mod skills;
 mod tray;
 mod url_logging;
+mod usage_alerts;
 mod utils;
 mod webdav_sync;
 mod window_preferences;
@@ -136,9 +137,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
             db::init_db(&app_handle)?;
+            usage_alerts::init(&app_handle);
             if let Ok(mut conn) = app_handle.state::<db::DbState>().0.lock() {
                 if let Err(error) =
                     commands::model_pricing_file::sync_local_model_pricing(&mut conn)
@@ -535,6 +538,11 @@ pub fn run() {
             commands::usage_compat::get_balance,
             commands::usage_compat::get_coding_plan_quota,
             commands::usage_compat::queryProviderUsage,
+            usage_alerts::commands::get_usage_alerts,
+            usage_alerts::commands::set_usage_alert_rule,
+            usage_alerts::commands::mark_usage_alerts_read,
+            usage_alerts::commands::check_usage_alerts,
+            usage_alerts::commands::retry_usage_alert,
             commands::stream_check_compat::get_stream_check_config,
             commands::stream_check_compat::save_stream_check_config,
             commands::startup_compat::import_default_config,

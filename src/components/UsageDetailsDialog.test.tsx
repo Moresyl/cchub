@@ -6,6 +6,7 @@ import type { ConfigProfile } from "../pages/profiles/helpers";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("./Toast", () => ({ showToast: vi.fn() }));
+vi.mock("./usageAlerts/UsageAlertRule", () => ({ default: () => null }));
 vi.mock("./CodeEditor", () => ({
   default: ({ value, language, readOnly }: { value: string; language: string; readOnly: boolean }) => (
     <div data-testid="json-editor" data-language={language} data-readonly={readOnly}>
@@ -26,6 +27,17 @@ const profile: ConfigProfile = {
 beforeEach(() => vi.mocked(invoke).mockReset());
 
 describe("usage and balance dialog", () => {
+  it("labels provider-cached data as noncurrent instead of a fresh successful reading", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      success: true,
+      stale: true,
+      asOf: "previous",
+      data: [{ remaining: 5, unit: "USD" }],
+    });
+    render(<UsageDetailsDialog profile={profile} locale="zh" onClose={vi.fn()} />);
+    expect(await screen.findByText("供应商返回了缓存数据，请留意数据时间")).toBeTruthy();
+    expect(screen.queryByText("查询成功")).toBeNull();
+  });
   it("distinguishes token and credit quotas in the same time window", async () => {
     vi.mocked(invoke).mockResolvedValue({
       success: true,

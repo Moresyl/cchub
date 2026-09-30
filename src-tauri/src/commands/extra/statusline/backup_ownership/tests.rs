@@ -18,6 +18,11 @@ fn cloud_settings_preserve_exact_device_state_and_import_only_shared_libraries()
         ),
         ("s3_sync_settings", "local S3 scope", "foreign S3 scope"),
         ("proxy_url", "local proxy", "foreign proxy"),
+        (
+            "usage_alert_state",
+            "local rules and history",
+            "foreign alerts",
+        ),
         ("hermes.rootOverride", "local Hermes root", "foreign root"),
         (
             "claude_desktop_gateway_token",
@@ -48,11 +53,12 @@ fn cloud_settings_preserve_exact_device_state_and_import_only_shared_libraries()
             [],
         )
         .unwrap();
-    assert_eq!(preserve_device_state(&live, &imported).unwrap(), 6);
+    assert_eq!(preserve_device_state(&live, &imported).unwrap(), 7);
     for (key, expected) in [
         ("webdav_sync_settings", "local DAV scope"),
         ("s3_sync_settings", "local S3 scope"),
         ("proxy_url", "local proxy"),
+        ("usage_alert_state", "local rules and history"),
         ("hermes.rootOverride", "local Hermes root"),
         ("claude_desktop_gateway_token", "local gateway secret"),
         ("future_device_setting", "local future value"),

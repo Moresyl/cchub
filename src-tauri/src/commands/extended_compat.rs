@@ -346,6 +346,7 @@ pub async fn testUsageScript(
         return Err("Usage script must be between 1 and 262144 bytes".to_string());
     }
     let mut command = tokio::process::Command::new("node");
+    crate::utils::configure_background_command(command.as_std_mut());
     command
         .args([
             "--no-warnings",
@@ -358,6 +359,7 @@ pub async fn testUsageScript(
         .env("CCHUB_BASE_URL", base_url.unwrap_or_default())
         .env("CCHUB_ACCESS_TOKEN", access_token.unwrap_or_default())
         .env("CCHUB_USER_ID", user_id.unwrap_or_default())
+        .kill_on_drop(true)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -417,7 +419,9 @@ pub async fn testUsageScript(
 async fn terminate_usage_process_tree(child: &mut tokio::process::Child) {
     #[cfg(target_os = "windows")]
     if let Some(pid) = child.id() {
-        let _ = tokio::process::Command::new("taskkill")
+        let mut command = tokio::process::Command::new("taskkill");
+        crate::utils::configure_background_command(command.as_std_mut());
+        let _ = command
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

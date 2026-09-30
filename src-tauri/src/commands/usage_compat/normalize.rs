@@ -6,6 +6,9 @@ fn number_at(value: &Value, keys: &[&str]) -> Option<f64> {
 }
 
 fn row(provider: &str, value: &Value) -> Option<Value> {
+    if value.get("success").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
     let remaining = number_at(value, &["remaining", "balance", "credits", "total_balance"]);
     let used = number_at(value, &["used", "usage", "total_usage"]).filter(|value| *value >= 0.0);
     let total =
@@ -30,6 +33,7 @@ fn row(provider: &str, value: &Value) -> Option<Value> {
         ("planName", ["planName", "name"].as_slice()),
         ("unit", ["unit", "currency"].as_slice()),
         ("metric", ["metric"].as_slice()),
+        ("accountId", ["accountId"].as_slice()),
         ("resetAt", ["resetAt", "resetsAt", "reset_at"].as_slice()),
     ] {
         if let Some(text) = keys
@@ -43,6 +47,11 @@ fn row(provider: &str, value: &Value) -> Option<Value> {
     }
     if let Some(valid) = value.get("isValid").and_then(Value::as_bool) {
         row["isValid"] = json!(valid);
+    }
+    for key in ["asOf", "stale"] {
+        if let Some(value) = value.get(key) {
+            row[key] = value.clone();
+        }
     }
     Some(row)
 }
@@ -68,8 +77,14 @@ pub(super) fn normalize_usage(provider: &str, payload: &Value) -> Value {
     } else {
         row(provider, values).into_iter().collect()
     };
-    json!({"success": !rows.is_empty(), "provider": provider, "data": rows,
-        "error": if rows.is_empty() { Some("Provider returned no recognized usage fields") } else { None }})
+    let mut result = json!({"success": !rows.is_empty(), "provider": provider, "data": rows,
+        "error": if rows.is_empty() { Some("Provider returned no recognized usage fields") } else { None }});
+    for key in ["asOf", "stale"] {
+        if let Some(value) = payload.get(key) {
+            result[key] = value.clone();
+        }
+    }
+    result
 }
 
 pub(super) fn quota_from_usage(provider: &str, result: &Value) -> Value {

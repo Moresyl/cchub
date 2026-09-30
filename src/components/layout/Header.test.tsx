@@ -5,6 +5,7 @@ import { setTheme } from "../../lib/theme";
 import Header from "./Header";
 
 vi.mock("../ProjectProfileSwitcher", () => ({ default: () => null }));
+vi.mock("../usageAlerts/NotificationCenter", () => ({ default: () => null }));
 vi.mock("../AppUpdateHost", () => ({
   useAppUpdate: () => ({ updateAvailable: false, latestVersion: null, openUpdateDialog: vi.fn() }),
 }));

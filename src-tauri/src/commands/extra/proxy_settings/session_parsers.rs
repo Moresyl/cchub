@@ -328,6 +328,8 @@ pub fn load_session_detail(session: &SessionSummary) -> Result<SessionDetail, St
         load_grokbuild_session_entries(&source_path)?
     } else if session.source_backend == "mcode_sqlite" {
         load_mcode_session_entries(&source_path, &session.id)?
+    } else if session.tool_id == "opencode" && session.source_backend == "opencode_sqlite" {
+        load_opencode_session_entries(&source_path, &session.id)?
     } else if session.tool_id == "codex" && session.source_kind == "codex_jsonl" {
         parse_codex_session_entries(&source_path)?
     } else if session.source_backend == "jsonl" {
@@ -439,6 +441,9 @@ pub fn delete_session_impl(
     }
     if source_backend == "grokbuild_native" {
         return delete_grokbuild_session(&root, &PathBuf::from(source_path), session_id);
+    }
+    if tool_id == "opencode" && source_backend == "opencode_sqlite" {
+        return delete_opencode_session(&PathBuf::from(source_path), session_id);
     }
     if tool_id == "codex" {
         delete_codex_session_records(&root, session_id)?;

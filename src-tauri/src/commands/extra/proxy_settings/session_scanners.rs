@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use super::super::config_profiles::*;
 use super::super::statusline::*;
 use super::super::types::*;
-use super::{scan_grokbuild_sessions, scan_mcode_sessions};
+use super::{scan_grokbuild_sessions, scan_mcode_sessions, scan_opencode_sessions};
 
 pub fn load_codex_history_index(root: &std::path::Path) -> HashMap<String, Vec<String>> {
     let mut index = HashMap::new();
@@ -233,7 +233,15 @@ pub fn scan_generic_tool_sessions_from_roots(
         if !seen_sqlite.insert(key) {
             continue;
         }
-        sessions.extend(scan_generic_sqlite_sessions(tool_id, &path, query));
+        if tool_id == "opencode" {
+            match scan_opencode_sessions(&path, query) {
+                Ok(native) if !native.is_empty() => sessions.extend(native),
+                Ok(_) => sessions.extend(scan_generic_sqlite_sessions(tool_id, &path, query)),
+                Err(error) => crate::utils::append_runtime_log("warn", "opencode-sessions", &error),
+            }
+        } else {
+            sessions.extend(scan_generic_sqlite_sessions(tool_id, &path, query));
+        }
     }
 
     sessions

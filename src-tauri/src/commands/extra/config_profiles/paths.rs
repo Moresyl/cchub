@@ -403,6 +403,18 @@ pub fn session_roots_for_tool(
         }
     }
 
+    if tool_id == "opencode" {
+        let data_root = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")));
+        if let Some(root) = data_root.map(|root| root.join("opencode")) {
+            if root.exists() && seen.insert(root.to_string_lossy().to_string()) {
+                roots.push(root);
+            }
+        }
+    }
+
     Ok(roots)
 }
 

@@ -73,6 +73,12 @@ OpenCode uses the existing `opencode.jsonc` or `opencode.json`. Profiles retain 
 
 Choose Runtime → Sessions → Sync usage to import completed requests from OpenCode V1/V2 databases. Totals include cache reads, cache writes, reasoning output, and compaction requests; unfinished responses remain eligible for the next sync. Corrected accounting updates existing records. Migration or moving the database does not import the same requests again. Durable identities survive log cleanup and are included in SQL backups. A result dialog lists errors when some sources could not sync.
 
+### Provider balance and quota
+
+The profile usage dialog shows every reported currency and quota window, including zero balances. Unknown units and missing usage metrics remain unknown; a balance alone does not imply a quota percentage. Built-in balance and Coding Plan queries route only exact official HTTPS hosts; an explicit Coding Plan selection can choose its fixed vendor endpoint. Generic relay queries share a 20-second budget across fallback endpoints, while official queries allow 15 seconds. JSON responses are limited to 2 MiB and credentials never follow redirects to another origin.
+
+Refreshing after a network failure retains the same configuration's last successful reading with a visible stale-data notice. Credential failures replace the result. Switching profiles, tools or configuration invalidates previous readings and late requests. The expandable read-only JSON view supports syntax highlighting and scrolling through long responses.
+
 ### Cloud backup settings
 
 WebDAV passwords and S3 secrets stay in the OS keyring and are bound to their server and account. Changing either requires the corresponding credentials; switching back can reuse that account's saved credential. Save edited settings before reading, uploading, or restoring remote backups. Background sync preserves form drafts, and restoring asks before replacing the local database.

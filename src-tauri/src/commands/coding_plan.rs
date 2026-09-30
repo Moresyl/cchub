@@ -7,34 +7,60 @@
 
 use std::time::Duration;
 
+use crate::shared::usage_http::{finite_number as as_f64, official_url};
 use serde_json::{json, Value};
-
-const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Provider {
     Kimi,
     Zhipu,
+    ZhipuEn,
     MiniMaxCn,
     MiniMaxEn,
 }
 
 fn detect_provider(base_url: &str, explicit: Option<&str>) -> Option<Provider> {
     let explicit = explicit.unwrap_or_default().trim().to_ascii_lowercase();
-    let url = base_url.to_ascii_lowercase();
-    if explicit.contains("kimi") || url.contains("api.kimi.com/coding") {
-        Some(Provider::Kimi)
-    } else if explicit.contains("zhipu") || url.contains("bigmodel.cn") || url.contains("api.z.ai")
-    {
-        Some(Provider::Zhipu)
-    } else if explicit.contains("minimax")
-        && (explicit.contains("cn") || url.contains("minimaxi.com"))
-    {
-        Some(Provider::MiniMaxCn)
-    } else if explicit.contains("minimax") || url.contains("minimax.io") {
-        Some(Provider::MiniMaxEn)
-    } else {
-        None
+    let url = official_url(base_url);
+    let host = url
+        .as_ref()
+        .and_then(url::Url::host_str)
+        .unwrap_or_default();
+    match explicit.as_str() {
+        "kimi" | "kimi-coding" | "kimi_coding" => return Some(Provider::Kimi),
+        "zhipu_cn" => return Some(Provider::Zhipu),
+        "zhipu_en" | "zai" | "z.ai" => return Some(Provider::ZhipuEn),
+        "zhipu" => {
+            return Some(if host == "api.z.ai" {
+                Provider::ZhipuEn
+            } else {
+                Provider::Zhipu
+            })
+        }
+        "minimax_cn" => return Some(Provider::MiniMaxCn),
+        "minimax_en" => return Some(Provider::MiniMaxEn),
+        "minimax" => {
+            return Some(if host == "api.minimaxi.com" {
+                Provider::MiniMaxCn
+            } else {
+                Provider::MiniMaxEn
+            })
+        }
+        _ => {}
+    }
+    match host {
+        "api.kimi.com"
+            if url.as_ref().is_some_and(|url| {
+                url.path() == "/coding" || url.path().starts_with("/coding/")
+            }) =>
+        {
+            Some(Provider::Kimi)
+        }
+        "open.bigmodel.cn" => Some(Provider::Zhipu),
+        "api.z.ai" => Some(Provider::ZhipuEn),
+        "api.minimaxi.com" => Some(Provider::MiniMaxCn),
+        "api.minimax.io" => Some(Provider::MiniMaxEn),
+        _ => None,
     }
 }
 
@@ -50,24 +76,20 @@ fn ok_result(provider: &str, tiers: Vec<Value>) -> Value {
     json!({"status": "ok", "provider": provider, "tiers": tiers})
 }
 
-fn as_f64(value: Option<&Value>) -> Option<f64> {
-    value.and_then(Value::as_f64).or_else(|| {
-        value
-            .and_then(Value::as_str)
-            .and_then(|item| item.parse().ok())
-    })
-}
-
 fn reset_at(value: Option<&Value>) -> Option<String> {
     if let Some(text) = value.and_then(Value::as_str) {
-        return (!text.trim().is_empty()).then(|| text.to_string());
+        if let Ok(date) = chrono::DateTime::parse_from_rfc3339(text.trim()) {
+            return Some(date.to_rfc3339());
+        }
     }
-    let timestamp = value.and_then(Value::as_i64)?;
+    let timestamp = value
+        .and_then(Value::as_i64)
+        .or_else(|| value?.as_str()?.trim().parse().ok())?;
     if timestamp <= 0 {
         return None;
     }
     let millis = if timestamp < 1_000_000_000_000 {
-        timestamp.saturating_mul(1000)
+        timestamp.checked_mul(1000)?
     } else {
         timestamp
     };
@@ -85,43 +107,14 @@ fn tier(name: &str, utilization: f64, resets_at: Option<String>) -> Value {
     value
 }
 
-async fn request_json(
-    url: &str,
-    api_key: &str,
-    auth_header: bool,
-) -> Result<Result<Value, String>, String> {
-    let client = crate::shared::http_client::build_http_client(
-        None,
-        Some("CCHub Coding Plan"),
-        Duration::from_secs(15),
-    )?;
-    let mut request = client.get(url).header("Accept", "application/json");
-    if auth_header {
-        request = request.bearer_auth(api_key);
-    } else {
-        request = request.header("Authorization", api_key);
-    }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("Coding Plan request failed: {error}"))?;
-    let status = response.status();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|error| format!("Failed to read Coding Plan response: {error}"))?;
-    if body.len() > MAX_RESPONSE_BYTES {
-        return Ok(Err("Coding Plan response is too large".to_string()));
-    }
-    if !status.is_success() {
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return Ok(Err(format!("Authentication failed (HTTP {status})")));
-        }
-        return Ok(Err(format!("Coding Plan API returned HTTP {status}")));
-    }
-    serde_json::from_slice(&body)
-        .map_err(|error| format!("Invalid Coding Plan response: {error}"))
-        .map(Ok)
+fn utilization(total: Option<f64>, used: Option<f64>, remaining: Option<f64>) -> Option<f64> {
+    let total = total.filter(|number| *number > 0.0)?;
+    let ratio = match used {
+        Some(used) if used >= 0.0 => used / total,
+        _ => 1.0 - remaining? / total,
+    };
+    let value = ratio * 100.0;
+    value.is_finite().then_some(value.max(0.0))
 }
 
 fn parse_kimi(body: &Value) -> Vec<Value> {
@@ -129,24 +122,24 @@ fn parse_kimi(body: &Value) -> Vec<Value> {
     if let Some(items) = body.get("limits").and_then(Value::as_array) {
         for item in items {
             let detail = item.get("detail").unwrap_or(item);
-            let limit = as_f64(detail.get("limit")).unwrap_or(0.0);
-            let remaining = as_f64(detail.get("remaining")).unwrap_or(0.0);
-            if limit > 0.0 {
-                tiers.push(tier(
-                    "five_hour",
-                    ((limit - remaining).max(0.0) / limit) * 100.0,
-                    reset_at(detail.get("resetTime")),
-                ));
+            if let Some(usage) = utilization(
+                as_f64(detail.get("limit")),
+                None,
+                as_f64(detail.get("remaining")),
+            ) {
+                tiers.push(tier("five_hour", usage, reset_at(detail.get("resetTime"))));
             }
         }
     }
     if let Some(usage) = body.get("usage") {
-        let limit = as_f64(usage.get("limit")).unwrap_or(0.0);
-        let remaining = as_f64(usage.get("remaining")).unwrap_or(0.0);
-        if limit > 0.0 {
+        if let Some(percent) = utilization(
+            as_f64(usage.get("limit")),
+            None,
+            as_f64(usage.get("remaining")),
+        ) {
             tiers.push(tier(
                 "weekly_limit",
-                ((limit - remaining).max(0.0) / limit) * 100.0,
+                percent,
                 reset_at(usage.get("resetTime")),
             ));
         }
@@ -156,9 +149,7 @@ fn parse_kimi(body: &Value) -> Vec<Value> {
 
 fn parse_zhipu(body: &Value) -> Vec<Value> {
     let data = body.get("data").unwrap_or(body);
-    let mut five_hour = None;
-    let mut weekly = None;
-    let mut fallback = Vec::new();
+    let mut tiers = Vec::new();
     for item in data
         .get("limits")
         .and_then(Value::as_array)
@@ -170,33 +161,26 @@ fn parse_zhipu(body: &Value) -> Vec<Value> {
         {
             continue;
         }
-        let value = tier(
-            "five_hour",
-            as_f64(item.get("percentage")).unwrap_or(0.0),
-            reset_at(item.get("nextResetTime")),
-        );
-        match item.get("unit").and_then(Value::as_i64) {
-            Some(3) if five_hour.is_none() => five_hour = Some(value),
-            Some(6) if weekly.is_none() => {
-                weekly = Some(Value::Object({
-                    let mut object = value.as_object().cloned().unwrap_or_default();
-                    object.insert("name".to_string(), json!("weekly_limit"));
-                    object
-                }))
-            }
-            _ => fallback.push(value),
-        }
+        let Some(percentage) = as_f64(item.get("percentage")).filter(|number| *number >= 0.0)
+        else {
+            continue;
+        };
+        let name = match item.get("unit").and_then(Value::as_i64) {
+            Some(3) => "five_hour".to_string(),
+            Some(6) => "weekly_limit".to_string(),
+            Some(unit) => format!("quota_unit_{unit}"),
+            None => "quota".to_string(),
+        };
+        let mut value = tier(&name, percentage, reset_at(item.get("nextResetTime")));
+        value["metric"] = json!(kind.to_ascii_lowercase());
+        tiers.push(value);
     }
-    for value in fallback {
-        if five_hour.is_none() {
-            five_hour = Some(value);
-        } else if weekly.is_none() {
-            let mut object = value.as_object().cloned().unwrap_or_default();
-            object.insert("name".to_string(), json!("weekly_limit"));
-            weekly = Some(Value::Object(object));
-        }
-    }
-    [five_hour, weekly].into_iter().flatten().collect()
+    tiers.sort_by_key(|value| match value["name"].as_str() {
+        Some("five_hour") => 0,
+        Some("weekly_limit") => 1,
+        _ => 2,
+    });
+    tiers
 }
 
 fn parse_minimax(body: &Value) -> Vec<Value> {
@@ -212,12 +196,10 @@ fn parse_minimax(body: &Value) -> Vec<Value> {
                 let remaining = as_f64(item.get("remaining").or_else(|| item.get("remain")));
                 let used = as_f64(item.get("used").or_else(|| item.get("usage")));
                 let total = as_f64(item.get("total").or_else(|| item.get("limit")));
-                let utilization = match (used, total, remaining, total) {
-                    (Some(used), Some(total), _, _) if total > 0.0 => used / total * 100.0,
-                    (_, _, Some(remaining), Some(total)) if total > 0.0 => {
-                        (1.0 - remaining / total) * 100.0
-                    }
-                    _ => as_f64(item.get("percentage")).unwrap_or(0.0),
+                let Some(utilization) = utilization(total, used, remaining)
+                    .or_else(|| as_f64(item.get("percentage")).filter(|number| *number >= 0.0))
+                else {
+                    continue;
                 };
                 tiers.push(tier(
                     name,
@@ -231,15 +213,15 @@ fn parse_minimax(body: &Value) -> Vec<Value> {
     tiers
 }
 
-async fn query_known(provider: Provider, base_url: &str, api_key: &str) -> Result<Value, String> {
+async fn query_known(provider: Provider, api_key: &str) -> Result<Value, String> {
     let (provider_name, endpoint, auth_header) = match provider {
         Provider::Kimi => (
             "kimi",
             "https://api.kimi.com/coding/v1/usages".to_string(),
             true,
         ),
-        Provider::Zhipu => {
-            let host = if base_url.to_ascii_lowercase().contains("api.z.ai") {
+        Provider::Zhipu | Provider::ZhipuEn => {
+            let host = if provider == Provider::ZhipuEn {
                 "api.z.ai"
             } else {
                 "open.bigmodel.cn"
@@ -261,13 +243,23 @@ async fn query_known(provider: Provider, base_url: &str, api_key: &str) -> Resul
             true,
         ),
     };
-    let body = match request_json(&endpoint, api_key, auth_header).await? {
+    let client = crate::shared::usage_http::client()?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let body = match crate::shared::usage_http::request_json(
+        &client,
+        &endpoint,
+        api_key,
+        auth_header,
+        deadline,
+    )
+    .await?
+    {
         Ok(body) => body,
-        Err(error) => return Ok(error_result(provider_name, error)),
+        Err(error) => return Ok(error_result(provider_name, error.message)),
     };
     let tiers = match provider {
         Provider::Kimi => parse_kimi(&body),
-        Provider::Zhipu => parse_zhipu(&body),
+        Provider::Zhipu | Provider::ZhipuEn => parse_zhipu(&body),
         Provider::MiniMaxCn | Provider::MiniMaxEn => parse_minimax(&body),
     };
     if tiers.is_empty() {
@@ -292,7 +284,7 @@ pub async fn query(
     if api_key.trim().is_empty() {
         return Ok(Some(not_found("coding_plan", "API key is empty")));
     }
-    Ok(Some(query_known(provider, base_url, api_key).await?))
+    Ok(Some(query_known(provider, api_key).await?))
 }
 
 #[cfg(test)]
@@ -346,5 +338,58 @@ mod tests {
         }}));
         assert_eq!(tiers[0]["utilization"], 20.0);
         assert_eq!(tiers[1]["utilization"], 35.0);
+    }
+
+    #[test]
+    fn only_exact_official_hosts_or_explicit_known_names_select_vendors() {
+        assert_eq!(
+            detect_provider("https://api.minimaxi.com/v1", None),
+            Some(Provider::MiniMaxCn)
+        );
+        assert_eq!(
+            detect_provider("https://api.z.ai/api", None),
+            Some(Provider::ZhipuEn)
+        );
+        assert_eq!(
+            detect_provider("https://relay.test", Some("zhipu_en")),
+            Some(Provider::ZhipuEn)
+        );
+        for url in [
+            "https://evil.test/bigmodel.cn",
+            "https://evil.test?next=api.z.ai",
+            "https://api.minimax.io.evil.test",
+            "https://api.kimi.com/coding-other",
+            "http://api.kimi.com/coding",
+        ] {
+            assert_eq!(detect_provider(url, Some("my-kimi-relay")), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn incomplete_and_non_finite_windows_are_not_reported_as_zero_or_exhausted() {
+        assert!(parse_kimi(
+            &json!({"usage": {"limit": 100}, "limits": [{"detail": {"remaining": 1}}]})
+        )
+        .is_empty());
+        assert!(
+            parse_kimi(&json!({"usage": {"limit": "1e-300", "remaining": "-1e300"}})).is_empty()
+        );
+        assert!(parse_zhipu(&json!({"limits": [{"type": "TOKENS_LIMIT", "unit": 3}, {"type": "CREDIT_LIMIT", "percentage": "NaN"}]})).is_empty());
+        assert!(
+            parse_minimax(&json!({"five_hour": {}, "weekly": {"percentage": "inf"}})).is_empty()
+        );
+        assert!(parse_minimax(&json!({"weekly": {"used": 1, "total": 0}})).is_empty());
+    }
+
+    #[test]
+    fn unknown_windows_keep_their_identity_and_only_valid_resets_are_used() {
+        let tiers = parse_zhipu(&json!({"limits": [
+            {"type": "TOKENS_LIMIT", "unit": 9, "percentage": 22, "nextResetTime": "nonsense"},
+            {"type": "CREDIT_LIMIT", "unit": 3, "percentage": 50, "nextResetTime": "1800000000"}
+        ]}));
+        assert_eq!(tiers[0]["name"], "five_hour");
+        assert!(tiers[0]["resetsAt"].as_str().unwrap().contains("2027"));
+        assert_eq!(tiers[1]["name"], "quota_unit_9");
+        assert!(tiers[1].get("resetsAt").is_none());
     }
 }

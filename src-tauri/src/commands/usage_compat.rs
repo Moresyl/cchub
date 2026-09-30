@@ -11,12 +11,19 @@ use tauri::State;
 
 use crate::commands::extra_commands::read_all_config_profiles_from_conn;
 use crate::db::DbState;
+use crate::shared::usage_http::FailureKind;
 
 fn validate_base_url(raw: &str) -> Result<url::Url, String> {
     let parsed =
         url::Url::parse(raw.trim()).map_err(|error| format!("Invalid base URL: {error}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        return Err("Base URL must be an http(s) URL".to_string());
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(
+            "Base URL must use HTTP(S) with a host and no embedded credentials".to_string(),
+        );
     }
     Ok(parsed)
 }
@@ -27,6 +34,8 @@ fn endpoint_candidates(base: &url::Url, paths: &[&str]) -> Vec<url::Url> {
     for path in paths {
         let mut candidate = base.clone();
         candidate.set_path(&format!("{base_path}/{}", path.trim_start_matches('/')));
+        candidate.set_query(None);
+        candidate.set_fragment(None);
         if !candidates.iter().any(|item: &url::Url| item == &candidate) {
             candidates.push(candidate);
         }
@@ -34,65 +43,8 @@ fn endpoint_candidates(base: &url::Url, paths: &[&str]) -> Vec<url::Url> {
     candidates
 }
 
-fn number_at(value: &Value, paths: &[&str]) -> Option<f64> {
-    paths.iter().find_map(|path| {
-        let mut cursor = value;
-        for part in path.split('.') {
-            cursor = cursor.get(part)?;
-        }
-        cursor
-            .as_f64()
-            .or_else(|| cursor.as_i64().map(|number| number as f64))
-    })
-}
-
-fn normalize_usage(provider: &str, payload: &Value) -> Value {
-    let remaining = number_at(
-        payload,
-        &[
-            "remaining",
-            "balance",
-            "data.balance",
-            "data.remaining",
-            "credits",
-            "data.credits",
-            "total_balance",
-            "data.total_balance",
-        ],
-    );
-    let used = number_at(payload, &["used", "data.used", "usage", "data.usage"]);
-    let limit = number_at(
-        payload,
-        &[
-            "limit",
-            "data.limit",
-            "total",
-            "data.total",
-            "total_credits",
-            "data.total_credits",
-        ],
-    );
-    let mut row = json!({ "planName": provider });
-    if let Some(value) = remaining {
-        row["remaining"] = json!(value);
-    }
-    if let Some(value) = used {
-        row["used"] = json!(value);
-    }
-    if let Some(value) = limit {
-        row["limit"] = json!(value);
-    }
-    json!({
-        "success": remaining.is_some() || used.is_some() || limit.is_some(),
-        "provider": provider,
-        "data": [row],
-        "error": if remaining.is_none() && used.is_none() && limit.is_none() {
-            Some("Provider returned no recognized usage fields".to_string())
-        } else {
-            None
-        },
-    })
-}
+mod normalize;
+use normalize::{normalize_usage, quota_from_usage};
 
 #[derive(Debug, Clone)]
 struct ConfiguredUsageScript {
@@ -139,60 +91,60 @@ fn configured_usage_script(snapshot: &str) -> Result<Option<ConfiguredUsageScrip
 async fn query_usage(base_url: &str, api_key: &str, paths: &[&str]) -> Result<Value, String> {
     let base = validate_base_url(base_url)?;
     let key = api_key.trim();
-    if key.is_empty() {
-        return Ok(json!({
-            "success": false,
-            "provider": base.host_str().unwrap_or("provider"),
-            "data": [],
-            "error": "API key is required"
-        }));
-    }
-
-    let client = crate::shared::http_client::build_http_client(
-        None,
-        Some("CCHub"),
-        Duration::from_secs(20),
-    )?;
     let provider = base.host_str().unwrap_or("provider").to_string();
-    let mut last_error = None;
-    for endpoint in endpoint_candidates(&base, paths) {
-        let response = match client.get(endpoint).bearer_auth(key).send().await {
-            Ok(response) => response,
-            Err(error) => {
-                last_error = Some(error.to_string());
-                continue;
-            }
-        };
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            continue;
-        }
-        if !response.status().is_success() {
-            let status = response.status();
-            if status == reqwest::StatusCode::UNAUTHORIZED
-                || status == reqwest::StatusCode::FORBIDDEN
-            {
-                return Ok(json!({
-                    "success": false,
-                    "provider": provider,
-                    "data": [],
-                    "error": format!("Provider rejected credentials ({status})")
-                }));
-            }
-            last_error = Some(format!("Provider returned HTTP {status}"));
-            continue;
-        }
-        let payload = response
-            .json::<Value>()
-            .await
-            .map_err(|error| format!("Invalid usage response: {error}"))?;
-        return Ok(normalize_usage(&provider, &payload));
+    let failure = |message: String| json!({"success": false, "provider": provider, "data": [], "error": message});
+    if key.is_empty() {
+        return Ok(failure("API key is required".into()));
     }
-    Ok(json!({
-        "success": false,
-        "provider": provider,
-        "data": [],
-        "error": last_error.unwrap_or_else(|| "Provider does not expose a supported usage endpoint".to_string())
-    }))
+    let client = crate::shared::usage_http::client()?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut last_error = None;
+    let mut transient_error = None;
+    for endpoint in endpoint_candidates(&base, paths) {
+        match crate::shared::usage_http::request_json(
+            &client,
+            endpoint.as_str(),
+            key,
+            true,
+            deadline,
+        )
+        .await
+        {
+            Ok(Ok(payload)) => {
+                let result = normalize_usage(&provider, &payload);
+                if result["success"] == true {
+                    return Ok(result);
+                }
+                last_error = Some("Provider returned no recognized usage fields".to_string());
+            }
+            Ok(Err(error)) => {
+                if matches!(
+                    error.kind,
+                    FailureKind::Http(
+                        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+                    )
+                ) {
+                    return Ok(failure(error.message));
+                }
+                if error.kind == FailureKind::InvalidRequest {
+                    return Ok(failure(error.message));
+                }
+                last_error = Some(error.message);
+            }
+            Err(error) => {
+                transient_error = Some(error);
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(error) = transient_error {
+        return Err(error);
+    }
+    Ok(failure(last_error.unwrap_or_else(|| {
+        "Provider does not expose a supported usage endpoint".into()
+    })))
 }
 
 #[tauri::command]
@@ -232,19 +184,7 @@ pub async fn get_coding_plan_quota(
     );
     let provider = coding_plan_provider.unwrap_or_else(|| "generic".to_string());
     let result = query_usage(&base_url, &api_key, &["usage", "quota", "api/v1/usage"]).await?;
-    if result.get("success").and_then(Value::as_bool) == Some(false) {
-        return Ok(json!({
-            "status": "not_found",
-            "provider": provider,
-            "tiers": [],
-            "error": result.get("error").cloned().unwrap_or_else(|| json!("Usage endpoint unavailable"))
-        }));
-    }
-    Ok(json!({
-        "status": "ok",
-        "provider": provider,
-        "tiers": result.get("data").cloned().unwrap_or_else(|| json!([]))
-    }))
+    Ok(quota_from_usage(&provider, &result))
 }
 
 fn config_credentials(tool_id: &str, snapshot: &str) -> Result<(String, String), String> {
@@ -391,11 +331,17 @@ pub async fn queryProviderUsage(
             "error": "Provider does not declare a usage base URL"
         }));
     }
+    if let Some(quota) = crate::commands::coding_plan::query(&base_url, &api_key, None).await? {
+        return Ok(normalize_usage(&provider_id, &quota));
+    }
     if let Some(result) = crate::commands::balance::query(&base_url, &api_key).await? {
         return Ok(result);
     }
     query_usage(&base_url, &api_key, &["usage", "quota", "balance"]).await
 }
+
+#[cfg(test)]
+mod query_tests;
 
 #[cfg(test)]
 mod tests {

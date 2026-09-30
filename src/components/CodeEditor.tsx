@@ -42,7 +42,7 @@ const jsonLinter = linter((view) => {
 
 const cmTheme = EditorView.theme({
   "&": {
-    fontSize: "12.5px",
+    fontSize: "12px",
     fontFamily: "var(--font-code)",
     flex: "1 1 auto",
     minHeight: "0",
@@ -167,8 +167,15 @@ function CodeEditorComponent({
       ...getLangExtension(language),
       themeCompartment.of(getThemeExtensions()),
       EditorView.lineWrapping,
+      EditorView.theme({
+        ".cm-scroller": {
+          minHeight: `${Math.max(0, Math.min(minHeight, maxHeight ?? minHeight) - 34)}px`,
+          ...(maxHeight === undefined ? {} : { maxHeight: `${Math.max(0, maxHeight - 34)}px` }),
+        },
+      }),
       CodeMirrorView.contentAttributes.of({
         "aria-label": `${language.toUpperCase()} configuration editor`,
+        "aria-readonly": String(readOnly),
         spellcheck: "false",
       }),
     ];
@@ -188,7 +195,7 @@ function CodeEditorComponent({
     }
 
     return nextExtensions;
-  }, [language, placeholder, readOnly]);
+  }, [language, placeholder, readOnly, minHeight, maxHeight]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -230,7 +237,7 @@ function CodeEditorComponent({
       }}
     >
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-[var(--bg-elevated)]/65 px-3">
-        <span className="text-[10px] font-semibold uppercase text-muted-foreground">{language}</span>
+        <span className="text-[11px] font-semibold uppercase text-muted-foreground">{language}</span>
         <span className="size-1.5 rounded-full bg-[var(--success)] opacity-75" aria-hidden="true" />
       </div>
       <div ref={containerRef} className="min-h-0 flex-1" />

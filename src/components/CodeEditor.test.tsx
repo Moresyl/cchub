@@ -1,11 +1,47 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getEditorCspNonce } from "./CodeEditor";
+import { render, screen } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import { EditorState } from "@codemirror/state";
+import CodeEditor, { getEditorCspNonce } from "./CodeEditor";
 
 const addedStyles: HTMLStyleElement[] = [];
 
 afterEach(() => {
   for (const style of addedStyles) style.remove();
   addedStyles.length = 0;
+});
+
+describe("bounded configuration editor", () => {
+  it("keeps long JSON scrollable inside its maximum height", () => {
+    const mounted = render(
+      <CodeEditor
+        value={JSON.stringify({ rows: Array.from({ length: 40 }, (_, id) => ({ id })) }, null, 2)}
+        minHeight={160}
+        maxHeight={300}
+        readOnly
+      />,
+    );
+    const content = screen.getByRole("textbox", { name: "JSON configuration editor" });
+    const view = EditorView.findFromDOM(content)!;
+    expect(getComputedStyle(view.scrollDOM).maxHeight).toBe("266px");
+    expect(getComputedStyle(view.scrollDOM).minHeight).toBe("126px");
+    expect(content.getAttribute("aria-readonly")).toBe("true");
+    expect(view.state.facet(EditorState.readOnly)).toBe(true);
+    mounted.unmount();
+  });
+
+  it("updates externally supplied JSON and switches read-only semantics", () => {
+    const mounted = render(<CodeEditor value='{"balance": 1}' readOnly />);
+    const content = screen.getByRole("textbox", { name: "JSON configuration editor" });
+    expect(EditorView.findFromDOM(content)!.state.doc.toString()).toBe('{"balance": 1}');
+    mounted.rerender(<CodeEditor value='{"balance": 2}' readOnly={false} />);
+    const next = screen.getByRole("textbox", { name: "JSON configuration editor" });
+    const view = EditorView.findFromDOM(next)!;
+    expect(view.state.doc.toString()).toBe('{"balance": 2}');
+    expect(view.state.facet(EditorState.readOnly)).toBe(false);
+    expect(next.getAttribute("aria-readonly")).toBe("false");
+    mounted.unmount();
+  });
 });
 
 describe("getEditorCspNonce", () => {

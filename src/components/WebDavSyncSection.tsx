@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import { memo, startTransition, useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, CheckCircle, Copy, Download, Link2, RefreshCw, Save, Upload, Wifi } from "lucide-react";
@@ -8,6 +8,8 @@ import { showToast } from "./Toast";
 import { useSetWebDavSyncSettingsMutation } from "../hooks/mutations";
 import { useAppDialog } from "./AppDialogProvider";
 import { SimpleSelect } from "./ui/simple-select";
+import { cloudSettingsChanged, sameWebDavAccount } from "../lib/cloudSyncSettings";
+import { Button } from "./ui/button";
 
 import {
   EMPTY_SETTINGS,
@@ -40,14 +42,31 @@ function WebDavSyncSectionComponent() {
   );
 
   const [settings, setSettings] = useState<WebDavSyncSettings>(EMPTY_SETTINGS);
+  const [savedSettings, setSavedSettings] = useState<WebDavSyncSettings | null>(null);
   const [remoteInfo, setRemoteInfo] = useState<WebDavRemoteInfo | null>(null);
   const [presetId, setPresetId] = useState("custom");
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [actionState, setActionState] = useState<ActionState>("loading");
+  const dirty =
+    passwordTouched ||
+    cloudSettingsChanged(settings, savedSettings, [
+      "enabled",
+      "base_url",
+      "username",
+      "password",
+      "remote_root",
+      "profile",
+      "auto_sync",
+    ]);
+  const draftRef = useRef(false);
+  draftRef.current = dirty;
+  const savedAccount = savedSettings !== null && sameWebDavAccount(settings, savedSettings);
+  const remoteActionsDisabled = actionState !== "idle" || dirty || !savedSettings || !savedSettings.enabled;
 
   const applyLoadedState = useCallback((nextSettings: WebDavSyncSettings, nextRemoteInfo: WebDavRemoteInfo | null) => {
     startTransition(() => {
       setSettings({ ...EMPTY_SETTINGS, ...nextSettings, password: "" });
+      setSavedSettings({ ...EMPTY_SETTINGS, ...nextSettings, password: "" });
       setRemoteInfo(nextRemoteInfo);
       setPresetId(detectPreset(nextSettings.base_url));
       setPasswordTouched(false);
@@ -56,6 +75,7 @@ function WebDavSyncSectionComponent() {
 
   const loadState = useCallback(
     async (silent = false) => {
+      if (silent && draftRef.current) return;
       if (!silent) {
         setActionState("loading");
       }
@@ -64,7 +84,7 @@ function WebDavSyncSectionComponent() {
           invoke<WebDavSyncSettings>("get_webdav_sync_settings"),
           invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info").catch(() => null),
         ]);
-        applyLoadedState(nextSettings, nextRemoteInfo);
+        if (!silent || !draftRef.current) applyLoadedState(nextSettings, nextRemoteInfo);
       } catch (error) {
         if (!silent) {
           showToast("error", String(error));
@@ -79,6 +99,7 @@ function WebDavSyncSectionComponent() {
   );
 
   const handleSyncEvent = useEffectEvent((payload: WebDavSyncEvent) => {
+    if (actionState !== "idle") return;
     void loadState(true);
     if (payload.status === "success") {
       showToast(
@@ -142,7 +163,7 @@ function WebDavSyncSectionComponent() {
         settings,
         passwordTouched,
       });
-      applyLoadedState(saved, remoteInfo);
+      applyLoadedState(saved, null);
       showToast("success", uiText("WebDAV 设置已保存", "WebDAV settings saved", "WebDAV 設定を保存しました"));
       const nextRemoteInfo = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info").catch((error) => {
         console.warn("Failed to refresh WebDAV remote info after saving settings", error);
@@ -174,6 +195,7 @@ function WebDavSyncSectionComponent() {
   }, [passwordTouched, settings, uiText]);
 
   const refreshRemoteInfo = useCallback(async () => {
+    if (remoteActionsDisabled) return;
     setActionState("refreshing");
     try {
       const nextRemoteInfo = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info");
@@ -185,9 +207,10 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, []);
+  }, [remoteActionsDisabled]);
 
   const handleUpload = useCallback(async () => {
+    if (remoteActionsDisabled) return;
     if (!settings.enabled) {
       showToast(
         "error",
@@ -219,9 +242,10 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, [loadState, settings.enabled, uiText]);
+  }, [loadState, remoteActionsDisabled, settings.enabled, uiText]);
 
   const handleDownload = useCallback(async () => {
+    if (remoteActionsDisabled || !remoteInfo?.exists || !remoteInfo.compatible) return;
     if (!settings.enabled) {
       showToast(
         "error",
@@ -257,7 +281,7 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, [appDialog, loadState, settings.enabled, uiText]);
+  }, [appDialog, loadState, remoteActionsDisabled, remoteInfo, settings.enabled, uiText]);
 
   const handleToggleEnabled = useCallback(() => {
     updateSettings("enabled", !settings.enabled);
@@ -329,14 +353,14 @@ function WebDavSyncSectionComponent() {
 
   const passwordPlaceholder = useMemo(
     () =>
-      settings.has_password && !passwordTouched
+      settings.has_password && !passwordTouched && savedAccount
         ? uiText(
             "已保存，留空则保持不变",
             "Saved already. Leave blank to keep it.",
             "保存済みです。空欄なら保持します。",
           )
         : "",
-    [passwordTouched, settings.has_password, uiText],
+    [passwordTouched, savedAccount, settings.has_password, uiText],
   );
 
   const presetHint = useMemo(
@@ -412,10 +436,16 @@ function WebDavSyncSectionComponent() {
           "Remote snapshot found but incompatible",
           "リモートスナップショットを検出しましたが互換性がありません",
         )
-    : uiText("远端暂无快照", "No remote snapshot yet", "リモートにスナップショットはありません");
+    : remoteInfo
+      ? uiText("远端暂无快照", "No remote snapshot yet", "リモートにスナップショットはありません")
+      : uiText("尚未读取", "Not loaded", "未取得");
   const remoteStatusDetail = remoteInfo?.updated_at
     ? formatDateTime(remoteInfo.updated_at)
-    : uiText("等待首次上传", "Waiting for the first upload", "最初のアップロード待ち");
+    : remoteInfo?.exists
+      ? uiText("备份时间不可用", "Backup timestamp unavailable")
+      : remoteInfo
+        ? uiText("等待首次上传", "Waiting for the first upload", "最初のアップロード待ち")
+        : uiText("刷新以读取远端状态", "Refresh to read remote status");
   const remoteSizeDetail = remoteInfo?.app_version
     ? `CCHub ${remoteInfo.app_version}`
     : uiText("尚未获取版本信息", "Version info unavailable", "バージョン情報は未取得です");
@@ -433,11 +463,24 @@ function WebDavSyncSectionComponent() {
 
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
         {uiText(
-          "把完整 SQL 备份上传到 WebDAV，并按 `remote_root / 协议版本 / DB 兼容版本 / profile` 组织远端目录。密码采用 backfill 策略，前端留空不会静默清除已保存密码。",
-          "Upload the full SQL backup to WebDAV and organize the remote path by `remote_root / protocol version / DB compatibility version / profile`. Password handling uses backfill so leaving the field blank does not silently erase a saved password.",
-          "完全な SQL バックアップを WebDAV にアップロードし、`remote_root / プロトコル版 / DB 互換版 / profile` でリモートを整理します。パスワードは backfill 方式で扱い、入力欄を空にしても保存済みパスワードは勝手に消えません。",
+          "将配置备份到你的 WebDAV 存储，在其他设备上恢复。密码保存在系统密钥环中，仅用于对应的服务器与账号。",
+          "Back up your configuration to WebDAV and restore it on another device. Passwords stay in the OS keyring and belong to the corresponding server and account.",
+          "設定を WebDAV にバックアップし、別の端末で復元できます。パスワードはシステムキーチェーンに保存され、対応するサーバーとアカウントにのみ使用されます。",
         )}
       </p>
+      {dirty && (
+        <p role="status" className="mb-4 text-xs text-[var(--text-secondary)]">
+          {uiText(
+            "有未保存的修改，请保存后再读取、上传或恢复远端备份。",
+            "Save your changes before reading, uploading, or restoring remote backups.",
+          )}
+        </p>
+      )}
+      {!savedSettings && !busy && (
+        <Button variant="secondary" onClick={() => void loadState()}>
+          {uiText("重新读取设置", "Retry loading settings")}
+        </Button>
+      )}
 
       <div
         style={{
@@ -518,7 +561,7 @@ function WebDavSyncSectionComponent() {
               : uiText("保存设置", "Save Settings", "設定を保存")
           }
           loading={actionState === "saving"}
-          disabled={busy}
+          disabled={busy || !savedSettings}
           icon={Save}
           variant="btn-primary"
           onClick={handleSaveClick}
@@ -530,7 +573,7 @@ function WebDavSyncSectionComponent() {
               : uiText("测试连接", "Test Connection", "接続テスト")
           }
           loading={actionState === "testing"}
-          disabled={busy}
+          disabled={busy || !savedSettings}
           icon={Wifi}
           onClick={handleTestClick}
         />
@@ -541,7 +584,7 @@ function WebDavSyncSectionComponent() {
               : uiText("刷新远端", "Refresh Remote", "リモートを更新")
           }
           loading={actionState === "refreshing"}
-          disabled={busy}
+          disabled={remoteActionsDisabled}
           icon={RefreshCw}
           onClick={handleRefreshRemoteClick}
         />
@@ -552,7 +595,7 @@ function WebDavSyncSectionComponent() {
               : uiText("上传当前快照", "Upload Snapshot", "現在のスナップショットをアップロード")
           }
           loading={actionState === "uploading"}
-          disabled={busy}
+          disabled={remoteActionsDisabled}
           icon={Upload}
           onClick={handleUploadClick}
         />
@@ -563,7 +606,7 @@ function WebDavSyncSectionComponent() {
               : uiText("从远端恢复", "Restore From Remote", "リモートから復元")
           }
           loading={actionState === "downloading"}
-          disabled={busy || !remoteInfo?.exists}
+          disabled={remoteActionsDisabled || !remoteInfo?.exists || !remoteInfo.compatible}
           icon={Download}
           onClick={handleDownloadClick}
         />
@@ -579,7 +622,7 @@ function WebDavSyncSectionComponent() {
         )}
       </div>
 
-      {settings.has_password && !passwordTouched && (
+      {settings.has_password && !passwordTouched && savedAccount && (
         <div
           style={{
             display: "flex",
@@ -592,9 +635,9 @@ function WebDavSyncSectionComponent() {
         >
           <CheckCircle size={14} style={{ color: "var(--success)" }} />
           {uiText(
-            "后端已保存密码，当前输入框为空不会清除它；只有你实际修改密码输入框后才会覆盖。",
-            "A password is already stored on the backend. Leaving the field empty will keep it; only touching the password field will replace it.",
-            "パスワードは既にバックエンドへ保存されています。入力欄を空のままにしても保持され、パスワード欄を実際に編集した場合のみ上書きされます。",
+            "此服务器与账号的密码已保存。留空保持不变；编辑后清空可删除已保存密码。",
+            "The password for this server and account is saved. Leave it untouched to keep it; edit and clear it to remove it.",
+            "このサーバーとアカウントのパスワードは保存済みです。未編集なら保持し、編集後に空にすると削除します。",
           )}
         </div>
       )}

@@ -24,12 +24,7 @@ pub(super) fn normalize_base_url(value: &str) -> String {
 }
 
 pub(super) fn validate_base_url(value: &str) -> Result<(), String> {
-    let url = Url::parse(&normalize_base_url(value))
-        .map_err(|_| "WebDAV base URL is invalid".to_string())?;
-    match url.scheme() {
-        "http" | "https" => Ok(()),
-        _ => Err("WebDAV base URL must use http or https".to_string()),
-    }
+    crate::cloud_credentials::validate_url(value).map(|_| ())
 }
 
 pub(super) fn method_propfind() -> Result<Method, String> {

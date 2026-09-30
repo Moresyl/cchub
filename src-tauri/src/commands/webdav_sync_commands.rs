@@ -36,7 +36,7 @@ pub async fn webdav_test_connection(
 ) -> Result<(), String> {
     let existing = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        webdav_sync::read_settings(&conn).ok()
+        Some(webdav_sync::read_settings(&conn)?)
     };
     webdav_sync::test_connection(settings, existing, preserve_empty_password.unwrap_or(true)).await
 }

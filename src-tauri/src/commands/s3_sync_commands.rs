@@ -36,7 +36,7 @@ pub async fn s3_test_connection(
 ) -> Result<(), String> {
     let existing = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        s3_sync::read_settings(&conn).ok()
+        Some(s3_sync::read_settings(&conn)?)
     };
     s3_sync::test_connection(settings, existing, preserve_empty_secret.unwrap_or(true)).await
 }

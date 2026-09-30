@@ -4,6 +4,10 @@ import { Cloud, Download, Loader2, RefreshCw, Save, Upload, Wifi } from "lucide-
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
 import { Switch } from "./ui/switch";
+import { Input } from "./ui/input";
+import { Button } from "./ui/button";
+import { useAppDialog } from "./AppDialogProvider";
+import { cloudSettingsChanged, sameS3Account } from "../lib/cloudSyncSettings";
 
 interface S3SyncSettings {
   enabled: boolean;
@@ -48,18 +52,42 @@ const DEFAULT_SETTINGS: S3SyncSettings = {
 type Action = "idle" | "loading" | "saving" | "testing" | "refreshing" | "uploading" | "downloading";
 
 export default function S3SyncSection() {
+  const appDialog = useAppDialog();
   const locale = getLocale();
   const [settings, setSettings] = useState<S3SyncSettings>(DEFAULT_SETTINGS);
+  const [savedSettings, setSavedSettings] = useState<S3SyncSettings | null>(null);
   const [remote, setRemote] = useState<S3RemoteInfo | null>(null);
   const [action, setAction] = useState<Action>("loading");
   const [secretTouched, setSecretTouched] = useState(false);
   const text = useCallback((zh: string, en: string) => (locale === "zh" ? zh : en), [locale]);
   const busy = action !== "idle";
+  const dirty =
+    secretTouched ||
+    cloudSettingsChanged(settings, savedSettings, [
+      "enabled",
+      "endpoint",
+      "region",
+      "bucket",
+      "accessKeyId",
+      "secretAccessKey",
+      "remoteRoot",
+      "profile",
+      "autoSync",
+    ]);
+  const savedAccount = savedSettings !== null && sameS3Account(settings, savedSettings);
+  const remoteActionsDisabled = busy || dirty || !savedSettings || !savedSettings.enabled;
 
   const load = useCallback(async () => {
     setAction("loading");
     try {
-      setSettings(await invoke<S3SyncSettings>("get_s3_sync_settings"));
+      const loaded = {
+        ...DEFAULT_SETTINGS,
+        ...(await invoke<S3SyncSettings>("get_s3_sync_settings")),
+        secretAccessKey: "",
+      };
+      setSettings(loaded);
+      setSavedSettings(loaded);
+      setSecretTouched(false);
     } catch (error) {
       showToast("error", `${text("读取 S3 设置失败", "Failed to load S3 settings")}: ${error}`);
     } finally {
@@ -76,10 +104,14 @@ export default function S3SyncSection() {
   };
 
   const save = async () => {
+    if (busy || !savedSettings) return;
     setAction("saving");
     try {
       const saved = await invoke<S3SyncSettings>("set_s3_sync_settings", { settings, secretTouched });
-      setSettings(saved);
+      const masked = { ...DEFAULT_SETTINGS, ...saved, secretAccessKey: "" };
+      setSettings(masked);
+      setSavedSettings(masked);
+      setRemote(null);
       setSecretTouched(false);
       showToast("success", text("S3 设置已保存", "S3 settings saved"));
     } catch (error) {
@@ -90,6 +122,7 @@ export default function S3SyncSection() {
   };
 
   const test = async () => {
+    if (busy || !savedSettings) return;
     setAction("testing");
     try {
       await invoke("s3_test_connection", { settings, preserveEmptySecret: !secretTouched });
@@ -102,6 +135,7 @@ export default function S3SyncSection() {
   };
 
   const refreshRemote = async () => {
+    if (remoteActionsDisabled) return;
     setAction("refreshing");
     try {
       setRemote(await invoke<S3RemoteInfo>("s3_sync_fetch_remote_info"));
@@ -113,6 +147,7 @@ export default function S3SyncSection() {
   };
 
   const upload = async () => {
+    if (remoteActionsDisabled) return;
     setAction("uploading");
     try {
       setRemote(await invoke<S3RemoteInfo>("s3_sync_upload"));
@@ -126,6 +161,18 @@ export default function S3SyncSection() {
   };
 
   const download = async () => {
+    if (remoteActionsDisabled || !remote?.exists || !remote.compatible) return;
+    const confirmed = await appDialog.confirm({
+      title: text("从 S3 恢复", "Restore from S3"),
+      message: text(
+        "远端备份会覆盖当前数据库，请确认本地工作已保存。",
+        "The remote backup will replace the current database. Make sure local work is saved.",
+      ),
+      confirmText: text("继续恢复", "Restore"),
+      cancelText: text("取消", "Cancel"),
+      tone: "warning",
+    });
+    if (!confirmed) return;
     setAction("downloading");
     try {
       await invoke<string>("s3_sync_download");
@@ -163,10 +210,23 @@ export default function S3SyncSection() {
       </div>
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
         {text(
-          "使用 AWS Signature V4 连接 AWS S3 或兼容对象存储。密钥只保存到系统密钥环，快照上传前会生成校验清单，恢复时会验证大小、版本和 SHA-256。",
-          "Connect to AWS S3 or compatible object storage with AWS Signature V4. Secrets stay in the OS keyring; snapshots are restored only after manifest, size, version, and SHA-256 checks.",
+          "将配置备份到 S3 或兼容的对象存储，在其他设备上恢复。密钥保存在系统密钥环中，仅用于对应的服务器与账号；恢复前会验证备份完整性。",
+          "Back up your configuration to S3 or compatible storage and restore it on another device. Keys stay in the OS keyring and belong to the corresponding server and account. Backups are checked for integrity before restoring.",
         )}
       </p>
+      {dirty && (
+        <p role="status" className="mb-4 text-xs text-[var(--text-secondary)]">
+          {text(
+            "有未保存的修改，请保存后再读取、上传或恢复远端备份。",
+            "Save your changes before reading, uploading, or restoring remote backups.",
+          )}
+        </p>
+      )}
+      {!savedSettings && !busy && (
+        <Button variant="secondary" onClick={() => void load()}>
+          {text("重新读取设置", "Retry loading settings")}
+        </Button>
+      )}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <Toggle
           label={text("启用同步", "Enable sync")}
@@ -192,8 +252,7 @@ export default function S3SyncSection() {
         {fields.map(([key, label, placeholder]) => (
           <label key={key} style={{ fontSize: 12, color: "var(--text-secondary)" }}>
             <span style={{ display: "block", marginBottom: 5 }}>{label}</span>
-            <input
-              className="input"
+            <Input
               value={String(settings[key])}
               placeholder={placeholder}
               disabled={busy}
@@ -203,11 +262,14 @@ export default function S3SyncSection() {
         ))}
         <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>
           <span style={{ display: "block", marginBottom: 5 }}>{text("Secret Access Key", "Secret Access Key")}</span>
-          <input
-            className="input"
+          <Input
             type="password"
             value={settings.secretAccessKey}
-            placeholder={settings.hasSecretAccessKey ? text("已保存，留空保持不变", "Saved; leave blank to keep") : ""}
+            placeholder={
+              settings.hasSecretAccessKey && !secretTouched && savedAccount
+                ? text("已保存，留空保持不变", "Saved; leave blank to keep")
+                : ""
+            }
             disabled={busy}
             onChange={(event) => {
               setSecretTouched(true);
@@ -220,31 +282,36 @@ export default function S3SyncSection() {
         <ActionButton
           icon={Save}
           label={action === "saving" ? text("保存中...", "Saving...") : text("保存设置", "Save settings")}
-          disabled={busy}
+          disabled={busy || !savedSettings}
+          loading={action === "saving"}
           onClick={() => void save()}
         />
         <ActionButton
           icon={Wifi}
           label={action === "testing" ? text("测试中...", "Testing...") : text("测试连接", "Test connection")}
-          disabled={busy}
+          disabled={busy || !savedSettings}
+          loading={action === "testing"}
           onClick={() => void test()}
         />
         <ActionButton
           icon={RefreshCw}
           label={action === "refreshing" ? text("刷新中...", "Refreshing...") : text("刷新远端", "Refresh remote")}
-          disabled={busy}
+          disabled={remoteActionsDisabled}
+          loading={action === "refreshing"}
           onClick={() => void refreshRemote()}
         />
         <ActionButton
           icon={Upload}
           label={action === "uploading" ? text("上传中...", "Uploading...") : text("上传快照", "Upload snapshot")}
-          disabled={busy || !settings.enabled}
+          disabled={remoteActionsDisabled}
+          loading={action === "uploading"}
           onClick={() => void upload()}
         />
         <ActionButton
           icon={Download}
           label={action === "downloading" ? text("恢复中...", "Restoring...") : text("从远端恢复", "Restore remote")}
-          disabled={busy || !settings.enabled || !remote?.exists || !remote.compatible}
+          disabled={remoteActionsDisabled || !remote?.exists || !remote.compatible}
+          loading={action === "downloading"}
           onClick={() => void download()}
         />
       </div>
@@ -256,7 +323,9 @@ export default function S3SyncSection() {
               ? remote.compatible
                 ? text("可恢复快照", "Compatible snapshot")
                 : text("版本不兼容", "Incompatible snapshot")
-              : text("尚未读取", "Not loaded")
+              : remote
+                ? text("远端暂无备份", "No remote backup")
+                : text("尚未读取", "Not loaded")
           }
         />
         <InfoCard label={text("远端路径", "Remote path")} value={remote?.profilePath || "—"} mono />
@@ -292,18 +361,24 @@ function ActionButton({
   icon: Icon,
   label,
   disabled,
+  loading,
   onClick,
 }: {
   icon: typeof Save;
   label: string;
   disabled: boolean;
+  loading: boolean;
   onClick: () => void;
 }) {
   return (
-    <button className="btn btn-secondary btn-sm" type="button" disabled={disabled} onClick={onClick}>
-      {disabled ? <Loader2 size={13} className="animate-spin" /> : <Icon size={13} />}
+    <Button variant="secondary" type="button" disabled={disabled} onClick={onClick} aria-busy={loading}>
+      {loading ? (
+        <Loader2 size={14} aria-hidden="true" className="animate-spin" />
+      ) : (
+        <Icon size={14} aria-hidden="true" />
+      )}
       {label}
-    </button>
+    </Button>
   );
 }
 

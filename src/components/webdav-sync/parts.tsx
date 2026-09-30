@@ -1,6 +1,8 @@
-import { memo, useCallback, type ChangeEvent } from "react";
+import { memo, useCallback, useId, type ChangeEvent } from "react";
 import { Copy, type LucideIcon } from "lucide-react";
 import { Switch } from "../ui/switch";
+import { Input } from "../ui/input";
+import { Button } from "../ui/button";
 
 export interface WebDavSyncSettings {
   enabled: boolean;
@@ -178,6 +180,7 @@ function WebDavTextFieldComponent({
   placeholder,
   type = "text",
 }: WebDavTextFieldProps) {
+  const inputId = useId();
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       onValueChange(fieldKey, event.target.value);
@@ -187,9 +190,11 @@ function WebDavTextFieldComponent({
 
   return (
     <div>
-      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 6 }}>{label}</div>
-      <input
-        className="input"
+      <label htmlFor={inputId} className="mb-1.5 block text-xs font-medium">
+        {label}
+      </label>
+      <Input
+        id={inputId}
         value={value}
         placeholder={placeholder}
         onChange={handleChange}
@@ -211,10 +216,16 @@ function WebDavActionButtonComponent({
   onClick,
 }: WebDavActionButtonProps) {
   return (
-    <button className={`btn ${variant} btn-sm`} onClick={onClick} disabled={disabled} style={{ gap: 6 }}>
-      <Icon size={14} className={loading ? "spin" : ""} />
+    <Button
+      type="button"
+      variant={variant === "btn-primary" ? "default" : variant === "btn-ghost" ? "ghost" : "secondary"}
+      onClick={onClick}
+      disabled={disabled}
+      aria-busy={loading}
+    >
+      <Icon size={14} aria-hidden="true" className={loading ? "spin" : ""} />
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -243,7 +254,7 @@ function WebDavInfoCardComponent({
           display: "flex",
           alignItems: "center",
           gap: 8,
-          fontSize: valueLarge ? 20 : 13,
+          fontSize: valueLarge ? 20 : 14,
           fontWeight: valueLarge ? 700 : 600,
           fontFamily: mono ? "var(--font-code)" : undefined,
           wordBreak: mono ? "break-all" : undefined,
@@ -290,11 +301,11 @@ function WebDavSnapshotDetailsComponent({
           marginBottom: 8,
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
         {canCopy ? (
-          <button className="btn btn-ghost btn-icon-sm" onClick={onCopy} title={copyTitle}>
-            <Copy size={12} />
-          </button>
+          <Button type="button" variant="ghost" size="icon" onClick={onCopy} title={copyTitle} aria-label={copyTitle}>
+            <Copy size={14} aria-hidden="true" />
+          </Button>
         ) : null}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>

@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::cloud_credentials::{self, CredentialStore, KeyringStore};
 use crate::commands::extra_commands::{
     generate_sql_backup, get_json_app_setting, get_text_app_setting, import_backup_from_path_impl,
     set_json_app_setting,
@@ -18,7 +19,6 @@ use crate::commands::extra_commands::{
 use crate::db::DbState;
 
 const SETTINGS_KEY: &str = "s3_sync_settings";
-const KEYRING_SERVICE: &str = "cchub";
 const KEYRING_ACCOUNT: &str = "s3_sync_secret_access_key";
 const FORMAT: &str = "cchub-s3-sync";
 const PROTOCOL_VERSION: u32 = 1;
@@ -44,6 +44,7 @@ pub struct S3SyncSettings {
     #[serde(skip_serializing)]
     pub secret_access_key: String,
     pub has_secret_access_key: bool,
+    pub credential_scope: Option<String>,
     pub remote_root: String,
     pub profile: String,
     pub auto_sync: bool,
@@ -63,6 +64,7 @@ impl Default for S3SyncSettings {
             access_key_id: String::new(),
             secret_access_key: String::new(),
             has_secret_access_key: false,
+            credential_scope: None,
             remote_root: "cchub-sync".to_string(),
             profile: "default".to_string(),
             auto_sync: false,
@@ -100,11 +102,7 @@ impl S3SyncSettings {
             return Err("S3 region is required".to_string());
         }
         if !self.endpoint.is_empty() {
-            let url = url::Url::parse(&self.endpoint)
-                .map_err(|_| "S3 endpoint must be a valid HTTP(S) URL".to_string())?;
-            if !matches!(url.scheme(), "http" | "https") {
-                return Err("S3 endpoint must use http or https".to_string());
-            }
+            cloud_credentials::validate_url(&self.endpoint)?;
         }
         Ok(())
     }
@@ -147,57 +145,78 @@ struct S3Manifest {
     profile_path: String,
 }
 
-struct KeyringStore;
+fn credential_scope(settings: &S3SyncSettings) -> String {
+    cloud_credentials::scope("s3_secret", &endpoint(settings), &settings.access_key_id)
+}
 
-impl KeyringStore {
-    fn entry(&self) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-            .map_err(|error| format!("Failed to open S3 credential store: {error}"))
-    }
+fn same_remote(left: &S3SyncSettings, right: &S3SyncSettings) -> bool {
+    credential_scope(left) == credential_scope(right)
+        && left.bucket == right.bucket
+        && left.region == right.region
+        && left.remote_root == right.remote_root
+        && left.profile == right.profile
+}
 
-    fn get(&self) -> Result<Option<String>, String> {
-        match self.entry()?.get_password() {
-            Ok(secret) => Ok(Some(secret)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(format!("Failed to read S3 secret access key: {error}")),
+fn prepare_connection(
+    settings: &mut S3SyncSettings,
+    existing: Option<&S3SyncSettings>,
+    preserve: bool,
+) -> Result<(), String> {
+    settings.normalize();
+    if let Some(existing) = existing {
+        if preserve
+            && settings.secret_access_key.is_empty()
+            && credential_scope(settings) == credential_scope(existing)
+        {
+            settings.secret_access_key = existing.secret_access_key.clone();
+        }
+        if settings.proxy_url.is_none() {
+            settings.proxy_url = existing.proxy_url.clone();
         }
     }
-
-    fn set(&self, secret: &str) -> Result<(), String> {
-        self.entry()?
-            .set_password(secret)
-            .map_err(|error| format!("Failed to save S3 secret access key: {error}"))
-    }
-
-    fn delete(&self) -> Result<(), String> {
-        match self.entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(format!("Failed to delete S3 secret access key: {error}")),
-        }
-    }
+    let mut validation = settings.clone();
+    validation.enabled = true;
+    validation.validate()
 }
 
 pub fn migrate_secret_to_keyring(conn: &rusqlite::Connection) -> Result<(), String> {
-    let mut settings: S3SyncSettings =
-        get_json_app_setting(conn, SETTINGS_KEY)?.unwrap_or_default();
-    if !settings.secret_access_key.trim().is_empty() {
-        KeyringStore.set(settings.secret_access_key.trim())?;
-        settings.has_secret_access_key = true;
-        settings.secret_access_key.clear();
-        set_json_app_setting(conn, SETTINGS_KEY, &settings)?;
-    } else if let Some(secret) = KeyringStore.get()? {
-        settings.has_secret_access_key = !secret.is_empty();
-        set_json_app_setting(conn, SETTINGS_KEY, &settings)?;
-    }
+    let _ = read_settings_with_store(conn, &KeyringStore)?;
     Ok(())
 }
 
 pub fn read_settings(conn: &rusqlite::Connection) -> Result<S3SyncSettings, String> {
-    let mut settings: S3SyncSettings =
-        get_json_app_setting(conn, SETTINGS_KEY)?.unwrap_or_default();
-    if let Some(secret) = KeyringStore.get()? {
-        settings.secret_access_key = secret;
-        settings.has_secret_access_key = true;
+    read_settings_with_store(conn, &KeyringStore)
+}
+
+fn read_settings_with_store(
+    conn: &rusqlite::Connection,
+    store: &impl CredentialStore,
+) -> Result<S3SyncSettings, String> {
+    let stored: Option<S3SyncSettings> = get_json_app_setting(conn, SETTINGS_KEY)?;
+    let configured = stored.is_some();
+    let mut settings = stored.unwrap_or_default();
+    settings.normalize();
+    let scope = credential_scope(&settings);
+    if configured {
+        if settings.credential_scope.is_none() {
+            let legacy = if !settings.secret_access_key.trim().is_empty() {
+                Some(settings.secret_access_key.clone())
+            } else {
+                store.get(KEYRING_ACCOUNT)?
+            };
+            let secret = store.get(&scope)?.or(legacy).unwrap_or_default();
+            settings.secret_access_key.clear();
+            settings.has_secret_access_key = !secret.trim().is_empty();
+            settings.credential_scope = Some(scope.clone());
+            cloud_credentials::save(store, &scope, &secret, || {
+                set_json_app_setting(conn, SETTINGS_KEY, &settings)
+            })?;
+            store.delete(KEYRING_ACCOUNT)?;
+            settings.secret_access_key = secret;
+        } else {
+            settings.secret_access_key = store.get(&scope)?.unwrap_or_default();
+            settings.has_secret_access_key = !settings.secret_access_key.trim().is_empty();
+        }
     }
     settings.proxy_url =
         get_text_app_setting(conn, "proxy_url")?.filter(|value| !value.trim().is_empty());
@@ -206,25 +225,39 @@ pub fn read_settings(conn: &rusqlite::Connection) -> Result<S3SyncSettings, Stri
 
 pub fn write_settings(
     conn: &rusqlite::Connection,
-    mut incoming: S3SyncSettings,
+    incoming: S3SyncSettings,
     secret_touched: bool,
 ) -> Result<S3SyncSettings, String> {
-    let existing = read_settings(conn).unwrap_or_default();
+    write_settings_with_store(conn, incoming, secret_touched, &KeyringStore)
+}
+
+fn write_settings_with_store(
+    conn: &rusqlite::Connection,
+    mut incoming: S3SyncSettings,
+    secret_touched: bool,
+    store: &impl CredentialStore,
+) -> Result<S3SyncSettings, String> {
+    let existing = read_settings_with_store(conn, store)?;
     incoming.normalize();
+    let scope = credential_scope(&incoming);
     if !secret_touched && incoming.secret_access_key.is_empty() {
-        incoming.secret_access_key = existing.secret_access_key;
+        incoming.secret_access_key = store.get(&scope)?.unwrap_or_default();
     }
+    let unchanged = same_remote(&incoming, &existing);
+    incoming.last_sync_at = if unchanged {
+        existing.last_sync_at
+    } else {
+        None
+    };
+    incoming.last_error = if unchanged { existing.last_error } else { None };
     incoming.proxy_url = existing.proxy_url;
     incoming.validate()?;
-    if incoming.secret_access_key.trim().is_empty() {
-        KeyringStore.delete()?;
-        incoming.has_secret_access_key = false;
-    } else {
-        KeyringStore.set(incoming.secret_access_key.trim())?;
-        incoming.has_secret_access_key = true;
-    }
-    incoming.secret_access_key.clear();
-    set_json_app_setting(conn, SETTINGS_KEY, &incoming)?;
+    incoming.has_secret_access_key = !incoming.secret_access_key.trim().is_empty();
+    let secret = std::mem::take(&mut incoming.secret_access_key);
+    incoming.credential_scope = Some(scope.clone());
+    cloud_credentials::save(store, &scope, &secret, || {
+        set_json_app_setting(conn, SETTINGS_KEY, &incoming)
+    })?;
     Ok(incoming.masked_for_frontend())
 }
 
@@ -264,8 +297,12 @@ fn object_key(settings: &S3SyncSettings, name: &str) -> String {
 }
 
 fn object_url(settings: &S3SyncSettings, key: &str) -> Result<url::Url, String> {
-    let mut url = url::Url::parse(&endpoint(settings)).map_err(|error| error.to_string())?;
-    let mut path = format!("/{}/", settings.bucket.trim_matches('/'));
+    let mut url = cloud_credentials::validate_url(&endpoint(settings))?;
+    let mut path = format!(
+        "{}/{}/",
+        url.path().trim_end_matches('/'),
+        settings.bucket.trim_matches('/')
+    );
     path.push_str(key.trim_matches('/'));
     url.set_path(&path);
     Ok(url)
@@ -450,24 +487,7 @@ pub async fn test_connection(
     existing: Option<S3SyncSettings>,
     preserve_secret: bool,
 ) -> Result<(), String> {
-    if preserve_secret && settings.secret_access_key.is_empty() {
-        settings.secret_access_key = existing
-            .as_ref()
-            .and_then(|value| {
-                if value.secret_access_key.is_empty() {
-                    None
-                } else {
-                    Some(value.secret_access_key.clone())
-                }
-            })
-            .unwrap_or_default();
-    }
-    if settings.proxy_url.is_none() {
-        settings.proxy_url = existing.and_then(|value| value.proxy_url);
-    }
-    settings.enabled = true;
-    settings.normalize();
-    settings.validate()?;
+    prepare_connection(&mut settings, existing.as_ref(), preserve_secret)?;
     let response = request_object(
         &settings,
         reqwest::Method::HEAD,
@@ -592,10 +612,7 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         profile_path: profile_path(&settings),
     };
     let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let mut saved = settings.masked_for_frontend();
-    saved.last_sync_at = Some(created_at);
-    saved.last_error = None;
-    set_json_app_setting(&conn, SETTINGS_KEY, &saved)?;
+    update_upload_status(&conn, &settings, created_at)?;
     Ok(info)
 }
 
@@ -641,6 +658,21 @@ pub fn update_error(conn: &rusqlite::Connection, error: &str) -> Result<(), Stri
     settings.last_error = Some(error.to_string());
     settings.secret_access_key.clear();
     set_json_app_setting(conn, SETTINGS_KEY, &settings)
+}
+
+fn update_upload_status(
+    conn: &rusqlite::Connection,
+    expected: &S3SyncSettings,
+    synced_at: String,
+) -> Result<(), String> {
+    let mut current: S3SyncSettings = get_json_app_setting(conn, SETTINGS_KEY)?.unwrap_or_default();
+    current.normalize();
+    if same_remote(&current, expected) {
+        current.last_sync_at = Some(synced_at);
+        current.last_error = None;
+        set_json_app_setting(conn, SETTINGS_KEY, &current.masked_for_frontend())?;
+    }
+    Ok(())
 }
 
 pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
@@ -714,3 +746,6 @@ mod tests {
         assert_eq!(host_header(&url).unwrap(), "127.0.0.1:9000");
     }
 }
+
+#[cfg(test)]
+mod credential_tests;

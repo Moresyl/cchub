@@ -152,11 +152,11 @@ export function AppDialogProvider({ children }: { children: ReactNode }) {
           ) : (
             <DialogBody className="hidden" />
           )}
-          <DialogFooter>
-            <Button variant="secondary" size="sm" onClick={() => finish(false)}>
+          <DialogFooter className="max-md:mt-auto">
+            <Button variant="secondary" onClick={() => finish(false)}>
               {active?.cancelText ?? "取消"}
             </Button>
-            <Button variant={tone === "danger" ? "destructive" : "default"} size="sm" onClick={() => finish(true)}>
+            <Button variant={tone === "danger" ? "destructive" : "default"} onClick={() => finish(true)}>
               {active?.confirmText ?? "确认"}
             </Button>
           </DialogFooter>

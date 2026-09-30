@@ -61,6 +61,10 @@ OpenCode uses the existing `opencode.jsonc` or `opencode.json`. Profiles retain 
 
 Choose Runtime → Sessions → Sync usage to import completed requests from OpenCode V1/V2 databases. Totals include cache reads, cache writes, reasoning output, and compaction requests; unfinished responses remain eligible for the next sync. Corrected accounting updates existing records. Migration or moving the database does not import the same requests again. Durable identities survive log cleanup and are included in SQL backups. A result dialog lists errors when some sources could not sync.
 
+### Cloud backup settings
+
+WebDAV passwords and S3 secrets stay in the OS keyring and are bound to their server and account. Changing either requires the corresponding credentials; switching back can reuse that account's saved credential. Save edited settings before reading, uploading, or restoring remote backups. Background sync preserves form drafts, and restoring asks before replacing the local database.
+
 ### Platform
 
 | Feature                | Description                                                                   |

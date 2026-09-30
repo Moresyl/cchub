@@ -1,5 +1,6 @@
 mod claude_md;
 mod cloud_credentials;
+mod cloud_transfer;
 mod codex_oauth;
 mod commands;
 mod copilot_auth;

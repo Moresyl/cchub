@@ -432,9 +432,9 @@ function WebDavSyncSectionComponent() {
     ? remoteInfo.compatible
       ? uiText("已发现可兼容快照", "Compatible snapshot found", "互換スナップショットを検出")
       : uiText(
-          "发现远端快照，但版本不兼容",
-          "Remote snapshot found but incompatible",
-          "リモートスナップショットを検出しましたが互換性がありません",
+          "远端备份信息无效或不兼容",
+          "Invalid or incompatible remote backup",
+          "リモートバックアップ情報が無効、または互換性がありません",
         )
     : remoteInfo
       ? uiText("远端暂无快照", "No remote snapshot yet", "リモートにスナップショットはありません")

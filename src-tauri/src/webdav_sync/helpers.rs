@@ -216,10 +216,9 @@ pub(super) async fn fetch_manifest_for_layout(
     let response = response
         .error_for_status()
         .map_err(|error| format!("WebDAV manifest request failed: {error}"))?;
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("Failed to read WebDAV manifest body: {error}"))?;
+    let bytes =
+        crate::cloud_transfer::read_bounded(response, crate::cloud_transfer::MANIFEST_LIMIT)
+            .await?;
     let manifest = serde_json::from_slice::<WebDavManifest>(&bytes)
         .map_err(|error| format!("Invalid WebDAV manifest: {error}"))?;
     Ok(Some(manifest))
@@ -229,9 +228,11 @@ pub(super) fn validate_manifest_compatibility(
     manifest: &WebDavManifest,
     layout: WebDavRemoteLayout,
 ) -> Result<(), String> {
-    if manifest.snapshot_path.trim().is_empty() {
-        return Err("WebDAV manifest is missing snapshot path".to_string());
-    }
+    crate::cloud_transfer::validate_snapshot_path(&manifest.snapshot_path)?;
+    crate::cloud_transfer::validate_size_and_digest(
+        manifest.size_bytes,
+        (!manifest.sha256.is_empty()).then_some(manifest.sha256.as_str()),
+    )?;
 
     if layout == WebDavRemoteLayout::Current {
         if manifest.format != WEBDAV_FORMAT {

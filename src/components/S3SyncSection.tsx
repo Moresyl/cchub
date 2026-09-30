@@ -322,7 +322,7 @@ export default function S3SyncSection() {
             remote?.exists
               ? remote.compatible
                 ? text("可恢复快照", "Compatible snapshot")
-                : text("版本不兼容", "Incompatible snapshot")
+                : text("备份信息无效或不兼容", "Invalid or incompatible backup")
               : remote
                 ? text("远端暂无备份", "No remote backup")
                 : text("尚未读取", "Not loaded")

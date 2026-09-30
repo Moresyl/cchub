@@ -16,7 +16,7 @@ const WEBDAV_MANIFEST_FILE: &str = "manifest.json";
 const WEBDAV_FORMAT: &str = "cchub-webdav-sync";
 const WEBDAV_PROTOCOL_VERSION: u32 = 1;
 const WEBDAV_DB_COMPAT_VERSION: u32 = 1;
-const MAX_WEBDAV_SYNC_BYTES: usize = 15 * 1024 * 1024;
+const MAX_WEBDAV_SYNC_BYTES: usize = crate::cloud_transfer::SNAPSHOT_LIMIT;
 const AUTO_SYNC_INTERVAL_SECS: u64 = 15 * 60;
 const WEBDAV_KEYRING_ACCOUNT: &str = "webdav_sync_password";
 
@@ -160,6 +160,7 @@ struct WebDavManifest {
     created_at: String,
     snapshot_path: String,
     size_bytes: u64,
+    sha256: String,
     device_name: String,
     profile_path: Option<String>,
 }
@@ -428,10 +429,10 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
     ensure_remote_directories(&client, &settings, WebDavRemoteLayout::Current).await?;
 
     let created_at = chrono::Utc::now().to_rfc3339();
-    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let snapshot_name = format!("cchub-sync-{timestamp}.sql");
+    let snapshot_name = format!("cchub-sync-{}.sql", uuid::Uuid::new_v4());
     let snapshot_path = format!("snapshots/{snapshot_name}");
     let snapshot_target = remote_file_url(&settings, WebDavRemoteLayout::Current, &snapshot_path)?;
+    let digest = crate::cloud_transfer::sha256(&sql_bytes);
     upload_bytes(
         &client,
         &settings,
@@ -451,6 +452,7 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         created_at: created_at.clone(),
         snapshot_path: snapshot_path.clone(),
         size_bytes,
+        sha256: digest,
         device_name: device_name.clone(),
         profile_path: Some(remote_profile_path(&settings, WebDavRemoteLayout::Current)),
     };
@@ -515,13 +517,6 @@ async fn download_inner(db: &State<'_, DbState>) -> Result<String, String> {
         .ok_or_else(|| "No remote WebDAV sync manifest found".to_string())?;
     validate_manifest_compatibility(&manifest, layout)?;
 
-    if manifest.size_bytes > MAX_WEBDAV_SYNC_BYTES as u64 {
-        return Err(format!(
-            "Remote backup is too large to restore automatically ({} MB)",
-            manifest.size_bytes / (1024 * 1024)
-        ));
-    }
-
     let snapshot_target = remote_file_url(&settings, layout, &manifest.snapshot_path)?;
     let response = auth_request(client.get(snapshot_target), &settings)
         .send()
@@ -529,17 +524,12 @@ async fn download_inner(db: &State<'_, DbState>) -> Result<String, String> {
         .map_err(|error| format!("Failed to download WebDAV snapshot: {error}"))?
         .error_for_status()
         .map_err(|error| format!("WebDAV snapshot download failed: {error}"))?;
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("Failed to read WebDAV snapshot body: {error}"))?;
-
-    if bytes.len() > MAX_WEBDAV_SYNC_BYTES {
-        return Err(format!(
-            "Remote backup body exceeds the safety limit of {} MB",
-            MAX_WEBDAV_SYNC_BYTES / (1024 * 1024)
-        ));
-    }
+    let bytes = crate::cloud_transfer::read_bounded(response, MAX_WEBDAV_SYNC_BYTES).await?;
+    crate::cloud_transfer::verify_snapshot(
+        &bytes,
+        manifest.size_bytes,
+        (!manifest.sha256.is_empty()).then_some(manifest.sha256.as_str()),
+    )?;
 
     let temp_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
     let temp_file = temp_dir.path().join("cchub-webdav-sync.sql");
@@ -611,6 +601,9 @@ use helpers::*;
 
 #[cfg(test)]
 mod credential_tests;
+
+#[cfg(test)]
+mod transfer_tests;
 
 #[cfg(test)]
 mod tests {

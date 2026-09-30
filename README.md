@@ -65,6 +65,8 @@ Choose Runtime → Sessions → Sync usage to import completed requests from Ope
 
 WebDAV passwords and S3 secrets stay in the OS keyring and are bound to their server and account. Changing either requires the corresponding credentials; switching back can reuse that account's saved credential. Save edited settings before reading, uploading, or restoring remote backups. Background sync preserves form drafts, and restoring asks before replacing the local database.
 
+Downloads stop at 64 KiB for manifests or 15 MiB for snapshots. Restoring validates the snapshot path and declared size; new WebDAV snapshots and S3 snapshots also verify SHA-256. Older WebDAV snapshots remain readable with size checks. Each upload uses a separate snapshot filename.
+
 ### Platform
 
 | Feature                | Description                                                                   |

@@ -23,7 +23,7 @@ const KEYRING_ACCOUNT: &str = "s3_sync_secret_access_key";
 const FORMAT: &str = "cchub-s3-sync";
 const PROTOCOL_VERSION: u32 = 1;
 const DB_COMPAT_VERSION: u32 = 1;
-const MAX_SYNC_BYTES: usize = 15 * 1024 * 1024;
+const MAX_SYNC_BYTES: usize = crate::cloud_transfer::SNAPSHOT_LIMIT;
 const MANIFEST_NAME: &str = "manifest.json";
 
 static SYNC_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
@@ -313,7 +313,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
+    crate::cloud_transfer::sha256(bytes)
 }
 
 fn hmac_sha256(key: &[u8], message: &[u8]) -> Vec<u8> {
@@ -434,14 +434,14 @@ async fn get_object(settings: &S3SyncSettings, key: &str) -> Result<Option<Vec<u
     let response = response
         .error_for_status()
         .map_err(|error| format!("S3 download failed: {error}"))?;
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("Failed to read S3 response: {error}"))?;
-    if bytes.len() > MAX_SYNC_BYTES {
-        return Err("Remote S3 snapshot exceeds the 15 MB safety limit".to_string());
-    }
-    Ok(Some(bytes.to_vec()))
+    let limit = if key == object_key(settings, MANIFEST_NAME) {
+        crate::cloud_transfer::MANIFEST_LIMIT
+    } else {
+        MAX_SYNC_BYTES
+    };
+    Ok(Some(
+        crate::cloud_transfer::read_bounded(response, limit).await?,
+    ))
 }
 
 async fn put_object(settings: &S3SyncSettings, key: &str, body: Vec<u8>) -> Result<(), String> {
@@ -476,9 +476,8 @@ fn validate_manifest(manifest: &S3Manifest) -> Result<(), String> {
     if manifest.db_compat_version != DB_COMPAT_VERSION {
         return Err("S3 manifest database version is incompatible".to_string());
     }
-    if manifest.snapshot_path.trim().is_empty() || manifest.sha256.len() != 64 {
-        return Err("S3 manifest is invalid".to_string());
-    }
+    crate::cloud_transfer::validate_snapshot_path(&manifest.snapshot_path)?;
+    crate::cloud_transfer::validate_size_and_digest(manifest.size_bytes, Some(&manifest.sha256))?;
     Ok(())
 }
 
@@ -572,8 +571,7 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
     if sql_bytes.len() > MAX_SYNC_BYTES {
         return Err("S3 upload aborted because backup exceeds the 15 MB safety limit".to_string());
     }
-    let timestamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let snapshot_path = format!("snapshots/cchub-sync-{timestamp}.sql");
+    let snapshot_path = format!("snapshots/cchub-sync-{}.sql", uuid::Uuid::new_v4());
     put_object(
         &settings,
         &object_key(&settings, &snapshot_path),
@@ -632,15 +630,10 @@ pub async fn download(db: &State<'_, DbState>) -> Result<String, String> {
     let manifest: S3Manifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("Invalid S3 manifest: {error}"))?;
     validate_manifest(&manifest)?;
-    if manifest.size_bytes as usize > MAX_SYNC_BYTES {
-        return Err("Remote S3 snapshot exceeds the 15 MB safety limit".to_string());
-    }
     let bytes = get_object(&settings, &object_key(&settings, &manifest.snapshot_path))
         .await?
         .ok_or("Remote S3 snapshot is missing")?;
-    if bytes.len() as u64 != manifest.size_bytes || sha256_hex(&bytes) != manifest.sha256 {
-        return Err("Remote S3 snapshot integrity verification failed".to_string());
-    }
+    crate::cloud_transfer::verify_snapshot(&bytes, manifest.size_bytes, Some(&manifest.sha256))?;
     let temp_dir = tempfile::tempdir().map_err(|error| error.to_string())?;
     let temp_file = temp_dir.path().join("cchub-s3-sync.sql");
     std::fs::write(&temp_file, bytes).map_err(|error| error.to_string())?;
@@ -749,3 +742,6 @@ mod tests {
 
 #[cfg(test)]
 mod credential_tests;
+
+#[cfg(test)]
+mod transfer_tests;

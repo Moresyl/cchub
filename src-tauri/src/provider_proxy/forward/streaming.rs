@@ -37,7 +37,9 @@ pub(super) fn streaming_body<R: tauri::Runtime>(
     is_desktop: bool,
     desktop_model: Option<String>,
     health: StreamHealth,
+    started_at: std::time::Instant,
 ) -> Body {
+    let upstream_status = response.status().as_u16();
     let is_sse = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -48,7 +50,7 @@ pub(super) fn streaming_body<R: tauri::Runtime>(
     } else {
         boxed(response.bytes_stream())
     };
-    let observed = observe(source, health);
+    let observed = observe(source, health.clone());
     let stream = match transform {
         Some(ClaudeApiFormat::OpenAiChat) => boxed(create_anthropic_sse_stream(observed)),
         Some(ClaudeApiFormat::OpenAiResponses) => {
@@ -72,6 +74,9 @@ pub(super) fn streaming_body<R: tauri::Runtime>(
         insights,
         config.streaming_first_byte_timeout,
         config.streaming_idle_timeout,
+        upstream_status,
+        started_at,
+        health,
     ));
     if is_desktop {
         Body::from_stream(desktop::restore_stream_model(

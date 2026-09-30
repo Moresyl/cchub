@@ -133,61 +133,8 @@ pub(super) fn calculate_proxy_total_cost(
     total_cost * upstream.cost_multiplier
 }
 
-fn update_daily_proxy_usage_rollup(
-    conn: &Connection,
-    tool_id: &str,
-    created_at: &str,
-    usage: &ProxyUsageMetrics,
-    latency_ms: u64,
-    status_code: u16,
-    total_cost_usd: f64,
-) -> Result<(), String> {
-    let day = created_at
-        .get(..10)
-        .ok_or_else(|| format!("Invalid proxy request timestamp: {created_at}"))?;
-    conn.execute(
-        "INSERT INTO proxy_usage_daily_rollups (
-            day,
-            tool_id,
-            total_requests,
-            success_requests,
-            total_input_tokens,
-            total_output_tokens,
-            total_cache_read_tokens,
-            total_cache_creation_tokens,
-            total_cost_usd,
-            avg_latency_ms,
-            updated_at
-        ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-        ON CONFLICT(day, tool_id) DO UPDATE SET
-            total_requests = proxy_usage_daily_rollups.total_requests + 1,
-            success_requests = proxy_usage_daily_rollups.success_requests + excluded.success_requests,
-            total_input_tokens = proxy_usage_daily_rollups.total_input_tokens + excluded.total_input_tokens,
-            total_output_tokens = proxy_usage_daily_rollups.total_output_tokens + excluded.total_output_tokens,
-            total_cache_read_tokens = proxy_usage_daily_rollups.total_cache_read_tokens + excluded.total_cache_read_tokens,
-            total_cache_creation_tokens = proxy_usage_daily_rollups.total_cache_creation_tokens + excluded.total_cache_creation_tokens,
-            total_cost_usd = printf('%.6f', CAST(proxy_usage_daily_rollups.total_cost_usd AS REAL) + CAST(excluded.total_cost_usd AS REAL)),
-            avg_latency_ms = (
-                (proxy_usage_daily_rollups.avg_latency_ms * proxy_usage_daily_rollups.total_requests)
-                + excluded.avg_latency_ms
-            ) / (proxy_usage_daily_rollups.total_requests + 1),
-            updated_at = excluded.updated_at",
-        rusqlite::params![
-            day,
-            tool_id,
-            if (200..300).contains(&(status_code as i32)) { 1i64 } else { 0i64 },
-            usage.input_tokens as i64,
-            usage.output_tokens as i64,
-            usage.cache_read_tokens as i64,
-            usage.cache_creation_tokens as i64,
-            format!("{total_cost_usd:.6}"),
-            latency_ms as f64,
-            created_at,
-        ],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
+#[path = "cost/accounting.rs"]
+mod accounting;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn log_proxy_request<R: tauri::Runtime>(
@@ -210,76 +157,31 @@ pub(super) fn log_proxy_request<R: tauri::Runtime>(
         );
         return;
     };
-
     let usage = usage.cloned().unwrap_or_default();
     let created_at = chrono::Utc::now().to_rfc3339();
-    let total_cost_usd = calculate_proxy_total_cost(&conn, upstream, insights, &usage);
-    if let Err(error) = conn.execute(
-        "INSERT OR REPLACE INTO proxy_request_logs (
-            request_id,
-            tool_id,
-            profile_id,
-            provider_name,
-            request_model,
-            response_model,
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-            cache_creation_tokens,
-            total_cost_usd,
-            latency_ms,
-            status_code,
-            is_streaming,
-            error_message,
-            created_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-        rusqlite::params![
-            request_id,
-            tool_id,
-            &upstream.profile_id,
-            &upstream.profile_name,
-            insights.request_model.as_deref(),
-            usage.response_model.as_deref(),
-            usage.input_tokens as i64,
-            usage.output_tokens as i64,
-            usage.cache_read_tokens as i64,
-            usage.cache_creation_tokens as i64,
-            format!("{total_cost_usd:.6}"),
-            latency_ms as i64,
-            status_code as i64,
-            insights.is_streaming as i64,
-            error_message,
-            &created_at,
-        ],
-    ) {
+    let record = accounting::RequestRecord {
+        request_id,
+        tool_id,
+        upstream,
+        insights,
+        usage: &usage,
+        latency_ms,
+        status_code,
+        error_message,
+        created_at: &created_at,
+        total_cost_usd: calculate_proxy_total_cost(&conn, upstream, insights, &usage),
+    };
+    if let Err(error) = accounting::persist_request(&conn, &record) {
         crate::utils::append_runtime_log(
             "warn",
             "provider_proxy",
-            &format!("Failed to persist proxy usage log: {error}"),
+            &format!("Failed to persist proxy accounting: {error}"),
         );
         return;
     }
-
-    if let Err(error) = update_daily_proxy_usage_rollup(
-        &conn,
-        tool_id,
-        &created_at,
-        &usage,
-        latency_ms,
-        status_code,
-        total_cost_usd,
-    ) {
-        crate::utils::append_runtime_log(
-            "warn",
-            "provider_proxy",
-            &format!("Failed to update proxy usage rollup: {error}"),
-        );
-    }
+    drop(conn);
     let _ = app_handle.emit(
         "usage-log-recorded",
-        serde_json::json!({
-            "toolId": tool_id,
-            "statusCode": status_code,
-        }),
+        serde_json::json!({ "toolId": tool_id, "statusCode": status_code }),
     );
 }

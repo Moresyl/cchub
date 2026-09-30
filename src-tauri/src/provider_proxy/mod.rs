@@ -24,7 +24,6 @@ mod profiles;
 mod rewriters;
 mod upstream;
 mod usage;
-use cost::{calculate_proxy_total_cost, parse_cost_text};
 use forward::forward_proxy_request;
 pub(crate) use optimizer::{update_optimizer_config_cache, update_rectifier_config_cache};
 use profiles::profile_circuit_key;

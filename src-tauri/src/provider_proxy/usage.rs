@@ -3,14 +3,9 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
-use crate::db::DbState;
-
-use super::{
-    calculate_proxy_total_cost, parse_cost_text, ProxyRequestInsights, ProxyUsageMetrics,
-    UpstreamTarget,
-};
+use super::{ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
 
 pub(super) fn parse_usage_metrics_from_response(body: &Value) -> Option<ProxyUsageMetrics> {
     if let Some(usage) = body.get("usageMetadata") {
@@ -199,160 +194,8 @@ pub(super) fn scan_stream_usage_buffer(
     changed
 }
 
-pub(super) fn finalize_stream_usage_log<R: tauri::Runtime>(
-    app_handle: &AppHandle<R>,
-    request_id: &str,
-    tool_id: &str,
-    upstream: &UpstreamTarget,
-    insights: &ProxyRequestInsights,
-    usage: &ProxyUsageMetrics,
-) {
-    let db = app_handle.state::<DbState>();
-    let Ok(conn) = db.0.lock() else {
-        crate::utils::append_runtime_log(
-            "warn",
-            "provider_proxy",
-            "Failed to acquire database lock while finalizing proxy stream usage",
-        );
-        return;
-    };
-
-    let existing = conn.query_row(
-        "SELECT
-            response_model,
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-            cache_creation_tokens,
-            total_cost_usd,
-            created_at
-         FROM proxy_request_logs
-         WHERE request_id = ?1",
-        rusqlite::params![request_id],
-        |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, i64>(1)?.max(0) as u64,
-                row.get::<_, i64>(2)?.max(0) as u64,
-                row.get::<_, i64>(3)?.max(0) as u64,
-                row.get::<_, i64>(4)?.max(0) as u64,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-            ))
-        },
-    );
-
-    let Ok((
-        existing_response_model,
-        existing_input_tokens,
-        existing_output_tokens,
-        existing_cache_read_tokens,
-        existing_cache_creation_tokens,
-        existing_total_cost_usd,
-        created_at,
-    )) = existing
-    else {
-        return;
-    };
-
-    let previous_response_model = existing_response_model.clone();
-    let mut merged_usage = ProxyUsageMetrics {
-        response_model: existing_response_model,
-        input_tokens: existing_input_tokens,
-        output_tokens: existing_output_tokens,
-        cache_read_tokens: existing_cache_read_tokens,
-        cache_creation_tokens: existing_cache_creation_tokens,
-    };
-    merge_proxy_usage_metrics(&mut merged_usage, usage);
-
-    let existing_total_cost = parse_cost_text(&existing_total_cost_usd);
-    let next_total_cost = calculate_proxy_total_cost(&conn, upstream, insights, &merged_usage);
-    let delta_usage = ProxyUsageMetrics {
-        response_model: None,
-        input_tokens: merged_usage
-            .input_tokens
-            .saturating_sub(existing_input_tokens),
-        output_tokens: merged_usage
-            .output_tokens
-            .saturating_sub(existing_output_tokens),
-        cache_read_tokens: merged_usage
-            .cache_read_tokens
-            .saturating_sub(existing_cache_read_tokens),
-        cache_creation_tokens: merged_usage
-            .cache_creation_tokens
-            .saturating_sub(existing_cache_creation_tokens),
-    };
-    let delta_cost = (next_total_cost - existing_total_cost).max(0.0);
-
-    let has_usage_delta = delta_usage.input_tokens > 0
-        || delta_usage.output_tokens > 0
-        || delta_usage.cache_read_tokens > 0
-        || delta_usage.cache_creation_tokens > 0
-        || delta_cost > 0.0;
-    let response_model_changed =
-        merged_usage.response_model.as_deref() != previous_response_model.as_deref();
-    if !has_usage_delta && !response_model_changed {
-        return;
-    }
-
-    if let Err(error) = conn.execute(
-        "UPDATE proxy_request_logs
-         SET response_model = ?2,
-             input_tokens = ?3,
-             output_tokens = ?4,
-             cache_read_tokens = ?5,
-             cache_creation_tokens = ?6,
-             total_cost_usd = ?7
-         WHERE request_id = ?1",
-        rusqlite::params![
-            request_id,
-            merged_usage.response_model.as_deref(),
-            merged_usage.input_tokens as i64,
-            merged_usage.output_tokens as i64,
-            merged_usage.cache_read_tokens as i64,
-            merged_usage.cache_creation_tokens as i64,
-            format!("{next_total_cost:.6}"),
-        ],
-    ) {
-        crate::utils::append_runtime_log(
-            "warn",
-            "provider_proxy",
-            &format!("Failed to finalize proxy stream usage log: {error}"),
-        );
-        return;
-    }
-
-    if !has_usage_delta {
-        return;
-    }
-
-    if let Err(error) = conn.execute(
-        "UPDATE proxy_usage_daily_rollups
-         SET total_input_tokens = total_input_tokens + ?3,
-             total_output_tokens = total_output_tokens + ?4,
-             total_cache_read_tokens = total_cache_read_tokens + ?5,
-             total_cache_creation_tokens = total_cache_creation_tokens + ?6,
-             total_cost_usd = printf('%.6f', CAST(total_cost_usd AS REAL) + ?7),
-             updated_at = ?8
-         WHERE day = ?1 AND tool_id = ?2",
-        rusqlite::params![
-            created_at.get(..10).unwrap_or_default(),
-            tool_id,
-            delta_usage.input_tokens as i64,
-            delta_usage.output_tokens as i64,
-            delta_usage.cache_read_tokens as i64,
-            delta_usage.cache_creation_tokens as i64,
-            delta_cost,
-            chrono::Utc::now().to_rfc3339(),
-        ],
-    ) {
-        crate::utils::append_runtime_log(
-            "warn",
-            "provider_proxy",
-            &format!("Failed to finalize proxy usage rollup: {error}"),
-        );
-    }
-}
+#[path = "usage/stream_log.rs"]
+mod stream_log;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(
@@ -364,68 +207,67 @@ pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(
     insights: ProxyRequestInsights,
     first_byte_timeout_secs: u64,
     idle_timeout_secs: u64,
+    upstream_status: u16,
+    started_at: std::time::Instant,
+    health: super::forward::streaming_health::StreamHealth,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
     E: std::error::Error + Send + 'static,
 {
+    // Created outside the generator so an unpolled body also records cancellation.
+    let log = stream_log::StreamRequestLog {
+        app_handle,
+        request_id,
+        tool_id,
+        upstream,
+        insights,
+        started_at,
+        upstream_status,
+        status_code: 499,
+        error_message: Some("Client disconnected before the upstream response completed".into()),
+        usage: ProxyUsageMetrics::default(),
+    };
     async_stream::stream! {
+        let mut log = log;
         let mut buffer = String::new();
-        let mut merged_usage = ProxyUsageMetrics::default();
-        let mut saw_usage = false;
         let mut is_first_chunk = true;
-
         tokio::pin!(stream);
         loop {
             let timeout_secs = if is_first_chunk { first_byte_timeout_secs } else { idle_timeout_secs };
             let next_chunk = if timeout_secs > 0 {
-                match tokio::time::timeout(
-                    Duration::from_secs(timeout_secs),
-                    stream.next(),
-                ).await {
+                match tokio::time::timeout(Duration::from_secs(timeout_secs), stream.next()).await {
                     Ok(chunk) => chunk,
                     Err(_) => {
                         let kind = if is_first_chunk { "first byte" } else { "idle" };
                         let msg = format!("Stream {kind} timeout after {timeout_secs}s");
-                        crate::utils::append_runtime_log("warn", "provider_proxy", &msg);
+                        log.fail(msg.clone());
                         yield Err(std::io::Error::new(std::io::ErrorKind::TimedOut, msg));
-                        break;
+                        return;
                     }
                 }
-            } else {
-                stream.next().await
-            };
-
+            } else { stream.next().await };
             match next_chunk {
                 Some(Ok(bytes)) => {
                     is_first_chunk = false;
                     let normalized = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
-                    if scan_stream_usage_buffer(&mut buffer, &normalized, &mut merged_usage) {
-                        saw_usage = true;
-                    }
+                    scan_stream_usage_buffer(&mut buffer, &normalized, &mut log.usage);
+                    if buffer.len() > 1024 * 1024 { buffer.clear(); }
+                    if health.failed() { log.fail("Upstream returned a streaming error".into()); }
                     yield Ok(bytes);
                 }
                 Some(Err(error)) => {
+                    log.fail(error.to_string());
                     yield Err(std::io::Error::other(error.to_string()));
-                    break;
+                    return;
                 }
                 None => break,
             }
         }
-
-        if !buffer.trim().is_empty() && scan_stream_usage_buffer(&mut buffer, "\n\n", &mut merged_usage) {
-            saw_usage = true;
+        if !buffer.trim().is_empty() {
+            scan_stream_usage_buffer(&mut buffer, "\n\n", &mut log.usage);
         }
-
-        if saw_usage {
-            finalize_stream_usage_log(
-                &app_handle,
-                &request_id,
-                &tool_id,
-                &upstream,
-                &insights,
-                &merged_usage,
-            );
-        }
+        if health.failed() { log.fail("Upstream returned a streaming error".into()); }
+        else { log.complete(); }
     }
 }

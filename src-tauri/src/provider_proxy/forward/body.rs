@@ -9,6 +9,36 @@ use axum::{
 use bytes::Bytes;
 use serde_json::Value;
 
+pub(super) struct RetainedReply {
+    pub response: Response<Body>,
+    pub upstream: crate::provider_proxy::UpstreamTarget,
+    pub insights: crate::provider_proxy::ProxyRequestInsights,
+    pub error_message: String,
+}
+
+impl RetainedReply {
+    pub(super) fn finish<R: tauri::Runtime>(
+        self,
+        app: &tauri::AppHandle<R>,
+        request_id: &str,
+        tool_id: &str,
+        started_at: std::time::Instant,
+    ) -> Response<Body> {
+        crate::provider_proxy::cost::log_proxy_request(
+            app,
+            request_id,
+            tool_id,
+            &self.upstream,
+            &self.insights,
+            None,
+            started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            self.response.status().as_u16(),
+            Some(&self.error_message),
+        );
+        self.response
+    }
+}
+
 pub(super) fn failed_response(
     status: StatusCode,
     headers: &reqwest::header::HeaderMap,

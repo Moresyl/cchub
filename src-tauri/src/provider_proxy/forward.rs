@@ -156,7 +156,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     let request_id = next_proxy_request_id();
     let started_at = Instant::now();
     let mut last_error: Option<String> = None;
-    let mut last_response: Option<Response<Body>> = None;
+    let mut last_response: Option<body::RetainedReply> = None;
     let rectifier_config = read_rectifier_config(&app_handle);
     let optimizer_config = read_optimizer_config(&app_handle);
 
@@ -207,6 +207,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                     continue;
                 }
                 return last_response
+                    .map(|reply| reply.finish(&app_handle, &request_id, &tool_id, started_at))
                     .unwrap_or_else(|| build_proxy_error(StatusCode::BAD_GATEWAY, error));
             }
         };
@@ -293,6 +294,20 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             &effective_relative_path,
             effective_body_bytes.as_ref(),
         );
+        let log_attempt =
+            |usage: Option<&super::ProxyUsageMetrics>, status: u16, error: Option<&str>| {
+                log_proxy_request(
+                    &app_handle,
+                    &request_id,
+                    &tool_id,
+                    &upstream,
+                    &request_insights,
+                    usage,
+                    started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                    status,
+                    error,
+                );
+            };
         let ordered_base_urls = ordered_upstream_base_urls(&app_handle, &upstream);
         let attempt_count = ordered_base_urls.len();
         let Some(mut profile_lease) = CircuitLease::acquire(
@@ -365,7 +380,16 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                 .await
                                 {
                                     Ok((status, headers, bytes)) => {
-                                        last_response = Some(body::failed_response(
+                                        let error_message = parse_json_bytes(&bytes)
+                                            .as_ref()
+                                            .and_then(extract_error_message_from_response)
+                                            .unwrap_or_else(|| {
+                                                format!(
+                                                    "Upstream returned HTTP {}",
+                                                    status.as_u16()
+                                                )
+                                            });
+                                        let response = body::failed_response(
                                             status,
                                             &headers,
                                             bytes,
@@ -375,7 +399,13 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                         &original_relative_path,
                                                     )
                                             }),
-                                        ));
+                                        );
+                                        last_response = Some(body::RetainedReply {
+                                            response,
+                                            upstream: upstream.clone(),
+                                            insights: request_insights.clone(),
+                                            error_message,
+                                        });
                                     }
                                     Err(error) => last_error = Some(error),
                                 }
@@ -384,8 +414,6 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             profile_lease.failure();
                         }
 
-                        let latency_ms =
-                            started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
                         let headers = response.headers().clone();
                         let content_type = headers
                             .get(reqwest::header::CONTENT_TYPE)
@@ -415,6 +443,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         endpoint_failed = true;
                                         last_error =
                                             Some("Upstream returned invalid JSON".to_string());
+                                        log_attempt(None, 502, last_error.as_deref());
                                         continue 'endpoints;
                                     }
                                     if status.is_success()
@@ -428,6 +457,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         endpoint_failed = true;
                                         last_error = Some(parsed.as_ref().and_then(extract_error_message_from_response)
                                             .unwrap_or_else(|| "Upstream returned an error in a success response".to_string()));
+                                        log_attempt(None, 502, last_error.as_deref());
                                         continue 'endpoints;
                                     }
                                     let upstream_error_message = parsed
@@ -492,14 +522,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                         "Failed to transform upstream response for {} ({}/{}): {error}",
                                                         upstream.profile_name, tool_id, upstream.profile_id
                                                     );
-                                                    log_proxy_request(
-                                                        &app_handle,
-                                                        &request_id,
-                                                        &tool_id,
-                                                        &upstream,
-                                                        &request_insights,
+                                                    log_attempt(
                                                         None,
-                                                        latency_ms,
                                                         StatusCode::BAD_GATEWAY.as_u16(),
                                                         Some(&message),
                                                     );
@@ -515,14 +539,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                 "Upstream returned a non-JSON success body for transformed Claude request: {} ({}/{})",
                                                 upstream.profile_name, tool_id, upstream.profile_id
                                             );
-                                            log_proxy_request(
-                                                &app_handle,
-                                                &request_id,
-                                                &tool_id,
-                                                &upstream,
-                                                &request_insights,
+                                            log_attempt(
                                                 None,
-                                                latency_ms,
                                                 StatusCode::BAD_GATEWAY.as_u16(),
                                                 Some(&message),
                                             );
@@ -560,14 +578,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                             .as_ref()
                                             .and_then(extract_error_message_from_response)
                                     };
-                                    log_proxy_request(
-                                        &app_handle,
-                                        &request_id,
-                                        &tool_id,
-                                        &upstream,
-                                        &request_insights,
+                                    log_attempt(
                                         usage.as_ref(),
-                                        latency_ms,
                                         status.as_u16(),
                                         error_message.as_deref(),
                                     );
@@ -598,14 +610,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         "Failed to read upstream response body for {} ({}/{}): {error}",
                                         upstream.profile_name, tool_id, upstream.profile_id
                                     );
-                                    log_proxy_request(
-                                        &app_handle,
-                                        &request_id,
-                                        &tool_id,
-                                        &upstream,
-                                        &request_insights,
+                                    log_attempt(
                                         None,
-                                        latency_ms,
                                         StatusCode::BAD_GATEWAY.as_u16(),
                                         Some(&message),
                                     );
@@ -641,17 +647,6 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                     profile_index > 0,
                                 )
                             };
-                            log_proxy_request(
-                                &app_handle,
-                                &request_id,
-                                &tool_id,
-                                &upstream,
-                                &request_insights,
-                                None,
-                                latency_ms,
-                                status.as_u16(),
-                                None,
-                            );
                             let desktop_model = if is_desktop
                                 && status.is_success()
                                 && is_claude_messages_path(&original_relative_path)
@@ -677,6 +672,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                 is_desktop,
                                 desktop_model,
                                 health.clone(),
+                                started_at,
                             );
                             return build_forward_response_from_parts(
                                 status,
@@ -697,21 +693,11 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                         } else {
                             Some(format!("Upstream returned HTTP {}", status.as_u16()))
                         };
-                        log_proxy_request(
-                            &app_handle,
-                            &request_id,
-                            &tool_id,
-                            &upstream,
-                            &request_insights,
-                            None,
-                            latency_ms,
-                            status.as_u16(),
-                            error_message.as_deref(),
-                        );
                         match read_response_body_limited(response, MAX_PROXY_RESPONSE_BODY_BYTES)
                             .await
                         {
                             Ok((status, headers, bytes)) => {
+                                log_attempt(None, status.as_u16(), error_message.as_deref());
                                 if status.is_success() {
                                     let endpoint_accepted = endpoint_lease.success();
                                     let profile_accepted = profile_lease.success();
@@ -736,17 +722,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                     "Failed to read upstream response body for {} ({}/{}): {error}",
                                     upstream.profile_name, tool_id, upstream.profile_id
                                 );
-                                log_proxy_request(
-                                    &app_handle,
-                                    &request_id,
-                                    &tool_id,
-                                    &upstream,
-                                    &request_insights,
-                                    None,
-                                    latency_ms,
-                                    StatusCode::BAD_GATEWAY.as_u16(),
-                                    Some(&message),
-                                );
+                                log_attempt(None, StatusCode::BAD_GATEWAY.as_u16(), Some(&message));
                                 endpoint_lease.failure();
                                 endpoint_failed = true;
                                 last_error = Some(message);
@@ -760,6 +736,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             upstream.profile_name, tool_id, upstream.profile_id, base_url
                         );
                         last_error = Some(message.clone());
+                        log_attempt(None, 502, Some(&message));
                         endpoint_lease.failure();
                         endpoint_failed = true;
                         if index + 1 < attempt_count {
@@ -779,22 +756,13 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                         }
 
                         crate::utils::append_runtime_log("warn", "provider_proxy", &message);
-                        let latency_ms =
-                            started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-                        log_proxy_request(
-                            &app_handle,
-                            &request_id,
-                            &tool_id,
-                            &upstream,
-                            &request_insights,
-                            None,
-                            latency_ms,
-                            StatusCode::BAD_GATEWAY.as_u16(),
-                            Some(&message),
-                        );
-                        return last_response.unwrap_or_else(|| {
-                            build_proxy_error(StatusCode::BAD_GATEWAY, message)
-                        });
+                        return last_response
+                            .map(|reply| {
+                                reply.finish(&app_handle, &request_id, &tool_id, started_at)
+                            })
+                            .unwrap_or_else(|| {
+                                build_proxy_error(StatusCode::BAD_GATEWAY, message)
+                            });
                     }
                 }
             }
@@ -805,7 +773,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     }
 
     if let Some(response) = last_response {
-        return response;
+        return response.finish(&app_handle, &request_id, &tool_id, started_at);
     }
     let unavailable = last_error.is_none();
     let mut response = build_proxy_error(

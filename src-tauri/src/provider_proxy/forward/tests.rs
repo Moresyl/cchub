@@ -406,6 +406,7 @@ async fn dropped_unpolled_stream_releases_probe_without_success() {
     drop(response);
     assert!(profile(&app, "p1").is_available());
     assert_eq!(profile(&app, "p1").consecutive_successes, 0);
+    streaming_tests::assert_single_outcome(&app, 499, 0, 0);
 }
 
 #[tokio::test]
@@ -424,6 +425,7 @@ async fn stream_timeout_is_failure_instead_of_healthy_headers() {
     assert!(to_bytes(response.into_body(), 1024).await.is_err());
     assert_eq!(profile(&app, "p1").state, CircuitState::Open);
     assert_eq!(endpoint(&app, "p1", &upstream.url).consecutive_failures, 1);
+    streaming_tests::assert_single_outcome(&app, 502, 0, 0);
 }
 
 fn set_format(app: &App<MockRuntime>, id: &str, format: &str) {
@@ -493,6 +495,7 @@ async fn later_blocked_profiles_preserve_the_vendor_error_and_translation() {
             assert_eq!(body["type"], "error");
         }
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+        streaming_tests::assert_single_outcome(&app, 429, 0, 0);
     }
 }
 
@@ -579,6 +582,7 @@ async fn in_band_errors_are_forwarded_and_never_count_as_recovery() {
         assert!(text.contains("vendor quota"), "{format}: {text}");
         assert_eq!(profile(&app, "p1").state, CircuitState::Open, "{format}");
         assert_eq!(profile(&app, "p1").consecutive_successes, 0, "{format}");
+        streaming_tests::assert_single_outcome(&app, 502, 0, 0);
     }
 }
 
@@ -634,6 +638,7 @@ async fn incomplete_streams_fail_without_fabricating_a_normal_completion() {
         }
         assert_eq!(profile(&app, "p1").state, CircuitState::Open, "{format}");
         assert_eq!(profile(&app, "p1").consecutive_successes, 0, "{format}");
+        streaming_tests::assert_single_outcome(&app, 502, 0, 0);
     }
 }
 
@@ -706,4 +711,44 @@ async fn json_error_with_success_status_uses_alternate_without_healing_primary()
     assert_eq!(endpoint(&app, "p1", &primary.url).consecutive_failures, 1);
     assert_eq!(profile(&app, "p1").consecutive_failures, 0);
     assert_eq!(alternate.hits.load(Ordering::SeqCst), 1);
+    streaming_tests::assert_single_outcome(&app, 200, 1, 0);
+}
+
+#[tokio::test]
+async fn retained_vendor_reply_owns_the_log_after_a_later_parse_failure() {
+    let primary = server(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/json",
+        r#"{"error":{"message":"quota"}}"#,
+    )
+    .await;
+    let alternate = server(StatusCode::OK, "application/json", "invalid JSON").await;
+    let app = app(
+        &[("p1", &primary.url, vec![alternate.url.clone()])],
+        OptimizerConfig::default(),
+    );
+    let response = forward(app.handle().clone(), false).await;
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(alternate.hits.load(Ordering::SeqCst), 1);
+    streaming_tests::assert_single_outcome(&app, 429, 0, 0);
+    let db = app.state::<DbState>();
+    let message: String =
+        db.0.lock()
+            .unwrap()
+            .query_row("SELECT error_message FROM proxy_request_logs", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+    assert_eq!(message, "quota");
+}
+
+#[tokio::test]
+async fn exhausted_malformed_bodies_log_the_final_gateway_failure_once() {
+    let upstream = server(StatusCode::OK, "application/json", "invalid JSON").await;
+    let app = app(&[("p1", &upstream.url, vec![])], OptimizerConfig::default());
+    assert_eq!(
+        forward(app.handle().clone(), false).await.status(),
+        StatusCode::BAD_GATEWAY
+    );
+    streaming_tests::assert_single_outcome(&app, 502, 0, 0);
 }

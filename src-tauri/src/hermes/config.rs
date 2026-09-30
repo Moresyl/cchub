@@ -54,13 +54,21 @@ pub fn read_value(conn: &Connection) -> Result<Value, String> {
 }
 
 pub fn write_value(conn: &Connection, value: &Value) -> Result<Option<PathBuf>, String> {
+    write_value_with_backup(conn, value, true)
+}
+
+pub(super) fn write_value_with_backup(
+    conn: &Connection,
+    value: &Value,
+    create_backup: bool,
+) -> Result<Option<PathBuf>, String> {
     let path = config_path(conn)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
     let mut created_backup = None;
-    if path.exists() && !has_existing_backup(&path) {
+    if create_backup && path.exists() && !has_existing_backup(&path) {
         let backup_path = backup_path_for(&path);
         std::fs::copy(&path, &backup_path).map_err(|e| {
             format!(

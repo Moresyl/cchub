@@ -1,4 +1,7 @@
 // Claude HUD + Hello2cc plugin + OpenClaw memory + tool env reports + backups & restore.
+mod backup_artifacts;
+mod backup_file_rollback;
+mod backup_import;
 mod backup_paths;
 mod backup_sql;
 mod backups_commands;
@@ -9,6 +12,7 @@ mod hud;
 mod openclaw;
 mod project_roots;
 
+pub(crate) use backup_import::import_backup_from_path_impl;
 pub use backups_commands::*;
 pub use backups_restore::*;
 pub use diagnostics::*;

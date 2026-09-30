@@ -182,7 +182,7 @@ fn malformed_artifacts_stop_before_any_tool_configuration_is_written() {
         [],
     )
     .unwrap();
-    assert!(super::super::backups_restore::restore_imported_artifacts(&conn, 2).is_err());
+    assert!(super::super::backup_artifacts::restore_imported_artifacts(&conn, 2).is_err());
     assert!(!dir.path().join("settings.json").exists());
 }
 
@@ -207,7 +207,7 @@ fn skill_restore_includes_every_exported_tool() {
         .unwrap();
     }
     let counts =
-        super::super::backups_restore::restore_imported_artifacts(&conn, tools.len()).unwrap();
+        super::super::backup_artifacts::restore_imported_artifacts(&conn, tools.len()).unwrap();
     assert_eq!(counts.2, tools.len());
     for tool in tools {
         assert_eq!(

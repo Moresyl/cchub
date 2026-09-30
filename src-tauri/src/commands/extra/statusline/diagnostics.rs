@@ -206,8 +206,8 @@ pub fn get_main_db_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> 
         })
         .map_err(|e| e.to_string())?;
 
-    for row in rows.flatten() {
-        let (name, file) = row;
+    for row in rows {
+        let (name, file) = row.map_err(|e| e.to_string())?;
         if name == "main" && !file.trim().is_empty() {
             return Ok(PathBuf::from(file));
         }
@@ -225,7 +225,7 @@ pub fn create_safety_db_backup(
     }
 
     if backup_path.exists() {
-        std::fs::remove_file(backup_path).map_err(|e| e.to_string())?;
+        return Err("安全备份文件已存在，请使用新的备份路径".into());
     }
 
     let vacuum_sql = format!(
@@ -233,38 +233,4 @@ pub fn create_safety_db_backup(
         sql_escape(&backup_path.to_string_lossy())
     );
     conn.execute_batch(&vacuum_sql).map_err(|e| e.to_string())
-}
-
-pub fn validate_imported_backup_tables(conn: &rusqlite::Connection) -> Result<(), String> {
-    let backup_meta_exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_backup_meta'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    if backup_meta_exists == 0 {
-        return Err("备份文件格式不正确，缺少 _backup_meta 表".to_string());
-    }
-
-    Ok(())
-}
-
-pub fn remove_db_sidecars(db_path: &std::path::Path) {
-    let wal_path = db_path.with_extension(
-        db_path
-            .extension()
-            .map(|ext| format!("{}-wal", ext.to_string_lossy()))
-            .unwrap_or_else(|| "wal".to_string()),
-    );
-    let shm_path = db_path.with_extension(
-        db_path
-            .extension()
-            .map(|ext| format!("{}-shm", ext.to_string_lossy()))
-            .unwrap_or_else(|| "shm".to_string()),
-    );
-
-    let _ = std::fs::remove_file(wal_path);
-    let _ = std::fs::remove_file(shm_path);
 }

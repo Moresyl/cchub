@@ -219,7 +219,9 @@ pub fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<
         "opencode" => {
             crate::opencode_profiles::read_profile(&resolve_tool_config_path(conn, tool_id)?)
         }
-        "grokbuild" => crate::grok_config::read_snapshot(),
+        "grokbuild" => {
+            crate::grok_config::read_snapshot_at(&resolve_tool_config_path(conn, tool_id)?)
+        }
         "pi" => {
             let config_path = resolve_tool_config_path(conn, tool_id)?;
             if !config_path.exists() {
@@ -574,7 +576,10 @@ pub fn apply_tool_snapshot_with_options(
             Ok(())
         }
         "hermes" => hermes::snapshot::apply_snapshot(conn, &effective_snapshot).map(|_| ()),
-        "grokbuild" => crate::grok_config::apply_snapshot(&effective_snapshot),
+        "grokbuild" => crate::grok_config::apply_snapshot_at(
+            &resolve_tool_config_path(conn, tool_id)?,
+            &effective_snapshot,
+        ),
         _ => {
             let config_path = resolve_tool_config_path(conn, tool_id)?;
             if let Some(parent) = config_path.parent() {

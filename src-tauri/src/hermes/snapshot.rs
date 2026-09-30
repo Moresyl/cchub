@@ -49,6 +49,21 @@ pub fn read_snapshot(conn: &Connection) -> Result<String, String> {
 }
 
 pub fn apply_snapshot(conn: &Connection, snapshot: &str) -> Result<Option<PathBuf>, String> {
+    apply_snapshot_impl(conn, snapshot, true)
+}
+
+pub(crate) fn apply_snapshot_without_backup(
+    conn: &Connection,
+    snapshot: &str,
+) -> Result<Option<PathBuf>, String> {
+    apply_snapshot_impl(conn, snapshot, false)
+}
+
+fn apply_snapshot_impl(
+    conn: &Connection,
+    snapshot: &str,
+    create_backup: bool,
+) -> Result<Option<PathBuf>, String> {
     let parsed: serde_json::Value =
         serde_json::from_str(snapshot).map_err(|e| format!("Invalid Hermes snapshot JSON: {e}"))?;
     let incoming_config_value = parsed
@@ -88,7 +103,7 @@ pub fn apply_snapshot(conn: &Connection, snapshot: &str) -> Result<Option<PathBu
         }
     }
 
-    let backup_path = config::write_value(conn, &next_config)?;
+    let backup_path = config::write_value_with_backup(conn, &next_config, create_backup)?;
 
     let mut next_env = env::read_env_map(conn)?;
     let provider = next_config

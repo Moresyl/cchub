@@ -5,7 +5,7 @@
 //! can be edited and backed up without exposing credentials in log output.
 
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_MODEL: &str = "grok-4.5";
 const DEFAULT_BASE_URL: &str = "https://api.x.ai/v1";
@@ -20,8 +20,7 @@ pub fn get_grok_config_path() -> PathBuf {
     get_grok_config_dir().join("config.toml")
 }
 
-pub fn read_snapshot() -> Result<String, String> {
-    let path = get_grok_config_path();
+pub(crate) fn read_snapshot_at(path: &Path) -> Result<String, String> {
     if !path.exists() {
         return Err(format!("Config file not found: {}", path.display()));
     }
@@ -33,9 +32,8 @@ pub fn read_snapshot() -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-pub fn apply_snapshot(snapshot: &str) -> Result<(), String> {
+pub(crate) fn apply_snapshot_at(path: &Path, snapshot: &str) -> Result<(), String> {
     let config = snapshot_to_toml(snapshot)?;
-    let path = get_grok_config_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }

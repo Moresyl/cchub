@@ -2,11 +2,11 @@
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::HashSet;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::{
-    current_profile_setting_key, CircuitState, ClaudeApiFormat, LocalProviderProxyRuntime,
-    ProfileCandidate, UpstreamTarget,
+    current_profile_setting_key, ClaudeApiFormat, LocalProviderProxyRuntime, ProfileCandidate,
+    UpstreamTarget,
 };
 
 pub(super) fn active_profile_id_for_tool(
@@ -310,42 +310,8 @@ pub(super) fn profile_circuit_key(tool_id: &str, profile_id: &str) -> String {
     format!("{tool_id}::{profile_id}")
 }
 
-pub(super) fn ordered_profile_candidates(
-    app_handle: &AppHandle,
-    conn: &Connection,
-    tool_id: &str,
-) -> Result<Vec<ProfileCandidate>, String> {
-    let ordered = read_profile_candidates_for_tool(conn, tool_id)?;
-    let available = app_handle
-        .state::<LocalProviderProxyRuntime>()
-        .0
-        .lock()
-        .ok()
-        .map(|mut runtime| {
-            ordered
-                .iter()
-                .filter(|profile| {
-                    let key = profile_circuit_key(tool_id, &profile.profile_id);
-                    match runtime.profile_circuits.get_mut(&key) {
-                        Some(state) => state.is_available(),
-                        None => true,
-                    }
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        });
-
-    if let Some(available) = available {
-        if !available.is_empty() {
-            return Ok(available);
-        }
-    }
-
-    Ok(ordered)
-}
-
-pub(super) fn ordered_upstream_base_urls(
-    app_handle: &AppHandle,
+pub(super) fn ordered_upstream_base_urls<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     upstream: &UpstreamTarget,
 ) -> Vec<String> {
     let primary = canonicalize_base_url(&upstream.base_url);
@@ -386,12 +352,12 @@ pub(super) fn ordered_upstream_base_urls(
         .0
         .lock()
         .ok()
-        .map(|mut runtime| {
+        .map(|runtime| {
             ordered
                 .iter()
                 .filter(|base_url| {
                     let key = endpoint_circuit_key(&upstream.profile_id, base_url);
-                    match runtime.endpoint_circuits.get_mut(&key) {
+                    match runtime.endpoint_circuits.get(&key) {
                         Some(state) => state.is_available(),
                         None => true,
                     }
@@ -400,21 +366,15 @@ pub(super) fn ordered_upstream_base_urls(
                 .collect::<Vec<_>>()
         });
 
-    if let Some(available) = available {
-        if !available.is_empty() {
-            return available;
-        }
-    }
-
-    ordered
+    available.unwrap_or_default()
 }
 
 pub(super) fn endpoint_circuit_key(profile_id: &str, base_url: &str) -> String {
     format!("{profile_id}::{}", canonicalize_base_url(base_url))
 }
 
-pub(super) fn remember_preferred_upstream_base_url(
-    app_handle: &AppHandle,
+fn remember_preferred_upstream_base_url<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     profile_id: &str,
     primary_base_url: &str,
     selected_base_url: &str,
@@ -435,94 +395,32 @@ pub(super) fn remember_preferred_upstream_base_url(
     }
 }
 
-pub(super) fn record_profile_success(
-    app_handle: &AppHandle,
+pub(super) fn route_succeeded<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     tool_id: &str,
-    profile_id: &str,
-    config: &crate::proxy_optimizer::OptimizerConfig,
+    upstream: &UpstreamTarget,
+    base_url: &str,
+    switched_profile: bool,
 ) {
-    let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
-    let Ok(mut runtime) = runtime_state.0.lock() else {
-        return;
-    };
-    let key = profile_circuit_key(tool_id, profile_id);
-    let state = runtime.profile_circuits.entry(key).or_default();
-    state.record_success(config.circuit_success_threshold);
-}
-
-pub(super) fn record_profile_failure(
-    app_handle: &AppHandle,
-    tool_id: &str,
-    profile_id: &str,
-    profile_name: &str,
-    config: &crate::proxy_optimizer::OptimizerConfig,
-) {
-    let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
-    let Ok(mut runtime) = runtime_state.0.lock() else {
-        return;
-    };
-
-    let key = profile_circuit_key(tool_id, profile_id);
-    let state = runtime.profile_circuits.entry(key).or_default();
-    let was_open = state.state == CircuitState::Open;
-    state.record_failure(
-        config.circuit_failure_threshold,
-        config.circuit_timeout_secs,
+    remember_preferred_upstream_base_url(
+        app_handle,
+        &upstream.profile_id,
+        &upstream.base_url,
+        base_url,
     );
-    if !was_open && state.state == CircuitState::Open {
+    if canonicalize_base_url(base_url) != canonicalize_base_url(&upstream.base_url) {
         crate::utils::append_runtime_log(
-            "warn",
+            "info",
             "provider_proxy",
             &format!(
-                "Proxy profile circuit opened [{tool_id}] {} ({}) for {}s",
-                profile_name, profile_id, config.circuit_timeout_secs
+                "Proxy failover promoted alternate endpoint [{tool_id}] {} -> {}",
+                upstream.base_url, base_url
             ),
         );
     }
-}
-
-pub(super) fn record_endpoint_success(
-    app_handle: &AppHandle,
-    upstream: &UpstreamTarget,
-    base_url: &str,
-    config: &crate::proxy_optimizer::OptimizerConfig,
-) {
-    let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
-    let Ok(mut runtime) = runtime_state.0.lock() else {
-        return;
-    };
-    let key = endpoint_circuit_key(&upstream.profile_id, base_url);
-    let state = runtime.endpoint_circuits.entry(key).or_default();
-    state.record_success(config.circuit_success_threshold);
-}
-
-pub(super) fn record_endpoint_failure(
-    app_handle: &AppHandle,
-    tool_id: &str,
-    upstream: &UpstreamTarget,
-    base_url: &str,
-    config: &crate::proxy_optimizer::OptimizerConfig,
-) {
-    let runtime_state = app_handle.state::<LocalProviderProxyRuntime>();
-    let Ok(mut runtime) = runtime_state.0.lock() else {
-        return;
-    };
-
-    let key = endpoint_circuit_key(&upstream.profile_id, base_url);
-    let state = runtime.endpoint_circuits.entry(key).or_default();
-    let was_open = state.state == CircuitState::Open;
-    state.record_failure(
-        config.circuit_failure_threshold,
-        config.circuit_timeout_secs,
-    );
-    if !was_open && state.state == CircuitState::Open {
-        crate::utils::append_runtime_log(
-            "warn",
-            "provider_proxy",
-            &format!(
-                "Proxy circuit opened [{tool_id}] {} (profile {}) @ {} for {}s",
-                upstream.profile_name, upstream.profile_id, base_url, config.circuit_timeout_secs
-            ),
-        );
+    if switched_profile {
+        let _ = app_handle.emit("provider-failover", serde_json::json!({
+            "tool_id": tool_id, "profile_name": &upstream.profile_name, "profile_id": &upstream.profile_id,
+        }));
     }
 }

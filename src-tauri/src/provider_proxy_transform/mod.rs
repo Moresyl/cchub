@@ -2,10 +2,13 @@ mod responses;
 mod sse_chat;
 mod sse_gemini;
 mod sse_responses;
+mod stream_decode;
+mod stream_errors;
 pub use responses::{anthropic_to_responses, responses_to_anthropic};
 pub use sse_chat::create_anthropic_sse_stream;
 pub use sse_gemini::create_anthropic_sse_stream_from_gemini;
 pub use sse_responses::create_anthropic_sse_stream_from_responses;
+pub(crate) use stream_decode::normalize_sse_stream;
 
 use serde_json::{json, Value};
 

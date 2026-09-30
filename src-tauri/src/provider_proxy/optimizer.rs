@@ -7,8 +7,8 @@ use crate::db::DbState;
 
 use super::LocalProviderProxyRuntime;
 
-pub(super) fn read_optimizer_config(
-    app_handle: &AppHandle,
+pub(super) fn read_optimizer_config<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
 ) -> crate::proxy_optimizer::OptimizerConfig {
     if let Some(config) = app_handle
         .try_state::<LocalProviderProxyRuntime>()
@@ -44,8 +44,8 @@ pub(super) fn read_optimizer_config(
     apply_auto_failover_override_with_conn(&conn, config)
 }
 
-fn apply_auto_failover_override(
-    app_handle: &AppHandle,
+fn apply_auto_failover_override<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     config: crate::proxy_optimizer::OptimizerConfig,
 ) -> crate::proxy_optimizer::OptimizerConfig {
     let db = app_handle.state::<DbState>();
@@ -72,8 +72,8 @@ fn apply_auto_failover_override_with_conn(
     config
 }
 
-pub(super) fn read_rectifier_config(
-    app_handle: &AppHandle,
+pub(super) fn read_rectifier_config<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
 ) -> crate::proxy_optimizer::config::RectifierConfig {
     if let Some(config) = app_handle
         .try_state::<LocalProviderProxyRuntime>()
@@ -110,8 +110,8 @@ pub(super) fn read_rectifier_config(
     config
 }
 
-pub(crate) fn update_optimizer_config_cache(
-    app_handle: &AppHandle,
+pub(crate) fn update_optimizer_config_cache<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     config: crate::proxy_optimizer::OptimizerConfig,
 ) {
     if let Some(runtime_state) = app_handle.try_state::<LocalProviderProxyRuntime>() {
@@ -121,8 +121,8 @@ pub(crate) fn update_optimizer_config_cache(
     }
 }
 
-pub(crate) fn update_rectifier_config_cache(
-    app_handle: &AppHandle,
+pub(crate) fn update_rectifier_config_cache<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     config: crate::proxy_optimizer::config::RectifierConfig,
 ) {
     if let Some(runtime_state) = app_handle.try_state::<LocalProviderProxyRuntime>() {

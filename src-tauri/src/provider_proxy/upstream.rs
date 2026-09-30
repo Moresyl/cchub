@@ -30,8 +30,8 @@ pub(super) fn is_retryable_upstream_status(status: StatusCode) -> bool {
     )
 }
 
-pub(super) async fn extract_upstream_target(
-    app_handle: &AppHandle,
+pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     tool_id: &str,
     profile_id: String,
     profile_name: String,
@@ -767,13 +767,6 @@ pub(super) fn build_forward_response_from_parts(
             format!("Failed to build proxy response: {error}"),
         ),
     }
-}
-
-pub(super) fn build_forward_response(upstream_response: reqwest::Response) -> Response<Body> {
-    let status = upstream_response.status();
-    let headers = upstream_response.headers().clone();
-    let body = Body::from_stream(upstream_response.bytes_stream());
-    build_forward_response_from_parts(status, &headers, body)
 }
 
 pub(super) async fn read_response_body_limited(

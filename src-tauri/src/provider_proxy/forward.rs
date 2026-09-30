@@ -4,42 +4,56 @@ use axum::http::{Request, Response, StatusCode};
 use bytes::Bytes;
 use serde_json::Value;
 use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::db::DbState;
-use crate::provider_proxy_transform::{
-    create_anthropic_sse_stream, create_anthropic_sse_stream_from_gemini,
-    create_anthropic_sse_stream_from_responses, openai_error_to_anthropic,
-    rectify_anthropic_request_bytes,
-};
+use crate::provider_proxy_transform::{openai_error_to_anthropic, rectify_anthropic_request_bytes};
 
+use super::circuits::{
+    profile_available, retry_after_seconds, track_body, CircuitLease, CircuitScope,
+};
 use super::cost::{
     extract_error_message_from_response, log_proxy_request, transform_claude_response_body,
 };
 use super::desktop;
+#[path = "forward/body.rs"]
+mod body;
+#[path = "forward/streaming.rs"]
+mod streaming;
+#[path = "forward/streaming_health.rs"]
+pub(super) mod streaming_health;
 use super::optimizer::{apply_proxy_optimizers, read_optimizer_config, read_rectifier_config};
 use super::profiles::{
-    canonicalize_base_url, is_claude_messages_path, ordered_profile_candidates,
-    ordered_upstream_base_urls, record_endpoint_failure, record_endpoint_success,
-    record_profile_failure, record_profile_success, remember_preferred_upstream_base_url,
-    rewrite_claude_request_target, should_strip_claude_transform_header,
+    endpoint_circuit_key, is_claude_messages_path, ordered_upstream_base_urls, profile_circuit_key,
+    read_profile_candidates_for_tool, rewrite_claude_request_target, route_succeeded,
+    should_strip_claude_transform_header,
 };
-use super::usage::{create_usage_tracking_stream, parse_usage_metrics_from_response};
+use super::usage::parse_usage_metrics_from_response;
 use super::{
-    build_forward_response, build_forward_response_from_parts, build_json_response_from_value,
-    build_proxy_error, build_upstream_request_url, extract_request_insights,
-    extract_upstream_target, is_hop_by_hop_header, is_retryable_upstream_status,
-    next_proxy_request_id, parse_json_bytes, read_local_provider_proxy_settings_from_conn,
-    read_response_body_limited, reqwest_client, transform_claude_request_body, ClaudeApiFormat,
+    build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
+    build_upstream_request_url, extract_request_insights, extract_upstream_target,
+    is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
+    read_local_provider_proxy_settings_from_conn, read_response_body_limited, reqwest_client,
+    transform_claude_request_body, ClaudeApiFormat, LocalProviderProxyRuntime,
     MAX_PROXY_BODY_BYTES, MAX_PROXY_RESPONSE_BODY_BYTES,
 };
+use body::apply_local_proxy_body_override;
 
-#[allow(clippy::never_loop)]
-pub(super) async fn forward_proxy_request(
-    app_handle: AppHandle,
+pub(super) async fn forward_proxy_request<R: tauri::Runtime>(
+    app_handle: AppHandle<R>,
+    tool_id: String,
+    relative_path: String,
+    request: Request<Body>,
+) -> Response<Body> {
+    forward_proxy_request_with_client(app_handle, tool_id, relative_path, request, None).await
+}
+
+async fn forward_proxy_request_with_client<R: tauri::Runtime>(
+    app_handle: AppHandle<R>,
     tool_id: String,
     relative_path: String,
     mut request: Request<Body>,
+    client: Option<reqwest::Client>,
 ) -> Response<Body> {
     let is_desktop = tool_id == "claude-desktop";
     let (settings, proxy_url) = {
@@ -107,17 +121,18 @@ pub(super) async fn forward_proxy_request(
         let candidates = if is_desktop {
             desktop::profile_candidates(&conn)
         } else {
-            ordered_profile_candidates(&app_handle, &conn, &tool_id)
+            read_profile_candidates_for_tool(&conn, &tool_id)
         };
         match candidates {
             Ok(value) => value,
             Err(error) => return build_proxy_error(StatusCode::BAD_GATEWAY, error),
         }
     };
-    let profile_candidate_count = profile_candidates.len();
-
     let method = request.method().clone();
-    let client = match reqwest_client(proxy_url.as_deref()) {
+    let client = match client
+        .map(Ok)
+        .unwrap_or_else(|| reqwest_client(proxy_url.as_deref()))
+    {
         Ok(client) => client,
         Err(error) => return build_proxy_error(StatusCode::BAD_GATEWAY, error),
     };
@@ -141,22 +156,33 @@ pub(super) async fn forward_proxy_request(
     let request_id = next_proxy_request_id();
     let started_at = Instant::now();
     let mut last_error: Option<String> = None;
+    let mut last_response: Option<Response<Body>> = None;
     let rectifier_config = read_rectifier_config(&app_handle);
     let optimizer_config = read_optimizer_config(&app_handle);
 
-    let mut total_profile_retries: u32 = 0;
+    let runtime = app_handle.state::<LocalProviderProxyRuntime>().0.clone();
+    let profile_budget = if optimizer_config.failover_enabled {
+        1usize.saturating_add(optimizer_config.max_profile_retries as usize)
+    } else {
+        1
+    };
+    let profile_candidates: Vec<_> = profile_candidates
+        .into_iter()
+        .take(profile_budget)
+        .collect();
+    let profile_candidate_count = profile_candidates.len();
+    let profile_ids: Vec<String> = profile_candidates
+        .iter()
+        .map(|candidate| candidate.profile_id.clone())
+        .collect();
 
     'profiles: for (profile_index, candidate) in profile_candidates.into_iter().enumerate() {
-        if profile_index > 0 {
-            if !optimizer_config.failover_enabled {
-                break;
-            }
-            total_profile_retries += 1;
-            if total_profile_retries > optimizer_config.max_profile_retries {
-                break;
-            }
+        if !profile_available(
+            &runtime,
+            &profile_circuit_key(&tool_id, &candidate.profile_id),
+        ) {
+            continue;
         }
-
         let upstream = match extract_upstream_target(
             &app_handle,
             &tool_id,
@@ -180,7 +206,8 @@ pub(super) async fn forward_proxy_request(
                     );
                     continue;
                 }
-                return build_proxy_error(StatusCode::BAD_GATEWAY, error);
+                return last_response
+                    .unwrap_or_else(|| build_proxy_error(StatusCode::BAD_GATEWAY, error));
             }
         };
 
@@ -268,8 +295,25 @@ pub(super) async fn forward_proxy_request(
         );
         let ordered_base_urls = ordered_upstream_base_urls(&app_handle, &upstream);
         let attempt_count = ordered_base_urls.len();
+        let Some(mut profile_lease) = CircuitLease::acquire(
+            runtime.clone(),
+            CircuitScope::Profile,
+            profile_circuit_key(&tool_id, &upstream.profile_id),
+            &optimizer_config,
+        ) else {
+            continue;
+        };
+        let mut endpoint_failed = false;
 
-        for (index, base_url) in ordered_base_urls.iter().enumerate() {
+        'endpoints: for (index, base_url) in ordered_base_urls.iter().enumerate() {
+            let Some(mut endpoint_lease) = CircuitLease::acquire(
+                runtime.clone(),
+                CircuitScope::Endpoint,
+                endpoint_circuit_key(&upstream.profile_id, base_url),
+                &optimizer_config,
+            ) else {
+                continue;
+            };
             let mut request_body_bytes = effective_body_bytes.clone();
             let mut rectifier_attempts = 0usize;
 
@@ -308,93 +352,40 @@ pub(super) async fn forward_proxy_request(
                         let status = response.status();
                         let is_retryable_status = is_retryable_upstream_status(status);
                         if is_retryable_status {
-                            record_endpoint_failure(
-                                &app_handle,
-                                &tool_id,
-                                &upstream,
-                                base_url,
-                                &optimizer_config,
-                            );
-                            record_profile_failure(
-                                &app_handle,
-                                &tool_id,
-                                &upstream.profile_id,
-                                &upstream.profile_name,
-                                &optimizer_config,
-                            );
-                            if index + 1 < attempt_count {
-                                crate::utils::append_runtime_log(
-                                    "warn",
-                                    "provider_proxy",
-                                    &format!(
-                                        "Proxy failover retry [{tool_id}] {} (profile {}) {} returned {}. Trying next endpoint.",
-                                        upstream.profile_name, upstream.profile_id, base_url, status
-                                    ),
-                                );
-                                continue;
+                            endpoint_lease.failure();
+                            endpoint_failed = true;
+                            if index + 1 < attempt_count
+                                || profile_index + 1 < profile_candidate_count
+                            {
+                                // Preserve the last vendor reply if all later candidates become blocked.
+                                match read_response_body_limited(
+                                    response,
+                                    MAX_PROXY_RESPONSE_BODY_BYTES,
+                                )
+                                .await
+                                {
+                                    Ok((status, headers, bytes)) => {
+                                        last_response = Some(body::failed_response(
+                                            status,
+                                            &headers,
+                                            bytes,
+                                            upstream.claude_api_format.filter(|format| {
+                                                format.needs_transform()
+                                                    && is_claude_messages_path(
+                                                        &original_relative_path,
+                                                    )
+                                            }),
+                                        ));
+                                    }
+                                    Err(error) => last_error = Some(error),
+                                }
+                                continue 'endpoints;
                             }
-                            if profile_index + 1 < profile_candidate_count {
-                                crate::utils::append_runtime_log(
-                                    "warn",
-                                    "provider_proxy",
-                                    &format!(
-                                        "Proxy failover switching provider [{tool_id}] {} ({}) after {} from {}.",
-                                        upstream.profile_name, upstream.profile_id, status, base_url
-                                    ),
-                                );
-                                last_error = Some(format!(
-                                    "Upstream returned retryable status {} for {} ({})",
-                                    status, upstream.profile_name, upstream.profile_id
-                                ));
-                                continue 'profiles;
-                            }
+                            profile_lease.failure();
                         }
 
                         let latency_ms =
                             started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-                        if status.is_success() {
-                            record_endpoint_success(
-                                &app_handle,
-                                &upstream,
-                                base_url,
-                                &optimizer_config,
-                            );
-                            record_profile_success(
-                                &app_handle,
-                                &tool_id,
-                                &upstream.profile_id,
-                                &optimizer_config,
-                            );
-                            remember_preferred_upstream_base_url(
-                                &app_handle,
-                                &upstream.profile_id,
-                                &upstream.base_url,
-                                base_url,
-                            );
-                            if canonicalize_base_url(base_url)
-                                != canonicalize_base_url(&upstream.base_url)
-                            {
-                                crate::utils::append_runtime_log(
-                                    "info",
-                                    "provider_proxy",
-                                    &format!(
-                                        "Proxy failover promoted alternate endpoint [{tool_id}] {} -> {}",
-                                        upstream.base_url, base_url
-                                    ),
-                                );
-                            }
-                            if profile_index > 0 {
-                                let _ = app_handle.emit(
-                                    "provider-failover",
-                                    serde_json::json!({
-                                        "tool_id": &tool_id,
-                                        "profile_name": &upstream.profile_name,
-                                        "profile_id": &upstream.profile_id,
-                                    }),
-                                );
-                            }
-                        }
-
                         let headers = response.headers().clone();
                         let content_type = headers
                             .get(reqwest::header::CONTENT_TYPE)
@@ -403,8 +394,8 @@ pub(super) async fn forward_proxy_request(
                             .unwrap_or_default();
                         let is_json_response = content_type.contains("application/json")
                             || content_type.contains("+json");
-                        let is_stream_response = request_insights.is_streaming
-                            || content_type.contains("text/event-stream");
+                        let is_stream_response = content_type.contains("text/event-stream")
+                            || (request_insights.is_streaming && !is_json_response);
                         let claude_transform = upstream.claude_api_format.filter(|format| {
                             format.needs_transform()
                                 && is_claude_messages_path(&original_relative_path)
@@ -419,6 +410,26 @@ pub(super) async fn forward_proxy_request(
                             {
                                 Ok((_response_status, headers, bytes)) => {
                                     let parsed = parse_json_bytes(&bytes);
+                                    if status.is_success() && parsed.is_none() {
+                                        endpoint_lease.failure();
+                                        endpoint_failed = true;
+                                        last_error =
+                                            Some("Upstream returned invalid JSON".to_string());
+                                        continue 'endpoints;
+                                    }
+                                    if status.is_success()
+                                        && parsed.as_ref().is_some_and(|value| {
+                                            value.get("error").is_some_and(|error| !error.is_null())
+                                                || value.get("type").and_then(Value::as_str)
+                                                    == Some("error")
+                                        })
+                                    {
+                                        endpoint_lease.failure();
+                                        endpoint_failed = true;
+                                        last_error = Some(parsed.as_ref().and_then(extract_error_message_from_response)
+                                            .unwrap_or_else(|| "Upstream returned an error in a success response".to_string()));
+                                        continue 'endpoints;
+                                    }
                                     let upstream_error_message = parsed
                                         .as_ref()
                                         .and_then(extract_error_message_from_response);
@@ -492,10 +503,10 @@ pub(super) async fn forward_proxy_request(
                                                         StatusCode::BAD_GATEWAY.as_u16(),
                                                         Some(&message),
                                                     );
-                                                    return build_proxy_error(
-                                                        StatusCode::BAD_GATEWAY,
-                                                        message,
-                                                    );
+                                                    endpoint_lease.failure();
+                                                    endpoint_failed = true;
+                                                    last_error = Some(message);
+                                                    continue 'endpoints;
                                                 }
                                             }
                                         }
@@ -515,10 +526,10 @@ pub(super) async fn forward_proxy_request(
                                                 StatusCode::BAD_GATEWAY.as_u16(),
                                                 Some(&message),
                                             );
-                                            return build_proxy_error(
-                                                StatusCode::BAD_GATEWAY,
-                                                message,
-                                            );
+                                            endpoint_lease.failure();
+                                            endpoint_failed = true;
+                                            last_error = Some(message);
+                                            continue 'endpoints;
                                         }
                                         (Some(_), None) => {
                                             Some(openai_error_to_anthropic(status.as_u16(), None))
@@ -526,6 +537,19 @@ pub(super) async fn forward_proxy_request(
                                         (None, parsed) => parsed,
                                     };
 
+                                    if status.is_success() {
+                                        let endpoint_accepted = endpoint_lease.success();
+                                        let profile_accepted = profile_lease.success();
+                                        if endpoint_accepted && profile_accepted {
+                                            route_succeeded(
+                                                &app_handle,
+                                                &tool_id,
+                                                &upstream,
+                                                base_url,
+                                                profile_index > 0,
+                                            );
+                                        }
+                                    }
                                     let usage = transformed_body
                                         .as_ref()
                                         .and_then(parse_usage_metrics_from_response);
@@ -585,12 +609,38 @@ pub(super) async fn forward_proxy_request(
                                         StatusCode::BAD_GATEWAY.as_u16(),
                                         Some(&message),
                                     );
-                                    return build_proxy_error(StatusCode::BAD_GATEWAY, message);
+                                    endpoint_lease.failure();
+                                    endpoint_failed = true;
+                                    last_error = Some(message);
+                                    continue 'endpoints;
                                 }
                             }
                         }
 
                         if is_stream_response {
+                            let path = original_relative_path.trim_matches('/');
+                            let health = if is_claude_messages_path(path)
+                                || path.ends_with("chat/completions")
+                                || path.ends_with("responses")
+                                || path.contains(":streamGenerateContent")
+                            {
+                                streaming_health::StreamHealth::requiring_completion()
+                            } else {
+                                streaming_health::StreamHealth::default()
+                            };
+                            let route_app = app_handle.clone();
+                            let route_tool = tool_id.clone();
+                            let route_target = upstream.clone();
+                            let route_base = base_url.clone();
+                            let on_success = move || {
+                                route_succeeded(
+                                    &route_app,
+                                    &route_tool,
+                                    &route_target,
+                                    &route_base,
+                                    profile_index > 0,
+                                )
+                            };
                             log_proxy_request(
                                 &app_handle,
                                 &request_id,
@@ -615,98 +665,31 @@ pub(super) async fn forward_proxy_request(
                             } else {
                                 None
                             };
-                            if let Some(api_format) = claude_transform {
-                                let body = match api_format {
-                                    ClaudeApiFormat::OpenAiChat => {
-                                        Body::from_stream(create_usage_tracking_stream(
-                                            create_anthropic_sse_stream(response.bytes_stream()),
-                                            app_handle.clone(),
-                                            request_id.clone(),
-                                            tool_id.clone(),
-                                            upstream.clone(),
-                                            request_insights.clone(),
-                                            optimizer_config.streaming_first_byte_timeout,
-                                            optimizer_config.streaming_idle_timeout,
-                                        ))
-                                    }
-                                    ClaudeApiFormat::OpenAiResponses => {
-                                        Body::from_stream(create_usage_tracking_stream(
-                                            create_anthropic_sse_stream_from_responses(
-                                                response.bytes_stream(),
-                                            ),
-                                            app_handle.clone(),
-                                            request_id.clone(),
-                                            tool_id.clone(),
-                                            upstream.clone(),
-                                            request_insights.clone(),
-                                            optimizer_config.streaming_first_byte_timeout,
-                                            optimizer_config.streaming_idle_timeout,
-                                        ))
-                                    }
-                                    ClaudeApiFormat::GeminiNative => {
-                                        let gemini_model = request_insights
-                                            .request_model
-                                            .clone()
-                                            .unwrap_or_else(|| "gemini-3.6-flash".to_string());
-                                        Body::from_stream(create_usage_tracking_stream(
-                                            create_anthropic_sse_stream_from_gemini(
-                                                response.bytes_stream(),
-                                                gemini_model,
-                                            ),
-                                            app_handle.clone(),
-                                            request_id.clone(),
-                                            tool_id.clone(),
-                                            upstream.clone(),
-                                            request_insights.clone(),
-                                            optimizer_config.streaming_first_byte_timeout,
-                                            optimizer_config.streaming_idle_timeout,
-                                        ))
-                                    }
-                                    ClaudeApiFormat::Anthropic => {
-                                        Body::from_stream(create_usage_tracking_stream(
-                                            response.bytes_stream(),
-                                            app_handle.clone(),
-                                            request_id.clone(),
-                                            tool_id.clone(),
-                                            upstream.clone(),
-                                            request_insights.clone(),
-                                            optimizer_config.streaming_first_byte_timeout,
-                                            optimizer_config.streaming_idle_timeout,
-                                        ))
-                                    }
-                                };
-                                let body = if is_desktop {
-                                    Body::from_stream(desktop::restore_stream_model(
-                                        body.into_data_stream(),
-                                        desktop_model,
-                                    ))
-                                } else {
-                                    body
-                                };
-                                return build_forward_response_from_parts(status, &headers, body);
-                            }
-                            if content_type.contains("text/event-stream") {
-                                let body = Body::from_stream(create_usage_tracking_stream(
-                                    response.bytes_stream(),
-                                    app_handle.clone(),
-                                    request_id.clone(),
-                                    tool_id.clone(),
-                                    upstream.clone(),
-                                    request_insights.clone(),
-                                    optimizer_config.streaming_first_byte_timeout,
-                                    optimizer_config.streaming_idle_timeout,
-                                ));
-                                let body = if is_desktop {
-                                    Body::from_stream(desktop::restore_stream_model(
-                                        body.into_data_stream(),
-                                        desktop_model,
-                                    ))
-                                } else {
-                                    body
-                                };
-                                return build_forward_response_from_parts(status, &headers, body);
-                            }
-                            return build_forward_response(response);
+                            let body = streaming::streaming_body(
+                                response,
+                                claude_transform,
+                                app_handle.clone(),
+                                request_id.clone(),
+                                tool_id.clone(),
+                                upstream.clone(),
+                                request_insights.clone(),
+                                &optimizer_config,
+                                is_desktop,
+                                desktop_model,
+                                health.clone(),
+                            );
+                            return build_forward_response_from_parts(
+                                status,
+                                &headers,
+                                track_body(
+                                    body,
+                                    profile_lease,
+                                    endpoint_lease,
+                                    status.is_success(),
+                                    health,
+                                    on_success,
+                                ),
+                            );
                         }
 
                         let error_message = if status.is_success() {
@@ -729,6 +712,19 @@ pub(super) async fn forward_proxy_request(
                             .await
                         {
                             Ok((status, headers, bytes)) => {
+                                if status.is_success() {
+                                    let endpoint_accepted = endpoint_lease.success();
+                                    let profile_accepted = profile_lease.success();
+                                    if endpoint_accepted && profile_accepted {
+                                        route_succeeded(
+                                            &app_handle,
+                                            &tool_id,
+                                            &upstream,
+                                            base_url,
+                                            profile_index > 0,
+                                        );
+                                    }
+                                }
                                 return build_forward_response_from_parts(
                                     status,
                                     &headers,
@@ -751,7 +747,10 @@ pub(super) async fn forward_proxy_request(
                                     StatusCode::BAD_GATEWAY.as_u16(),
                                     Some(&message),
                                 );
-                                return build_proxy_error(StatusCode::BAD_GATEWAY, message);
+                                endpoint_lease.failure();
+                                endpoint_failed = true;
+                                last_error = Some(message);
+                                continue 'endpoints;
                             }
                         }
                     }
@@ -761,32 +760,12 @@ pub(super) async fn forward_proxy_request(
                             upstream.profile_name, tool_id, upstream.profile_id, base_url
                         );
                         last_error = Some(message.clone());
-                        record_endpoint_failure(
-                            &app_handle,
-                            &tool_id,
-                            &upstream,
-                            base_url,
-                            &optimizer_config,
-                        );
+                        endpoint_lease.failure();
+                        endpoint_failed = true;
                         if index + 1 < attempt_count {
-                            crate::utils::append_runtime_log(
-                                "warn",
-                                "provider_proxy",
-                                &format!(
-                                    "Proxy request failed [{tool_id}] {} @ {}: {error}. Trying next endpoint.",
-                                    upstream.profile_name, base_url
-                                ),
-                            );
-                            continue;
+                            continue 'endpoints;
                         }
-
-                        record_profile_failure(
-                            &app_handle,
-                            &tool_id,
-                            &upstream.profile_id,
-                            &upstream.profile_name,
-                            &optimizer_config,
-                        );
+                        profile_lease.failure();
                         if profile_index + 1 < profile_candidate_count {
                             crate::utils::append_runtime_log(
                                 "warn",
@@ -813,71 +792,42 @@ pub(super) async fn forward_proxy_request(
                             StatusCode::BAD_GATEWAY.as_u16(),
                             Some(&message),
                         );
-                        return build_proxy_error(StatusCode::BAD_GATEWAY, message);
+                        return last_response.unwrap_or_else(|| {
+                            build_proxy_error(StatusCode::BAD_GATEWAY, message)
+                        });
                     }
                 }
             }
         }
-    }
-
-    build_proxy_error(
-        StatusCode::BAD_GATEWAY,
-        last_error.unwrap_or_else(|| format!("No upstream provider available for {tool_id}")),
-    )
-}
-
-fn apply_local_proxy_body_override(body: Bytes, override_value: Option<&Value>) -> Bytes {
-    let Some(override_value) = override_value else {
-        return body;
-    };
-    let Ok(mut target) = serde_json::from_slice::<Value>(&body) else {
-        return body;
-    };
-    if !target.is_object() || !override_value.is_object() {
-        return body;
-    }
-    merge_json_objects(&mut target, override_value);
-    serde_json::to_vec(&target).map(Bytes::from).unwrap_or(body)
-}
-
-fn merge_json_objects(target: &mut Value, overrides: &Value) {
-    let Some(target_object) = target.as_object_mut() else {
-        *target = overrides.clone();
-        return;
-    };
-    let Some(override_object) = overrides.as_object() else {
-        *target = overrides.clone();
-        return;
-    };
-    for (key, value) in override_object {
-        if let Some(current) = target_object.get_mut(key) {
-            if current.is_object() && value.is_object() {
-                merge_json_objects(current, value);
-                continue;
-            }
+        if endpoint_failed {
+            profile_lease.failure();
         }
-        target_object.insert(key.clone(), value.clone());
     }
+
+    if let Some(response) = last_response {
+        return response;
+    }
+    let unavailable = last_error.is_none();
+    let mut response = build_proxy_error(
+        if last_error.is_some() {
+            StatusCode::BAD_GATEWAY
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        },
+        last_error.unwrap_or_else(|| format!("No upstream provider available for {tool_id}")),
+    );
+    if unavailable {
+        if let Ok(value) = axum::http::HeaderValue::from_str(
+            &retry_after_seconds(&runtime, &tool_id, &profile_ids).to_string(),
+        ) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+    }
+    response
 }
 
 #[cfg(test)]
-mod tests {
-    use super::apply_local_proxy_body_override;
-    use bytes::Bytes;
-    use serde_json::json;
-
-    #[test]
-    fn local_proxy_body_override_deep_merges_json_without_stream() {
-        let body =
-            Bytes::from(r#"{"model":"demo","generationConfig":{"temperature":0.7},"stream":true}"#);
-        let result = apply_local_proxy_body_override(
-            body,
-            Some(&json!({ "generationConfig": { "temperature": 0.2 }, "max_tokens": 64 })),
-        );
-        let value: serde_json::Value = serde_json::from_slice(&result).unwrap();
-        assert_eq!(value["model"], "demo");
-        assert_eq!(value["generationConfig"]["temperature"], 0.2);
-        assert_eq!(value["max_tokens"], 64);
-        assert_eq!(value["stream"], true);
-    }
-}
+#[path = "forward/tests.rs"]
+mod tests;

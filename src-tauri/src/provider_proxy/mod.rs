@@ -8,13 +8,15 @@ use axum::{
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::{AppHandle, Manager, State as TauriState};
 use tokio::sync::oneshot;
 
 mod alpha_search;
+mod circuits;
 mod cost;
+use circuits::{CircuitState, EndpointCircuitState};
 mod desktop;
 mod forward;
 mod optimizer;
@@ -32,11 +34,10 @@ use rewriters::{
     rewrite_opencode_snapshot,
 };
 use upstream::{
-    build_forward_response, build_forward_response_from_parts, build_json_response_from_value,
-    build_proxy_error, build_upstream_request_url, extract_request_insights,
-    extract_upstream_target, is_hop_by_hop_header, is_retryable_upstream_status,
-    next_proxy_request_id, parse_json_bytes, read_response_body_limited, reqwest_client,
-    transform_claude_request_body,
+    build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
+    build_upstream_request_url, extract_request_insights, extract_upstream_target,
+    is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
+    read_response_body_limited, reqwest_client, transform_claude_request_body,
 };
 
 use crate::db::DbState;
@@ -84,81 +85,6 @@ pub struct LocalProviderProxyStatus {
     pub enabled_apps: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum CircuitState {
-    #[default]
-    Closed,
-    Open,
-    HalfOpen,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(super) struct EndpointCircuitState {
-    pub(super) state: CircuitState,
-    pub(super) consecutive_failures: u32,
-    pub(super) consecutive_successes: u32,
-    pub(super) open_until: Option<Instant>,
-    pub(super) half_open_permit_taken: bool,
-}
-
-impl EndpointCircuitState {
-    pub(super) fn is_available(&mut self) -> bool {
-        match self.state {
-            CircuitState::Closed => true,
-            CircuitState::Open => {
-                if self.open_until.is_some_and(|until| Instant::now() >= until) {
-                    self.state = CircuitState::HalfOpen;
-                    self.half_open_permit_taken = true;
-                    self.consecutive_successes = 0;
-                    return true;
-                }
-                false
-            }
-            CircuitState::HalfOpen => false,
-        }
-    }
-
-    pub(super) fn record_success(&mut self, success_threshold: u32) {
-        self.consecutive_failures = 0;
-        match self.state {
-            CircuitState::HalfOpen => {
-                self.consecutive_successes += 1;
-                if self.consecutive_successes >= success_threshold {
-                    self.state = CircuitState::Closed;
-                    self.open_until = None;
-                    self.half_open_permit_taken = false;
-                } else {
-                    self.half_open_permit_taken = false;
-                }
-            }
-            _ => {
-                self.state = CircuitState::Closed;
-                self.open_until = None;
-            }
-        }
-    }
-
-    pub(super) fn record_failure(&mut self, failure_threshold: u32, timeout_secs: u64) {
-        self.consecutive_successes = 0;
-        match self.state {
-            CircuitState::HalfOpen => {
-                self.state = CircuitState::Open;
-                self.open_until = Some(Instant::now() + Duration::from_secs(timeout_secs));
-                self.half_open_permit_taken = false;
-                self.consecutive_failures = 0;
-            }
-            _ => {
-                self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-                if self.consecutive_failures >= failure_threshold {
-                    self.state = CircuitState::Open;
-                    self.open_until = Some(Instant::now() + Duration::from_secs(timeout_secs));
-                    self.consecutive_failures = 0;
-                }
-            }
-        }
-    }
-}
-
 #[derive(Default)]
 pub(super) struct LocalProviderProxyRuntimeInner {
     pub(super) port: Option<u16>,
@@ -170,7 +96,7 @@ pub(super) struct LocalProviderProxyRuntimeInner {
     pub(super) rectifier_config: Option<crate::proxy_optimizer::config::RectifierConfig>,
 }
 
-pub(crate) struct LocalProviderProxyRuntime(pub(super) Mutex<LocalProviderProxyRuntimeInner>);
+pub(crate) struct LocalProviderProxyRuntime(pub(super) Arc<Mutex<LocalProviderProxyRuntimeInner>>);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -353,9 +279,9 @@ pub(super) struct ProxyUsageMetrics {
 }
 
 pub(crate) fn init_local_provider_proxy_runtime(app_handle: &AppHandle) {
-    app_handle.manage(LocalProviderProxyRuntime(Mutex::new(
+    app_handle.manage(LocalProviderProxyRuntime(Arc::new(Mutex::new(
         LocalProviderProxyRuntimeInner::default(),
-    )));
+    ))));
 }
 
 pub(super) fn current_profile_setting_key(tool_id: &str) -> String {
@@ -727,52 +653,8 @@ pub(crate) fn set_claude_desktop_proxy_enabled(
 
 #[cfg(test)]
 mod tests {
-    use super::{CircuitState, EndpointCircuitState, PROXY_PATH_ROUTE, PROXY_ROOT_ROUTE};
+    use super::{PROXY_PATH_ROUTE, PROXY_ROOT_ROUTE};
     use axum::{routing::any, Router};
-    use std::time::Duration;
-
-    #[test]
-    fn circuit_opens_after_threshold_and_exposes_retry_window() {
-        let mut state = EndpointCircuitState::default();
-        state.record_failure(2, 30);
-        assert_eq!(state.state, CircuitState::Closed);
-        assert_eq!(state.consecutive_failures, 1);
-
-        state.record_failure(2, 30);
-        assert_eq!(state.state, CircuitState::Open);
-        assert!(state.open_until.is_some());
-        assert!(state.open_until.unwrap() > std::time::Instant::now());
-    }
-
-    #[test]
-    fn half_open_requires_recovery_threshold() {
-        let mut state = EndpointCircuitState {
-            state: CircuitState::Open,
-            open_until: Some(std::time::Instant::now() - Duration::from_secs(1)),
-            ..Default::default()
-        };
-        assert!(state.is_available());
-        assert_eq!(state.state, CircuitState::HalfOpen);
-        assert!(!state.is_available(), "only one half-open probe may run");
-
-        state.record_success(2);
-        assert_eq!(state.state, CircuitState::HalfOpen);
-        state.record_success(2);
-        assert_eq!(state.state, CircuitState::Closed);
-        assert!(state.open_until.is_none());
-    }
-
-    #[test]
-    fn half_open_failure_reopens_circuit() {
-        let mut state = EndpointCircuitState {
-            state: CircuitState::HalfOpen,
-            ..Default::default()
-        };
-        state.record_failure(3, 10);
-        assert_eq!(state.state, CircuitState::Open);
-        assert!(state.open_until.is_some());
-        assert_eq!(state.consecutive_failures, 0);
-    }
 
     #[test]
     fn local_proxy_routes_use_axum_v08_capture_syntax() {

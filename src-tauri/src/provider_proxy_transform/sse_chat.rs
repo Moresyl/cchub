@@ -113,6 +113,12 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                     continue;
                                 }
 
+                                if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+                                    if let Some(error) = super::stream_errors::error_event(&value, None) {
+                                        yield Ok(error);
+                                        return;
+                                    }
+                                }
                                 if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
                                     if message_id.is_none() {
                                         message_id = Some(chunk.id.clone());

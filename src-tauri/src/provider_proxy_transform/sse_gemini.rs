@@ -49,6 +49,10 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                             Err(_) => continue,
                         };
 
+                        if let Some(error) = super::stream_errors::error_event(&parsed, None) {
+                            yield Ok(error);
+                            return;
+                        }
                         let usage_meta = parsed.get("usageMetadata");
                         let input_tokens = usage_meta
                             .and_then(|u| u.get("promptTokenCount"))
@@ -191,7 +195,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                         }
                     });
                     yield Ok(Bytes::from(format!("event: error\ndata: {}\n\n", serde_json::to_string(&error_event).unwrap_or_default())));
-                    break;
+                    return;
                 }
             }
         }

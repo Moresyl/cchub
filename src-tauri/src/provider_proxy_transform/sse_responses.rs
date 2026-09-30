@@ -171,6 +171,10 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                             Err(_) => continue,
                         };
 
+                        if let Some(error) = super::stream_errors::error_event(&data, Some(event_name)) {
+                            yield Ok(error);
+                            return;
+                        }
                         match event_name {
                             "response.created" => {
                                 let response_obj = response_object_from_event(&data);

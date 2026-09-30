@@ -68,6 +68,9 @@ keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["linux-native"] }
 
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 [profile.dev]
 # Windows/MSVC has hit intermittent linker failures with optimized dev builds
 # (`anon.*.llvm.*` unresolved symbols). Keep dev codegen conservative.

@@ -55,6 +55,12 @@ Screenshots are from the desktop app; the example endpoint has been anonymized.
 | **Native Configs**   | OpenCode switching preserves JSONC comments, MCP, plugins, and other providers |
 | **Sessions & Usage** | Browse native sessions and import output, reasoning, and cache usage without duplicate billing |
 
+### Local proxy and failover
+
+Alternate endpoints are attempted in order. A profile records one failure after its available endpoints are exhausted. Disabling cross-profile failover or exhausting its retry budget preserves the vendor's HTTP status, error body, and `Retry-After`. Open circuits are not bypassed; when every candidate is blocked, the proxy returns HTTP 503 with a retry delay.
+
+Recovery allows one probe at a time, and cancellation releases its slot. Health is recorded after the response body finishes; streams also check vendor error events and completion markers, preserving split Unicode characters and handling CRLF boundaries. Chat, Responses, and Gemini adapters forward errors rather than fabricate normal completion after interruption. Late requests cannot change a newer circuit state after a reset or another opening.
+
 ### Native configuration and usage sync
 
 OpenCode uses the existing `opencode.jsonc` or `opencode.json`. Profiles retain the native provider ID and selected model, SDK extension options, and other model definitions. Applying a profile updates its provider and default model. Invalid syntax, duplicate fields, or an external change detected before writing stops the update with an actionable error.

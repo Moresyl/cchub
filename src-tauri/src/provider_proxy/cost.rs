@@ -190,8 +190,8 @@ fn update_daily_proxy_usage_rollup(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn log_proxy_request(
-    app_handle: &AppHandle,
+pub(super) fn log_proxy_request<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     request_id: &str,
     tool_id: &str,
     upstream: &UpstreamTarget,

@@ -89,6 +89,43 @@ pub(super) fn merge_proxy_usage_metrics(current: &mut ProxyUsageMetrics, next: &
         .max(next.cache_creation_tokens);
 }
 
+fn parse_partial_stream_usage(
+    usage: &Value,
+    response_model: Option<String>,
+) -> Option<ProxyUsageMetrics> {
+    let has_counter = [
+        "input_tokens",
+        "prompt_tokens",
+        "output_tokens",
+        "completion_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ]
+    .iter()
+    .any(|key| usage.get(key).and_then(Value::as_u64).is_some())
+        || usage
+            .pointer("/input_tokens_details/cached_tokens")
+            .and_then(Value::as_u64)
+            .is_some()
+        || usage
+            .pointer("/prompt_tokens_details/cached_tokens")
+            .and_then(Value::as_u64)
+            .is_some();
+    if !has_counter {
+        return None;
+    }
+    let mut usage = usage.as_object()?.clone();
+    if !usage.contains_key("input_tokens") && !usage.contains_key("prompt_tokens") {
+        usage.insert("input_tokens".into(), Value::from(0));
+    }
+    if !usage.contains_key("output_tokens") && !usage.contains_key("completion_tokens") {
+        usage.insert("output_tokens".into(), Value::from(0));
+    }
+    parse_usage_metrics_from_response(
+        &serde_json::json!({ "model": response_model, "usage": usage }),
+    )
+}
+
 pub(super) fn extract_stream_usage_metrics_from_event(body: &Value) -> Option<ProxyUsageMetrics> {
     let response_model = body
         .pointer("/message/model")
@@ -98,24 +135,15 @@ pub(super) fn extract_stream_usage_metrics_from_event(body: &Value) -> Option<Pr
         .map(|value| value.to_string());
 
     if let Some(usage) = body.pointer("/message/usage") {
-        return parse_usage_metrics_from_response(&serde_json::json!({
-            "model": response_model,
-            "usage": usage,
-        }));
+        return parse_partial_stream_usage(usage, response_model);
     }
 
     if let Some(usage) = body.pointer("/response/usage") {
-        return parse_usage_metrics_from_response(&serde_json::json!({
-            "model": response_model,
-            "usage": usage,
-        }));
+        return parse_partial_stream_usage(usage, response_model);
     }
 
     if let Some(usage) = body.get("usage") {
-        return parse_usage_metrics_from_response(&serde_json::json!({
-            "model": response_model,
-            "usage": usage,
-        }));
+        return parse_partial_stream_usage(usage, response_model);
     }
 
     if body.get("usageMetadata").is_some() {
@@ -171,8 +199,8 @@ pub(super) fn scan_stream_usage_buffer(
     changed
 }
 
-pub(super) fn finalize_stream_usage_log(
-    app_handle: &AppHandle,
+pub(super) fn finalize_stream_usage_log<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     request_id: &str,
     tool_id: &str,
     upstream: &UpstreamTarget,
@@ -327,9 +355,9 @@ pub(super) fn finalize_stream_usage_log(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn create_usage_tracking_stream<S, E>(
+pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(
     stream: S,
-    app_handle: AppHandle,
+    app_handle: AppHandle<R>,
     request_id: String,
     tool_id: String,
     upstream: UpstreamTarget,

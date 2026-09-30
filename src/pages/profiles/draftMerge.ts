@@ -62,6 +62,8 @@ export function mergeSharedDraftFields(
     next.modelCatalogAlias = parsed.modelCatalogAlias;
   } else if (toolId === "opencode") {
     next.npm = parsed.npm;
+    next.openCodeNativeProviderId = parsed.openCodeNativeProviderId;
+    next.openCodeSource = parsed.openCodeSource;
     next.modelName = parsed.modelName || next.modelName;
     next.openCodeContextLimit = parsed.openCodeContextLimit;
     next.openCodeOutputLimit = parsed.openCodeOutputLimit;

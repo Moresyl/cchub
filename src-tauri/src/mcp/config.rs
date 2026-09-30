@@ -211,7 +211,7 @@ fn scan_wrapped_mcp_json(path: &PathBuf, source: &str, servers: &mut Vec<Scanned
         Err(_) => return,
     };
 
-    let value: serde_json::Value = match serde_json::from_str(&content) {
+    let value = match crate::json_config::parse_json_object(&content) {
         Ok(v) => v,
         Err(_) => return,
     };
@@ -297,7 +297,7 @@ fn get_gemini_config_path() -> Option<PathBuf> {
 }
 
 fn get_opencode_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".opencode").join("opencode.json"))
+    crate::opencode_paths::default_config_path().ok()
 }
 
 // ── Codex TOML scanning ──
@@ -722,10 +722,9 @@ pub fn check_server_in_tool(name: &str, tool_id: &str) -> bool {
             let p = home.join(".gemini").join("settings.json");
             check_server_in_json_config(name, &p)
         }
-        "opencode" => {
-            let p = home.join(".opencode").join("opencode.json");
-            super::formats::has_json_server(&p, name, super::formats::JsonMcpFormat::OpenCode)
-        }
+        "opencode" => get_opencode_config_path().is_some_and(|path| {
+            super::formats::has_json_server(&path, name, super::formats::JsonMcpFormat::OpenCode)
+        }),
         "openclaw" => false, // OpenClaw MCP sync not yet supported
         "hermes" => hermes::mcp::has_server_in_default_root(name).unwrap_or(false),
         "mcode" => mcode::has_server(name),
@@ -796,13 +795,14 @@ Authorization = "Bearer secret"
         std::fs::write(
             &path,
             r#"{
+  // 用户保留的注释
   "theme": "system",
   "mcp": {
     "remote": {
       "type": "remote",
       "url": "https://example.com/mcp",
       "headers": {"Authorization": "Bearer secret"},
-      "enabled": true
+      "enabled": true,
     }
   }
 }"#,

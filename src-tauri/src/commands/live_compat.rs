@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::io::Read;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tauri::State;
@@ -145,33 +144,23 @@ const OPENCODE_RUNTIME_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[tauri::command]
 pub async fn get_opencode_runtime_models(db: State<'_, DbState>) -> Result<Vec<String>, String> {
-    let (config_dir, cli_path) = {
+    let (config_path, cli_path) = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        let config_dir = conn
-            .query_row(
-                "SELECT config_dir FROM custom_paths WHERE tool_id = 'opencode'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|home| home.join(".opencode")))
-            .ok_or("Cannot determine OpenCode config directory")?;
+        let config_path = crate::opencode_paths::config_path(&conn)?;
         (
-            config_dir,
+            config_path,
             crate::commands::extra_commands::resolve_cli_path("opencode"),
         )
     };
 
-    tokio::task::spawn_blocking(move || run_opencode_models(&cli_path, &config_dir))
+    tokio::task::spawn_blocking(move || run_opencode_models(&cli_path, &config_path))
         .await
         .map_err(|error| format!("OpenCode model discovery task failed: {error}"))?
 }
 
 fn run_opencode_models(
     cli_path: &str,
-    config_dir: &std::path::Path,
+    config_path: &std::path::Path,
 ) -> Result<Vec<String>, String> {
     let mut command = if cfg!(target_os = "windows")
         && (cli_path.ends_with(".cmd") || cli_path.ends_with(".bat"))
@@ -187,7 +176,13 @@ fn run_opencode_models(
     };
     crate::utils::configure_background_command(&mut command);
     command
-        .env("OPENCODE_CONFIG_DIR", config_dir)
+        .env("OPENCODE_CONFIG", config_path)
+        .env(
+            "OPENCODE_CONFIG_DIR",
+            config_path
+                .parent()
+                .ok_or("Invalid OpenCode config directory")?,
+        )
         .env("OPENCODE_DISABLE_PROJECT_CONFIG", "true")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

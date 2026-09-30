@@ -59,6 +59,9 @@ pub fn tool_config_file_name(tool_id: &str) -> Result<&'static str, String> {
 }
 
 pub fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<PathBuf, String> {
+    if tool_id == "opencode" {
+        return Ok(crate::opencode_paths::default_config_dir(home));
+    }
     let dir = match tool_id {
         "claude" => ".claude",
         "codex" => ".codex",
@@ -78,6 +81,9 @@ pub fn resolve_tool_config_dir(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<PathBuf, String> {
+    if tool_id == "opencode" {
+        return crate::opencode_paths::config_dir(conn);
+    }
     if tool_id == "hermes" {
         return hermes::hermes_root(conn);
     }
@@ -126,6 +132,9 @@ pub fn resolve_tool_config_path(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<PathBuf, String> {
+    if tool_id == "opencode" {
+        return crate::opencode_paths::config_path(conn);
+    }
     if tool_id == "hermes" {
         return hermes::config_path(conn);
     }
@@ -404,11 +413,7 @@ pub fn session_roots_for_tool(
     }
 
     if tool_id == "opencode" {
-        let data_root = std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")));
-        if let Some(root) = data_root.map(|root| root.join("opencode")) {
+        if let Some(root) = dirs::home_dir().map(|home| crate::opencode_paths::data_dir(&home)) {
             if root.exists() && seen.insert(root.to_string_lossy().to_string()) {
                 roots.push(root);
             }

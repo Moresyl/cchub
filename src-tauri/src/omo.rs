@@ -69,42 +69,11 @@ pub fn variant_from_id(value: &str) -> Result<&'static OmoVariant, String> {
 }
 
 fn resolve_opencode_config_dir(conn: &Connection) -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-
-    let custom_dir: Option<String> = conn
-        .query_row(
-            "SELECT config_dir FROM custom_paths WHERE tool_id = 'opencode'",
-            [],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if let Some(dir) = custom_dir.filter(|dir| !dir.trim().is_empty()) {
-        return Ok(PathBuf::from(dir));
-    }
-
-    let custom_config_path: Option<String> = conn
-        .query_row(
-            "SELECT mcp_config_path FROM custom_paths WHERE tool_id = 'opencode'",
-            [],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if let Some(path) = custom_config_path.filter(|path| !path.trim().is_empty()) {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            return Ok(parent.to_path_buf());
-        }
-    }
-
-    Ok(home.join(".opencode"))
+    crate::opencode_paths::config_dir(conn)
 }
 
 fn opencode_config_path(conn: &Connection) -> Result<PathBuf, String> {
-    Ok(resolve_opencode_config_dir(conn)?.join("opencode.json"))
+    crate::opencode_paths::config_path(conn)
 }
 
 fn variant_candidates(base_dir: &Path, variant: &OmoVariant) -> Vec<PathBuf> {
@@ -142,136 +111,9 @@ fn find_unified_config_path(variant: &OmoVariant) -> Result<Option<PathBuf>, Str
     Ok(None)
 }
 
-fn strip_jsonc_comments(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let chars: Vec<char> = input.chars().collect();
-    let mut index = 0;
-    let mut in_string = false;
-    let mut escape = false;
-    let mut quote = '\0';
-    let mut line_comment = false;
-    let mut block_comment = false;
-
-    while index < chars.len() {
-        let current = chars[index];
-        let next = chars.get(index + 1).copied().unwrap_or('\0');
-
-        if line_comment {
-            if current == '\n' {
-                line_comment = false;
-                output.push('\n');
-            }
-            index += 1;
-            continue;
-        }
-
-        if block_comment {
-            if current == '*' && next == '/' {
-                block_comment = false;
-                index += 2;
-            } else {
-                if current == '\n' {
-                    output.push('\n');
-                }
-                index += 1;
-            }
-            continue;
-        }
-
-        if in_string {
-            output.push(current);
-            if escape {
-                escape = false;
-            } else if current == '\\' {
-                escape = true;
-            } else if current == quote {
-                in_string = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if (current == '"' || current == '\'') && !line_comment && !block_comment {
-            in_string = true;
-            quote = current;
-            output.push(current);
-            index += 1;
-            continue;
-        }
-
-        if current == '/' && next == '/' {
-            line_comment = true;
-            index += 2;
-            continue;
-        }
-
-        if current == '/' && next == '*' {
-            block_comment = true;
-            index += 2;
-            continue;
-        }
-
-        output.push(current);
-        index += 1;
-    }
-
-    output
-}
-
-fn strip_jsonc_trailing_commas(input: &str) -> String {
-    let chars: Vec<char> = input.chars().collect();
-    let mut output = String::with_capacity(input.len());
-    let mut index = 0;
-    let mut in_string = false;
-    let mut escape = false;
-
-    while index < chars.len() {
-        let current = chars[index];
-        if in_string {
-            output.push(current);
-            if escape {
-                escape = false;
-            } else if current == '\\' {
-                escape = true;
-            } else if current == '"' {
-                in_string = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if current == '"' {
-            in_string = true;
-            output.push(current);
-            index += 1;
-            continue;
-        }
-
-        if current == ',' {
-            let mut lookahead = index + 1;
-            while chars
-                .get(lookahead)
-                .is_some_and(|value| value.is_whitespace())
-            {
-                lookahead += 1;
-            }
-            if matches!(chars.get(lookahead), Some('}' | ']')) {
-                index += 1;
-                continue;
-            }
-        }
-
-        output.push(current);
-        index += 1;
-    }
-
-    output
-}
-
 fn read_jsonc_object(path: &Path) -> Result<Map<String, Value>, String> {
     let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let cleaned = strip_jsonc_trailing_commas(&strip_jsonc_comments(&content));
-    let parsed: Value = serde_json::from_str(&cleaned).map_err(|e| e.to_string())?;
+    let parsed = crate::json_config::parse_json_object(&content)?;
     parsed
         .as_object()
         .cloned()
@@ -293,6 +135,7 @@ fn read_config_object(path: &Path, unified: bool) -> Result<Map<String, Value>, 
     }
 }
 
+#[cfg(test)]
 fn build_config_root(
     path: &Path,
     unified: bool,
@@ -350,7 +193,7 @@ fn read_opencode_plugins(path: &Path) -> Result<(Map<String, Value>, Vec<String>
     }
 
     let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let parsed: Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let parsed = crate::json_config::parse_json_object(&content)?;
     let obj = parsed
         .as_object()
         .cloned()
@@ -368,59 +211,59 @@ fn read_opencode_plugins(path: &Path) -> Result<(Map<String, Value>, Vec<String>
     Ok((obj, plugins))
 }
 
+fn plugin_values(document: &Value) -> Result<Vec<Value>, String> {
+    match document.get("plugin") {
+        None => Ok(Vec::new()),
+        Some(Value::Array(values)) => Ok(values.clone()),
+        Some(_) => Err("OpenCode plugin configuration must be an array".into()),
+    }
+}
+
 fn sync_omo_plugin(opencode_path: &Path, variant: &OmoVariant) -> Result<Vec<String>, String> {
-    let (mut config, mut plugins) = read_opencode_plugins(opencode_path)?;
     let normalized_plugin = canonicalize_plugin_name(variant.plugin_name);
-
-    plugins.retain(|plugin| {
-        !matches_any_plugin_prefix(plugin, &STANDARD_PLUGIN_PREFIXES)
-            && !matches_any_plugin_prefix(plugin, &SLIM_PLUGIN_PREFIXES)
-    });
-    if !plugins.iter().any(|plugin| plugin == &normalized_plugin) {
-        plugins.push(normalized_plugin);
-    }
-
-    config.insert(
-        "plugin".to_string(),
-        Value::Array(plugins.iter().cloned().map(Value::String).collect()),
-    );
-
-    if let Some(parent) = opencode_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let content =
-        serde_json::to_string_pretty(&Value::Object(config)).map_err(|e| e.to_string())?;
-    crate::utils::atomic_write_string(opencode_path, &content).map_err(|e| e.to_string())?;
-    Ok(plugins)
+    let mut result = Vec::new();
+    crate::json_config::update_json_file(opencode_path, |document| {
+        let mut plugins = plugin_values(document)?;
+        plugins.retain(|plugin| {
+            plugin.as_str().is_none_or(|name| {
+                !matches_any_plugin_prefix(name, &STANDARD_PLUGIN_PREFIXES)
+                    && !matches_any_plugin_prefix(name, &SLIM_PLUGIN_PREFIXES)
+            })
+        });
+        if !plugins
+            .iter()
+            .any(|value| value.as_str() == Some(&normalized_plugin))
+        {
+            plugins.push(Value::String(normalized_plugin));
+        }
+        result = plugins
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect();
+        document["plugin"] = Value::Array(plugins);
+        Ok(())
+    })?;
+    Ok(result)
 }
 
 pub fn disable_local_plugin(conn: &Connection, variant: &OmoVariant) -> Result<bool, String> {
     let opencode_path = opencode_config_path(conn)?;
-    if !opencode_path.exists() {
-        return Ok(false);
-    }
-    let (mut config, plugins) = read_opencode_plugins(&opencode_path)?;
-    let filtered = plugins
-        .into_iter()
-        .filter(|plugin| !matches_any_plugin_prefix(plugin, variant.plugin_prefixes))
-        .collect::<Vec<_>>();
-    if filtered.len()
-        == config
-            .get("plugin")
-            .and_then(Value::as_array)
-            .map(|items| items.len())
-            .unwrap_or(0)
-    {
-        return Ok(false);
-    }
-    config.insert(
-        "plugin".to_string(),
-        Value::Array(filtered.into_iter().map(Value::String).collect()),
-    );
-    let content =
-        serde_json::to_string_pretty(&Value::Object(config)).map_err(|e| e.to_string())?;
-    crate::utils::atomic_write_string(&opencode_path, &content).map_err(|e| e.to_string())?;
-    Ok(true)
+    let mut changed = false;
+    crate::json_config::update_json_file(&opencode_path, |document| {
+        let mut plugins = plugin_values(document)?;
+        let previous_count = plugins.len();
+        plugins.retain(|plugin| {
+            plugin
+                .as_str()
+                .is_none_or(|name| !matches_any_plugin_prefix(name, variant.plugin_prefixes))
+        });
+        changed = previous_count != plugins.len();
+        if changed {
+            document["plugin"] = Value::Array(plugins);
+        }
+        Ok(())
+    })?;
+    Ok(changed)
 }
 
 pub fn read_local_config(
@@ -528,10 +371,14 @@ pub fn write_local_config(
         );
     }
 
-    let root = build_config_root(&config_path, is_unified, section)?;
-
-    let content = serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
-    crate::utils::atomic_write_string(&config_path, &content).map_err(|e| e.to_string())?;
+    crate::json_config::update_json_file(&config_path, |document| {
+        if is_unified {
+            document[OPENCODE_SECTION_KEY] = Value::Object(section);
+        } else {
+            *document = Value::Object(section);
+        }
+        Ok(())
+    })?;
 
     let opencode_path = opencode_config_path(conn)?;
     let _ = sync_omo_plugin(&opencode_path, variant)?;
@@ -619,5 +466,43 @@ mod tests {
             Some(1)
         );
         assert!(root.get("[opencode]").is_some());
+    }
+
+    #[test]
+    fn plugin_updates_preserve_jsonc_and_plugin_options() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opencode.jsonc");
+        let source = r#"{
+  // 保留插件注释
+  "plugin": ["other", ["with-options", {"flag": true}], "oh-my-opencode@old"],
+  "permission": { "bash": "ask" }
+}"#;
+        std::fs::write(&path, source).unwrap();
+        let plugins = sync_omo_plugin(&path, &STANDARD_VARIANT).unwrap();
+        assert!(plugins.contains(&"other".into()));
+        assert!(plugins.contains(&STANDARD_VARIANT.plugin_name.to_string()));
+        let output = std::fs::read_to_string(&path).unwrap();
+        assert!(output.contains("// 保留插件注释"));
+        assert!(output.contains(r#""permission": { "bash": "ask" }"#));
+        let value = crate::json_config::parse_json_object(&output).unwrap();
+        assert_eq!(
+            value["plugin"][1],
+            serde_json::json!(["with-options", {"flag":true}])
+        );
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE custom_paths (tool_id TEXT, config_dir TEXT, mcp_config_path TEXT)",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO custom_paths VALUES ('opencode', ?1, NULL)",
+            [directory.path().to_str().unwrap()],
+        )
+        .unwrap();
+        assert!(disable_local_plugin(&conn, &STANDARD_VARIANT).unwrap());
+        let disabled = std::fs::read_to_string(&path).unwrap();
+        assert!(!disable_local_plugin(&conn, &STANDARD_VARIANT).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), disabled);
+        assert!(disabled.contains("// 保留插件注释"));
     }
 }

@@ -29,6 +29,61 @@ fn env_present(keys: &[&str]) -> bool {
     })
 }
 
+fn credential_value(value: &serde_json::Value) -> bool {
+    let Some(value) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    if let Some(variable) = value
+        .strip_prefix("{env:")
+        .and_then(|value| value.strip_suffix('}'))
+    {
+        return env_present(&[variable]);
+    }
+    true
+}
+
+fn opencode_file_has_credentials(path: &std::path::Path) -> bool {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = crate::json_config::parse_json_object(&source) else {
+        return false;
+    };
+    if value
+        .pointer("/options/apiKey")
+        .is_some_and(credential_value)
+    {
+        return true;
+    }
+    if value
+        .get("provider")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|providers| {
+            providers.values().any(|provider| {
+                provider
+                    .pointer("/options/apiKey")
+                    .is_some_and(credential_value)
+            })
+        })
+    {
+        return true;
+    }
+    value.as_object().is_some_and(|providers| {
+        providers.values().any(|provider| {
+            matches!(
+                provider.get("type").and_then(serde_json::Value::as_str),
+                Some("api" | "oauth")
+            ) && ["key", "access", "refresh"]
+                .iter()
+                .any(|key| provider.get(*key).is_some_and(credential_value))
+        })
+    })
+}
+
 fn status_for_tool(conn: &rusqlite::Connection, tool_id: &str) -> LocalAuthStatus {
     let config_dir = resolve_tool_config_dir(conn, tool_id).ok();
     let candidates: Vec<std::path::PathBuf> = match (tool_id, config_dir.as_ref()) {
@@ -36,13 +91,31 @@ fn status_for_tool(conn: &rusqlite::Connection, tool_id: &str) -> LocalAuthStatu
         ("codex", Some(dir)) => vec![dir.join("auth.json")],
         ("gemini", Some(dir)) => vec![dir.join("oauth_creds.json"), dir.join("settings.json")],
         ("openclaw", Some(dir)) => vec![dir.join("auth-profiles.json"), dir.join("openclaw.json")],
-        ("opencode", Some(dir)) => vec![dir.join("auth.json"), dir.join("opencode.json")],
+        ("opencode", Some(dir)) => {
+            let mut paths = dirs::home_dir()
+                .map(|home| vec![crate::opencode_paths::data_dir(&home).join("auth.json")])
+                .unwrap_or_default();
+            paths.push(dir.join("auth.json"));
+            if let Ok(path) = resolve_tool_config_path(conn, tool_id) {
+                paths.push(path);
+            }
+            paths
+        }
         ("hermes", Some(dir)) => vec![dir.join("config.yaml"), dir.join("config.yml")],
         ("pi", Some(dir)) => vec![dir.join("models.json"), dir.join("settings.json")],
         ("grokbuild", Some(dir)) => vec![dir.join("auth.json"), dir.join("config.toml")],
         _ => Vec::new(),
     };
-    let credential_path = candidates.iter().find(|path| non_empty_file(path)).cloned();
+    let credential_path = candidates
+        .iter()
+        .find(|path| {
+            if tool_id == "opencode" {
+                opencode_file_has_credentials(path)
+            } else {
+                non_empty_file(path)
+            }
+        })
+        .cloned();
     let environment = match tool_id {
         "claude" => env_present(&["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]),
         "codex" => env_present(&["OPENAI_API_KEY"]),
@@ -94,10 +167,34 @@ pub fn get_local_auth_status(db: State<'_, DbState>) -> Result<Vec<LocalAuthStat
 
 #[cfg(test)]
 mod tests {
-    use super::env_present;
+    use super::{env_present, opencode_file_has_credentials};
 
     #[test]
     fn env_present_returns_false_for_empty_input() {
         assert!(!env_present(&[]));
+    }
+
+    #[test]
+    fn opencode_auth_detection_requires_an_actual_credential() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("auth.json");
+        for source in [
+            "{}\n",
+            "{\"theme\":\"dark\"}",
+            "{\"provider\":{\"custom\":{\"options\":{\"apiKey\":\" \"}}}}",
+            "{\"openai\":{\"type\":\"oauth\",\"expires\":123}}",
+            "broken",
+        ] {
+            std::fs::write(&path, source).unwrap();
+            assert!(!opencode_file_has_credentials(&path));
+        }
+        for source in [
+            "{\"openai\":{\"type\":\"api\",\"key\":\"fixture\"}}",
+            "{\"openai\":{\"type\":\"oauth\",\"refresh\":\"fixture\"}}",
+            "{ // config\n\"provider\":{\"custom\":{\"options\":{\"apiKey\":\"fixture\"}}}}",
+        ] {
+            std::fs::write(&path, source).unwrap();
+            assert!(opencode_file_has_credentials(&path));
+        }
     }
 }

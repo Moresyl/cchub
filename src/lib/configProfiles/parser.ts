@@ -255,7 +255,7 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       const options = (parsed.options || {}) as Record<string, string>;
       const modelsObj = (parsed.models || {}) as Record<string, Record<string, any>>;
       const modelEntries = Object.entries(modelsObj);
-      const firstEntry = modelEntries[0];
+      const firstEntry = modelEntries.find(([id]) => id === metadata.nativeModelId) || modelEntries[0];
       const firstModel = firstEntry?.[1] || {};
       const variants = (firstModel.variants || {}) as Record<string, Record<string, any>>;
       const firstVariantName = Object.keys(variants)[0] || "";
@@ -268,9 +268,11 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         ...transportFields,
         usageScript,
         npm,
+        openCodeNativeProviderId: typeof metadata.nativeProviderId === "string" ? metadata.nativeProviderId : undefined,
+        openCodeSource: parsed,
         baseUrl: options.baseURL || "",
         apiKey: options.apiKey || "",
-        model: firstEntry?.[0] || "",
+        model: typeof metadata.nativeModelId === "string" ? metadata.nativeModelId : firstEntry?.[0] || "",
         modelName: firstModel.name || "",
         websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,

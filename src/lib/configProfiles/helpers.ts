@@ -270,6 +270,8 @@ export function applyPresetToFields(
       suggestedFallbackModels: current?.suggestedFallbackModels || "",
       modelCatalogAlias: current?.modelCatalogAlias || "",
       openCodeContextLimit: current?.openCodeContextLimit || "",
+      openCodeNativeProviderId: current?.openCodeNativeProviderId,
+      openCodeSource: current?.openCodeSource,
       openCodeOutputLimit: current?.openCodeOutputLimit || "",
       openCodeInputModalities: current?.openCodeInputModalities || "",
       openCodeOutputModalities: current?.openCodeOutputModalities || "",

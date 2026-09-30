@@ -68,7 +68,10 @@ fn config_root_paths(
     Ok(CONFIG_ROOTS
         .iter()
         .map(|root| {
-            let path = if root.id == "hermes" {
+            let path = if root.id == "opencode" {
+                crate::opencode_paths::config_dir(conn)
+                    .unwrap_or_else(|_| crate::opencode_paths::default_config_dir(&home))
+            } else if root.id == "hermes" {
                 hermes::hermes_root(conn).unwrap_or_else(|_| home.join(root.dir))
             } else {
                 home.join(root.dir)

@@ -368,7 +368,6 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
                     openCodeThinkingLevel: (value === "none" ? "" : value) as OpenCodeThinkingLevel | "",
                   })
                 }
-                className="h-7"
               />
             </Field>
           </div>

@@ -56,7 +56,7 @@ pub fn bootstrap_tool_environment_from_conn(
         }
         "opencode" => {
             write_default_file_if_missing(
-                &config_dir.join("opencode.json"),
+                &resolve_tool_config_path(conn, tool_id)?,
                 "{}\n",
                 &mut created_files,
             )?;

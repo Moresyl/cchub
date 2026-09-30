@@ -136,6 +136,10 @@ fn base_dir_for_candidate(
     home: &std::path::Path,
     conn: &Connection,
 ) -> PathBuf {
+    if candidate.id == "opencode" {
+        return crate::opencode_paths::config_dir(conn)
+            .unwrap_or_else(|_| crate::opencode_paths::default_config_dir(home));
+    }
     if candidate.id == "hermes" {
         if let Ok(path) = crate::hermes::hermes_root(conn) {
             return path;
@@ -171,9 +175,16 @@ fn detect_tools_with_conn(conn: &Connection) -> Vec<DetectedTool> {
         .iter()
         .map(|t| {
             let base = base_dir_for_candidate(t, &home, conn);
-            let config_path = base.join(t.config_file);
+            let config_path = if t.id == "opencode" {
+                crate::opencode_paths::config_path(conn)
+                    .unwrap_or_else(|_| base.join(t.config_file))
+            } else {
+                base.join(t.config_file)
+            };
             let mcp_config_path = if t.id == "claude" {
                 home.join(".claude.json")
+            } else if t.id == "opencode" {
+                config_path.clone()
             } else {
                 base.join(t.mcp_config_file)
             };

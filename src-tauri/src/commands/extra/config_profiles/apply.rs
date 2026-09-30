@@ -145,8 +145,8 @@ pub fn config_contents_match(left: &str, right: &str) -> bool {
     }
 
     match (
-        serde_json::from_str::<serde_json::Value>(left),
-        serde_json::from_str::<serde_json::Value>(right),
+        crate::json_config::parse_json_object(left),
+        crate::json_config::parse_json_object(right),
     ) {
         (Ok(mut a), Ok(mut b)) => {
             // Strip metadata keys used for claude profile splitting
@@ -216,6 +216,9 @@ pub fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<
             .map_err(|e| e.to_string())
         }
         "hermes" => hermes::snapshot::read_snapshot(conn),
+        "opencode" => {
+            crate::opencode_profiles::read_profile(&resolve_tool_config_path(conn, tool_id)?)
+        }
         "grokbuild" => crate::grok_config::read_snapshot(),
         "pi" => {
             let config_path = resolve_tool_config_path(conn, tool_id)?;
@@ -356,11 +359,20 @@ pub fn apply_tool_snapshot_with_options(
     snapshot: &str,
     preserve_user_edits: bool,
 ) -> Result<(), String> {
+    let snapshot = if tool_id == "opencode" {
+        crate::opencode_profiles::normalize_profile(snapshot)?
+    } else {
+        snapshot.to_string()
+    };
     let effective_snapshot =
-        crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool_id, snapshot)?;
+        crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool_id, &snapshot)?;
 
     match tool_id {
         "mcode" => Err("MiniMax Code providers must be managed individually".to_string()),
+        "opencode" => crate::opencode_profiles::apply_profile(
+            &resolve_tool_config_path(conn, tool_id)?,
+            &effective_snapshot,
+        ),
         "codex" => {
             let dir = resolve_tool_config_dir(conn, tool_id)?;
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

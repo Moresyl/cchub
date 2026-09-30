@@ -143,6 +143,11 @@ pub fn save_config_profile(
     config_snapshot: String,
     db: State<'_, DbState>,
 ) -> Result<String, String> {
+    let config_snapshot = if tool_id == "opencode" {
+        crate::opencode_profiles::normalize_profile(&config_snapshot)?
+    } else {
+        config_snapshot
+    };
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -168,6 +173,16 @@ pub fn save_shared_config_profiles(
     if profiles.is_empty() {
         return Err("At least one target tool is required".to_string());
     }
+    let profiles = profiles
+        .into_iter()
+        .map(|mut profile| {
+            if profile.tool_id == "opencode" {
+                profile.config_snapshot =
+                    crate::opencode_profiles::normalize_profile(&profile.config_snapshot)?;
+            }
+            Ok(profile)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
 
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
@@ -291,6 +306,12 @@ pub fn update_config_profile(
             |row| row.get(0),
         )
         .map_err(|e| format!("Profile not found: {}", e))?;
+
+    let config_snapshot = if tool_id == "opencode" {
+        crate::opencode_profiles::normalize_profile(&config_snapshot)?
+    } else {
+        config_snapshot
+    };
 
     conn.execute(
         "UPDATE config_profiles SET name = ?1, config_snapshot = ?2, source_type = 'manual', source_key = NULL, updated_at = ?3 WHERE id = ?4",

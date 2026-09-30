@@ -171,55 +171,61 @@ pub fn write_json_server(
     config: &McpServerConfig,
     format: JsonMcpFormat,
 ) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let mut document = if path.exists() {
-        let content = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-        serde_json::from_str::<Value>(&content)
-            .map_err(|error| format!("Invalid MCP JSON at {}: {error}", path.display()))?
-    } else {
-        json!({})
-    };
-    let root = document
-        .as_object_mut()
-        .ok_or_else(|| format!("MCP config must be a JSON object: {}", path.display()))?;
-    let container_key = format.container_key();
-    let servers = root.entry(container_key).or_insert_with(|| json!({}));
-    let servers = servers
-        .as_object_mut()
-        .ok_or_else(|| format!("{container_key} must be a JSON object: {}", path.display()))?;
     let spec = match format {
         JsonMcpFormat::Standard => standard_spec(config),
         JsonMcpFormat::Gemini => gemini_spec(config),
         JsonMcpFormat::OpenCode => opencode_spec(config),
     };
-    servers.insert(name.to_string(), spec);
-    let content = serde_json::to_string_pretty(&document).map_err(|error| error.to_string())?;
-    crate::utils::atomic_write_string(path, &content).map_err(|error| error.to_string())
+    crate::json_config::update_json_file(path, |document| {
+        let root = document
+            .as_object_mut()
+            .ok_or("MCP config must be a JSON object")?;
+        let container_key = format.container_key();
+        let servers = root.entry(container_key).or_insert_with(|| json!({}));
+        let servers = servers
+            .as_object_mut()
+            .ok_or_else(|| format!("{container_key} must be a JSON object"))?;
+        let mut entry = match servers.get(name) {
+            Some(Value::Object(existing)) => existing.clone(),
+            Some(_) => return Err("Existing MCP entry must be a JSON object".into()),
+            None => serde_json::Map::new(),
+        };
+        // These fields belong to the connection form. Preserve all extension
+        // fields (timeouts, OAuth, vendor options), but discard stale transport fields.
+        for key in [
+            "type",
+            "command",
+            "args",
+            "env",
+            "environment",
+            "url",
+            "httpUrl",
+            "headers",
+        ] {
+            entry.remove(key);
+        }
+        entry.extend(spec.as_object().expect("MCP spec object").clone());
+        servers.insert(name.to_string(), Value::Object(entry));
+        Ok(())
+    })
 }
 
 pub fn remove_json_server(path: &Path, name: &str, format: JsonMcpFormat) -> Result<(), String> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let content = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let mut document: Value = serde_json::from_str(&content)
-        .map_err(|error| format!("Invalid MCP JSON at {}: {error}", path.display()))?;
-    if let Some(servers) = document
-        .get_mut(format.container_key())
-        .and_then(Value::as_object_mut)
-    {
-        servers.remove(name);
-    }
-    let content = serde_json::to_string_pretty(&document).map_err(|error| error.to_string())?;
-    crate::utils::atomic_write_string(path, &content).map_err(|error| error.to_string())
+    crate::json_config::update_json_file(path, |document| {
+        if let Some(container) = document.get_mut(format.container_key()) {
+            let servers = container
+                .as_object_mut()
+                .ok_or("MCP container must be a JSON object")?;
+            servers.remove(name);
+        }
+        Ok(())
+    })
 }
 
 pub fn has_json_server(path: &Path, name: &str, format: JsonMcpFormat) -> bool {
     std::fs::read_to_string(path)
         .ok()
-        .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+        .and_then(|content| crate::json_config::parse_json_object(&content).ok())
         .and_then(|document| {
             document
                 .get(format.container_key())
@@ -419,5 +425,91 @@ mod tests {
             config.env.get("Authorization").map(String::as_str),
             Some("Bearer secret")
         );
+    }
+
+    #[test]
+    fn jsonc_mcp_round_trip_preserves_extensions_and_unrelated_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opencode.jsonc");
+        let source = r#"{
+  // 软件设置不归 MCP 表单管理
+  "theme": "dark",
+  "mcp": {
+    "other": { "type": "local", "command": ["keep"], },
+    "target": {
+      "type": "local",
+      "command": ["old"],
+      "environment": {"OLD": "value"},
+      "timeout": 12500, // 自定义扩展
+      "oauth": { "clientId": "local", "scopes": ["read"] }
+    }
+  }
+}
+"#;
+        std::fs::write(&path, source).unwrap();
+        write_json_server(&path, "target", &remote_config(), JsonMcpFormat::OpenCode).unwrap();
+        let output = std::fs::read_to_string(&path).unwrap();
+        assert!(output.contains("// 软件设置不归 MCP 表单管理\n  \"theme\": \"dark\""));
+        assert!(output.contains(r#""other": { "type": "local", "command": ["keep"], },"#));
+        assert!(output.contains("\"timeout\": 12500, // 自定义扩展"));
+        assert!(output.contains(r#""oauth": { "clientId": "local", "scopes": ["read"] }"#));
+        let value = crate::json_config::parse_json_object(&output).unwrap();
+        let target = &value["mcp"]["target"];
+        assert_eq!(target["type"], "remote");
+        assert_eq!(target["enabled"], true);
+        assert!(target.get("command").is_none());
+        assert!(target.get("environment").is_none());
+        assert!(has_json_server(&path, "target", JsonMcpFormat::OpenCode));
+        write_json_server(&path, "target", &remote_config(), JsonMcpFormat::OpenCode).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), output);
+        remove_json_server(&path, "target", JsonMcpFormat::OpenCode).unwrap();
+        assert!(!has_json_server(&path, "target", JsonMcpFormat::OpenCode));
+        assert!(has_json_server(&path, "other", JsonMcpFormat::OpenCode));
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("// 软件设置不归 MCP 表单管理"));
+    }
+
+    #[test]
+    fn json_mcp_rejects_invalid_containers_and_leaves_missing_deletions_untouched() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        remove_json_server(&path, "missing", JsonMcpFormat::Standard).unwrap();
+        assert!(!path.exists());
+        for source in [r#"{"mcpServers": []}"#, r#"{"mcpServers": {"target": 5}}"#] {
+            std::fs::write(&path, source).unwrap();
+            assert!(
+                write_json_server(&path, "target", &remote_config(), JsonMcpFormat::Standard)
+                    .is_err()
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        }
+        std::fs::write(&path, r#"{"mcpServers": []}"#).unwrap();
+        assert!(remove_json_server(&path, "target", JsonMcpFormat::Standard).is_err());
+    }
+
+    #[test]
+    fn switching_remote_to_local_clears_only_transport_fields() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"mcpServers":{"server":{"url":"old","headers":{"SECRET":"old"},"timeout":5000}}}"#,
+        )
+        .unwrap();
+        let local = McpServerConfig {
+            command: "node".into(),
+            args: vec!["server.js".into()],
+            env: HashMap::new(),
+            transport_type: Some("stdio".into()),
+        };
+        write_json_server(&path, "server", &local, JsonMcpFormat::Standard).unwrap();
+        let value =
+            crate::json_config::parse_json_object(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let server = &value["mcpServers"]["server"];
+        assert_eq!(server["command"], "node");
+        assert_eq!(server["timeout"], 5000);
+        assert!(server.get("url").is_none());
+        assert!(server.get("headers").is_none());
     }
 }

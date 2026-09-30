@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { StructuredDraftFields } from "./types";
+import { buildOpenCodeProvider } from "./opencode";
 import {
   normalizeCustomUserAgent,
   normalizeEndpointList,
@@ -336,11 +337,10 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     }
 
     return JSON.stringify(
-      {
-        npm: fields.npm.trim() || "@ai-sdk/openai-compatible",
-        customEndpoints,
-        name: "custom",
-        metadata: {
+      buildOpenCodeProvider(
+        fields,
+        modelEntry,
+        {
           ...transportMetadata,
           ...usageMetadata,
           category: fields.category,
@@ -351,16 +351,8 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
           useFullUrl: fields.useFullUrl || undefined,
           iconUrl: fields.iconUrl.trim() || undefined,
         },
-        options: {
-          baseURL: fields.baseUrl.trim(),
-          apiKey: fields.apiKey.trim(),
-        },
-        models: fields.model.trim()
-          ? {
-              [fields.model.trim()]: modelEntry,
-            }
-          : {},
-      },
+        customEndpoints,
+      ),
       null,
       2,
     );

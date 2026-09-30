@@ -145,4 +145,7 @@ export interface StructuredDraftFields {
   hermesApiKeyEnv: string;
   /** Imported usage scripts are preserved while editing structured fields. */
   usageScript?: Record<string, unknown>;
+  /** Native provider identity and fields retained through structured edits. */
+  openCodeNativeProviderId?: string;
+  openCodeSource?: Record<string, unknown>;
 }

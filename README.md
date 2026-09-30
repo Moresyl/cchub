@@ -73,6 +73,8 @@ Uploads use conditional writes: snapshots are created only if absent, and manife
 
 Before replacing the database, backup imports validate artifact tool identifiers, relative paths and encoded content, rejecting traversal, Windows device names and malformed content. File restoration also rejects descendant symbolic links and junctions below the selected root. Project-file migration validates every record before writing files atomically one by one; whole-operation rollback across multiple files is not yet implemented.
 
+SQL backups load into a temporary database using the application's existing tables and indexes. External database access, schema replacement, triggers and SQL functions are refused. Invalid data or a timeout rolls back the SQL import, and errors do not echo backup contents.
+
 ### Platform
 
 | Feature                | Description                                                                   |

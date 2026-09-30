@@ -28,6 +28,7 @@ pub(crate) fn fixture(responses: Vec<Vec<u8>>) -> (String, thread::JoinHandle<Ve
                     Err(error) => panic!("fixture accept: {error}"),
                 }
             };
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

@@ -418,8 +418,16 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
 async fn fetch_manifest(
     settings: &S3SyncSettings,
 ) -> Result<Option<(S3Manifest, ObservedRevision)>, String> {
+    fetch_manifest_with_client(&client(settings)?, settings).await
+}
+
+async fn fetch_manifest_with_client(
+    client: &reqwest::Client,
+    settings: &S3SyncSettings,
+) -> Result<Option<(S3Manifest, ObservedRevision)>, String> {
     let Some((bytes, headers)) =
-        get_object_with_headers(settings, &object_key(settings, MANIFEST_NAME)).await?
+        get_object_with_headers_using(client, settings, &object_key(settings, MANIFEST_NAME))
+            .await?
     else {
         return Ok(None);
     };

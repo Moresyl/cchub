@@ -36,7 +36,15 @@ async fn s3_snapshot_creation_is_immutable_and_manifest_races_stop_replacement()
         secret_access_key: "public-secret".into(),
         ..Default::default()
     };
-    let (_, revision) = super::fetch_manifest(&settings).await.unwrap().unwrap();
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let (_, revision) = super::fetch_manifest_with_client(&client, &settings)
+        .await
+        .unwrap()
+        .unwrap();
     let store = MemoryStore::default();
     let scope = super::backup_scope(&settings);
     assert!(cloud_revision::authorize(&store, &scope, Some(&revision), None).is_err());
@@ -44,7 +52,8 @@ async fn s3_snapshot_creation_is_immutable_and_manifest_races_stop_replacement()
     let condition =
         cloud_revision::authorize(&store, &scope, Some(&revision), Some(&reviewed.revision))
             .unwrap();
-    put_object(
+    put_object_using(
+        &client,
         &settings,
         &object_key(&settings, "snapshots/new.cchub-backup"),
         b"encrypted-fixture".to_vec(),
@@ -53,7 +62,8 @@ async fn s3_snapshot_creation_is_immutable_and_manifest_races_stop_replacement()
     .await
     .unwrap();
     assert_eq!(
-        put_object(
+        put_object_using(
+            &client,
             &settings,
             &object_key(&settings, "manifest.json"),
             body,

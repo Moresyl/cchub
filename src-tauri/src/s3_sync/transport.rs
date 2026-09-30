@@ -182,7 +182,17 @@ pub(super) async fn request_object(
     key: &str,
     body: Vec<u8>,
 ) -> Result<reqwest::Response, String> {
-    let request = signed_request(&client(settings)?, settings, method, key, body, None)?;
+    request_object_with_client(&client(settings)?, settings, method, key, body).await
+}
+
+async fn request_object_with_client(
+    client: &reqwest::Client,
+    settings: &S3SyncSettings,
+    method: reqwest::Method,
+    key: &str,
+    body: Vec<u8>,
+) -> Result<reqwest::Response, String> {
+    let request = signed_request(client, settings, method, key, body, None)?;
     request
         .send()
         .await
@@ -202,7 +212,16 @@ pub(super) async fn get_object_with_headers(
     settings: &S3SyncSettings,
     key: &str,
 ) -> Result<Option<(Vec<u8>, reqwest::header::HeaderMap)>, String> {
-    let response = request_object(settings, reqwest::Method::GET, key, Vec::new()).await?;
+    get_object_with_headers_using(&client(settings)?, settings, key).await
+}
+
+pub(super) async fn get_object_with_headers_using(
+    client: &reqwest::Client,
+    settings: &S3SyncSettings,
+    key: &str,
+) -> Result<Option<(Vec<u8>, reqwest::header::HeaderMap)>, String> {
+    let response =
+        request_object_with_client(client, settings, reqwest::Method::GET, key, Vec::new()).await?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
@@ -227,8 +246,18 @@ pub(super) async fn put_object(
     body: Vec<u8>,
     condition: &crate::cloud_revision::WriteCondition,
 ) -> Result<reqwest::header::HeaderMap, String> {
+    put_object_using(&client(settings)?, settings, key, body, condition).await
+}
+
+pub(super) async fn put_object_using(
+    client: &reqwest::Client,
+    settings: &S3SyncSettings,
+    key: &str,
+    body: Vec<u8>,
+    condition: &crate::cloud_revision::WriteCondition,
+) -> Result<reqwest::header::HeaderMap, String> {
     let request = signed_request(
-        &client(settings)?,
+        client,
         settings,
         reqwest::Method::PUT,
         key,

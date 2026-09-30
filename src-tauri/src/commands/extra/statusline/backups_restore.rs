@@ -335,8 +335,8 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
     sql.push_str(&crate::db::schema::get_schema_sql());
     sql.push('\n');
 
-    // Backup metadata table
-    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_meta (key TEXT PRIMARY KEY, value TEXT);\n");
+    // Trusted artifact tables shared by export and import.
+    sql.push_str(super::backup_sql::BACKUP_TABLE_SCHEMA);
     sql.push_str(&format!(
         "INSERT OR REPLACE INTO _backup_meta VALUES ('version', '{}');\n",
         env!("CARGO_PKG_VERSION")
@@ -345,13 +345,6 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
         "INSERT OR REPLACE INTO _backup_meta VALUES ('created_at', '{}');\n\n",
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
     ));
-
-    // Tool configs table
-    sql.push_str("CREATE TABLE IF NOT EXISTS _tool_configs (tool_id TEXT PRIMARY KEY, config_path TEXT, config_content TEXT);\n");
-
-    // Skill files table
-    sql.push_str("CREATE TABLE IF NOT EXISTS _skill_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT, name TEXT, content TEXT);\n\n");
-    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_files (id INTEGER PRIMARY KEY AUTOINCREMENT, root_key TEXT, relative_path TEXT, content_base64 TEXT);\n\n");
 
     // Data dump for all business tables
     sql.push_str("-- ── Data ──\n\n");
@@ -684,16 +677,7 @@ pub(crate) fn import_backup_from_path_impl(
             let temp_conn =
                 rusqlite::Connection::open(temp_file.path()).map_err(|e| e.to_string())?;
             configure_database_connection(&temp_conn, false)?;
-            temp_conn
-                .execute_batch("BEGIN IMMEDIATE;")
-                .map_err(|e| e.to_string())?;
-            if let Err(error) = temp_conn.execute_batch(content) {
-                let _ = temp_conn.execute_batch("ROLLBACK;");
-                return Err(error.to_string());
-            }
-            temp_conn
-                .execute_batch("COMMIT;")
-                .map_err(|e| e.to_string())?;
+            super::backup_sql::load_backup_sql(&temp_conn, content)?;
             crate::db::schema::run_migrations(&temp_conn).map_err(|e| e.to_string())?;
             validate_imported_backup_tables(&temp_conn)?;
             super::backup_paths::validate_artifact_paths(&temp_conn)?;

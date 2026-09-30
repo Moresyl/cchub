@@ -44,6 +44,7 @@ const BACKUP_DATA_TABLES: &[&str] = &[
     "prompt_library",
     "imported_project_files",
     "proxy_request_logs",
+    "session_usage_dedup",
     "model_pricing",
     "proxy_usage_daily_rollups",
     "update_history",
@@ -270,45 +271,7 @@ pub fn restore_imported_artifacts(
     ))
 }
 
-/// Generate complete .sql backup content
-pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> String {
-    let mut sql = String::new();
-
-    // Header
-    sql.push_str("-- ═══════════════════════════════════════════════════════\n");
-    sql.push_str("-- CCHub Database Backup (.sql)\n");
-    sql.push_str(&format!("-- Version: {}\n", env!("CARGO_PKG_VERSION")));
-    sql.push_str(&format!(
-        "-- Created: {}\n",
-        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
-    ));
-    sql.push_str("-- ═══════════════════════════════════════════════════════\n\n");
-
-    // Schema (CREATE TABLE IF NOT EXISTS)
-    sql.push_str("-- ── Schema ──\n\n");
-    sql.push_str(&crate::db::schema::get_schema_sql());
-    sql.push('\n');
-
-    // Backup metadata table
-    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_meta (key TEXT PRIMARY KEY, value TEXT);\n");
-    sql.push_str(&format!(
-        "INSERT OR REPLACE INTO _backup_meta VALUES ('version', '{}');\n",
-        env!("CARGO_PKG_VERSION")
-    ));
-    sql.push_str(&format!(
-        "INSERT OR REPLACE INTO _backup_meta VALUES ('created_at', '{}');\n\n",
-        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
-    ));
-
-    // Tool configs table
-    sql.push_str("CREATE TABLE IF NOT EXISTS _tool_configs (tool_id TEXT PRIMARY KEY, config_path TEXT, config_content TEXT);\n");
-
-    // Skill files table
-    sql.push_str("CREATE TABLE IF NOT EXISTS _skill_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT, name TEXT, content TEXT);\n\n");
-    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_files (id INTEGER PRIMARY KEY AUTOINCREMENT, root_key TEXT, relative_path TEXT, content_base64 TEXT);\n\n");
-
-    // Data dump for all business tables
-    sql.push_str("-- ── Data ──\n\n");
+pub(crate) fn append_backup_database_rows(conn: &rusqlite::Connection, sql: &mut String) {
     for table in BACKUP_DATA_TABLES {
         let query = format!("SELECT * FROM {}", table);
         if let Ok(mut stmt) = conn.prepare(&query) {
@@ -348,7 +311,7 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
             if !rows_to_insert.is_empty() {
                 sql.push_str(&format!("-- Table: {}\n", table));
                 append_insert_batches(
-                    &mut sql,
+                    sql,
                     &format!(
                         "INSERT OR REPLACE INTO {} ({}) VALUES ",
                         table,
@@ -360,6 +323,48 @@ pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path:
             }
         }
     }
+}
+
+/// Generate complete .sql backup content
+pub(crate) fn generate_sql_backup(conn: &rusqlite::Connection, home: &std::path::Path) -> String {
+    let mut sql = String::new();
+
+    // Header
+    sql.push_str("-- ═══════════════════════════════════════════════════════\n");
+    sql.push_str("-- CCHub Database Backup (.sql)\n");
+    sql.push_str(&format!("-- Version: {}\n", env!("CARGO_PKG_VERSION")));
+    sql.push_str(&format!(
+        "-- Created: {}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    ));
+    sql.push_str("-- ═══════════════════════════════════════════════════════\n\n");
+
+    // Schema (CREATE TABLE IF NOT EXISTS)
+    sql.push_str("-- ── Schema ──\n\n");
+    sql.push_str(&crate::db::schema::get_schema_sql());
+    sql.push('\n');
+
+    // Backup metadata table
+    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_meta (key TEXT PRIMARY KEY, value TEXT);\n");
+    sql.push_str(&format!(
+        "INSERT OR REPLACE INTO _backup_meta VALUES ('version', '{}');\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    sql.push_str(&format!(
+        "INSERT OR REPLACE INTO _backup_meta VALUES ('created_at', '{}');\n\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    ));
+
+    // Tool configs table
+    sql.push_str("CREATE TABLE IF NOT EXISTS _tool_configs (tool_id TEXT PRIMARY KEY, config_path TEXT, config_content TEXT);\n");
+
+    // Skill files table
+    sql.push_str("CREATE TABLE IF NOT EXISTS _skill_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT, name TEXT, content TEXT);\n\n");
+    sql.push_str("CREATE TABLE IF NOT EXISTS _backup_files (id INTEGER PRIMARY KEY AUTOINCREMENT, root_key TEXT, relative_path TEXT, content_base64 TEXT);\n\n");
+
+    // Data dump for all business tables
+    sql.push_str("-- ── Data ──\n\n");
+    append_backup_database_rows(conn, &mut sql);
 
     // Tool config files
     sql.push_str("-- ── Tool Configs ──\n\n");

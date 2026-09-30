@@ -54,6 +54,7 @@ export interface PiUsageScript {
 
 export interface SessionSyncResult {
   imported: number;
+  updated?: number;
   skipped: number;
   filesScanned: number;
   suspectedDuplicates: number;

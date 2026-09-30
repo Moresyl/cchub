@@ -413,8 +413,16 @@ pub fn session_roots_for_tool(
     }
 
     if tool_id == "opencode" {
-        if let Some(root) = dirs::home_dir().map(|home| crate::opencode_paths::data_dir(&home)) {
-            if root.exists() && seen.insert(root.to_string_lossy().to_string()) {
+        if let Some(home) = dirs::home_dir() {
+            let database = crate::opencode_paths::database_path(&home);
+            if database.is_file() && seen.insert(database.to_string_lossy().to_string()) {
+                roots.push(database.clone());
+            }
+            let root = crate::opencode_paths::data_dir(&home);
+            if database.parent() == Some(root.as_path())
+                && root.exists()
+                && seen.insert(root.to_string_lossy().to_string())
+            {
                 roots.push(root);
             }
         }
@@ -486,6 +494,15 @@ pub fn collect_session_candidate_files(
     depth: usize,
 ) {
     if depth > 5 {
+        return;
+    }
+
+    // An explicitly configured native database is a file root. Do not scan its
+    // parent directory, which may contain unrelated user databases.
+    if current_dir.is_file() {
+        if tool_id == "opencode" {
+            sqlite_files.push(current_dir.to_path_buf());
+        }
         return;
     }
 

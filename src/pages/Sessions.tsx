@@ -11,6 +11,7 @@ import HighlightedText from "../components/HighlightedText";
 import SessionListItem from "../components/SessionListItem";
 import SessionUsageActions from "../components/SessionUsageActions";
 import LoadingState from "../components/states/LoadingState";
+import { Button } from "../components/ui/button";
 import { useDeleteSessionMutation, useDeleteSessionsMutation } from "../hooks/mutations";
 import { fetchSessionsPageData, fetchVisibleAppsQuery, queryKeys } from "../hooks/queries";
 
@@ -401,10 +402,10 @@ export default function Sessions() {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <SessionUsageActions />
-            <button className="btn btn-secondary btn-sm" onClick={() => void loadSessions(false)}>
+            <Button type="button" variant="secondary" onClick={() => void loadSessions(false)}>
               <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
               {uiText("刷新", "Refresh", "更新")}
-            </button>
+            </Button>
           </div>
         </div>
 

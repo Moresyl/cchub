@@ -24,7 +24,7 @@
 
 CCHub opens directly into configuration switching. Filter and search saved provider profiles by tool, see which profile is active, and apply another in one click. You can also create, edit, duplicate, ping, and stream-check profiles. Shared providers and project profiles remain available as advanced options.
 
-The compact neutral light/dark workspace uses a unified frameless desktop title bar, native window actions, a collapsible sidebar, and `Ctrl+K` quick switching. New profiles start from an official default or a blank custom template; existing saved profiles remain compatible. Configuration files, MCP servers, and Skills are secondary destinations. Former standalone pages such as Autopilot, session analytics, Marketplace, and security audit are no longer product entry points; upgrading does not delete existing configuration data.
+The compact neutral light/dark workspace uses a unified frameless desktop title bar, native window actions, a collapsible sidebar, and `Ctrl+K` quick switching. New profiles start from an official default or a blank custom template; existing saved profiles remain compatible. Configuration files, MCP servers, and Skills are secondary destinations. The Runtime sidebar view provides proxy management, usage analytics, and session browsing. Former standalone pages such as Autopilot, Marketplace, and security audit are no longer product entry points. Upgrading does not delete existing configuration data.
 
 ---
 
@@ -52,6 +52,14 @@ Screenshots are from the desktop app; the example endpoint has been anonymized.
 | **MCP Servers**      | Scan, edit, and sync MCP configurations across tools                    |
 | **Skills & Plugins** | Browse, edit, and sync Skills across tools                              |
 | **Quick Switch**     | `Ctrl+K` to find/apply profiles or navigate to configuration pages      |
+| **Native Configs**   | OpenCode switching preserves JSONC comments, MCP, plugins, and other providers |
+| **Sessions & Usage** | Browse native sessions and import output, reasoning, and cache usage without duplicate billing |
+
+### Native configuration and usage sync
+
+OpenCode uses the existing `opencode.jsonc` or `opencode.json`. Profiles retain the native provider ID and selected model, SDK extension options, and other model definitions. Applying a profile updates its provider and default model. Invalid syntax, duplicate fields, or an external change detected before writing stops the update with an actionable error.
+
+Choose Runtime → Sessions → Sync usage to import completed requests from OpenCode V1/V2 databases. Totals include cache reads, cache writes, reasoning output, and compaction requests; unfinished responses remain eligible for the next sync. Corrected accounting updates existing records. Migration or moving the database does not import the same requests again. Durable identities survive log cleanup and are included in SQL backups. A result dialog lists errors when some sources could not sync.
 
 ### Platform
 

@@ -23,6 +23,8 @@ const USAGE_INSERT_BATCH_SIZE: usize = 1_000;
 #[serde(rename_all = "camelCase")]
 pub struct SessionSyncResult {
     pub imported: u32,
+    #[serde(default)]
+    pub updated: u32,
     pub skipped: u32,
     pub files_scanned: u32,
     pub suspected_duplicates: u32,
@@ -33,6 +35,7 @@ pub struct SessionSyncResult {
 impl SessionSyncResult {
     pub(crate) fn merge(&mut self, other: Self) {
         self.imported = self.imported.saturating_add(other.imported);
+        self.updated = self.updated.saturating_add(other.updated);
         self.skipped = self.skipped.saturating_add(other.skipped);
         self.files_scanned = self.files_scanned.saturating_add(other.files_scanned);
         self.suspected_duplicates = self
@@ -564,6 +567,12 @@ pub fn sync_session_usage(
     if !records.is_empty() {
         persist_records(&mut conn, records, &mut result);
     }
+    match super::opencode_session_usage::sync_opencode_usage(&mut conn) {
+        Ok(native_result) => result.merge(native_result),
+        Err(error) => result
+            .errors
+            .push(format!("OpenCode session import failed: {error}")),
+    }
     match crate::commands::pi_session_usage::sync_pi_usage(&mut conn) {
         Ok(pi_result) => result.merge(pi_result),
         Err(error) => result
@@ -591,7 +600,7 @@ pub fn sync_session_usage(
     }
     let _ = app.emit(
         "usage-log-recorded",
-        serde_json::json!({"source": "session", "imported": result.imported}),
+        serde_json::json!({"source": "session", "imported": result.imported, "updated": result.updated}),
     );
     Ok(result)
 }

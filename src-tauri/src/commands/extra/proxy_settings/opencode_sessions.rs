@@ -1,28 +1,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use crate::opencode_storage::{layouts, open_readonly, table_exists};
+use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 
 use super::super::config_profiles::{count_query_hits, truncate_session_text};
 use super::super::types::{SessionEntry, SessionSummary};
-
-fn table_exists(conn: &Connection, table: &str) -> bool {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [table],
-        |row| row.get(0),
-    )
-    .unwrap_or(false)
-}
-
-fn open_readonly(path: &Path) -> Result<Connection, String> {
-    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|error| format!("Cannot read OpenCode sessions: {error}"))?;
-    conn.busy_timeout(std::time::Duration::from_secs(2))
-        .map_err(|error| error.to_string())?;
-    Ok(conn)
-}
 
 fn timestamp(milliseconds: i64) -> Option<String> {
     chrono::DateTime::from_timestamp_millis(milliseconds).map(|time| {
@@ -73,7 +57,7 @@ fn visible_text(value: &Value) -> String {
 }
 
 fn is_v2_session(conn: &Connection, id: &str) -> Result<bool, String> {
-    if !table_exists(conn, "session_v2") {
+    if !table_exists(conn, "session_v2")? || !table_exists(conn, "session_message")? {
         return Ok(false);
     }
     conn.query_row(
@@ -92,7 +76,7 @@ fn load_entries(conn: &Connection, id: &str) -> Result<Vec<SessionEntry>, String
         "SELECT id, '', time_created, data FROM message WHERE session_id = ?1 ORDER BY time_created, id"
     };
     let mut parts: HashMap<String, Vec<String>> = HashMap::new();
-    if !v2 && table_exists(conn, "part") {
+    if !v2 && table_exists(conn, "part")? {
         let mut stmt = conn
             .prepare(
                 "SELECT message_id, data FROM part WHERE session_id = ?1 ORDER BY time_created, id",
@@ -176,42 +160,29 @@ pub fn scan_opencode_sessions(path: &Path, query: &str) -> Result<Vec<SessionSum
     let conn = connection
         .transaction()
         .map_err(|error| error.to_string())?;
-    let v2 = table_exists(&conn, "session_v2") && table_exists(&conn, "session_message");
-    let v1 = table_exists(&conn, "session") && table_exists(&conn, "message");
-    if !v1 && !v2 {
+    let layouts = layouts(&conn)?;
+    if layouts.is_empty() {
         return Ok(Vec::new());
     }
-
-    let migration: Option<i64> = if v2 && table_exists(&conn, "kv") {
-        conn.query_row("SELECT MAX(COALESCE(time_created, 0), COALESCE(time_updated, 0)) FROM kv WHERE key = 'migration.v1-v2'", [], |row| row.get(0))
-            .optional().map_err(|error| error.to_string())?.filter(|timestamp| *timestamp > 0)
-    } else {
-        None
-    };
+    let mut usage: HashMap<String, crate::opencode_accounting::Tokens> = HashMap::new();
+    for record in crate::opencode_accounting::read_usage(&conn, None)?.records {
+        usage
+            .entry(record.session)
+            .or_default()
+            .accumulate(record.tokens);
+    }
     let mut sessions = Vec::new();
     let normalized_query = query.trim().to_lowercase();
-    for (table, messages, enabled) in [
-        ("session_v2", "session_message", v2),
-        ("session", "message", v1),
-    ] {
-        if !enabled {
-            continue;
-        }
-        let predicate = if table == "session" && v2 {
-            // Without a migration marker it is unsafe to resurrect leftover V1 rows.
-            if migration.is_none() {
-                continue;
-            }
-            "WHERE s.time_updated > ?1 AND NOT EXISTS (SELECT 1 FROM session_v2 newer WHERE newer.id = s.id)"
-        } else {
-            "WHERE ?1 IS NOT NULL"
-        };
+    for layout in layouts {
+        let table = layout.sessions;
+        let messages = layout.messages;
+        let predicate = layout.predicate;
         let sql = format!("SELECT s.id, COALESCE(s.title, ''), COALESCE(s.directory, ''), s.time_created,
             MAX(s.time_updated, COALESCE((SELECT MAX(time_updated) FROM {messages} m WHERE m.session_id = s.id), s.time_updated))
-            FROM {table} s {predicate} ORDER BY 5 DESC");
+            FROM {table} s WHERE {predicate} ORDER BY 5 DESC");
         let mut stmt = conn.prepare(&sql).map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([migration.unwrap_or(0)], |row| {
+            .query_map([layout.migration], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -225,6 +196,7 @@ pub fn scan_opencode_sessions(path: &Path, query: &str) -> Result<Vec<SessionSum
             let (id, mut title, directory, created, updated) =
                 row.map_err(|error| error.to_string())?;
             let entries = load_entries(&conn, &id)?;
+            let tokens = usage.get(&id).copied();
             if title.trim().is_empty() {
                 title = Path::new(&directory)
                     .file_name()
@@ -266,9 +238,9 @@ pub fn scan_opencode_sessions(path: &Path, query: &str) -> Result<Vec<SessionSum
                     updated_at: timestamp(updated),
                     preview,
                     message_count: entries.len(),
-                    input_tokens: None,
-                    output_tokens: None,
-                    tokens_used: None,
+                    input_tokens: tokens.map(|tokens| tokens.input_total()),
+                    output_tokens: tokens.map(|tokens| tokens.output),
+                    tokens_used: tokens.map(|tokens| tokens.total()),
                     search_hit_count: hits,
                     can_resume: true,
                     can_delete: true,
@@ -309,7 +281,7 @@ pub fn delete_opencode_session(path: &Path, id: &str) -> Result<(), String> {
         ("session_v2", "id"),
         ("session", "id"),
     ] {
-        if !table_exists(&tx, table) {
+        if !table_exists(&tx, table)? {
             continue;
         }
         let count = tx

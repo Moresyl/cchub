@@ -235,8 +235,9 @@ pub fn scan_generic_tool_sessions_from_roots(
         }
         if tool_id == "opencode" {
             match scan_opencode_sessions(&path, query) {
-                Ok(native) if !native.is_empty() => sessions.extend(native),
-                Ok(_) => sessions.extend(scan_generic_sqlite_sessions(tool_id, &path, query)),
+                // An empty native result is meaningful: generic fallback can
+                // resurrect frozen V1 rows that were intentionally filtered out.
+                Ok(native) => sessions.extend(native),
                 Err(error) => crate::utils::append_runtime_log("warn", "opencode-sessions", &error),
             }
         } else {

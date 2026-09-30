@@ -22,6 +22,10 @@ pub(crate) fn data_dir(home: &Path) -> PathBuf {
         .join("opencode")
 }
 
+pub(crate) fn database_path(home: &Path) -> PathBuf {
+    absolute_environment_path("OPENCODE_DB").unwrap_or_else(|| data_dir(home).join("opencode.db"))
+}
+
 pub(crate) fn config_in_dir(directory: &Path) -> Result<PathBuf, String> {
     for name in ["opencode.jsonc", "opencode.json"] {
         let path = directory.join(name);

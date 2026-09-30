@@ -49,8 +49,11 @@ pub async fn webdav_sync_fetch_remote_info(
 }
 
 #[tauri::command]
-pub async fn webdav_sync_upload(db: State<'_, DbState>) -> Result<WebDavRemoteInfo, String> {
-    webdav_sync::upload(&db).await
+pub async fn webdav_sync_upload(
+    db: State<'_, DbState>,
+    reviewed_revision: Option<String>,
+) -> Result<WebDavRemoteInfo, String> {
+    webdav_sync::upload(&db, reviewed_revision).await
 }
 
 #[tauri::command]

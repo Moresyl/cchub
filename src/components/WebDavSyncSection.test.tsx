@@ -50,6 +50,40 @@ describe("WebDavSyncSection", () => {
     );
   }
 
+  it("confirms a new remote revision and sends exactly that revision once", async () => {
+    const remote = {
+      exists: true,
+      compatible: true,
+      encrypted: true,
+      upload_review: { revision: "a".repeat(64), requiresConfirmation: true, conditionalSupported: true },
+    };
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_webdav_sync_settings")
+        return { ...settings, enabled: true, backup_encryption: { hasPassphrase: true } };
+      if (command === "webdav_sync_fetch_remote_info" || command === "webdav_sync_upload") return remote;
+      return null;
+    });
+    renderSection();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "上传当前快照" }).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "上传当前快照" }));
+    expect(await screen.findByRole("button", { name: "替换备份" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "上传当前快照" }).hasAttribute("disabled")).toBe(false),
+    );
+    expect(invokeMock.mock.calls.some(([command]) => command === "webdav_sync_upload")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "上传当前快照" }));
+    fireEvent.click(await screen.findByRole("button", { name: "替换备份" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("webdav_sync_upload", {
+        reviewedRevision: remote.upload_review.revision,
+      }),
+    );
+    expect(invokeMock.mock.calls.filter(([command]) => command === "webdav_sync_upload")).toHaveLength(1);
+  });
+
   it("keeps connection and remote status available but blocks encrypted restore without a password", async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "get_webdav_sync_settings") return { ...settings, enabled: true };

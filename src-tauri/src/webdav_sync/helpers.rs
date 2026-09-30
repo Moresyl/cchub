@@ -163,35 +163,38 @@ pub(super) async fn upload_bytes(
     url: &str,
     content_type: &str,
     bytes: Vec<u8>,
-) -> Result<(), String> {
-    auth_request(
+    condition: &crate::cloud_revision::WriteCondition,
+) -> Result<reqwest::header::HeaderMap, String> {
+    let request = auth_request(
         client
             .put(url)
             .header("Content-Type", content_type)
             .body(bytes),
         settings,
-    )
-    .send()
-    .await
-    .map_err(|error| format!("WebDAV upload failed: {error}"))?
-    .error_for_status()
-    .map_err(|error| format!("WebDAV upload returned error: {error}"))?;
-    Ok(())
+    );
+    crate::cloud_revision::send(request, condition).await
 }
 
 pub(super) async fn fetch_manifest_with_fallback(
     client: &reqwest::Client,
     settings: &WebDavSyncSettings,
-) -> Result<Option<(WebDavManifest, WebDavRemoteLayout)>, String> {
-    if let Some(manifest) =
+) -> Result<
+    Option<(
+        WebDavManifest,
+        WebDavRemoteLayout,
+        crate::cloud_revision::ObservedRevision,
+    )>,
+    String,
+> {
+    if let Some((manifest, revision)) =
         fetch_manifest_for_layout(client, settings, WebDavRemoteLayout::Current).await?
     {
-        return Ok(Some((manifest, WebDavRemoteLayout::Current)));
+        return Ok(Some((manifest, WebDavRemoteLayout::Current, revision)));
     }
-    if let Some(manifest) =
+    if let Some((manifest, revision)) =
         fetch_manifest_for_layout(client, settings, WebDavRemoteLayout::Legacy).await?
     {
-        return Ok(Some((manifest, WebDavRemoteLayout::Legacy)));
+        return Ok(Some((manifest, WebDavRemoteLayout::Legacy, revision)));
     }
     Ok(None)
 }
@@ -200,7 +203,7 @@ pub(super) async fn fetch_manifest_for_layout(
     client: &reqwest::Client,
     settings: &WebDavSyncSettings,
     layout: WebDavRemoteLayout,
-) -> Result<Option<WebDavManifest>, String> {
+) -> Result<Option<(WebDavManifest, crate::cloud_revision::ObservedRevision)>, String> {
     let response = auth_request(
         client.get(manifest_url_for_layout(settings, layout)?),
         settings,
@@ -216,12 +219,15 @@ pub(super) async fn fetch_manifest_for_layout(
     let response = response
         .error_for_status()
         .map_err(|error| format!("WebDAV manifest request failed: {error}"))?;
+    let headers = response.headers().clone();
     let bytes =
         crate::cloud_transfer::read_bounded(response, crate::cloud_transfer::MANIFEST_LIMIT)
             .await?;
     let manifest = serde_json::from_slice::<WebDavManifest>(&bytes)
         .map_err(|error| format!("Invalid WebDAV manifest: {error}"))?;
-    Ok(Some(manifest))
+    let scope = format!("{}:{}", super::backup_scope(settings), layout.label());
+    let revision = crate::cloud_revision::observe(&scope, &bytes, &headers);
+    Ok(Some((manifest, revision)))
 }
 
 pub(super) fn validate_manifest_compatibility(

@@ -30,6 +30,7 @@ const remote = {
   sizeBytes: 100,
   compatible: true,
   encrypted: true,
+  uploadReview: { revision: "a".repeat(64), requiresConfirmation: false, conditionalSupported: true },
   profilePath: "default",
 };
 
@@ -45,6 +46,80 @@ beforeEach(() => {
 });
 
 describe("S3 cloud sync", () => {
+  it("shows backup review instead of upload progress while awaiting replacement confirmation", async () => {
+    let finishReview!: (confirmed: boolean) => void;
+    confirmMock.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishReview = resolve;
+        }),
+    );
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_s3_sync_settings") return stored;
+      if (command === "s3_sync_fetch_remote_info")
+        return { ...remote, uploadReview: { ...remote.uploadReview, requiresConfirmation: true } };
+      return null;
+    });
+    render(<S3SyncSection />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传快照" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "上传快照" }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "检查备份..." }).getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByRole("button", { name: "上传中..." })).toBeNull();
+    expect(invokeMock.mock.calls.some(([command]) => command === "s3_sync_upload")).toBe(false);
+    await act(async () => finishReview(false));
+    expect(screen.getByRole("button", { name: "上传快照" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("refreshes and uploads the exact accepted revision without an extra overwrite dialog", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_s3_sync_settings") return stored;
+      if (command === "s3_sync_fetch_remote_info" || command === "s3_sync_upload") return remote;
+      return null;
+    });
+    render(<S3SyncSection />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传快照" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "上传快照" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("s3_sync_upload", { reviewedRevision: remote.uploadReview.revision }),
+    );
+    expect(confirmMock).not.toHaveBeenCalled();
+  });
+
+  it("never uploads a newly discovered remote backup when overwrite review is cancelled", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_s3_sync_settings") return stored;
+      if (command === "s3_sync_fetch_remote_info")
+        return { ...remote, uploadReview: { ...remote.uploadReview, requiresConfirmation: true } };
+      return null;
+    });
+    render(<S3SyncSection />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传快照" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "上传快照" }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: "替换远端备份" })));
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传快照" }).hasAttribute("disabled")).toBe(false));
+    expect(invokeMock.mock.calls.some(([command]) => command === "s3_sync_upload")).toBe(false);
+    expect(screen.getByRole("status").textContent).toContain("自动上传不会覆盖");
+  });
+
+  it("sends the confirmed revision once and does not retry a later remote conflict", async () => {
+    confirmMock.mockResolvedValue(true);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_s3_sync_settings") return stored;
+      if (command === "s3_sync_fetch_remote_info")
+        return { ...remote, uploadReview: { ...remote.uploadReview, requiresConfirmation: true } };
+      if (command === "s3_sync_upload") throw new Error("远端备份已变化");
+      return null;
+    });
+    render(<S3SyncSection />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传快照" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "上传快照" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("s3_sync_upload", { reviewedRevision: remote.uploadReview.revision }),
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "上传快照" }).hasAttribute("disabled")).toBe(false));
+    expect(invokeMock.mock.calls.filter(([command]) => command === "s3_sync_upload")).toHaveLength(1);
+  });
   it("keeps connection and remote status available but blocks encrypted restore without a password", async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "get_s3_sync_settings") return { ...stored, backupEncryption: { hasPassphrase: false } };

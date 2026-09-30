@@ -7,16 +7,19 @@
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::cloud_credentials::{self, CredentialStore, KeyringStore};
+use crate::cloud_revision::{self, ObservedRevision, UploadReview, WriteCondition};
 use crate::commands::extra_commands::{
     generate_sql_backup, get_json_app_setting, get_text_app_setting, import_backup_from_path_impl,
     set_json_app_setting,
 };
 use crate::db::DbState;
+
+mod transport;
+use transport::*;
 
 const SETTINGS_KEY: &str = "s3_sync_settings";
 const KEYRING_ACCOUNT: &str = "s3_sync_secret_access_key";
@@ -129,6 +132,7 @@ pub struct S3RemoteInfo {
     pub size_bytes: Option<u64>,
     pub compatible: bool,
     pub encrypted: bool,
+    pub upload_review: Option<UploadReview>,
     pub protocol_version: Option<u32>,
     pub db_compat_version: Option<u32>,
     pub profile_path: String,
@@ -295,197 +299,6 @@ fn write_settings_with_store(
     Ok(incoming.masked_for_frontend())
 }
 
-fn normalize_segment(value: &str, fallback: &str) -> String {
-    let normalized = value.trim().trim_matches('/');
-    if normalized.is_empty() {
-        fallback.to_string()
-    } else {
-        normalized.to_string()
-    }
-}
-
-fn endpoint(settings: &S3SyncSettings) -> String {
-    if settings.endpoint.is_empty() {
-        format!("https://s3.{}.amazonaws.com", settings.region)
-    } else if settings.endpoint.starts_with("http://") || settings.endpoint.starts_with("https://")
-    {
-        settings.endpoint.clone()
-    } else {
-        format!("https://{}", settings.endpoint)
-    }
-}
-
-fn profile_path(settings: &S3SyncSettings) -> String {
-    format!(
-        "{}/v{}/db-v{}/{}",
-        settings.remote_root, PROTOCOL_VERSION, DB_COMPAT_VERSION, settings.profile
-    )
-}
-
-fn object_key(settings: &S3SyncSettings, name: &str) -> String {
-    format!(
-        "{}/{}",
-        profile_path(settings),
-        name.trim_start_matches('/')
-    )
-}
-
-fn object_url(settings: &S3SyncSettings, key: &str) -> Result<url::Url, String> {
-    let mut url = cloud_credentials::validate_url(&endpoint(settings))?;
-    let mut path = format!(
-        "{}/{}/",
-        url.path().trim_end_matches('/'),
-        settings.bucket.trim_matches('/')
-    );
-    path.push_str(key.trim_matches('/'));
-    url.set_path(&path);
-    Ok(url)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    crate::cloud_transfer::sha256(bytes)
-}
-
-fn hmac_sha256(key: &[u8], message: &[u8]) -> Vec<u8> {
-    let mut block = [0u8; 64];
-    if key.len() > block.len() {
-        block[..32].copy_from_slice(&Sha256::digest(key));
-    } else {
-        block[..key.len()].copy_from_slice(key);
-    }
-    let mut inner = [0u8; 64];
-    let mut outer = [0u8; 64];
-    for index in 0..64 {
-        inner[index] = block[index] ^ 0x36;
-        outer[index] = block[index] ^ 0x5c;
-    }
-    let mut inner_hash = Sha256::new();
-    inner_hash.update(inner);
-    inner_hash.update(message);
-    let mut outer_hash = Sha256::new();
-    outer_hash.update(outer);
-    outer_hash.update(inner_hash.finalize());
-    outer_hash.finalize().to_vec()
-}
-
-fn signed_request(
-    client: &reqwest::Client,
-    settings: &S3SyncSettings,
-    method: reqwest::Method,
-    key: &str,
-    body: Vec<u8>,
-) -> Result<reqwest::RequestBuilder, String> {
-    let url = object_url(settings, key)?;
-    let host = host_header(&url)?;
-    let now = Utc::now();
-    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-    let short_date = now.format("%Y%m%d").to_string();
-    let payload_hash = sha256_hex(&body);
-    let canonical_uri = if url.path().is_empty() {
-        "/"
-    } else {
-        url.path()
-    };
-    let canonical_headers =
-        format!("host:{host}\nx-amz-content-sha256:{payload_hash}\nx-amz-date:{amz_date}\n");
-    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
-    let canonical_request = format!(
-        "{}\n{}\n\n{}\n{}\n{}",
-        method.as_str(),
-        canonical_uri,
-        canonical_headers,
-        signed_headers,
-        payload_hash
-    );
-    let scope = format!("{short_date}/{}/{}/aws4_request", settings.region, "s3");
-    let credential_scope = scope.clone();
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{}",
-        sha256_hex(canonical_request.as_bytes())
-    );
-    let k_date = hmac_sha256(
-        format!("AWS4{}", settings.secret_access_key).as_bytes(),
-        short_date.as_bytes(),
-    );
-    let k_region = hmac_sha256(&k_date, settings.region.as_bytes());
-    let k_service = hmac_sha256(&k_region, b"s3");
-    let k_signing = hmac_sha256(&k_service, b"aws4_request");
-    let signature = hex(&hmac_sha256(&k_signing, string_to_sign.as_bytes()));
-    let authorization = format!(
-        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
-        settings.access_key_id, scope, signed_headers, signature
-    );
-    Ok(client
-        .request(method, url)
-        .header("host", host)
-        .header("x-amz-date", amz_date)
-        .header("x-amz-content-sha256", payload_hash)
-        .header("Authorization", authorization)
-        .body(body))
-}
-
-fn host_header(url: &url::Url) -> Result<String, String> {
-    let host = url
-        .host_str()
-        .ok_or_else(|| "S3 endpoint has no host".to_string())?;
-    Ok(match url.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_string(),
-    })
-}
-
-fn client(settings: &S3SyncSettings) -> Result<reqwest::Client, String> {
-    crate::shared::http_client::build_http_client(
-        settings.proxy_url.as_deref(),
-        Some(&format!("CCHub/{} S3", env!("CARGO_PKG_VERSION"))),
-        Duration::from_secs(30),
-    )
-    .map_err(|error| format!("Failed to build S3 HTTP client: {error}"))
-}
-
-async fn request_object(
-    settings: &S3SyncSettings,
-    method: reqwest::Method,
-    key: &str,
-    body: Vec<u8>,
-) -> Result<reqwest::Response, String> {
-    let request = signed_request(&client(settings)?, settings, method, key, body)?;
-    request
-        .send()
-        .await
-        .map_err(|error| format!("S3 request failed: {error}"))
-}
-
-async fn get_object(settings: &S3SyncSettings, key: &str) -> Result<Option<Vec<u8>>, String> {
-    let response = request_object(settings, reqwest::Method::GET, key, Vec::new()).await?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    let response = response
-        .error_for_status()
-        .map_err(|error| format!("S3 download failed: {error}"))?;
-    let limit = if key == object_key(settings, MANIFEST_NAME) {
-        crate::cloud_transfer::MANIFEST_LIMIT
-    } else {
-        MAX_SYNC_BYTES
-    };
-    Ok(Some(
-        crate::cloud_transfer::read_bounded(response, limit).await?,
-    ))
-}
-
-async fn put_object(settings: &S3SyncSettings, key: &str, body: Vec<u8>) -> Result<(), String> {
-    request_object(settings, reqwest::Method::PUT, key, body)
-        .await?
-        .error_for_status()
-        .map_err(|error| format!("S3 upload failed: {error}"))?;
-    Ok(())
-}
-
 fn device_name() -> String {
     ["COMPUTERNAME", "HOSTNAME"]
         .iter()
@@ -554,13 +367,14 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
             size_bytes: None,
             compatible: true,
             encrypted: false,
+            upload_review: None,
             protocol_version: Some(PROTOCOL_VERSION),
             db_compat_version: Some(DB_COMPAT_VERSION),
             profile_path: profile,
         });
     }
     let _guard = sync_lock().lock().await;
-    let Some(bytes) = get_object(&settings, &object_key(&settings, MANIFEST_NAME)).await? else {
+    let Some((manifest, revision)) = fetch_manifest(&settings).await? else {
         return Ok(S3RemoteInfo {
             exists: false,
             remote_url,
@@ -569,13 +383,16 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
             size_bytes: None,
             compatible: true,
             encrypted: false,
+            upload_review: Some(cloud_revision::review(
+                &KeyringStore,
+                &backup_scope(&settings),
+                None,
+            )?),
             protocol_version: Some(PROTOCOL_VERSION),
             db_compat_version: Some(DB_COMPAT_VERSION),
             profile_path: profile,
         });
     };
-    let manifest: S3Manifest =
-        serde_json::from_slice(&bytes).map_err(|error| format!("Invalid S3 manifest: {error}"))?;
     let compatible = validate_manifest(&manifest).is_ok();
     let encrypted =
         crate::cloud_backup::encrypted(&manifest.payload_format, &manifest.snapshot_path);
@@ -587,13 +404,36 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<S3RemoteInfo, 
         size_bytes: Some(manifest.size_bytes),
         compatible,
         encrypted,
+        upload_review: Some(cloud_revision::review(
+            &KeyringStore,
+            &backup_scope(&settings),
+            Some(&revision),
+        )?),
         protocol_version: Some(manifest.protocol_version),
         db_compat_version: Some(manifest.db_compat_version),
         profile_path: manifest.profile_path,
     })
 }
 
-pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
+async fn fetch_manifest(
+    settings: &S3SyncSettings,
+) -> Result<Option<(S3Manifest, ObservedRevision)>, String> {
+    let Some((bytes, headers)) =
+        get_object_with_headers(settings, &object_key(settings, MANIFEST_NAME)).await?
+    else {
+        return Ok(None);
+    };
+    let manifest = serde_json::from_slice(&bytes).map_err(|_| "S3 备份清单格式无效".to_string())?;
+    Ok(Some((
+        manifest,
+        cloud_revision::observe(&backup_scope(settings), &bytes, &headers),
+    )))
+}
+
+pub async fn upload(
+    db: &State<'_, DbState>,
+    reviewed_revision: Option<String>,
+) -> Result<S3RemoteInfo, String> {
     let _guard = sync_lock().lock().await;
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
@@ -604,6 +444,17 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
         settings
     };
+    let remote = fetch_manifest(&settings).await?;
+    if let Some((manifest, _)) = &remote {
+        validate_manifest(manifest)?;
+    }
+    let scope = backup_scope(&settings);
+    let condition = cloud_revision::authorize(
+        &KeyringStore,
+        &scope,
+        remote.as_ref().map(|(_, revision)| revision),
+        reviewed_revision.as_deref(),
+    )?;
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let sql_bytes = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
@@ -618,7 +469,13 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
     let size_bytes = payload.len() as u64;
     let digest = sha256_hex(&payload);
     let snapshot_path = format!("snapshots/cchub-sync-{}.cchub-backup", uuid::Uuid::new_v4());
-    put_object(&settings, &object_key(&settings, &snapshot_path), payload).await?;
+    put_object(
+        &settings,
+        &object_key(&settings, &snapshot_path),
+        payload,
+        &WriteCondition::Absent,
+    )
+    .await?;
     let created_at = Utc::now().to_rfc3339();
     let manifest = S3Manifest {
         format: FORMAT.to_string(),
@@ -634,12 +491,22 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         profile_path: profile_path(&settings),
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
-    put_object(
+    let headers = put_object(
         &settings,
         &object_key(&settings, MANIFEST_NAME),
-        manifest_bytes,
+        manifest_bytes.clone(),
+        &condition,
     )
     .await?;
+    let written = if cloud_revision::strong_etag(&headers).is_some() {
+        Some(cloud_revision::observe(&scope, &manifest_bytes, &headers))
+    } else {
+        fetch_manifest(&settings)
+            .await?
+            .map(|(_, revision)| revision)
+    };
+    let written = cloud_revision::verify_written(&manifest_bytes, written)?;
+    cloud_revision::accept(&KeyringStore, &scope, &written)?;
     let info = S3RemoteInfo {
         exists: true,
         remote_url: object_url(&settings, &object_key(&settings, MANIFEST_NAME))?.to_string(),
@@ -648,6 +515,11 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<S3RemoteInfo, String> {
         size_bytes: Some(size_bytes),
         compatible: true,
         encrypted: true,
+        upload_review: Some(cloud_revision::review(
+            &KeyringStore,
+            &scope,
+            Some(&written),
+        )?),
         protocol_version: Some(PROTOCOL_VERSION),
         db_compat_version: Some(DB_COMPAT_VERSION),
         profile_path: profile_path(&settings),
@@ -667,11 +539,9 @@ pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<
         }
         settings
     };
-    let manifest_bytes = get_object(&settings, &object_key(&settings, MANIFEST_NAME))
+    let (manifest, revision) = fetch_manifest(&settings)
         .await?
         .ok_or("No remote S3 sync manifest found")?;
-    let manifest: S3Manifest = serde_json::from_slice(&manifest_bytes)
-        .map_err(|error| format!("Invalid S3 manifest: {error}"))?;
     validate_manifest(&manifest)?;
     let bytes = get_object(&settings, &object_key(&settings, &manifest.snapshot_path))
         .await?
@@ -694,6 +564,7 @@ pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<
     saved.last_sync_at = Some(Utc::now().to_rfc3339());
     saved.last_error = None;
     set_json_app_setting(&conn, SETTINGS_KEY, &saved)?;
+    cloud_revision::accept(&KeyringStore, &backup_scope(&settings), &revision)?;
     Ok(message)
 }
 
@@ -734,7 +605,7 @@ pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
             if !enabled {
                 continue;
             }
-            let result = upload(&db).await;
+            let result = upload(&db, None).await;
             let payload = serde_json::json!({
                 "status": if result.is_ok() { "success" } else { "error" },
                 "message": result.as_ref().map(|_| "S3 sync completed").unwrap_or("S3 sync failed"),
@@ -796,3 +667,6 @@ mod credential_tests;
 
 #[cfg(test)]
 mod transfer_tests;
+
+#[cfg(test)]
+mod transport_tests;

@@ -47,8 +47,11 @@ pub async fn s3_sync_fetch_remote_info(db: State<'_, DbState>) -> Result<S3Remot
 }
 
 #[tauri::command]
-pub async fn s3_sync_upload(db: State<'_, DbState>) -> Result<S3RemoteInfo, String> {
-    match s3_sync::upload(&db).await {
+pub async fn s3_sync_upload(
+    db: State<'_, DbState>,
+    reviewed_revision: Option<String>,
+) -> Result<S3RemoteInfo, String> {
+    match s3_sync::upload(&db, reviewed_revision).await {
         Ok(info) => Ok(info),
         Err(error) => {
             if let Ok(conn) = db.0.lock() {

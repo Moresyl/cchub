@@ -4,6 +4,7 @@ import { Switch } from "../ui/switch";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { EMPTY_BACKUP_ENCRYPTION, type BackupEncryptionSettings } from "../../lib/backupEncryption";
+import type { CloudUploadReview } from "../../lib/cloudUploadReview";
 
 export interface WebDavSyncSettings {
   enabled: boolean;
@@ -30,6 +31,7 @@ export interface WebDavRemoteInfo {
   layout: string | null;
   compatible: boolean;
   encrypted?: boolean;
+  upload_review?: CloudUploadReview | null;
   protocol_version: number | null;
   db_compat_version: number | null;
   profile_path: string | null;
@@ -42,7 +44,15 @@ export interface WebDavSyncEvent {
   error: string | null;
 }
 
-export type ActionState = "idle" | "loading" | "saving" | "testing" | "refreshing" | "uploading" | "downloading";
+export type ActionState =
+  | "idle"
+  | "loading"
+  | "saving"
+  | "testing"
+  | "refreshing"
+  | "reviewing"
+  | "uploading"
+  | "downloading";
 
 export interface WebDavPreset {
   id: string;

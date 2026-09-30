@@ -11,6 +11,8 @@ import { SimpleSelect } from "./ui/simple-select";
 import { cloudSettingsChanged, sameWebDavAccount, sameWebDavBackupLocation } from "../lib/cloudSyncSettings";
 import { Button } from "./ui/button";
 import { BackupEncryptionField } from "./cloud-sync/BackupEncryptionField";
+import { CloudUploadStatus } from "./cloud-sync/CloudUploadStatus";
+import { confirmCloudUpload } from "../lib/cloudUploadReview";
 import { backupPasswordAvailable, maskBackupEncryption } from "../lib/backupEncryption";
 
 import {
@@ -233,9 +235,27 @@ function WebDavSyncSectionComponent() {
       );
       return;
     }
-    setActionState("uploading");
+    setActionState("reviewing");
     try {
-      const info = await invoke<WebDavRemoteInfo>("webdav_sync_upload");
+      const latest = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info");
+      setRemoteInfo(latest);
+      if (!latest.compatible)
+        throw new Error(
+          uiText(
+            "远端备份无效或不兼容，请更换备份位置后重试。",
+            "Remote backup is invalid or incompatible. Choose another backup location.",
+          ),
+        );
+      const reviewedRevision = await confirmCloudUpload(
+        latest.upload_review,
+        latest.exists,
+        latest.updated_at,
+        appDialog.confirm,
+        uiText,
+      );
+      if (reviewedRevision === null) return;
+      setActionState("uploading");
+      const info = await invoke<WebDavRemoteInfo>("webdav_sync_upload", { reviewedRevision });
       startTransition(() => {
         setRemoteInfo(info);
       });
@@ -253,7 +273,7 @@ function WebDavSyncSectionComponent() {
     } finally {
       setActionState("idle");
     }
-  }, [loadState, passwordAvailable, remoteActionsDisabled, settings.enabled, uiText]);
+  }, [appDialog, loadState, passwordAvailable, remoteActionsDisabled, settings.enabled, uiText]);
 
   const handleDownload = useCallback(async () => {
     if (
@@ -584,6 +604,7 @@ function WebDavSyncSectionComponent() {
           onChange={(value) => updateSettings("backup_encryption", value)}
         />
       </div>
+      <CloudUploadStatus review={remoteInfo?.upload_review} text={uiText} />
       {!passwordAvailable && savedSettings && (
         <p className="mb-3 text-xs text-[var(--text-secondary)]">
           {uiText(
@@ -630,11 +651,13 @@ function WebDavSyncSectionComponent() {
         />
         <WebDavActionButton
           label={
-            actionState === "uploading"
-              ? uiText("上传中...", "Uploading...", "アップロード中...")
-              : uiText("上传当前快照", "Upload Snapshot", "現在のスナップショットをアップロード")
+            actionState === "reviewing"
+              ? uiText("检查备份...", "Checking backup...", "バックアップを確認中...")
+              : actionState === "uploading"
+                ? uiText("上传中...", "Uploading...", "アップロード中...")
+                : uiText("上传当前快照", "Upload Snapshot", "現在のスナップショットをアップロード")
           }
-          loading={actionState === "uploading"}
+          loading={actionState === "reviewing" || actionState === "uploading"}
           disabled={remoteActionsDisabled || !passwordAvailable}
           icon={Upload}
           onClick={handleUploadClick}

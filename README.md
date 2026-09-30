@@ -69,6 +69,8 @@ Set and save a backup password of at least 12 characters before uploading. It is
 
 Downloads stop at 64 KiB for manifests and 15 MiB of backup content (encrypted files allow 68 additional bytes for format overhead). Restoring checks paths, declared sizes, SHA-256, and authenticated decryption before import. An incorrect password or modified encrypted content stops the import. Legacy unencrypted backups require explicit consent; older WebDAV backups without a digest still receive size checks. Each upload uses a separate snapshot filename.
 
+Uploads use conditional writes: snapshots are created only if absent, and manifests replace only the strong ETag revision just read. A change during review or upload stops the operation without an unconditional retry. When first connecting to an existing backup or discovering another device's revision, restore it first or explicitly confirm replacement during manual upload; confirmation applies only to that exact revision. Automatic uploads cannot replace an unaccepted revision, and deleted backups require manual confirmation before recreation. Successful uploads and restores record this device's accepted revision in the OS keyring, outside database backups. Storage without strong ETags or conditional-write support remains available for downloads but stops uploads. Replacing the manifest does not delete previous snapshot files.
+
 ### Platform
 
 | Feature                | Description                                                                   |

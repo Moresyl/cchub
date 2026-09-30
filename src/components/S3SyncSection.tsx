@@ -9,6 +9,8 @@ import { Button } from "./ui/button";
 import { useAppDialog } from "./AppDialogProvider";
 import { cloudSettingsChanged, sameS3Account, sameS3BackupLocation } from "../lib/cloudSyncSettings";
 import { BackupEncryptionField } from "./cloud-sync/BackupEncryptionField";
+import { CloudUploadStatus } from "./cloud-sync/CloudUploadStatus";
+import { confirmCloudUpload, type CloudUploadReview } from "../lib/cloudUploadReview";
 import {
   backupPasswordAvailable,
   EMPTY_BACKUP_ENCRYPTION,
@@ -40,6 +42,7 @@ interface S3RemoteInfo {
   sizeBytes: number | null;
   compatible: boolean;
   encrypted?: boolean;
+  uploadReview?: CloudUploadReview | null;
   profilePath: string;
 }
 
@@ -59,7 +62,7 @@ const DEFAULT_SETTINGS: S3SyncSettings = {
   lastError: null,
 };
 
-type Action = "idle" | "loading" | "saving" | "testing" | "refreshing" | "uploading" | "downloading";
+type Action = "idle" | "loading" | "saving" | "testing" | "refreshing" | "reviewing" | "uploading" | "downloading";
 
 export default function S3SyncSection() {
   const appDialog = useAppDialog();
@@ -168,9 +171,27 @@ export default function S3SyncSection() {
 
   const upload = async () => {
     if (remoteActionsDisabled || !passwordAvailable) return;
-    setAction("uploading");
+    setAction("reviewing");
     try {
-      setRemote(await invoke<S3RemoteInfo>("s3_sync_upload"));
+      const latest = await invoke<S3RemoteInfo>("s3_sync_fetch_remote_info");
+      setRemote(latest);
+      if (!latest.compatible)
+        throw new Error(
+          text(
+            "远端备份无效或不兼容，请更换备份位置后重试。",
+            "Remote backup is invalid or incompatible. Choose another backup location.",
+          ),
+        );
+      const reviewedRevision = await confirmCloudUpload(
+        latest.uploadReview,
+        latest.exists,
+        latest.updatedAt,
+        appDialog.confirm,
+        text,
+      );
+      if (reviewedRevision === null) return;
+      setAction("uploading");
+      setRemote(await invoke<S3RemoteInfo>("s3_sync_upload", { reviewedRevision }));
       await load();
       showToast("success", text("快照已上传到 S3", "Snapshot uploaded to S3"));
     } catch (error) {
@@ -312,6 +333,7 @@ export default function S3SyncSection() {
           onChange={(value) => update("backupEncryption", value)}
         />
       </div>
+      <CloudUploadStatus review={remote?.uploadReview} text={text} />
       {!passwordAvailable && savedSettings && (
         <p className="mb-3 text-xs text-[var(--text-secondary)]">
           {text(
@@ -344,9 +366,15 @@ export default function S3SyncSection() {
         />
         <ActionButton
           icon={Upload}
-          label={action === "uploading" ? text("上传中...", "Uploading...") : text("上传快照", "Upload snapshot")}
+          label={
+            action === "reviewing"
+              ? text("检查备份...", "Checking backup...")
+              : action === "uploading"
+                ? text("上传中...", "Uploading...")
+                : text("上传快照", "Upload snapshot")
+          }
           disabled={remoteActionsDisabled || !passwordAvailable}
-          loading={action === "uploading"}
+          loading={action === "reviewing" || action === "uploading"}
           onClick={() => void upload()}
         />
         <ActionButton

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::cloud_credentials::{self, CredentialStore, KeyringStore};
+use crate::cloud_revision::{self, UploadReview, WriteCondition};
 use crate::commands::extra_commands::{
     generate_sql_backup, get_json_app_setting, get_text_app_setting, import_backup_from_path_impl,
     set_json_app_setting,
@@ -150,6 +151,7 @@ pub struct WebDavRemoteInfo {
     pub layout: Option<String>,
     pub compatible: bool,
     pub encrypted: bool,
+    pub upload_review: Option<UploadReview>,
     pub protocol_version: Option<u32>,
     pub db_compat_version: Option<u32>,
     pub profile_path: Option<String>,
@@ -371,6 +373,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
             layout: Some(WebDavRemoteLayout::Current.label().to_string()),
             compatible: true,
             encrypted: false,
+            upload_review: None,
             protocol_version: Some(WEBDAV_PROTOCOL_VERSION),
             db_compat_version: Some(WEBDAV_DB_COMPAT_VERSION),
             profile_path: Some(remote_profile_path(&settings, WebDavRemoteLayout::Current)),
@@ -380,7 +383,7 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
     let _guard = webdav_sync_lock().lock().await;
     let client = build_client(&settings)?;
     match fetch_manifest_with_fallback(&client, &settings).await? {
-        Some((manifest, layout)) => {
+        Some((manifest, layout, revision)) => {
             let compatible = validate_manifest_compatibility(&manifest, layout).is_ok();
             Ok(WebDavRemoteInfo {
                 exists: true,
@@ -392,6 +395,11 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
                 device_name: Some(manifest.device_name.clone()),
                 layout: Some(layout.label().to_string()),
                 compatible,
+                upload_review: Some(cloud_revision::review(
+                    &KeyringStore,
+                    &backup_scope(&settings),
+                    Some(&revision),
+                )?),
                 encrypted: crate::cloud_backup::encrypted(
                     &manifest.payload_format,
                     &manifest.snapshot_path,
@@ -415,6 +423,11 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
             layout: Some(WebDavRemoteLayout::Current.label().to_string()),
             compatible: true,
             encrypted: false,
+            upload_review: Some(cloud_revision::review(
+                &KeyringStore,
+                &backup_scope(&settings),
+                None,
+            )?),
             protocol_version: Some(WEBDAV_PROTOCOL_VERSION),
             db_compat_version: Some(WEBDAV_DB_COMPAT_VERSION),
             profile_path: Some(remote_profile_path(&settings, WebDavRemoteLayout::Current)),
@@ -422,9 +435,12 @@ pub async fn fetch_remote_info(db: &State<'_, DbState>) -> Result<WebDavRemoteIn
     }
 }
 
-pub async fn upload(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, String> {
+pub async fn upload(
+    db: &State<'_, DbState>,
+    reviewed_revision: Option<String>,
+) -> Result<WebDavRemoteInfo, String> {
     let _guard = webdav_sync_lock().lock().await;
-    match upload_inner(db).await {
+    match upload_inner(db, reviewed_revision).await {
         Ok(info) => Ok(info),
         Err(error) => {
             if let Ok(conn) = db.0.lock() {
@@ -435,7 +451,10 @@ pub async fn upload(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, String>
     }
 }
 
-async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, String> {
+async fn upload_inner(
+    db: &State<'_, DbState>,
+    reviewed_revision: Option<String>,
+) -> Result<WebDavRemoteInfo, String> {
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let settings = read_settings(&conn)?;
@@ -444,6 +463,29 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         }
         crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
         settings
+    };
+
+    let client = build_client(&settings)?;
+    let remote = fetch_manifest_with_fallback(&client, &settings).await?;
+    if let Some((manifest, layout, _)) = &remote {
+        validate_manifest_compatibility(manifest, *layout)?;
+    }
+    let scope = backup_scope(&settings);
+    let condition = cloud_revision::authorize(
+        &KeyringStore,
+        &scope,
+        remote.as_ref().map(|(_, _, revision)| revision),
+        reviewed_revision.as_deref(),
+    )?;
+    // Legacy snapshots are kept in their original directory. A current manifest
+    // is created conditionally so another client creating it wins safely.
+    let condition = if remote
+        .as_ref()
+        .is_some_and(|(_, layout, _)| matches!(layout, WebDavRemoteLayout::Legacy))
+    {
+        WriteCondition::Absent
+    } else {
+        condition
     };
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
@@ -463,7 +505,6 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
             .await?;
     let size_bytes = payload.len() as u64;
 
-    let client = build_client(&settings)?;
     ensure_remote_directories(&client, &settings, WebDavRemoteLayout::Current).await?;
 
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -477,6 +518,7 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         &snapshot_target,
         "application/octet-stream",
         payload,
+        &WriteCondition::Absent,
     )
     .await?;
 
@@ -497,14 +539,28 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     let manifest_url = manifest_url_for_layout(&settings, WebDavRemoteLayout::Current)?;
-    upload_bytes(
+    let headers = upload_bytes(
         &client,
         &settings,
         &manifest_url,
         "application/json",
-        manifest_bytes,
+        manifest_bytes.clone(),
+        &condition,
     )
     .await?;
+    let written = if cloud_revision::strong_etag(&headers).is_some() {
+        Some(cloud_revision::observe(
+            &format!("{scope}:{}", WebDavRemoteLayout::Current.label()),
+            &manifest_bytes,
+            &headers,
+        ))
+    } else {
+        fetch_manifest_for_layout(&client, &settings, WebDavRemoteLayout::Current)
+            .await?
+            .map(|(_, revision)| revision)
+    };
+    let written = cloud_revision::verify_written(&manifest_bytes, written)?;
+    cloud_revision::accept(&KeyringStore, &scope, &written)?;
 
     {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
@@ -522,6 +578,11 @@ async fn upload_inner(db: &State<'_, DbState>) -> Result<WebDavRemoteInfo, Strin
         layout: Some(WebDavRemoteLayout::Current.label().to_string()),
         compatible: true,
         encrypted: true,
+        upload_review: Some(cloud_revision::review(
+            &KeyringStore,
+            &scope,
+            Some(&written),
+        )?),
         protocol_version: Some(WEBDAV_PROTOCOL_VERSION),
         db_compat_version: Some(WEBDAV_DB_COMPAT_VERSION),
         profile_path: manifest.profile_path,
@@ -552,7 +613,7 @@ async fn download_inner(db: &State<'_, DbState>, allow_plaintext: bool) -> Resul
     };
 
     let client = build_client(&settings)?;
-    let (manifest, layout) = fetch_manifest_with_fallback(&client, &settings)
+    let (manifest, layout, revision) = fetch_manifest_with_fallback(&client, &settings)
         .await?
         .ok_or_else(|| "No remote WebDAV sync manifest found".to_string())?;
     validate_manifest_compatibility(&manifest, layout)?;
@@ -588,6 +649,8 @@ async fn download_inner(db: &State<'_, DbState>, allow_plaintext: bool) -> Resul
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let _ = update_sync_status(&conn, Some(chrono::Utc::now().to_rfc3339()), None)?;
     }
+
+    cloud_revision::accept(&KeyringStore, &backup_scope(&settings), &revision)?;
 
     Ok(message)
 }
@@ -628,7 +691,7 @@ pub async fn run_auto_sync_if_enabled(
         return Ok(None);
     }
 
-    match upload(&db).await {
+    match upload(&db, None).await {
         Ok(info) => Ok(Some(WebDavSyncEvent {
             status: "success".to_string(),
             message: "Automatic WebDAV sync completed".to_string(),
@@ -652,6 +715,9 @@ mod credential_tests;
 
 #[cfg(test)]
 mod transfer_tests;
+
+#[cfg(test)]
+mod revision_tests;
 
 #[cfg(test)]
 mod tests {

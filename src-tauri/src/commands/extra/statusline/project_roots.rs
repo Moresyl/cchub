@@ -1,5 +1,4 @@
 #![allow(clippy::too_many_arguments)]
-use base64::Engine;
 use std::path::PathBuf;
 
 use super::super::config_profiles::*;
@@ -32,7 +31,7 @@ pub fn restore_imported_project_root_snapshot(
         })
         .map_err(|e| e.to_string())?;
 
-    let files: Vec<(String, String)> = rows.filter_map(|row| row.ok()).collect();
+    let files: Vec<(String, String)> = rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
     if files.is_empty() {
         return Ok(0);
     }
@@ -40,16 +39,20 @@ pub fn restore_imported_project_root_snapshot(
     let target_root_path = PathBuf::from(target_root);
     let mut restored = 0usize;
 
-    for (relative_path, content_base64) in &files {
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(content_base64)
-            .map_err(|e| e.to_string())?;
-        let target_path =
-            target_root_path.join(relative_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let planned = files
+        .iter()
+        .map(|(path, content)| {
+            Ok((
+                super::backup_paths::confined_target(&target_root_path, path, false)?,
+                super::backup_paths::decode_file(content)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    for (target_path, bytes) in planned {
         if let Some(parent) = target_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        std::fs::write(&target_path, bytes).map_err(|e| e.to_string())?;
+        crate::utils::atomic_write(&target_path, &bytes).map_err(|e| e.to_string())?;
         restored += 1;
     }
 
@@ -78,6 +81,8 @@ pub fn store_imported_project_file(
     relative_path: &str,
     content_base64: &str,
 ) -> Result<(), String> {
+    super::backup_paths::relative_path(relative_path, false)?;
+    super::backup_paths::decode_file(content_base64)?;
     let Some(project_root) = normalize_project_root_path(project_root) else {
         return Ok(());
     };

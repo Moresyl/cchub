@@ -11,7 +11,7 @@ use super::*;
 
 const SQL_BACKUP_BATCH_ROWS: usize = 200;
 const SQL_BACKUP_BATCH_BYTES: usize = 1024 * 1024;
-const TOOL_BACKUP_IDS: &[&str] = &[
+pub(super) const TOOL_BACKUP_IDS: &[&str] = &[
     "claude",
     "codex",
     "gemini",
@@ -22,7 +22,7 @@ const TOOL_BACKUP_IDS: &[&str] = &[
     "pi",
     "mcode",
 ];
-const CLAUDE_DESKTOP_BACKUP_KEYS: &[&str] = &[
+pub(super) const CLAUDE_DESKTOP_BACKUP_KEYS: &[&str] = &[
     "normal-config",
     "threep-config",
     "managed-profile",
@@ -105,6 +105,7 @@ pub fn restore_imported_artifacts(
     conn: &rusqlite::Connection,
     restored_count: usize,
 ) -> Result<(usize, usize, usize, usize, usize), String> {
+    super::backup_paths::validate_artifact_paths(conn)?;
     let temp_backup_rows = conn
         .query_row(
             "SELECT
@@ -186,22 +187,18 @@ pub fn restore_imported_artifacts(
         }) {
             for row in rows.flatten() {
                 let (tool_id, name, file_content) = row;
-                let normalized_tool_id = match tool_id.as_str() {
-                    "claude-settings" => "claude",
-                    "claude" => "claude",
-                    "codex" => "codex",
-                    "gemini" => "gemini",
-                    "opencode" => "opencode",
-                    "openclaw" => "openclaw",
-                    _ => continue,
+                let normalized_tool_id = if tool_id == "claude-settings" {
+                    "claude"
+                } else {
+                    tool_id.as_str()
                 };
                 let skills_dir = match resolve_tool_skills_dir(conn, normalized_tool_id) {
                     Ok(path) => path,
                     Err(_) => continue,
                 };
                 let _ = std::fs::create_dir_all(&skills_dir);
-                if crate::utils::atomic_write_string(&skills_dir.join(&name), &file_content).is_ok()
-                {
+                let target = super::backup_paths::confined_target(&skills_dir, &name, false)?;
+                if crate::utils::atomic_write_string(&target, &file_content).is_ok() {
                     skills_restored += 1;
                 }
             }
@@ -237,15 +234,9 @@ pub fn restore_imported_artifacts(
                     Ok(path) => path,
                     Err(_) => continue,
                 };
-                let target_path = if relative_path.is_empty() {
-                    root_path
-                } else {
-                    root_path.join(relative_path.replace('/', std::path::MAIN_SEPARATOR_STR))
-                };
-                let bytes = match base64::engine::general_purpose::STANDARD.decode(content_base64) {
-                    Ok(bytes) => bytes,
-                    Err(_) => continue,
-                };
+                let target_path =
+                    super::backup_paths::confined_target(&root_path, &relative_path, true)?;
+                let bytes = super::backup_paths::decode_file(&content_base64)?;
                 if let Some(parent) = target_path.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
@@ -705,6 +696,7 @@ pub(crate) fn import_backup_from_path_impl(
                 .map_err(|e| e.to_string())?;
             crate::db::schema::run_migrations(&temp_conn).map_err(|e| e.to_string())?;
             validate_imported_backup_tables(&temp_conn)?;
+            super::backup_paths::validate_artifact_paths(&temp_conn)?;
             count_backup_rows(&temp_conn)?
         };
 

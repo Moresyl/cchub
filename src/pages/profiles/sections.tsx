@@ -1,11 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/rules-of-hooks */
 import { memo, lazy, useCallback, type ChangeEvent, type ReactNode } from "react";
-import { RefreshCw, Save } from "lucide-react";
+import { Save } from "lucide-react";
 
 import ProfileFragmentCard from "../../components/ProfileFragmentCard";
 import ProfilePresetButton from "../../components/ProfilePresetButton";
 import ProfileTargetToolToggle from "../../components/ProfileTargetToolToggle";
-import ModelSelector, { type ModelInfo } from "../../components/ModelSelector";
 import LoadingState from "../../components/states/LoadingState";
 import { CheckboxField } from "../../components/ui/checkbox-field";
 import { SimpleSelect } from "../../components/ui/simple-select";
@@ -20,7 +19,6 @@ import {
   TWO_COLUMN_GRID_STYLE,
   formatTime,
   getConfigLanguage,
-  supportsModelFetch,
   type DetectedTool,
   type ProviderConfigFragment,
 } from "./helpers";
@@ -333,197 +331,7 @@ export const ProfilePresetSection = memo(function ProfilePresetSection({
   );
 });
 
-interface ProfileModelsSectionProps {
-  locale: string;
-  localeText: (zh: string, en: string, ja?: string) => string;
-  draftTool: string;
-  draftModel: string;
-  draftReasoningModel: string;
-  draftHaikuModel: string;
-  draftSonnetModel: string;
-  draftOpusModel: string;
-  draftModelName: string;
-  draftOpenCodeContextLimit: string;
-  draftOpenCodeOutputLimit: string;
-  draftOpenCodeInputModalities: string;
-  draftOpenCodeOutputModalities: string;
-  fetchedModels: string[];
-  fetchedModelDetails: ModelInfo[];
-  fetchingModels: boolean;
-  modelFetchError: string | null;
-  onFetchModels: () => void;
-  onDraftChange: (toolId: string, next: Partial<StructuredDraftFields>) => void;
-}
-
-export const ProfileModelsSection = memo(function ProfileModelsSection({
-  locale,
-  localeText,
-  draftTool,
-  draftModel,
-  draftReasoningModel,
-  draftHaikuModel,
-  draftSonnetModel,
-  draftOpusModel,
-  draftModelName,
-  draftOpenCodeContextLimit,
-  draftOpenCodeOutputLimit,
-  draftOpenCodeInputModalities,
-  draftOpenCodeOutputModalities,
-  fetchedModels,
-  fetchedModelDetails,
-  fetchingModels,
-  modelFetchError,
-  onFetchModels,
-  onDraftChange,
-}: ProfileModelsSectionProps) {
-  const canFetchModels = supportsModelFetch(draftTool);
-  const hasDetails = fetchedModelDetails.length > 0;
-
-  const ModelInput = useCallback(
-    ({
-      value,
-      onChange: onValueChange,
-      placeholder,
-    }: {
-      value: string;
-      onChange: (v: string) => void;
-      placeholder?: string;
-    }) => {
-      if (hasDetails) {
-        return (
-          <ModelSelector
-            value={value}
-            models={fetchedModelDetails}
-            onChange={onValueChange}
-            placeholder={placeholder}
-          />
-        );
-      }
-      return <TextInput value={value} onChange={(e) => onValueChange(e.target.value)} placeholder={placeholder} />;
-    },
-    [hasDetails, fetchedModelDetails],
-  );
-
-  return (
-    <div>
-      <div
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}
-      >
-        <SectionTitle>{locale === "zh" ? "模型配置" : "Models"}</SectionTitle>
-        {canFetchModels && (
-          <Button
-            variant="secondary"
-            type="button"
-            onClick={onFetchModels}
-            disabled={fetchingModels}
-            style={{ gap: 6, whiteSpace: "nowrap" }}
-          >
-            {fetchingModels ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
-            {localeText("拉取模型列表", "Fetch Models", "モデル一覧を取得")}
-          </Button>
-        )}
-      </div>
-      {(modelFetchError || fetchedModels.length > 0) && (
-        <div style={{ fontSize: 12, color: modelFetchError ? "var(--danger)" : "var(--text-muted)", marginBottom: 12 }}>
-          {modelFetchError ||
-            localeText(
-              `已发现 ${fetchedModels.length} 个模型`,
-              `Discovered ${fetchedModels.length} models`,
-              `${fetchedModels.length} 個のモデルを検出しました`,
-            )}
-        </div>
-      )}
-      {draftTool === "claude" ? (
-        <div style={TWO_COLUMN_GRID_STYLE}>
-          <Field label={locale === "zh" ? "主模型" : "Main Model"}>
-            <ModelInput
-              value={draftModel}
-              onChange={(v) => onDraftChange(draftTool, { model: v })}
-              placeholder="claude-sonnet-4-5"
-            />
-          </Field>
-          <Field label={locale === "zh" ? "推理模型" : "Reasoning Model"}>
-            <ModelInput
-              value={draftReasoningModel}
-              onChange={(v) => onDraftChange(draftTool, { reasoningModel: v })}
-              placeholder="claude-sonnet-4-5"
-            />
-          </Field>
-          <Field label={locale === "zh" ? "Haiku 默认模型" : "Default Haiku"}>
-            <ModelInput
-              value={draftHaikuModel}
-              onChange={(v) => onDraftChange(draftTool, { haikuModel: v })}
-              placeholder="claude-haiku-3-5"
-            />
-          </Field>
-          <Field label={locale === "zh" ? "Sonnet 默认模型" : "Default Sonnet"}>
-            <ModelInput
-              value={draftSonnetModel}
-              onChange={(v) => onDraftChange(draftTool, { sonnetModel: v })}
-              placeholder="claude-sonnet-4-5"
-            />
-          </Field>
-          <Field label={locale === "zh" ? "Opus 默认模型" : "Default Opus"}>
-            <ModelInput
-              value={draftOpusModel}
-              onChange={(v) => onDraftChange(draftTool, { opusModel: v })}
-              placeholder="claude-opus-5"
-            />
-          </Field>
-        </div>
-      ) : (
-        <div style={TWO_COLUMN_GRID_STYLE}>
-          <Field label={locale === "zh" ? "模型 ID" : "Model ID"}>
-            <ModelInput
-              value={draftModel}
-              onChange={(v) => onDraftChange(draftTool, { model: v })}
-              placeholder={locale === "zh" ? "例如 deepseek-chat" : "e.g. deepseek-chat"}
-            />
-          </Field>
-          <Field label={locale === "zh" ? "模型显示名" : "Display Name"}>
-            <TextInput
-              value={draftModelName}
-              onChange={(event) => onDraftChange(draftTool, { modelName: event.target.value })}
-              placeholder={locale === "zh" ? "可选，默认同 ID" : "Optional, defaults to ID"}
-            />
-          </Field>
-          {draftTool === "opencode" && (
-            <>
-              <Field label={locale === "zh" ? "Context Limit" : "Context Limit"}>
-                <TextInput
-                  value={draftOpenCodeContextLimit}
-                  onChange={(event) => onDraftChange(draftTool, { openCodeContextLimit: event.target.value })}
-                  placeholder="400000"
-                />
-              </Field>
-              <Field label={locale === "zh" ? "Output Limit" : "Output Limit"}>
-                <TextInput
-                  value={draftOpenCodeOutputLimit}
-                  onChange={(event) => onDraftChange(draftTool, { openCodeOutputLimit: event.target.value })}
-                  placeholder="128000"
-                />
-              </Field>
-              <Field label={locale === "zh" ? "输入模态" : "Input Modalities"}>
-                <TextInput
-                  value={draftOpenCodeInputModalities}
-                  onChange={(event) => onDraftChange(draftTool, { openCodeInputModalities: event.target.value })}
-                  placeholder="text,image,pdf"
-                />
-              </Field>
-              <Field label={locale === "zh" ? "输出模态" : "Output Modalities"}>
-                <TextInput
-                  value={draftOpenCodeOutputModalities}
-                  onChange={(event) => onDraftChange(draftTool, { openCodeOutputModalities: event.target.value })}
-                  placeholder="text"
-                />
-              </Field>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-});
+export { ProfileModelsSection } from "./ModelsSection";
 
 interface ProfileRawConfigSectionProps {
   locale: string;

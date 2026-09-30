@@ -6,76 +6,12 @@ use tauri::State;
 
 use crate::db::DbState;
 
+mod catalog;
+mod detailed;
+
+pub use catalog::ModelInfo;
+
 const PROVIDER_MODELS_TIMEOUT_SECS: u64 = 15;
-
-#[derive(Debug, Deserialize)]
-struct OpenAiModelsResponse {
-    data: Option<Vec<OpenAiModelEntry>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiModelEntry {
-    id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiModelDetailedEntry {
-    id: Option<String>,
-    context_window: Option<u64>,
-    max_completion_tokens: Option<u64>,
-    // OpenRouter extends with pricing info
-    pricing: Option<OpenRouterPricing>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenRouterPricing {
-    prompt: Option<String>,
-    completion: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiModelsDetailedResponse {
-    data: Option<Vec<OpenAiModelDetailedEntry>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicModelEntry {
-    id: Option<String>,
-    display_name: Option<String>,
-    #[serde(default)]
-    max_tokens: Option<u64>,
-    // Anthropic returns context window as "max_input_tokens" on some endpoints
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicModelsResponse {
-    data: Option<Vec<AnthropicModelEntry>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GeminiModelsResponse {
-    models: Option<Vec<GeminiModelEntry>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GeminiModelEntry {
-    name: Option<String>,
-    display_name: Option<String>,
-    input_token_limit: Option<u64>,
-    output_token_limit: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInfo {
-    pub id: String,
-    pub display_name: Option<String>,
-    pub context_window: Option<u64>,
-    pub max_output_tokens: Option<u64>,
-    pub input_price: Option<String>,
-    pub output_price: Option<String>,
-}
 
 /// Model shape used by the provider editor. It intentionally keeps optional
 /// ownership metadata so OpenAI-compatible gateways can return richer rows
@@ -246,16 +182,6 @@ fn normalize_model_id(value: &str) -> Option<String> {
     )
 }
 
-fn sort_and_dedup_models(models: Vec<String>) -> Vec<String> {
-    let mut next = models
-        .into_iter()
-        .filter_map(|value| normalize_model_id(&value))
-        .collect::<Vec<_>>();
-    next.sort();
-    next.dedup();
-    next
-}
-
 fn generic_models_url(
     base_url: &str,
     is_full_url: bool,
@@ -332,43 +258,50 @@ fn parse_fetched_models(payload: &Value) -> Vec<FetchedModel> {
 }
 
 fn apply_model_fetch_headers(
-    mut request: reqwest::RequestBuilder,
+    request: reqwest::RequestBuilder,
     api_key: &str,
     api_format: Option<&str>,
     custom_user_agent: Option<&str>,
     request_headers: Option<&BTreeMap<String, String>>,
 ) -> reqwest::RequestBuilder {
-    if let Some(headers) = request_headers {
-        for (name, value) in headers {
+    use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, USER_AGENT};
+    let mut headers = HeaderMap::new();
+    if let Some(custom) = request_headers {
+        for (name, value) in custom {
             if let (Ok(name), Ok(value)) = (
-                reqwest::header::HeaderName::from_bytes(name.trim().as_bytes()),
-                reqwest::header::HeaderValue::from_str(value),
+                HeaderName::from_bytes(name.trim().as_bytes()),
+                HeaderValue::from_str(value),
             ) {
-                request = request.header(name, value);
+                headers.insert(name, value);
             }
         }
     }
     let format = api_format.unwrap_or_default().to_ascii_lowercase();
     if !api_key.trim().is_empty() {
         if format.contains("anthropic") {
-            request = request
-                .header("x-api-key", api_key.trim())
-                .header("anthropic-version", "2023-06-01");
+            // These values replace matching custom headers, rather than append
+            // another credential that the endpoint could interpret differently.
+            if let Ok(value) = HeaderValue::from_str(api_key.trim()) {
+                headers.insert("x-api-key", value);
+            }
+            headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
         } else if format.contains("google") || format.contains("gemini") {
-            request = request.header("x-goog-api-key", api_key.trim());
-        } else {
-            request = request.header("authorization", format!("Bearer {}", api_key.trim()));
+            if let Ok(value) = HeaderValue::from_str(api_key.trim()) {
+                headers.insert("x-goog-api-key", value);
+            }
+        } else if let Ok(value) = HeaderValue::from_str(&format!("Bearer {}", api_key.trim())) {
+            headers.insert(AUTHORIZATION, value);
         }
     }
     if let Some(user_agent) = custom_user_agent
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        if let Ok(value) = reqwest::header::HeaderValue::from_str(user_agent) {
-            request = request.header(reqwest::header::USER_AGENT, value);
+        if let Ok(value) = HeaderValue::from_str(user_agent) {
+            headers.insert(USER_AGENT, value);
         }
     }
-    request
+    request.headers(headers)
 }
 
 /// Fetches a model list without requiring a saved provider profile. This is
@@ -434,120 +367,34 @@ pub async fn fetch_provider_models(
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         build_provider_models_client(&conn)?
     };
-
-    let normalized_tool = tool_id.trim().to_ascii_lowercase();
-    let use_full_url = use_full_url.unwrap_or(false);
-
-    match normalized_tool.as_str() {
-        "claude" => {
-            if api_key.trim().is_empty() {
-                return Err("API key is required to fetch Claude models".to_string());
-            }
-
-            let models_url = build_claude_models_url(&base_url, use_full_url)?;
-            let response = client
-                .get(&models_url)
-                .header("x-api-key", api_key.trim())
-                .header("anthropic-version", "2023-06-01")
-                .send()
-                .await
-                .map_err(|e| format!("Request failed: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(format!("HTTP {status}: {body}"));
-            }
-
-            let parsed: OpenAiModelsResponse = response
-                .json()
-                .await
-                .map_err(|e| format!("Failed to parse response: {e}"))?;
-            Ok(sort_and_dedup_models(
-                parsed
-                    .data
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|item| item.id)
-                    .collect(),
-            ))
-        }
-        "codex" | "grokbuild" | "openclaw" | "opencode" | "hermes" => {
-            if api_key.trim().is_empty() {
-                return Err("API key is required to fetch models".to_string());
-            }
-
-            let models_url = build_openai_models_url(&base_url, use_full_url)?;
-            let response = client
-                .get(&models_url)
-                .header("authorization", format!("Bearer {}", api_key.trim()))
-                .send()
-                .await
-                .map_err(|e| format!("Request failed: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(format!("HTTP {status}: {body}"));
-            }
-
-            let parsed: OpenAiModelsResponse = response
-                .json()
-                .await
-                .map_err(|e| format!("Failed to parse response: {e}"))?;
-            Ok(sort_and_dedup_models(
-                parsed
-                    .data
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|item| item.id)
-                    .collect(),
-            ))
-        }
-        "gemini" => {
-            if api_key.trim().is_empty() {
-                return Err("API key is required to fetch Gemini models".to_string());
-            }
-
-            let mut url = Url::parse(&build_gemini_models_url(&base_url, use_full_url)?)
-                .map_err(|e| format!("Invalid Gemini models URL: {e}"))?;
-            url.query_pairs_mut().append_pair("key", api_key.trim());
-
-            let response = client
-                .get(url)
-                .send()
-                .await
-                .map_err(|e| format!("Request failed: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(format!("HTTP {status}: {body}"));
-            }
-
-            let parsed: GeminiModelsResponse = response
-                .json()
-                .await
-                .map_err(|e| format!("Failed to parse response: {e}"))?;
-            Ok(sort_and_dedup_models(
-                parsed
-                    .models
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|item| item.name)
-                    .collect(),
-            ))
-        }
-        _ => Err(format!("Fetching models is not supported for {tool_id}")),
-    }
+    let models = detailed::fetch_catalog(
+        &client,
+        &tool_id,
+        &base_url,
+        &api_key,
+        use_full_url.unwrap_or(false),
+        None,
+        None,
+        None,
+    )
+    .await?;
+    Ok(models.into_iter().map(|model| model.id).collect())
 }
 
 const MODEL_CACHE_TTL_SECS: i64 = 600; // 10 minutes
 
-fn model_cache_key(tool_id: &str, base_url: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    tool_id.hash(&mut hasher);
-    base_url.hash(&mut hasher);
-    format!("model_cache_{:x}", hasher.finish())
+fn model_cache_key(tool_id: &str, base_url: &str, api_key: &str, use_full_url: bool) -> String {
+    use sha2::{Digest, Sha256};
+    // Length-prefixed JSON keeps credentials and endpoint mode in distinct
+    // identities. Only a digest is stored as the database key.
+    let identity = serde_json::to_vec(&(
+        tool_id.trim().to_ascii_lowercase(),
+        base_url.trim(),
+        api_key.trim(),
+        use_full_url,
+    ))
+    .expect("string tuple serializes");
+    format!("model_cache_v2_{:x}", Sha256::digest(identity))
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -566,7 +413,8 @@ fn read_model_cache(conn: &rusqlite::Connection, key: &str) -> Option<Vec<String
         .ok()?;
     let cache: ModelCache = serde_json::from_str(&raw).ok()?;
     let now = chrono::Utc::now().timestamp();
-    if now - cache.fetched_at > MODEL_CACHE_TTL_SECS {
+    let age = now.checked_sub(cache.fetched_at)?;
+    if !(0..=MODEL_CACHE_TTL_SECS).contains(&age) {
         return None;
     }
     Some(cache.models)
@@ -594,7 +442,10 @@ pub async fn fetch_provider_models_cached(
     force_refresh: Option<bool>,
     db: State<'_, DbState>,
 ) -> Result<Vec<String>, String> {
-    let cache_key = model_cache_key(&tool_id, &base_url);
+    let cache_key = model_cache_key(&tool_id, &base_url, &api_key, use_full_url.unwrap_or(false));
+    if api_key.trim().is_empty() {
+        return Err("API key is required".into());
+    }
     let force = force_refresh.unwrap_or(false);
 
     if !force {
@@ -617,10 +468,15 @@ pub async fn fetch_provider_models_cached(
 pub fn get_cached_provider_models(
     tool_id: String,
     base_url: String,
+    api_key: Option<String>,
+    use_full_url: Option<bool>,
     db: State<'_, DbState>,
 ) -> Result<Option<Vec<String>>, String> {
+    let Some(api_key) = api_key.filter(|key| !key.trim().is_empty()) else {
+        return Ok(None);
+    };
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let key = model_cache_key(&tool_id, &base_url);
+    let key = model_cache_key(&tool_id, &base_url, &api_key, use_full_url.unwrap_or(false));
     Ok(read_model_cache(&conn, &key))
 }
 
@@ -632,156 +488,24 @@ pub async fn fetch_provider_models_detailed(
     use_full_url: Option<bool>,
     custom_user_agent: Option<String>,
     request_headers: Option<BTreeMap<String, String>>,
+    api_format: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<Vec<ModelInfo>, String> {
     let client = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
         build_provider_models_client(&conn)?
     };
-
-    let normalized_tool = tool_id.trim().to_ascii_lowercase();
-    let use_full_url = use_full_url.unwrap_or(false);
-
-    match normalized_tool.as_str() {
-        "claude" => {
-            if api_key.trim().is_empty() {
-                return Err("API key is required".to_string());
-            }
-            let models_url = build_claude_models_url(&base_url, use_full_url)?;
-            let response = apply_model_fetch_headers(
-                client.get(&models_url),
-                "",
-                Some("anthropic"),
-                custom_user_agent.as_deref(),
-                request_headers.as_ref(),
-            )
-            .header("x-api-key", api_key.trim())
-            .header("anthropic-version", "2023-06-01")
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(format!("HTTP {status}: {body}"));
-            }
-            let parsed: AnthropicModelsResponse = response
-                .json()
-                .await
-                .map_err(|e| format!("Parse failed: {e}"))?;
-            let mut models: Vec<ModelInfo> = parsed
-                .data
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|entry| {
-                    let id = normalize_model_id(entry.id.as_deref().unwrap_or(""))?;
-                    Some(ModelInfo {
-                        id,
-                        display_name: entry.display_name,
-                        context_window: None,
-                        max_output_tokens: entry.max_tokens,
-                        input_price: None,
-                        output_price: None,
-                    })
-                })
-                .collect();
-            models.sort_by(|a, b| a.id.cmp(&b.id));
-            models.dedup_by(|a, b| a.id == b.id);
-            Ok(models)
-        }
-        "codex" | "grokbuild" | "openclaw" | "opencode" | "hermes" => {
-            if api_key.trim().is_empty() {
-                return Err("API key is required".to_string());
-            }
-            let models_url = build_openai_models_url(&base_url, use_full_url)?;
-            let response = apply_model_fetch_headers(
-                client.get(&models_url),
-                "",
-                Some("openai"),
-                custom_user_agent.as_deref(),
-                request_headers.as_ref(),
-            )
-            .header("authorization", format!("Bearer {}", api_key.trim()))
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(format!("HTTP {status}: {body}"));
-            }
-            let parsed: OpenAiModelsDetailedResponse = response
-                .json()
-                .await
-                .map_err(|e| format!("Parse failed: {e}"))?;
-            let mut models: Vec<ModelInfo> = parsed
-                .data
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|entry| {
-                    let id = normalize_model_id(entry.id.as_deref().unwrap_or(""))?;
-                    Some(ModelInfo {
-                        id,
-                        display_name: None,
-                        context_window: entry.context_window,
-                        max_output_tokens: entry.max_completion_tokens,
-                        input_price: entry.pricing.as_ref().and_then(|p| p.prompt.clone()),
-                        output_price: entry.pricing.as_ref().and_then(|p| p.completion.clone()),
-                    })
-                })
-                .collect();
-            models.sort_by(|a, b| a.id.cmp(&b.id));
-            models.dedup_by(|a, b| a.id == b.id);
-            Ok(models)
-        }
-        "gemini" => {
-            if api_key.trim().is_empty() {
-                return Err("API key is required".to_string());
-            }
-            let mut url = Url::parse(&build_gemini_models_url(&base_url, use_full_url)?)
-                .map_err(|e| format!("Invalid URL: {e}"))?;
-            url.query_pairs_mut().append_pair("key", api_key.trim());
-            let response = apply_model_fetch_headers(
-                client.get(url),
-                "",
-                Some("gemini"),
-                custom_user_agent.as_deref(),
-                request_headers.as_ref(),
-            )
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {e}"))?;
-            let status = response.status();
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                return Err(format!("HTTP {status}: {body}"));
-            }
-            let parsed: GeminiModelsResponse = response
-                .json()
-                .await
-                .map_err(|e| format!("Parse failed: {e}"))?;
-            let mut models: Vec<ModelInfo> = parsed
-                .models
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|entry| {
-                    let id = normalize_model_id(entry.name.as_deref().unwrap_or(""))?;
-                    Some(ModelInfo {
-                        id,
-                        display_name: entry.display_name,
-                        context_window: entry.input_token_limit,
-                        max_output_tokens: entry.output_token_limit,
-                        input_price: None,
-                        output_price: None,
-                    })
-                })
-                .collect();
-            models.sort_by(|a, b| a.id.cmp(&b.id));
-            models.dedup_by(|a, b| a.id == b.id);
-            Ok(models)
-        }
-        _ => Err(format!("Fetching models is not supported for {tool_id}")),
-    }
+    detailed::fetch_catalog(
+        &client,
+        &tool_id,
+        &base_url,
+        &api_key,
+        use_full_url.unwrap_or(false),
+        api_format.as_deref(),
+        custom_user_agent.as_deref(),
+        request_headers.as_ref(),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -841,5 +565,60 @@ mod tests {
             normalize_model_id("models/gemini-2.5-pro").as_deref(),
             Some("gemini-2.5-pro")
         );
+    }
+
+    #[test]
+    fn catalogs_are_scoped_to_credentials_and_endpoint_mode() {
+        let key = super::model_cache_key("claude", "https://example.test", "first", false);
+        assert_ne!(
+            key,
+            super::model_cache_key("claude", "https://example.test", "second", false)
+        );
+        assert_ne!(
+            key,
+            super::model_cache_key("claude", "https://example.test", "first", true)
+        );
+        assert!(!key.contains("first"));
+    }
+
+    #[test]
+    fn future_and_extreme_cache_timestamps_are_not_valid() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);")
+            .unwrap();
+        for timestamp in [chrono::Utc::now().timestamp() + 3600, i64::MIN] {
+            let raw = serde_json::json!({"models":["a"],"fetched_at":timestamp}).to_string();
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings VALUES ('fixture', ?1)",
+                [raw],
+            )
+            .unwrap();
+            assert!(super::read_model_cache(&conn, "fixture").is_none());
+        }
+        super::write_model_cache(&conn, "fixture", &["valid".into()]);
+        assert_eq!(
+            super::read_model_cache(&conn, "fixture"),
+            Some(vec!["valid".into()])
+        );
+    }
+
+    #[test]
+    fn authoritative_auth_and_user_agent_replace_custom_headers() {
+        let custom = std::collections::BTreeMap::from([
+            ("Authorization".into(), "Bearer wrong".into()),
+            ("User-Agent".into(), "old".into()),
+        ]);
+        let request = super::apply_model_fetch_headers(
+            reqwest::Client::new().get("http://example.test"),
+            "correct",
+            Some("openai"),
+            Some("current"),
+            Some(&custom),
+        )
+        .build()
+        .unwrap();
+        assert_eq!(request.headers().get_all("authorization").iter().count(), 1);
+        assert_eq!(request.headers()["authorization"], "Bearer correct");
+        assert_eq!(request.headers()["user-agent"], "current");
     }
 }

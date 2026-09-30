@@ -54,6 +54,7 @@ export function buildEditorViewProps(input: BuildEditorPropsInput) {
   const { draftFields } = input;
   return {
     locale: input.locale,
+    draftFields,
     localeText: input.localeText,
     editingProfile: input.editingProfile,
     closeModal: input.closeModal,

@@ -53,11 +53,18 @@ fn normalize_models(provider: &mut Map<String, Value>) -> Result<(), String> {
                 .ok_or("OpenCode model limit must be a JSON object")?;
             for (key, value) in [("context", context), ("output", output)] {
                 if let Some(value) = value {
+                    if value.is_null() {
+                        limit.remove(key);
+                        continue;
+                    }
                     if value.as_u64().filter(|number| *number > 0).is_none() {
                         return Err("OpenCode token limits must be positive integers".into());
                     }
                     limit.insert(key.into(), value);
                 }
+            }
+            if limit.is_empty() {
+                model.remove("limit");
             }
         }
     }
@@ -122,6 +129,8 @@ fn extract_profile(document: &Value) -> Result<Value, String> {
     metadata.insert("nativeProviderId".into(), Value::String(id.into()));
     if let Some((_, model)) = selected.filter(|(selected_id, _)| *selected_id == id) {
         metadata.insert("nativeModelId".into(), Value::String(model.into()));
+    } else {
+        metadata.insert("nativeModelId".into(), Value::String(String::new()));
     }
     Ok(Value::Object(profile))
 }
@@ -152,6 +161,19 @@ pub(crate) fn apply_profile(path: &Path, snapshot: &str) -> Result<(), String> {
     let profile = crate::json_config::parse_json_object(&normalize_profile(snapshot)?)?;
     let id = provider_id(&profile)?;
     let mut provider = profile.as_object().unwrap().clone();
+    let cleared_limits: Vec<(String, &'static str)> = provider
+        .get("models")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|models| models.iter())
+        .flat_map(|(id, model)| {
+            [("contextLimit", "context"), ("outputLimit", "output")]
+                .into_iter()
+                .filter(|(form, _)| model.get(*form).is_some_and(Value::is_null))
+                .map(|(_, native)| (id.clone(), native))
+                .collect::<Vec<_>>()
+        })
+        .collect();
     for key in ["metadata", "customEndpoints", "custom_endpoints"] {
         provider.remove(key);
     }
@@ -162,12 +184,14 @@ pub(crate) fn apply_profile(path: &Path, snapshot: &str) -> Result<(), String> {
     }
     normalize_models(&mut provider)?;
     let models = provider.get("models").and_then(Value::as_object);
-    let selected = profile
+    let explicit_selection = profile
         .pointer("/metadata/nativeModelId")
-        .and_then(Value::as_str)
-        .filter(|model| !model.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| models.and_then(|models| models.keys().next().cloned()));
+        .and_then(Value::as_str);
+    let clear_selection = explicit_selection.is_some_and(|model| model.trim().is_empty());
+    let selected = match explicit_selection {
+        Some(model) => (!model.trim().is_empty()).then(|| model.to_string()),
+        None => models.and_then(|models| models.keys().next().cloned()),
+    };
     crate::json_config::update_json_file(path, |document| {
         let root = document.as_object_mut().unwrap();
         // Repair files emitted by older versions that put the provider at root.
@@ -197,8 +221,33 @@ pub(crate) fn apply_profile(path: &Path, snapshot: &str) -> Result<(), String> {
             return Err("Existing OpenCode provider must be a JSON object".into());
         }
         merge_fields(target, &Value::Object(provider));
+        for (model_id, key) in &cleared_limits {
+            if let Some(model) = target
+                .get_mut("models")
+                .and_then(|models| models.get_mut(model_id))
+                .and_then(Value::as_object_mut)
+            {
+                if let Some(limit) = model.get_mut("limit").and_then(Value::as_object_mut) {
+                    limit.remove(*key);
+                    if limit.is_empty() {
+                        model.remove("limit");
+                    }
+                }
+            }
+        }
         if let Some(model) = selected {
             root.insert("model".into(), Value::String(format!("{id}/{model}")));
+        } else if clear_selection
+            && root
+                .get("model")
+                .and_then(Value::as_str)
+                .is_some_and(|model| {
+                    model
+                        .split_once('/')
+                        .is_some_and(|(provider, _)| provider == id)
+                })
+        {
+            root.remove("model");
         }
         Ok(())
     })

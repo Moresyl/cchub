@@ -29,6 +29,7 @@ import type { ConfigProfile, DetectedTool, ProviderConfigFragment } from "./help
 type LocaleText = (zh: string, en: string, ja?: string) => string;
 
 interface ProfileEditorViewProps {
+  draftFields: StructuredDraftFields;
   locale: string;
   localeText: LocaleText;
   editingProfile: ConfigProfile | null;
@@ -214,16 +215,7 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
             locale={locale}
             localeText={localeText}
             draftTool={props.draftTool}
-            draftModel={props.draftModel}
-            draftReasoningModel={props.draftReasoningModel}
-            draftHaikuModel={props.draftHaikuModel}
-            draftSonnetModel={props.draftSonnetModel}
-            draftOpusModel={props.draftOpusModel}
-            draftModelName={props.draftModelName}
-            draftOpenCodeContextLimit={props.draftOpenCodeContextLimit}
-            draftOpenCodeOutputLimit={props.draftOpenCodeOutputLimit}
-            draftOpenCodeInputModalities={props.draftOpenCodeInputModalities}
-            draftOpenCodeOutputModalities={props.draftOpenCodeOutputModalities}
+            draftFields={props.draftFields}
             fetchedModels={props.fetchedModels}
             fetchedModelDetails={props.fetchedModelDetails}
             fetchingModels={props.fetchingModels}

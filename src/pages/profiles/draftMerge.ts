@@ -93,5 +93,21 @@ export function mergeDraftFields(
       (merged as unknown as Record<string, unknown>)[key] = value;
     }
   }
+  const connectionFields = [
+    "baseUrl",
+    "useFullUrl",
+    "apiKey",
+    "providerType",
+    "oauthAccountId",
+    "apiFormat",
+    "apiProtocol",
+    "npm",
+    "hermesProvider",
+    "customUserAgent",
+    "requestHeaders",
+  ] as const;
+  if (connectionFields.some((key) => JSON.stringify(current[key]) !== JSON.stringify(merged[key]))) {
+    delete merged.modelCatalog;
+  }
   return merged;
 }

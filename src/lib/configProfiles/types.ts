@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import type { SavedModelCatalog } from "../modelCatalog";
 export type StructuredConfigTool =
   | "claude"
   | "codex"
@@ -148,4 +149,6 @@ export interface StructuredDraftFields {
   /** Native provider identity and fields retained through structured edits. */
   openCodeNativeProviderId?: string;
   openCodeSource?: Record<string, unknown>;
+  /** Provider-local discovery snapshot, invalidated when its connection changes. */
+  modelCatalog?: SavedModelCatalog;
 }

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ModelInfo } from "../../components/ModelSelector";
 import { showToast } from "../../components/Toast";
 import { formatModelFetchError, supportsModelFetch } from "./helpers";
+import { normalizeModelCatalog, type SavedModelCatalog } from "../../lib/modelCatalog";
 
 export interface ModelDiscoveryContext {
   fetchingModels: boolean;
@@ -14,6 +15,12 @@ export interface ModelDiscoveryContext {
   draftBaseUrl: string;
   draftCustomUserAgent: string;
   draftRequestHeaders: Record<string, string>;
+  draftApiFormat?: string;
+  draftApiProtocol?: string;
+  draftNpm?: string;
+  draftHermesProvider?: string;
+  draftModelCatalog?: SavedModelCatalog;
+  onCatalog?: (catalog: SavedModelCatalog) => void;
   localeText: (zh: string, en: string, ja?: string) => string;
   setFetchingModels: (value: boolean) => void;
   setModelFetchError: (value: string | null) => void;
@@ -41,7 +48,18 @@ async function fetchCatalog(ctx: ModelDiscoveryContext): Promise<ModelInfo[]> {
     useFullUrl: ctx.draftUseFullUrl,
     customUserAgent: ctx.draftCustomUserAgent,
     requestHeaders: ctx.draftRequestHeaders,
+    apiFormat: modelDiscoveryProtocol(ctx),
   });
+}
+
+function modelDiscoveryProtocol(ctx: ModelDiscoveryContext): string | undefined {
+  if (ctx.draftTool === "claude") return ctx.draftApiFormat;
+  if (ctx.draftTool === "openclaw") return ctx.draftApiProtocol;
+  if (ctx.draftTool === "opencode") return ctx.draftNpm;
+  if (ctx.draftTool === "hermes") {
+    return ["anthropic", "gemini"].includes(ctx.draftHermesProvider ?? "") ? ctx.draftHermesProvider : "openai";
+  }
+  return undefined;
 }
 
 export async function performFetchModels(ctx: ModelDiscoveryContext): Promise<void> {
@@ -75,18 +93,12 @@ export async function performFetchModels(ctx: ModelDiscoveryContext): Promise<vo
   try {
     const result = await fetchCatalog(ctx);
     if (!isCurrent()) return;
-    // Some gateways repeat IDs. Keep one entry, enriching it with later metadata.
-    const unique = new Map<string, ModelInfo>();
-    for (const model of result) {
-      const id = model.id?.trim();
-      if (!id) continue;
-      const previous = unique.get(id);
-      const details = Object.fromEntries(Object.entries(model).filter(([, value]) => value != null && value !== ""));
-      unique.set(id, { ...previous, ...details, id });
-    }
-    const models = [...unique.values()];
+    const catalog = normalizeModelCatalog({ toolId: ctx.draftTool, models: result });
+    if (!catalog) throw new Error("Invalid model catalog");
+    const models = catalog.models;
     ctx.setFetchedModelDetails(models);
     ctx.setFetchedModels(models.map((model) => model.id));
+    ctx.onCatalog?.(catalog);
     showToast(
       "success",
       models.length
@@ -115,6 +127,8 @@ export async function performFetchModels(ctx: ModelDiscoveryContext): Promise<vo
 export function useModelDiscovery(ctx: ModelDiscoveryContext, editorScope: string): () => Promise<void> {
   const generation = useRef(0);
   const inFlight = useRef(false);
+  const savedCatalog = useRef(ctx.draftModelCatalog);
+  savedCatalog.current = ctx.draftModelCatalog;
   const identity = JSON.stringify([
     editorScope,
     ctx.draftTool,
@@ -124,6 +138,7 @@ export function useModelDiscovery(ctx: ModelDiscoveryContext, editorScope: strin
     ctx.draftBaseUrl,
     ctx.draftUseFullUrl,
     ctx.draftCustomUserAgent,
+    modelDiscoveryProtocol(ctx),
     Object.entries(ctx.draftRequestHeaders).sort(([a], [b]) => a.localeCompare(b)),
   ]);
   const { setFetchingModels, setFetchedModels, setFetchedModelDetails, setModelFetchError } = ctx;
@@ -132,14 +147,15 @@ export function useModelDiscovery(ctx: ModelDiscoveryContext, editorScope: strin
     generation.current += 1;
     inFlight.current = false;
     setFetchingModels(false);
-    setFetchedModels([]);
-    setFetchedModelDetails([]);
+    const models = savedCatalog.current?.toolId === ctx.draftTool ? savedCatalog.current.models : [];
+    setFetchedModels(models.map((model) => model.id));
+    setFetchedModelDetails(models);
     setModelFetchError(null);
     return () => {
       generation.current += 1;
       inFlight.current = false;
     };
-  }, [identity, setFetchingModels, setFetchedModels, setFetchedModelDetails, setModelFetchError]);
+  }, [identity, ctx.draftTool, setFetchingModels, setFetchedModels, setFetchedModelDetails, setModelFetchError]);
 
   return useCallback(async () => {
     if (inFlight.current) return;

@@ -4,15 +4,9 @@ import { memo, useCallback, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import type { ModelInfo } from "../lib/modelCatalog";
 
-export interface ModelInfo {
-  id: string;
-  displayName?: string | null;
-  contextWindow?: number | null;
-  maxOutputTokens?: number | null;
-  inputPrice?: string | null;
-  outputPrice?: string | null;
-}
+export type { ModelInfo } from "../lib/modelCatalog";
 
 interface ModelSelectorProps {
   value: string;
@@ -20,6 +14,8 @@ interface ModelSelectorProps {
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  label?: string;
+  id?: string;
 }
 
 function formatTokens(value: number | null | undefined): string {
@@ -29,7 +25,7 @@ function formatTokens(value: number | null | undefined): string {
   return String(value);
 }
 
-function ModelSelectorComponent({ value, models, onChange, placeholder, disabled }: ModelSelectorProps) {
+function ModelSelectorComponent({ value, models, onChange, placeholder, disabled, label, id }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -63,11 +59,13 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
   if (models.length === 0) {
     return (
       <Input
+        id={id}
         className="input model-selector-fallback"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         disabled={disabled}
+        aria-label={label || placeholder || "选择模型"}
       />
     );
   }
@@ -77,11 +75,12 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
       <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
+            id={id}
             type="button"
             variant="outline"
             className="model-selector-trigger"
             role="combobox"
-            aria-label={placeholder || "选择模型"}
+            aria-label={label || placeholder || "选择模型"}
             aria-expanded={open}
             disabled={disabled}
           >

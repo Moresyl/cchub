@@ -24,6 +24,7 @@ function context(overrides: Partial<ModelDiscoveryContext> = {}): ModelDiscovery
     setModelFetchError: vi.fn(),
     setFetchedModelDetails: vi.fn(),
     setFetchedModels: vi.fn(),
+    onCatalog: vi.fn(),
     ...overrides,
   };
 }
@@ -47,6 +48,10 @@ describe("model discovery", () => {
       { id: "a", displayName: "Alpha", contextWindow: 128000, outputPrice: "0.02" },
       { id: "b" },
     ]);
+    expect(ctx.onCatalog).toHaveBeenCalledWith({
+      toolId: "claude",
+      models: [{ id: "a", displayName: "Alpha", contextWindow: 128000, outputPrice: "0.02" }, { id: "b" }],
+    });
   });
 
   it.each(["github_copilot", "codex_oauth", "xai_oauth"])("retains display names for %s", async (type) => {
@@ -70,8 +75,53 @@ describe("model discovery", () => {
     await performFetchModels(ctx);
     expect(ctx.setFetchedModels).not.toHaveBeenCalled();
     expect(ctx.setFetchedModelDetails).not.toHaveBeenCalled();
+    expect(ctx.onCatalog).not.toHaveBeenCalled();
     expect(ctx.setModelFetchError).toHaveBeenCalled();
     expect(ctx.setFetchingModels).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each([
+    ["claude", { draftApiFormat: "openai_responses" }, "openai_responses"],
+    ["openclaw", { draftApiProtocol: "anthropic-messages" }, "anthropic-messages"],
+    ["opencode", { draftNpm: "@ai-sdk/google" }, "@ai-sdk/google"],
+    ["hermes", { draftHermesProvider: "anthropic" }, "anthropic"],
+  ])("uses the selected protocol for %s model discovery", async (tool, fields, protocol) => {
+    invoke.mockResolvedValue([
+      { id: "a", inputModalities: ["text", "image"], supportedReasoningLevels: ["low", "high"] },
+    ]);
+    const ctx = context({ draftTool: tool, ...fields });
+    await performFetchModels(ctx);
+    expect(invoke).toHaveBeenCalledWith(
+      "fetch_provider_models_detailed",
+      expect.objectContaining({ apiFormat: protocol }),
+    );
+    expect(ctx.setFetchedModelDetails).toHaveBeenCalledWith([
+      { id: "a", inputModalities: ["text", "image"], supportedReasoningLevels: ["low", "high"] },
+    ]);
+  });
+
+  it("invalidates in-flight catalogs when the selected protocol changes", async () => {
+    let resolve!: (models: ModelInfo[]) => void;
+    invoke.mockReturnValue(
+      new Promise<ModelInfo[]>((done) => {
+        resolve = done;
+      }),
+    );
+    const ctx = context({ draftApiFormat: "anthropic" });
+    const hook = renderHook(({ protocol }) => useModelDiscovery({ ...ctx, draftApiFormat: protocol }, "provider"), {
+      initialProps: { protocol: "anthropic" },
+    });
+    let pending!: Promise<void>;
+    act(() => {
+      pending = hook.result.current();
+    });
+    hook.rerender({ protocol: "openai_chat" });
+    vi.mocked(ctx.setFetchedModelDetails).mockClear();
+    await act(async () => {
+      resolve([{ id: "stale" }]);
+      await pending;
+    });
+    expect(ctx.setFetchedModelDetails).not.toHaveBeenCalled();
   });
 
   it("does not invoke the backend when credentials or the endpoint are missing", async () => {
@@ -107,6 +157,18 @@ describe("model discovery", () => {
     });
     expect(ctx.setFetchedModelDetails).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
+    expect(ctx.onCatalog).not.toHaveBeenCalled();
+  });
+
+  it("restores only the current tool's saved catalog", () => {
+    const ctx = context({ draftModelCatalog: { toolId: "claude", models: [{ id: "saved", contextWindow: 200000 }] } });
+    const hook = renderHook(({ tool }) => useModelDiscovery({ ...ctx, draftTool: tool }, "same-profile"), {
+      initialProps: { tool: "claude" },
+    });
+    expect(ctx.setFetchedModels).toHaveBeenLastCalledWith(["saved"]);
+    hook.rerender({ tool: "opencode" });
+    expect(ctx.setFetchedModels).toHaveBeenLastCalledWith([]);
+    expect(ctx.setFetchedModelDetails).toHaveBeenLastCalledWith([]);
   });
 
   it("ignores a late error after unmounting", async () => {

@@ -62,6 +62,54 @@ fn built_in_key_only_profiles_do_not_add_sdk_or_replace_native_model() {
 }
 
 #[test]
+fn cleared_form_limits_restore_defaults_without_touching_other_models() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("opencode.json");
+    let source = json!({"model":"local/a", "provider":{"local":{"models":{
+        "a":{"limit":{"context":10000,"output":1000},"cost":{"input":2}},
+        "b":{"limit":{"context":20000}}
+    }}}});
+    std::fs::write(&path, source.to_string()).unwrap();
+    let profile = json!({"metadata":{"nativeProviderId":"local","nativeModelId":"a",
+        "modelCatalog":{"toolId":"opencode","models":[{"id":"a","contextWindow":300000}]}},
+        "models":{"a":{"contextLimit":null,"outputLimit":null}}});
+    apply_profile(&path, &profile.to_string()).unwrap();
+    let native =
+        crate::json_config::parse_json_object(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let models = &native["provider"]["local"]["models"];
+    assert!(models["a"].get("limit").is_none());
+    assert_eq!(models["a"]["cost"]["input"], 2);
+    assert_eq!(models["b"]["limit"]["context"], 20000);
+    assert!(native["provider"]["local"].get("metadata").is_none());
+    let read: Value = serde_json::from_str(&read_profile(&path).unwrap()).unwrap();
+    assert!(read["models"]["a"].get("contextLimit").is_none());
+}
+
+#[test]
+fn explicit_empty_selection_does_not_fall_back_to_the_first_configured_model() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("opencode.json");
+    let source = json!({"model":"local/a", "provider":{"local":{"models":{"a":{"limit":{"context":10000}}}}}});
+    std::fs::write(&path, source.to_string()).unwrap();
+    let profile = json!({"metadata":{"nativeProviderId":"local","nativeModelId":""},"models":{"a":{"contextLimit":10000}}});
+    apply_profile(&path, &profile.to_string()).unwrap();
+    let native =
+        crate::json_config::parse_json_object(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(native.get("model").is_none());
+    assert_eq!(
+        native["provider"]["local"]["models"]["a"]["limit"]["context"],
+        10000
+    );
+    let restored: Value = serde_json::from_str(&read_profile(&path).unwrap()).unwrap();
+    assert_eq!(restored["metadata"]["nativeModelId"], "");
+    std::fs::write(&path, source.to_string().replace("local/a", "other/a")).unwrap();
+    apply_profile(&path, &profile.to_string()).unwrap();
+    let native =
+        crate::json_config::parse_json_object(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(native["model"], "other/a");
+}
+
+#[test]
 fn repairs_legacy_flat_files_without_losing_mcp() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("opencode.json");

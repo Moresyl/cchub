@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { StructuredDraftFields } from "./types";
 import { buildOpenCodeProvider } from "./opencode";
+import { normalizeModelCatalog } from "../modelCatalog";
 import {
   normalizeCustomUserAgent,
   normalizeEndpointList,
@@ -22,6 +23,7 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     body: requestBodyOverrides && Object.keys(requestBodyOverrides).length ? requestBodyOverrides : undefined,
   };
   const transportMetadata = {
+    modelCatalog: fields.modelCatalog?.toolId === toolId ? normalizeModelCatalog(fields.modelCatalog) : undefined,
     customUserAgent: customUserAgent || undefined,
     requestHeaders: Object.keys(requestHeaders).length ? requestHeaders : undefined,
     localProxyRequestOverrides:
@@ -301,9 +303,13 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
       name: fields.modelName.trim() || fields.model.trim(),
     };
     const contextLimit = parseNumberLike(fields.openCodeContextLimit);
-    if (contextLimit !== undefined) modelEntry.contextLimit = contextLimit;
+    modelEntry.contextLimit = fields.openCodeContextLimit.trim()
+      ? (contextLimit ?? fields.openCodeContextLimit.trim())
+      : null;
     const outputLimit = parseNumberLike(fields.openCodeOutputLimit);
-    if (outputLimit !== undefined) modelEntry.outputLimit = outputLimit;
+    modelEntry.outputLimit = fields.openCodeOutputLimit.trim()
+      ? (outputLimit ?? fields.openCodeOutputLimit.trim())
+      : null;
     const inputModalities = splitList(fields.openCodeInputModalities);
     const outputModalities = splitList(fields.openCodeOutputModalities);
     if (inputModalities.length || outputModalities.length) {

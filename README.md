@@ -40,6 +40,8 @@ Screenshots are from the desktop app; the example endpoint has been anonymized.
 
 ![CCHub configuration editor with structured options and syntax highlighting](screenshots/profile-editor.png)
 
+Model discovery follows the selected API protocol and retains provider-reported context/output limits, modalities, native endpoints, and reasoning levels. Catalogs are saved with their profile and invalidated when its connection changes. OpenCode model edits remain separate when switching models; reported limits and modalities can be applied explicitly, and clearing token limits restores the tool defaults. Discovery uses a single 15-second deadline across supported pagination, with limits of 50 pages, 10,000 model rows, and 8 MiB.
+
 ---
 
 ## Features

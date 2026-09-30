@@ -21,6 +21,8 @@ import {
   parseBooleanLike,
   stringifyTemplateValues,
 } from "./helpers";
+import { normalizeModelCatalog } from "../modelCatalog";
+import { defaultOpenCodeNpm } from "./opencode";
 
 function stringifyOverrideObject(value: unknown, headers = false): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
@@ -43,6 +45,7 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       parsed.customEndpoints ?? parsed.custom_endpoints ?? metadata.customEndpoints,
     );
     const transportFields = {
+      modelCatalog: normalizeModelCatalog(metadata.modelCatalog),
       customUserAgent: normalizeCustomUserAgent(
         metadata.customUserAgent ?? metadata.custom_user_agent ?? parsed.customUserAgent ?? parsed.custom_user_agent,
       ),
@@ -251,17 +254,26 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
     }
 
     if (toolId === "opencode") {
-      const npm = (parsed.npm as OpenCodeNpmPackage) || "@ai-sdk/openai-compatible";
+      const npm = (parsed.npm as OpenCodeNpmPackage) || defaultOpenCodeNpm(parsed);
       const options = (parsed.options || {}) as Record<string, string>;
       const modelsObj = (parsed.models || {}) as Record<string, Record<string, any>>;
       const modelEntries = Object.entries(modelsObj);
-      const firstEntry = modelEntries.find(([id]) => id === metadata.nativeModelId) || modelEntries[0];
+      const firstEntry =
+        typeof metadata.nativeModelId === "string"
+          ? ([metadata.nativeModelId, modelsObj[metadata.nativeModelId] || {}] as const)
+          : modelEntries[0];
       const firstModel = firstEntry?.[1] || {};
       const variants = (firstModel.variants || {}) as Record<string, Record<string, any>>;
       const firstVariantName = Object.keys(variants)[0] || "";
       const firstVariant = variants[firstVariantName] || {};
       const thinkingConfig = (firstVariant.thinkingConfig || firstVariant.thinking || {}) as Record<string, any>;
       const modalities = (firstModel.modalities || {}) as { input?: string[]; output?: string[] };
+      const contextLimit = Object.prototype.hasOwnProperty.call(firstModel, "contextLimit")
+        ? firstModel.contextLimit
+        : firstModel.limit?.context;
+      const outputLimit = Object.prototype.hasOwnProperty.call(firstModel, "outputLimit")
+        ? firstModel.outputLimit
+        : firstModel.limit?.output;
       return {
         ...defaults,
         customEndpoints,
@@ -284,8 +296,8 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
           metadata.costMultiplier !== undefined ? String(metadata.costMultiplier) : defaults.costMultiplier,
         useFullUrl: parseBooleanLike(metadata.useFullUrl),
         iconUrl: metadata.iconUrl || defaults.iconUrl,
-        openCodeContextLimit: firstModel.contextLimit !== undefined ? String(firstModel.contextLimit) : "",
-        openCodeOutputLimit: firstModel.outputLimit !== undefined ? String(firstModel.outputLimit) : "",
+        openCodeContextLimit: contextLimit != null ? String(contextLimit) : "",
+        openCodeOutputLimit: outputLimit != null ? String(outputLimit) : "",
         openCodeInputModalities: Array.isArray(modalities.input) ? modalities.input.join(",") : "",
         openCodeOutputModalities: Array.isArray(modalities.output) ? modalities.output.join(",") : "",
         openCodeVariantName: firstVariantName,

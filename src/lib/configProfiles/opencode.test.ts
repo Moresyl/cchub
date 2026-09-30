@@ -1,7 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { buildStructuredConfig, parseStructuredConfig } from "./index";
+import { defaultOpenCodeNpm } from "./opencode";
 
 describe("OpenCode structured editing", () => {
+  it.each([
+    ["anthropic", "@ai-sdk/anthropic"],
+    ["google", "@ai-sdk/google"],
+    ["openai", "@ai-sdk/openai"],
+    ["custom", "@ai-sdk/openai-compatible"],
+  ])("uses the built-in %s protocol without adding a redundant SDK override", (id, npm) => {
+    const source = { metadata: { nativeProviderId: id }, options: { apiKey: "fixture" } };
+    expect(defaultOpenCodeNpm(source)).toBe(npm);
+    const fields = parseStructuredConfig("opencode", JSON.stringify(source));
+    expect(fields.npm).toBe(npm);
+    expect(JSON.parse(buildStructuredConfig("opencode", fields)).npm).toBeUndefined();
+    expect(defaultOpenCodeNpm()).toBe("@ai-sdk/openai-compatible");
+  });
+  it("reads native flat limits and retains an explicit reset through save and reopen", () => {
+    const source = {
+      options: { apiKey: "key" },
+      models: { a: { limit: { context: 10000, output: 1000 } } },
+      metadata: { nativeModelId: "a" },
+    };
+    const fields = parseStructuredConfig("opencode", JSON.stringify(source));
+    expect(fields.openCodeContextLimit).toBe("10000");
+    expect(fields.openCodeOutputLimit).toBe("1000");
+    const saved = buildStructuredConfig("opencode", { ...fields, openCodeContextLimit: "" });
+    expect(JSON.parse(saved).models.a.contextLimit).toBeNull();
+    expect(parseStructuredConfig("opencode", saved).openCodeContextLimit).toBe("");
+  });
   it("keeps built-in identity and key-only SDK settings", () => {
     const source = {
       options: { apiKey: "before", timeout: 5000 },
@@ -9,12 +36,15 @@ describe("OpenCode structured editing", () => {
     };
     const fields = parseStructuredConfig("opencode", JSON.stringify(source));
     const output = JSON.parse(buildStructuredConfig("opencode", { ...fields, apiKey: "after" }));
+    expect(fields.npm).toBe("@ai-sdk/anthropic");
     expect(output.metadata.nativeProviderId).toBe("anthropic");
     expect(output.metadata.nativeModelId).toBe("claude-model");
     expect(output.options).toEqual({ apiKey: "after", timeout: 5000 });
     expect(output.npm).toBeUndefined();
     expect(output.name).toBeUndefined();
     expect(source.options.apiKey).toBe("before");
+    const changedSdk = JSON.parse(buildStructuredConfig("opencode", { ...fields, npm: "@ai-sdk/google" }));
+    expect(changedSdk.npm).toBe("@ai-sdk/google");
   });
 
   it("edits the selected native model and retains provider and other model extensions", () => {

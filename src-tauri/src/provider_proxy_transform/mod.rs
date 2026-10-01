@@ -1,5 +1,6 @@
 mod message_id;
 mod responses;
+mod responses_reasoning;
 mod sse_chat;
 mod sse_gemini;
 mod sse_responses;

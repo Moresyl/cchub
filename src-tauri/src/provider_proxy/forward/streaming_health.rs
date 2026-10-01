@@ -67,9 +67,12 @@ where
         while let Some(chunk) = stream.next().await {
             if let Ok(bytes) = &chunk {
                 for byte in bytes { inspector.push(*byte, &delivered); }
+                if delivered.failed() { health.fail(); }
                 if delivered.completed_successfully() && health.completed_successfully() {
                     health.1.store(true, Ordering::Relaxed);
                 }
+            } else {
+                health.fail();
             }
             yield chunk;
         }
@@ -183,6 +186,40 @@ fn inspect_frame(frame: &[u8], health: &StreamHealth) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn translated_errors_override_a_completed_vendor_reply_without_crediting_delivery() {
+        for split in [false, true] {
+            let health = StreamHealth::requiring_completion();
+            health.completed();
+            let wire = b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"adapter limit\"}}\n\n";
+            let chunks = wire
+                .chunks(if split { 1 } else { wire.len() })
+                .map(|chunk| Ok::<_, std::io::Error>(Bytes::copy_from_slice(chunk)))
+                .collect::<Vec<_>>();
+            let output = observe_delivery(futures_util::stream::iter(chunks), health.clone())
+                .collect::<Vec<_>>()
+                .await;
+            assert_eq!(
+                output
+                    .into_iter()
+                    .flat_map(|chunk| chunk.unwrap().to_vec())
+                    .collect::<Vec<_>>(),
+                wire
+            );
+            assert!(health.failed());
+            assert!(!health.delivered_successfully());
+        }
+        let health = StreamHealth::requiring_completion();
+        health.completed();
+        let source = futures_util::stream::iter([Err(std::io::Error::other("adapter failure"))]);
+        let output = observe_delivery(source, health.clone())
+            .collect::<Vec<_>>()
+            .await;
+        assert!(output[0].is_err());
+        assert!(health.failed());
+        assert!(!health.delivered_successfully());
+    }
 
     #[tokio::test]
     async fn terminal_event_names_are_recognized_but_empty_finish_reasons_are_not() {

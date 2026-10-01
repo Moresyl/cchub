@@ -640,21 +640,9 @@ pub fn responses_to_anthropic(body: Value) -> Result<Value, String> {
                 }));
             }
             "reasoning" => {
-                if let Some(summary) = item.get("summary").and_then(|s| s.as_array()) {
-                    let thinking_text: String = summary
-                        .iter()
-                        .filter_map(|s| {
-                            if s.get("type").and_then(|t| t.as_str()) == Some("summary_text") {
-                                s.get("text").and_then(|t| t.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("");
-                    if !thinking_text.is_empty() {
-                        content.push(json!({"type": "thinking", "thinking": thinking_text}));
-                    }
+                let thinking_text = super::responses_reasoning::whole_reasoning_text(item);
+                if !thinking_text.is_empty() {
+                    content.push(json!({"type": "thinking", "thinking": thinking_text}));
                 }
             }
             _ => {}

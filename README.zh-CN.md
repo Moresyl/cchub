@@ -91,6 +91,8 @@ OpenCode 使用已有的 `opencode.jsonc` 或 `opencode.json`。配置档案保�
 
 跨协议 Claude 代理将 Chat Completions、Responses 和 Gemini 的普通与流式回复统一为 Anthropic 消息 ID，保留 Chat Completions 和 Responses 的工具调用 ID。缺少上游消息 ID 时生成独立随机 ID；Responses 流缺少或重复起始事件时仍只输出一次消息开始，完成后只输出一次结束。原生 Anthropic 回复的消息 ID 保持原值。
 
+Responses 转换支持标准推理摘要、推理文本事件及仅在数据中声明的事件类型。推理分段使用独立内容块，切换到文本或工具前关闭，完成快照不重复输出；缺少增量时可恢复最终分段。推理状态设有分段数量和标识长度上限；即使供应商完成回复，转换器错误仍计为失败请求。这些限制针对推理状态，不代表整个流解析器已具备内存上限。
+
 ### OAuth 账号状态
 
 Claude 代理使用 Codex OAuth、xAI OAuth 或 GitHub Copilot 时，每次请求携带实际选中的账号与登录版本；未绑定配置跟随默认账号，明确绑定的配置保持指定账号。Codex 请求的账号头也使用实际选中的账号。账号移除或重新登录后，旧请求不能更新端点偏好或发送配置故障转移通知；Grok Build 的 xAI OAuth 代理也使用同样的账号校验。

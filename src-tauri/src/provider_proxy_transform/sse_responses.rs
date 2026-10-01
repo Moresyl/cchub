@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 use super::responses::{build_anthropic_usage_from_responses, map_responses_stop_reason};
+use super::responses_reasoning::ReasoningBlocks;
 use super::strip_sse_field;
 
 #[inline]
@@ -136,6 +137,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
         let mut current_text_index: Option<u32> = None;
         let mut tool_index_by_item_id: HashMap<String, u32> = HashMap::new();
         let mut last_tool_index: Option<u32> = None;
+        let mut reasoning = ReasoningBlocks::default();
 
         tokio::pin!(stream);
         while let Some(chunk) = stream.next().await {
@@ -165,22 +167,23 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                         }
 
                         let data_str = data_parts.join("\n");
-                        let event_name = event_type.as_deref().unwrap_or("");
                         let data: Value = match serde_json::from_str(&data_str) {
                             Ok(v) => v,
                             Err(_) => continue,
                         };
+                        let event_name = event_type.as_deref().filter(|event| !event.is_empty())
+                            .or_else(|| data.get("type").and_then(Value::as_str)).unwrap_or("");
 
                         if let Some(error) = super::stream_errors::error_event(&data, Some(event_name)) {
                             yield Ok(error);
                             return;
                         }
-                        if !has_sent_message_start && matches!(event_name,
+                        if !has_sent_message_start && (matches!(event_name,
                             "response.created" | "response.content_part.added" |
                             "response.output_text.delta" | "response.refusal.delta" |
                             "response.output_item.added" | "response.output_item.done" |
                             "response.function_call_arguments.delta" | "response.reasoning.delta" |
-                            "response.completed") {
+                            "response.completed") || ReasoningBlocks::handles(event_name)) {
                             if matches!(event_name, "response.created" | "response.completed") {
                                 let response_obj = response_object_from_event(&data);
                                 message_id = super::anthropic_message_id(response_obj.get("id").and_then(Value::as_str));
@@ -197,6 +200,42 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                             }});
                             yield Ok(Bytes::from(format!("event: message_start\ndata: {start}\n\n")));
                             has_sent_message_start = true;
+                        }
+                        let reasoning_item_done = event_name == "response.output_item.done" && data.pointer("/item/type").and_then(Value::as_str) == Some("reasoning");
+                        if ReasoningBlocks::handles(event_name) || reasoning_item_done {
+                            let result = if reasoning_item_done {
+                                reasoning.finish_item(&data, &mut next_content_index)
+                            } else { reasoning.handle(event_name, &data, &mut next_content_index) };
+                            let events = match result {
+                                Ok(events) => events,
+                                Err(message) => {
+                                    let error = json!({"type":"error", "error":{"type":"api_error", "message":message}});
+                                    yield Ok(Bytes::from(format!("event: error\ndata: {error}\n\n")));
+                                    return;
+                                }
+                            };
+                            if events.iter().any(|event| matches!(event["type"].as_str(), Some("content_block_start" | "content_block_delta"))) {
+                                if let Some(index) = current_text_index.take() {
+                                    if open_indices.remove(&index) {
+                                        let stop = json!({"type":"content_block_stop", "index":index});
+                                        yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {stop}\n\n")));
+                                    }
+                                    if fallback_open_index == Some(index) { fallback_open_index = None; }
+                                }
+                            }
+                            for event in events {
+                                yield Ok(Bytes::from(format!("event: {}\ndata: {event}\n\n", event["type"].as_str().expect("reasoning event type"))));
+                            }
+                            continue;
+                        }
+                        let opens_other_content = matches!(event_name, "response.output_text.delta" | "response.refusal.delta")
+                            || (event_name == "response.content_part.added" && matches!(data.pointer("/part/type").and_then(Value::as_str), Some("output_text" | "refusal")))
+                            || event_name == "response.function_call_arguments.delta"
+                            || (event_name == "response.output_item.added" && matches!(data.pointer("/item/type").and_then(Value::as_str), Some("function_call" | "web_search_call")));
+                        if opens_other_content || event_name == "response.completed" {
+                            for event in reasoning.close_all() {
+                                yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {event}\n\n")));
+                            }
                         }
                         match event_name {
                             "response.created" => {}
@@ -419,52 +458,6 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                                 }
                                             });
                                             yield Ok(Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                        }
-                                    }
-                                }
-                            }
-                            "response.reasoning.delta" => {
-                                if let Some(delta) = data.get("delta").or_else(|| data.get("text")).and_then(|d| d.as_str()) {
-                                    if let Some(index) = current_text_index.take() {
-                                        if open_indices.remove(&index) {
-                                            let stop_event = json!({"type": "content_block_stop", "index": index});
-                                            yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
-                                        }
-                                        if fallback_open_index == Some(index) {
-                                            fallback_open_index = None;
-                                        }
-                                    }
-                                    let index = resolve_content_index(&data, &mut next_content_index, &mut index_by_key, &mut fallback_open_index);
-                                    if !open_indices.contains(&index) {
-                                        let start_event = json!({
-                                            "type": "content_block_start",
-                                            "index": index,
-                                            "content_block": { "type": "thinking", "thinking": "" }
-                                        });
-                                        yield Ok(Bytes::from(format!("event: content_block_start\ndata: {}\n\n", serde_json::to_string(&start_event).unwrap_or_default())));
-                                        open_indices.insert(index);
-                                    }
-                                    let event = json!({
-                                        "type": "content_block_delta",
-                                        "index": index,
-                                        "delta": { "type": "thinking_delta", "thinking": delta }
-                                    });
-                                    yield Ok(Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                }
-                            }
-                            "response.reasoning.done" => {
-                                let key = content_part_key(&data);
-                                let index = if let Some(k) = key {
-                                    index_by_key.get(&k).copied()
-                                } else {
-                                    fallback_open_index
-                                };
-                                if let Some(index) = index {
-                                    if open_indices.remove(&index) {
-                                        let event = json!({"type": "content_block_stop", "index": index});
-                                        yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                        if fallback_open_index == Some(index) {
-                                            fallback_open_index = None;
                                         }
                                     }
                                 }

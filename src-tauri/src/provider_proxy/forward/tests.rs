@@ -26,6 +26,8 @@ mod managed_auth_tests;
 mod message_id_tests;
 #[path = "passthrough_tests.rs"]
 mod passthrough_tests;
+#[path = "responses_reasoning_tests.rs"]
+mod responses_reasoning_tests;
 #[path = "routing_tests.rs"]
 mod routing_tests;
 #[path = "streaming_tests.rs"]

@@ -28,6 +28,8 @@ mod quota;
 mod responses_history;
 #[path = "forward/streaming.rs"]
 mod streaming;
+#[path = "forward/streaming_chat.rs"]
+mod streaming_chat;
 #[path = "forward/streaming_errors.rs"]
 mod streaming_errors;
 #[path = "forward/streaming_health.rs"]

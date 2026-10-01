@@ -20,6 +20,8 @@ use tokio::sync::Notify;
 mod affinity_tests;
 #[path = "bounded_stream_tests.rs"]
 mod bounded_stream_tests;
+#[path = "chat_compat_tests.rs"]
+mod chat_compat_tests;
 #[path = "deadline_tests.rs"]
 mod deadline_tests;
 #[path = "gemini_tool_tests.rs"]

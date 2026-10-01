@@ -68,6 +68,13 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
                 .map(str::to_owned)
                 .unwrap_or_else(|| "gemini-3.6-flash".to_string()),
         )),
+        None if is_sse && matches!(Protocol::for_path(relative_path), Some(Protocol::Chat)) => {
+            boxed(terminate(
+                super::streaming_chat::normalize(observed),
+                Protocol::Chat,
+                upstream.profile_name.clone(),
+            ))
+        }
         _ => match Protocol::for_path(relative_path) {
             Some(protocol) => boxed(terminate(observed, protocol, upstream.profile_name.clone())),
             None => boxed(observed),

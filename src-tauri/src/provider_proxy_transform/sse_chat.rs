@@ -30,6 +30,8 @@ struct Delta {
     #[serde(default)]
     reasoning: Option<String>,
     #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     tool_calls: Option<Vec<DeltaToolCall>>,
 }
 
@@ -200,7 +202,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             has_sent_message_start = true;
                                         }
 
-                                        if let Some(reasoning) = &choice.delta.reasoning {
+                                        if let Some(reasoning) = choice.delta.reasoning.as_ref().filter(|text| !text.is_empty())
+                                            .or_else(|| choice.delta.reasoning_content.as_ref().filter(|text| !text.is_empty())) {
                                             if current_non_tool_block_type != Some("thinking") {
                                                 if let Some(index) = current_non_tool_block_index.take() {
                                                     let event = json!({"type": "content_block_stop", "index": index});
@@ -260,7 +263,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             }
                                         }
 
-                                        if let Some(tool_calls) = &choice.delta.tool_calls {
+                                        if let Some(tool_calls) = choice.delta.tool_calls.as_ref().filter(|calls| !calls.is_empty()) {
                                             if let Some(index) = current_non_tool_block_index.take() {
                                                 let event = json!({"type": "content_block_stop", "index": index});
                                                 yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
@@ -352,8 +355,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             }
                                         }
 
-                                        if let Some(finish_reason) = &choice.finish_reason {
-                                            has_finish_reason = !finish_reason.is_empty();
+                                        if let Some(finish_reason) = choice.finish_reason.as_ref().filter(|reason| !reason.is_empty()) {
+                                            has_finish_reason = true;
                                             if let Some(index) = current_non_tool_block_index.take() {
                                                 let event = json!({"type": "content_block_stop", "index": index});
                                                 yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));

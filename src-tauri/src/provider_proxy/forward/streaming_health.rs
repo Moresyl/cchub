@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
 #[path = "streaming_health/frame.rs"]
@@ -13,7 +13,7 @@ const REQUIRES_COMPLETION: u8 = 4;
 const UNVERIFIED: u8 = 8;
 
 #[derive(Clone, Default)]
-pub(crate) struct StreamHealth(Arc<AtomicU8>);
+pub(crate) struct StreamHealth(Arc<AtomicU8>, Arc<AtomicBool>);
 
 impl StreamHealth {
     pub(crate) fn failed(&self) -> bool {
@@ -23,7 +23,10 @@ impl StreamHealth {
         self.0.fetch_or(FAILED, Ordering::Relaxed);
     }
     pub(super) fn requiring_completion() -> Self {
-        Self(Arc::new(AtomicU8::new(REQUIRES_COMPLETION)))
+        Self(
+            Arc::new(AtomicU8::new(REQUIRES_COMPLETION)),
+            Arc::new(AtomicBool::new(false)),
+        )
     }
     pub(crate) fn verified(&self) -> bool {
         self.0.load(Ordering::Relaxed) & UNVERIFIED == 0
@@ -36,12 +39,40 @@ impl StreamHealth {
     fn completed_successfully(&self) -> bool {
         self.0.load(Ordering::Relaxed) & (FAILED | COMPLETED) == COMPLETED
     }
+    pub(crate) fn delivered_successfully(&self) -> bool {
+        self.1.load(Ordering::Relaxed) && !self.failed()
+    }
     fn unknown_frame(&self) {
         self.0.fetch_or(UNVERIFIED, Ordering::Relaxed);
     }
     fn incomplete(&self) -> bool {
         let flags = self.0.load(Ordering::Relaxed);
         flags & REQUIRES_COMPLETION != 0 && flags & (FAILED | COMPLETED) == 0
+    }
+}
+
+// Source completion can precede several translated output events. Credit only a
+// terminal event actually polled from the output stream, even on early client close.
+pub(super) fn observe_delivery<S>(
+    stream: S,
+    health: StreamHealth,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
+where
+    S: Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
+{
+    async_stream::stream! {
+        let delivered = StreamHealth::default();
+        let mut inspector = frame::Inspector::default();
+        tokio::pin!(stream);
+        while let Some(chunk) = stream.next().await {
+            if let Ok(bytes) = &chunk {
+                for byte in bytes { inspector.push(*byte, &delivered); }
+                if delivered.completed_successfully() && health.completed_successfully() {
+                    health.1.store(true, Ordering::Relaxed);
+                }
+            }
+            yield chunk;
+        }
     }
 }
 

@@ -22,6 +22,8 @@ mod deadline_tests;
 mod passthrough_tests;
 #[path = "streaming_tests.rs"]
 mod streaming_tests;
+#[path = "terminal_drop_tests.rs"]
+mod terminal_drop_tests;
 
 struct Upstream {
     url: String,

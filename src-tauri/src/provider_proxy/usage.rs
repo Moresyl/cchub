@@ -260,6 +260,7 @@ where
         status_code: 499,
         error_message: Some("Client disconnected before the upstream response completed".into()),
         usage: ProxyUsageMetrics::default(),
+        health: health.clone(),
     };
     async_stream::stream! {
         let mut log = log;

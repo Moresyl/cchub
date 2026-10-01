@@ -4,7 +4,7 @@ use futures_util::{Stream, StreamExt};
 use tauri::AppHandle;
 
 use super::streaming_errors::{terminate, Protocol};
-use super::streaming_health::{observe, StreamHealth};
+use super::streaming_health::{observe, observe_delivery, StreamHealth};
 use super::timeouts::{prepare_raw_stream, Deadline, ResponseStream};
 use crate::provider_proxy::desktop;
 use crate::provider_proxy::usage::create_usage_tracking_stream;
@@ -71,7 +71,7 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         },
     };
     let body = Body::from_stream(create_usage_tracking_stream(
-        stream,
+        observe_delivery(stream, health.clone()),
         app_handle,
         request_id,
         tool_id,

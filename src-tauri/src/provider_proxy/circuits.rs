@@ -246,46 +246,9 @@ impl Drop for CircuitLease {
     }
 }
 
-// Ownership follows the response body, including bodies dropped before their first poll.
-pub(super) fn track_body(
-    body: axum::body::Body,
-    mut profile: CircuitLease,
-    mut endpoint: CircuitLease,
-    successful_status: bool,
-    health: super::forward::streaming_health::StreamHealth,
-    on_success: impl FnOnce() + Send + 'static,
-) -> axum::body::Body {
-    use futures_util::StreamExt;
-    axum::body::Body::from_stream(async_stream::stream! {
-        let stream = body.into_data_stream();
-        tokio::pin!(stream);
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    if health.failed() {
-                        endpoint.failure();
-                        profile.failure();
-                    }
-                    yield Ok(bytes);
-                }
-                Err(error) => {
-                    endpoint.failure();
-                    profile.failure();
-                    yield Err(error);
-                    return;
-                }
-            }
-        }
-        if health.failed() {
-            endpoint.failure();
-            profile.failure();
-        } else if successful_status && health.verified() {
-            let endpoint_accepted = endpoint.success();
-            let profile_accepted = profile.success();
-            if endpoint_accepted && profile_accepted { on_success(); }
-        }
-    })
-}
+#[path = "circuits/response.rs"]
+mod response;
+pub(super) use response::track_body;
 
 #[cfg(test)]
 #[path = "circuits_tests.rs"]

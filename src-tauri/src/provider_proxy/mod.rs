@@ -38,10 +38,10 @@ use rewriters::{
     rewrite_opencode_snapshot,
 };
 use upstream::{
-    build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
-    build_upstream_request_url, extract_request_insights, extract_upstream_target,
-    is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
-    reqwest_client, transform_claude_request_body,
+    build_json_response_from_value, build_proxy_error, build_upstream_request_url,
+    extract_request_insights, extract_upstream_target, is_hop_by_hop_header,
+    is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes, reqwest_client,
+    transform_claude_request_body,
 };
 pub(crate) use upstream::{extract_local_proxy_overrides, extract_transport_headers};
 

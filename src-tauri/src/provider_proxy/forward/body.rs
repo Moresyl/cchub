@@ -9,6 +9,10 @@ use axum::{
 use bytes::Bytes;
 use serde_json::Value;
 
+#[path = "body/json_response.rs"]
+mod json_response;
+pub(super) use json_response::json_success_error;
+
 pub(super) struct RetainedReply {
     pub response: Response<Body>,
     pub upstream: crate::provider_proxy::UpstreamTarget,
@@ -94,6 +98,87 @@ pub(super) fn failed_response(
     }
 }
 
+pub(super) fn raw_response(
+    status: StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    bytes: Bytes,
+    path: &str,
+) -> Response<Body> {
+    let is_json = headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.split(';').next())
+        .is_some_and(|mime| {
+            let mime = mime.trim().to_ascii_lowercase();
+            mime == "application/json" || mime.ends_with("+json")
+        });
+    let original = bytes.clone();
+    let bytes = if status.is_success()
+        && is_json
+        && matches!(
+            super::streaming_errors::Protocol::for_path(path),
+            Some(super::streaming_errors::Protocol::Chat)
+        ) {
+        super::streaming_chat::repair_whole(bytes)
+    } else {
+        bytes
+    };
+    let mut headers = headers.clone();
+    if bytes != original {
+        invalidate_body_validators(&mut headers);
+    }
+    build_forward_response_from_parts(status, &headers, Body::from(bytes))
+}
+
+fn invalidate_body_validators(headers: &mut reqwest::header::HeaderMap) {
+    for name in [
+        "etag",
+        "content-md5",
+        "digest",
+        "content-digest",
+        "repr-digest",
+    ] {
+        headers.remove(name);
+    }
+}
+
+pub(super) fn stream_response(
+    status: StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    body: Body,
+) -> Response<Body> {
+    let mut headers = headers.clone();
+    // SSE decoding/repair/translation can change representation bytes. Do not
+    // advertise integrity values for the original upstream representation.
+    invalidate_body_validators(&mut headers);
+    build_forward_response_from_parts(status, &headers, body)
+}
+
+pub(super) fn finish_json_response(
+    status: StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    bytes: Bytes,
+    converted: Option<Value>,
+    path: &str,
+    is_desktop: bool,
+    original_request: &[u8],
+) -> Response<Body> {
+    if let Some(mut converted) = converted {
+        if is_desktop
+            && status.is_success()
+            && crate::provider_proxy::profiles::is_claude_messages_path(path)
+        {
+            crate::provider_proxy::desktop::restore_response_model(
+                &mut converted,
+                original_request,
+            );
+        }
+        build_json_response_from_value(status, headers, &converted)
+    } else {
+        raw_response(status, headers, bytes, path)
+    }
+}
+
 pub(super) fn apply_local_proxy_body_override(
     body: Bytes,
     override_value: Option<&Value>,
@@ -130,6 +215,10 @@ fn merge_json_objects(target: &mut Value, overrides: &Value) {
         target_object.insert(key.clone(), value.clone());
     }
 }
+
+#[cfg(test)]
+#[path = "body/chat_tests.rs"]
+mod chat_tests;
 
 #[cfg(test)]
 mod tests {

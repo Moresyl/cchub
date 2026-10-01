@@ -9,6 +9,17 @@ mod json;
 const MAX_REPAIR_BYTES: usize = 8 * 1024 * 1024;
 const PASS_CHUNK_BYTES: usize = 32 * 1024;
 
+pub(super) fn repair_whole(bytes: Bytes) -> Bytes {
+    if bytes.len() > MAX_REPAIR_BYTES {
+        return bytes;
+    }
+    std::str::from_utf8(&bytes)
+        .ok()
+        .and_then(json::repair_whole)
+        .map(Bytes::from)
+        .unwrap_or(bytes)
+}
+
 pub(super) fn normalize<S>(stream: S) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,

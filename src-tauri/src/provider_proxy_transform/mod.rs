@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod chat_compat_tests;
+pub(crate) mod chat_content;
 #[cfg(test)]
 mod chat_identity_tests;
 mod message_id;
@@ -532,30 +533,21 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, String> {
     let mut content = Vec::new();
     let mut has_tool_use = false;
 
+    if let Some(reasoning) = chat_content::reasoning(
+        message.get("reasoning").and_then(Value::as_str),
+        message.get("reasoning_content").and_then(Value::as_str),
+    )
+    .map_err(str::to_owned)?
+    {
+        content.push(json!({"type":"thinking", "thinking":reasoning}));
+    }
     if let Some(msg_content) = message.get("content") {
-        if let Some(text) = msg_content.as_str() {
-            if !text.is_empty() {
-                content.push(json!({"type": "text", "text": text}));
-            }
-        } else if let Some(parts) = msg_content.as_array() {
-            for part in parts {
-                match part.get("type").and_then(|t| t.as_str()).unwrap_or("") {
-                    "text" | "output_text" => {
-                        if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                            if !text.is_empty() {
-                                content.push(json!({"type": "text", "text": text}));
-                            }
-                        }
-                    }
-                    "refusal" => {
-                        if let Some(refusal) = part.get("refusal").and_then(|r| r.as_str()) {
-                            if !refusal.is_empty() {
-                                content.push(json!({"type": "text", "text": refusal}));
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+        let raw =
+            serde_json::to_string(msg_content).map_err(|_| "Invalid upstream Chat content")?;
+        for part in chat_content::parse(&raw).map_err(str::to_owned)? {
+            if !part.text.is_empty() {
+                let kind = part.kind.block_type();
+                content.push(json!({"type":kind, (kind):part.text}));
             }
         }
     }

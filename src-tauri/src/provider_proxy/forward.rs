@@ -47,8 +47,7 @@ use super::profiles::{
 };
 use super::usage::{parse_usage_metrics_with_basis, source_input_basis};
 use super::{
-    build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
-    build_upstream_request_url, extract_upstream_target, is_hop_by_hop_header,
+    build_proxy_error, build_upstream_request_url, extract_upstream_target, is_hop_by_hop_header,
     is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes, reqwest_client,
     ClaudeApiFormat, LocalProviderProxyRuntime, MAX_PROXY_BODY_BYTES,
     MAX_PROXY_RESPONSE_BODY_BYTES,
@@ -452,11 +451,20 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             {
                                 Ok((_response_status, headers, bytes)) => {
                                     let parsed = parse_json_bytes(&bytes);
-                                    if status.is_success() && parsed.is_none() {
+                                    if let Some(message) = status
+                                        .is_success()
+                                        .then(|| {
+                                            body::json_success_error(
+                                                parsed.as_ref(),
+                                                &bytes,
+                                                claude_transform.is_some(),
+                                            )
+                                        })
+                                        .flatten()
+                                    {
                                         endpoint_lease.failure();
                                         endpoint_failed = true;
-                                        last_error =
-                                            Some("Upstream returned invalid JSON".to_string());
+                                        last_error = Some(message.to_string());
                                         log_attempt(None, 502, last_error.as_deref());
                                         if claude_transform.is_some() && last_response.is_none() {
                                             last_response =
@@ -464,23 +472,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                     upstream.clone(),
                                                     request_insights.clone(),
                                                     None,
-                                                    "Upstream returned invalid JSON".into(),
+                                                    message.into(),
                                                 ));
                                         }
-                                        continue 'endpoints;
-                                    }
-                                    if status.is_success()
-                                        && parsed.as_ref().is_some_and(|value| {
-                                            value.get("error").is_some_and(|error| !error.is_null())
-                                                || value.get("type").and_then(Value::as_str)
-                                                    == Some("error")
-                                        })
-                                    {
-                                        endpoint_lease.failure();
-                                        endpoint_failed = true;
-                                        last_error = Some(parsed.as_ref().and_then(extract_error_message_from_response)
-                                            .unwrap_or_else(|| "Upstream returned an error in a success response".to_string()));
-                                        log_attempt(None, 502, last_error.as_deref());
                                         continue 'endpoints;
                                     }
                                     let upstream_error_message = parsed
@@ -594,7 +588,15 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         (Some(_), None) => {
                                             Some(openai_error_to_anthropic(status.as_u16(), None))
                                         }
-                                        (None, parsed) => parsed,
+                                        (None, parsed)
+                                            if is_desktop
+                                                && is_claude_messages_path(
+                                                    &original_relative_path,
+                                                ) =>
+                                        {
+                                            parsed
+                                        }
+                                        (None, _) => None,
                                     };
 
                                     if status.is_success() {
@@ -624,32 +626,21 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         transformed_body
                                             .as_ref()
                                             .and_then(extract_error_message_from_response)
+                                            .or(upstream_error_message)
                                     };
                                     log_attempt(
                                         usage.as_ref(),
                                         status.as_u16(),
                                         error_message.as_deref(),
                                     );
-                                    if let Some(mut transformed_body) = transformed_body {
-                                        if is_desktop
-                                            && status.is_success()
-                                            && is_claude_messages_path(&original_relative_path)
-                                        {
-                                            desktop::restore_response_model(
-                                                &mut transformed_body,
-                                                &body_bytes,
-                                            );
-                                        }
-                                        return build_json_response_from_value(
-                                            status,
-                                            &headers,
-                                            &transformed_body,
-                                        );
-                                    }
-                                    return build_forward_response_from_parts(
+                                    return body::finish_json_response(
                                         status,
                                         &headers,
-                                        Body::from(bytes),
+                                        bytes,
+                                        transformed_body,
+                                        &original_relative_path,
+                                        is_desktop,
+                                        &body_bytes,
                                     );
                                 }
                                 Err(error) => {
@@ -763,7 +754,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                     continue 'endpoints;
                                 }
                             };
-                            return build_forward_response_from_parts(
+                            return body::stream_response(
                                 status,
                                 &headers,
                                 track_body(
@@ -804,10 +795,11 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         );
                                     }
                                 }
-                                return build_forward_response_from_parts(
+                                return body::raw_response(
                                     status,
                                     &headers,
-                                    Body::from(bytes),
+                                    bytes,
+                                    &original_relative_path,
                                 );
                             }
                             Err(error) => {

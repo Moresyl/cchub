@@ -2,6 +2,7 @@ use crate::shared::token_usage::{InputTokenBasis, TokenUsage};
 use bytes::Bytes;
 use futures_util::stream::{Stream, StreamExt};
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -28,7 +29,9 @@ struct StreamChoice {
 #[derive(Debug, Deserialize)]
 struct Delta {
     #[serde(default)]
-    content: Option<String>,
+    content: Option<Box<RawValue>>,
+    #[serde(default)]
+    refusal: Option<String>,
     #[serde(default)]
     reasoning: Option<String>,
     #[serde(default)]
@@ -162,6 +165,21 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + Sync + 'static>
                                     }
 
                                     if let Some(choice) = chunk.choices.first() {
+                                        let mut parts = Vec::new();
+                                        match super::chat_content::reasoning(choice.delta.reasoning.as_deref(), choice.delta.reasoning_content.as_deref()) {
+                                            Ok(Some(reasoning)) => parts.push(super::chat_content::Part { kind: super::chat_content::Kind::Thinking, text: reasoning.to_owned() }),
+                                            Ok(None) => {},
+                                            Err(error) => { yield Ok(super::stream_errors::api_error_event(error)); return; }
+                                        }
+                                        if let Some(raw) = &choice.delta.content {
+                                            match super::chat_content::parse(raw.get()) {
+                                                Ok(content) => parts.extend(content),
+                                                Err(error) => { yield Ok(super::stream_errors::api_error_event(error)); return; }
+                                            }
+                                        }
+                                        if let Some(refusal) = &choice.delta.refusal {
+                                            parts.push(super::chat_content::Part { kind: super::chat_content::Kind::Text, text: refusal.clone() });
+                                        }
                                         if !has_sent_message_start {
                                             let mut start_usage = usage_state.anthropic(InputTokenBasis::IncludesCache);
                                             start_usage["output_tokens"] = json!(0);
@@ -179,9 +197,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + Sync + 'static>
                                             has_sent_message_start = true;
                                         }
 
-                                        if let Some(reasoning) = choice.delta.reasoning.as_ref().filter(|text| !text.is_empty())
-                                            .or_else(|| choice.delta.reasoning_content.as_ref().filter(|text| !text.is_empty())) {
-                                            if current_non_tool_block_type != Some("thinking") {
+                                        for part in parts.into_iter().filter(|part| !part.text.is_empty()) {
+                                            let kind = part.kind.block_type();
+                                            if current_non_tool_block_type != Some(kind) {
                                                 if let Some(index) = current_non_tool_block_index.take() {
                                                     let event = json!({"type": "content_block_stop", "index": index});
                                                     yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
@@ -192,10 +210,10 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + Sync + 'static>
                                                 let event = json!({
                                                     "type": "content_block_start",
                                                     "index": index,
-                                                    "content_block": { "type": "thinking", "thinking": "" }
+                                                    "content_block": { "type": kind, (kind): "" }
                                                 });
                                                 yield Ok(Bytes::from(format!("event: content_block_start\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                                current_non_tool_block_type = Some("thinking");
+                                                current_non_tool_block_type = Some(kind);
                                                 current_non_tool_block_index = Some(index);
                                             }
 
@@ -203,40 +221,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + Sync + 'static>
                                                 let event = json!({
                                                     "type": "content_block_delta",
                                                     "index": index,
-                                                    "delta": { "type": "thinking_delta", "thinking": reasoning }
+                                                    "delta": { "type": part.kind.delta_type(), (kind): part.text }
                                                 });
                                                 yield Ok(Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                            }
-                                        }
-
-                                        if let Some(content) = &choice.delta.content {
-                                            if !content.is_empty() {
-                                                if current_non_tool_block_type != Some("text") {
-                                                    if let Some(index) = current_non_tool_block_index.take() {
-                                                        let event = json!({"type": "content_block_stop", "index": index});
-                                                        yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                                    }
-                                                    let Some(index) = allocate(&mut next_content_index) else {
-                                                        yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
-                                                    };
-                                                    let event = json!({
-                                                        "type": "content_block_start",
-                                                        "index": index,
-                                                        "content_block": { "type": "text", "text": "" }
-                                                    });
-                                                    yield Ok(Bytes::from(format!("event: content_block_start\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                                    current_non_tool_block_type = Some("text");
-                                                    current_non_tool_block_index = Some(index);
-                                                }
-
-                                                if let Some(index) = current_non_tool_block_index {
-                                                    let event = json!({
-                                                        "type": "content_block_delta",
-                                                        "index": index,
-                                                        "delta": { "type": "text_delta", "text": content }
-                                                    });
-                                                    yield Ok(Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                                }
                                             }
                                         }
 

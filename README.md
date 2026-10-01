@@ -159,6 +159,10 @@ Refreshing after a network failure retains the same configuration's last success
 
 ### Protocol reply compatibility
 
+Chat replies support string content and typed text, thinking and refusal parts in both whole and streamed responses. Messages conversion retains part order, tool identities and trailing usage. Native Chat relays flatten fully understood arrays using field-only edits; unknown or signed parts remain unchanged. Conversion reports unsupported parts explicitly instead of returning an empty success, and never retries after streamed output. Repairs retain existing body/event bounds; whole native replies above the 8 MiB repair cap pass through. Modified replies discard the original body's integrity headers.
+
+Chat 响应兼容字符串正文，以及结构化文本、推理和拒绝内容；流式与非流式均支持。转换为 Messages 时保留内容顺序、工具身份和末尾用量；原样 Chat 转发只修改明确识别的字段，未知或带签名的内容保持原样。无法转换的内容会明确报错，已输出的流式请求不会重放。兼容处理沿用响应和事件的大小限制；超过 8 MiB 修复上限的原样非流式响应直接透传。正文发生修改时移除失效的原始校验头。
+
 Claude protocol conversion gives whole and streamed Chat Completions, Responses and Gemini replies Anthropic message IDs, preserving their tool-call IDs. Missing upstream message IDs receive independent random IDs. Responses streams emit one message start even when the upstream start is absent or repeated, and stop once on completion. Native Anthropic message IDs remain unchanged.
 
 Gemini tool results match historical calls by ID and use the original function name, including parallel calls to the same function and reordered results. Missing reply call IDs receive UUIDs; tool failures retain an error result. Unmatched or repeated history IDs are rejected locally with an API error. Duplicate reply IDs stop conversion without emitting a second tool call or a normal completion, and conversion failures retain reported usage while counting as failures. Tool identity tracking is limited to 4096 calls and 1024 bytes per ID; these limits do not cover the entire parser or reasoning-signature history.

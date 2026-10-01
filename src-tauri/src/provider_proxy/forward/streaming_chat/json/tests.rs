@@ -1,4 +1,4 @@
-use super::repair;
+use super::{repair, repair_whole};
 use serde_json::{json, Value};
 
 #[test]
@@ -156,4 +156,68 @@ fn last_wins_tool_name_clients_keep_the_identity_and_all_argument_fragments() {
     }
     assert_eq!(name, "grep");
     assert_eq!(arguments, r#"{"path":"文件"}"#);
+}
+
+#[test]
+fn typed_content_edits_preserve_opaque_numbers_signatures_and_escaped_keys() {
+    let source = r#"{ "choices" : [{ "delta" : { "con\u0074ent":[{"type":"thinking","thinking":[{"type":"text","text":"想🦀"}],"closed":true},{"type":"text","text":"答"}], "reasoning_\u0063ontent":"先", "signature":"YWJj==\/\u003d", "unknown":{"n":99999999999999999999999999,"e":1.2300e+999,"duplicate":1,"duplicate":2} }, "finish_reason":null }],"usage":{"prompt_tokens":7},"encrypted_content":"abc\/def\u003d" }"#;
+    let output = repair(source).unwrap();
+    assert_eq!(output, source.replace(r#"[{"type":"thinking","thinking":[{"type":"text","text":"想🦀"}],"closed":true},{"type":"text","text":"答"}]"#, r#""答""#)
+        .replace(r#""reasoning_\u0063ontent":"先""#, r#""reasoning_\u0063ontent":"先想🦀""#));
+}
+
+#[test]
+fn inserts_reasoning_and_combines_aliases_without_overlapping_empty_shape_edits() {
+    for fields in [
+        r#""content":[{"type":"thinking","thinking":"想"}],"tool_calls":[],"reasoning":"先""#,
+        r#""reasoning":"先","tool_calls":[],"content":[{"type":"thinking","thinking":"想"}]"#,
+        r#""reasoning_content":"","content":[{"type":"thinking","thinking":"想"}],"tool_calls":[]"#,
+        r#""content":[{"type":"thinking","thinking":"想"}],"reasoning_content":null"#,
+        r#""reasoning_content":"先","reasoning":"先","content":[{"type":"thinking","thinking":"想"}]"#,
+    ] {
+        let source = format!(r#"{{"choices":[{{"delta":{{{fields}}},"finish_reason":""}}]}}"#);
+        let output = repair(&source).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        let delta = &value["choices"][0]["delta"];
+        assert_eq!(delta["content"], "");
+        assert_eq!(
+            delta["reasoning_content"],
+            if fields.contains("先") {
+                "先想"
+            } else {
+                "想"
+            }
+        );
+        assert!(delta.get("reasoning").is_none() && delta.get("tool_calls").is_none());
+        assert!(value["choices"][0]["finish_reason"].is_null());
+    }
+}
+
+#[test]
+fn unknown_duplicate_and_signed_parts_remain_opaque_in_native_relays() {
+    for part in [
+        r#"{"type":"image_url","image_url":{"url":"secret://image"}}"#,
+        r#"{"type":"text","text":"one","text":"two"}"#,
+        r#"{"type":"thinking","thinking":"one","signature":"opaque"}"#,
+        r#"{"type":"thinking","thinking":[{"type":"image","text":"one"}]}"#,
+        r#"{"type":"text","text":"one","annotations":[{"x":1.200e+99}]}"#,
+    ] {
+        let source =
+            format!(r#"{{"choices":[{{"delta":{{"content":[{part}]}},"finish_reason":null}}]}}"#);
+        assert!(repair(&source).is_none(), "{source}");
+        assert!(repair_whole(&source.replace("delta", "message")).is_none());
+    }
+    let source = r#"{"choices":[{"delta":{"content":[{"type":"thinking","thinking":"new"}],"reasoning":"one","reasoning_content":"two"}}]}"#;
+    assert!(repair(source).is_none());
+}
+
+#[test]
+fn whole_chat_only_flattens_parts_and_retains_tool_identity_and_empty_metadata() {
+    let source = r#"{"choices":[{"message":{"content":[{"type":"text","text":"答"}],"reasoning_content":"","tool_calls":[{"function":{"name":"","arguments":"{}"}}]},"finish_reason":""}],"opaque":1.2300e+99}"#;
+    assert_eq!(
+        repair_whole(source).unwrap(),
+        source.replace(r#"[{"type":"text","text":"答"}]"#, r#""答""#)
+    );
+    let ordinary = source.replace(r#"[{"type":"text","text":"答"}]"#, r#""答""#);
+    assert!(repair_whole(&ordinary).is_none());
 }

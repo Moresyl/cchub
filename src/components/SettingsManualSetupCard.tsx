@@ -1,5 +1,7 @@
 import { memo } from "react";
-import { Copy, FolderOpen, Link2 } from "lucide-react";
+import { Copy, FolderOpen, Link2, Loader2 } from "lucide-react";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 
 export interface SettingsManualSetupCardReport {
   tool_id: string;
@@ -62,84 +64,73 @@ function SettingsManualSetupCardComponent({
   onBootstrap,
 }: SettingsManualSetupCardProps) {
   return (
-    <div
-      style={{
-        padding: "12px 14px",
-        borderRadius: 10,
-        background: "var(--bg-card)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}
-      >
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{report.tool_name}</div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{description}</div>
+    <Card className="min-w-0">
+      <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <CardTitle className="break-words text-[14px] leading-snug">{report.tool_name}</CardTitle>
+          <CardDescription className="break-words">{description}</CardDescription>
         </div>
         <span className="badge badge-muted">{report.tool_id}</span>
-      </div>
-      {report.manual_setup_path && (
-        <div
-          style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)", wordBreak: "break-all" }}
-        >
-          {report.manual_setup_path}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {report.manual_setup_path && (
+          <div className="break-all font-mono text-[12px] leading-relaxed text-muted-foreground">
+            {report.manual_setup_path}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {report.manual_setup_command && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onCopy(report.manual_setup_command || "", commandToastLabel)}
+            >
+              <Copy size={14} aria-hidden="true" />
+              {copyCommandLabel}
+            </Button>
+          )}
+          {report.manual_setup_path && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onCopy(report.manual_setup_path || "", pathToastLabel)}
+            >
+              <Copy size={14} aria-hidden="true" />
+              {copyPathLabel}
+            </Button>
+          )}
+          {report.manual_setup_path && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpen(report.manual_setup_path || "", openPathToastLabel)}
+            >
+              <FolderOpen size={14} aria-hidden="true" />
+              {openPathLabel}
+            </Button>
+          )}
+          <Button
+            type="button"
+            onClick={() => onBootstrap(report.tool_id, report.tool_name)}
+            disabled={bootstrapping}
+            aria-busy={bootstrapping}
+          >
+            {bootstrapping ? (
+              <Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : (
+              <FolderOpen size={14} aria-hidden="true" />
+            )}
+            {bootstrapping ? bootstrappingLabel : prepareFileLabel}
+          </Button>
+          {installUrl && (
+            <Button type="button" variant="outline" onClick={() => onOpen(installUrl, docsToastLabel)}>
+              <Link2 size={14} aria-hidden="true" />
+              {openDocsLabel}
+            </Button>
+          )}
         </div>
-      )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {report.manual_setup_command && (
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => onCopy(report.manual_setup_command || "", commandToastLabel)}
-            style={{ gap: 6 }}
-          >
-            <Copy size={12} />
-            {copyCommandLabel}
-          </button>
-        )}
-        {report.manual_setup_path && (
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => onCopy(report.manual_setup_path || "", pathToastLabel)}
-            style={{ gap: 6 }}
-          >
-            <Copy size={12} />
-            {copyPathLabel}
-          </button>
-        )}
-        {report.manual_setup_path && (
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => onOpen(report.manual_setup_path || "", openPathToastLabel)}
-            style={{ gap: 6 }}
-          >
-            <FolderOpen size={12} />
-            {openPathLabel}
-          </button>
-        )}
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => onBootstrap(report.tool_id, report.tool_name)}
-          disabled={bootstrapping}
-          style={{ gap: 6 }}
-        >
-          <FolderOpen size={12} className={bootstrapping ? "spin" : ""} />
-          {bootstrapping ? bootstrappingLabel : prepareFileLabel}
-        </button>
-        {installUrl && (
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => onOpen(installUrl, docsToastLabel)}
-            style={{ gap: 6 }}
-          >
-            <Link2 size={12} />
-            {openDocsLabel}
-          </button>
-        )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 

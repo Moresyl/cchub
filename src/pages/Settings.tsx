@@ -29,6 +29,7 @@ import ProjectProfilePanel from "../components/ProjectProfilePanel";
 import { buildMigrationCenterLabels } from "./settings/labels";
 import SettingsCategoryNav, { type SettingsCategory } from "./settings/CategoryNav";
 import { useSettingsMigrationState } from "../hooks/useSettingsMigrationState";
+import { useSettingsToolPathActions } from "../hooks/useSettingsToolPathActions";
 import { getTheme, setTheme, type Theme } from "../lib/theme";
 import { requestAppUpdateDialog } from "../components/AppUpdateHost";
 import { getVersion } from "@tauri-apps/api/app";
@@ -449,41 +450,18 @@ export default function Settings() {
     [loadToolsAndPaths, markToolPathSaved, saveCustomPathMutation],
   );
 
-  const handleToolMcpPathBlur = useCallback(
-    async (toolId: string, value: string, defaultValue: string, customPath?: CustomPath) => {
-      const nextValue = value.trim();
-      if (!nextValue || nextValue === defaultValue) return;
-      await saveToolCustomPath(toolId, customPath?.config_dir || null, nextValue, customPath?.skills_dir || null);
-    },
-    [saveToolCustomPath],
-  );
-
-  const handlePickToolMcpPath = useCallback(
-    async (toolId: string, customPath?: CustomPath) => {
-      const picked = await invoke<string | null>("pick_file");
-      if (!picked) return;
-      await saveToolCustomPath(toolId, customPath?.config_dir || null, picked, customPath?.skills_dir || null);
-    },
-    [saveToolCustomPath],
-  );
-
-  const handleToolSkillsDirBlur = useCallback(
-    async (toolId: string, value: string, defaultValue: string, customPath?: CustomPath) => {
-      const nextValue = value.trim();
-      if (!nextValue || nextValue === defaultValue) return;
-      await saveToolCustomPath(toolId, customPath?.config_dir || null, customPath?.mcp_config_path || null, nextValue);
-    },
-    [saveToolCustomPath],
-  );
-
-  const handlePickToolSkillsDir = useCallback(
-    async (toolId: string, customPath?: CustomPath) => {
-      const picked = await invoke<string | null>("pick_folder");
-      if (!picked) return;
-      await saveToolCustomPath(toolId, customPath?.config_dir || null, customPath?.mcp_config_path || null, picked);
-    },
-    [saveToolCustomPath],
-  );
+  const {
+    onSaveMcpPath: handleToolMcpPathBlur,
+    onSaveSkillsDir: handleToolSkillsDirBlur,
+    onPickMcpPath: handlePickToolMcpPath,
+    onPickSkillsDir: handlePickToolSkillsDir,
+  } = useSettingsToolPathActions({
+    customPaths,
+    setCustomPaths,
+    save: saveToolCustomPath,
+    pickFile: () => invoke<string | null>("pick_file"),
+    pickFolder: () => invoke<string | null>("pick_folder"),
+  });
 
   const handleCopyToolInstallCommand = useCallback(
     (command: string, toolName: string) => {

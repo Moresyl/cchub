@@ -26,10 +26,20 @@ interface SettingsToolPathSectionProps {
   visibleTools: SettingsToolPathSectionTool[];
   customPaths: SettingsToolPathSectionCustomPath[];
   pathSaved: string | null;
-  onSaveMcpPath: (toolId: string, value: string, defaultValue: string, customPath?: SettingsToolPathSectionCustomPath) => void | Promise<void>;
-  onPickMcpPath: (toolId: string, customPath?: SettingsToolPathSectionCustomPath) => void | Promise<void>;
-  onSaveSkillsDir: (toolId: string, value: string, defaultValue: string, customPath?: SettingsToolPathSectionCustomPath) => void | Promise<void>;
-  onPickSkillsDir: (toolId: string, customPath?: SettingsToolPathSectionCustomPath) => void | Promise<void>;
+  onSaveMcpPath: (
+    toolId: string,
+    value: string,
+    defaultValue: string,
+    customPath?: SettingsToolPathSectionCustomPath,
+  ) => string | Promise<string>;
+  onPickMcpPath: (toolId: string, customPath?: SettingsToolPathSectionCustomPath) => Promise<string | null>;
+  onSaveSkillsDir: (
+    toolId: string,
+    value: string,
+    defaultValue: string,
+    customPath?: SettingsToolPathSectionCustomPath,
+  ) => string | Promise<string>;
+  onPickSkillsDir: (toolId: string, customPath?: SettingsToolPathSectionCustomPath) => Promise<string | null>;
   onCopyInstallCommand: (command: string, toolName: string) => void | Promise<void>;
 }
 

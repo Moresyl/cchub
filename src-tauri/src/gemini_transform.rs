@@ -1,4 +1,12 @@
+use crate::shared::gemini_usage::GeminiUsage;
 use serde_json::{json, Value};
+
+mod tool_history;
+use tool_history::ToolHistory;
+pub(crate) use tool_history::ToolReplyIds;
+
+#[cfg(test)]
+mod tool_identity_tests;
 
 pub fn anthropic_to_gemini(body: Value) -> Result<(Value, String), String> {
     let model = body
@@ -23,6 +31,7 @@ pub fn anthropic_to_gemini(body: Value) -> Result<(Value, String), String> {
 
     // contents (messages)
     let mut contents: Vec<Value> = Vec::new();
+    let mut tool_history = ToolHistory::default();
     if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
         for msg in messages {
             let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
@@ -31,7 +40,7 @@ pub fn anthropic_to_gemini(body: Value) -> Result<(Value, String), String> {
                 _ => "user",
             };
 
-            let parts = convert_content_to_parts(msg.get("content"), role);
+            let parts = convert_content_to_parts(msg.get("content"), role, &mut tool_history)?;
             if !parts.is_empty() {
                 contents.push(json!({
                     "role": gemini_role,
@@ -87,15 +96,6 @@ pub fn anthropic_to_gemini(body: Value) -> Result<(Value, String), String> {
         gemini_body["generationConfig"] = gen_config;
     }
 
-    // streaming check
-    let stream = body
-        .get("stream")
-        .and_then(|s| s.as_bool())
-        .unwrap_or(false);
-    if stream {
-        gemini_body["_stream"] = json!(true);
-    }
-
     Ok((gemini_body, model_id))
 }
 
@@ -117,13 +117,14 @@ pub fn gemini_to_anthropic(gemini_response: Value, model: &str) -> Result<Value,
         .clone();
 
     let mut content: Vec<Value> = Vec::new();
+    let mut tool_ids = ToolReplyIds::default();
     for part in &parts {
         if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
             content.push(json!({"type": "text", "text": text}));
         } else if let Some(fc) = part.get("functionCall") {
             let name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
             let args = fc.get("args").cloned().unwrap_or(json!({}));
-            let id = format!("toolu_{}", generate_tool_id());
+            let id = tool_ids.next(fc)?;
             content.push(json!({
                 "type": "tool_use",
                 "id": id,
@@ -156,18 +157,17 @@ pub fn gemini_to_anthropic(gemini_response: Value, model: &str) -> Result<Value,
         stop_reason
     };
 
-    let usage = gemini_response
-        .get("usageMetadata")
-        .cloned()
-        .unwrap_or(json!({}));
-    let input_tokens = usage
-        .get("promptTokenCount")
-        .and_then(|t| t.as_u64())
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("candidatesTokenCount")
-        .and_then(|t| t.as_u64())
-        .unwrap_or(0);
+    let mut usage = GeminiUsage::default();
+    if let Some(metadata) = gemini_response.get("usageMetadata") {
+        usage.observe(metadata);
+    }
+    let mut normalized_usage = json!({
+        "input_tokens": usage.input.unwrap_or(0),
+        "output_tokens": usage.output()
+    });
+    if let Some(cached) = usage.cached {
+        normalized_usage["cache_read_input_tokens"] = json!(cached);
+    }
 
     Ok(json!({
         "id": crate::provider_proxy_transform::anthropic_message_id(None),
@@ -177,10 +177,7 @@ pub fn gemini_to_anthropic(gemini_response: Value, model: &str) -> Result<Value,
         "model": model,
         "stop_reason": actual_stop_reason,
         "stop_sequence": null,
-        "usage": {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens
-        }
+        "usage": normalized_usage
     }))
 }
 
@@ -219,19 +216,23 @@ fn extract_system_text(system: &Value) -> String {
     }
 }
 
-fn convert_content_to_parts(content: Option<&Value>, role: &str) -> Vec<Value> {
+fn convert_content_to_parts(
+    content: Option<&Value>,
+    role: &str,
+    tool_history: &mut ToolHistory,
+) -> Result<Vec<Value>, String> {
     let content = match content {
         Some(c) => c,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
 
     if let Some(text) = content.as_str() {
-        return vec![json!({"text": text})];
+        return Ok(vec![json!({"text": text})]);
     }
 
     let blocks = match content.as_array() {
         Some(blocks) => blocks,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
 
     let mut parts: Vec<Value> = Vec::new();
@@ -244,23 +245,18 @@ fn convert_content_to_parts(content: Option<&Value>, role: &str) -> Vec<Value> {
                 }
             }
             "tool_use" if role == "assistant" => {
-                let name = block
-                    .get("name")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("unknown");
+                let (id, name) = tool_history.register(block)?;
                 let input = block.get("input").cloned().unwrap_or(json!({}));
                 parts.push(json!({
                     "functionCall": {
+                        "id": id,
                         "name": name,
                         "args": input
                     }
                 }));
             }
             "tool_result" if role == "user" => {
-                let name = block
-                    .get("tool_use_id")
-                    .and_then(|id| id.as_str())
-                    .unwrap_or("unknown");
+                let (id, name) = tool_history.resolve(block)?;
                 let result_content = match block.get("content") {
                     Some(c) if c.is_string() => c.as_str().unwrap_or("").to_string(),
                     Some(c) if c.is_array() => c
@@ -275,10 +271,16 @@ fn convert_content_to_parts(content: Option<&Value>, role: &str) -> Vec<Value> {
                         .unwrap_or_default(),
                     _ => String::new(),
                 };
+                let response = if block.get("is_error").and_then(Value::as_bool) == Some(true) {
+                    json!({"error": result_content})
+                } else {
+                    json!({"result": result_content})
+                };
                 parts.push(json!({
                     "functionResponse": {
+                        "id": id,
                         "name": name,
-                        "response": {"result": result_content}
+                        "response": response
                     }
                 }));
             }
@@ -293,7 +295,7 @@ fn convert_content_to_parts(content: Option<&Value>, role: &str) -> Vec<Value> {
         }
     }
 
-    parts
+    Ok(parts)
 }
 
 fn sanitize_schema_for_gemini(mut schema: Value) -> Value {
@@ -308,23 +310,6 @@ fn sanitize_schema_for_gemini(mut schema: Value) -> Value {
         }
     }
     schema
-}
-
-fn generate_tool_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    format!("{:08x}{:04x}", nanos, rand_u16())
-}
-
-fn rand_u16() -> u16 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    ((t.as_nanos() >> 10) & 0xffff) as u16
 }
 
 #[cfg(test)]

@@ -14,9 +14,28 @@ pub(super) struct RetainedReply {
     pub upstream: crate::provider_proxy::UpstreamTarget,
     pub insights: crate::provider_proxy::ProxyRequestInsights,
     pub error_message: String,
+    pub usage: Option<crate::provider_proxy::ProxyUsageMetrics>,
 }
 
 impl RetainedReply {
+    pub(super) fn conversion_failed(
+        upstream: crate::provider_proxy::UpstreamTarget,
+        insights: crate::provider_proxy::ProxyRequestInsights,
+        usage: Option<crate::provider_proxy::ProxyUsageMetrics>,
+        error_message: String,
+    ) -> Self {
+        Self {
+            response: conversion_error_response(
+                StatusCode::BAD_GATEWAY,
+                "Upstream response could not be converted to Anthropic format",
+            ),
+            upstream,
+            insights,
+            usage,
+            error_message,
+        }
+    }
+
     pub(super) fn finish<R: tauri::Runtime>(
         self,
         app: &tauri::AppHandle<R>,
@@ -30,13 +49,26 @@ impl RetainedReply {
             tool_id,
             &self.upstream,
             &self.insights,
-            None,
+            self.usage.as_ref(),
             started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
             self.response.status().as_u16(),
             Some(&self.error_message),
         );
         self.response
     }
+}
+
+pub(super) fn conversion_error_response(status: StatusCode, message: &str) -> Response<Body> {
+    let kind = if status == StatusCode::BAD_REQUEST {
+        "invalid_request_error"
+    } else {
+        "api_error"
+    };
+    build_json_response_from_value(
+        status,
+        &reqwest::header::HeaderMap::new(),
+        &serde_json::json!({"type":"error","error":{"type":kind,"message":message}}),
+    )
 }
 
 pub(super) fn failed_response(

@@ -89,7 +89,11 @@ Refreshing after a network failure retains the same configuration's last success
 
 ### Protocol reply compatibility
 
-Claude protocol conversion gives whole and streamed Chat Completions, Responses and Gemini replies Anthropic message IDs, preserving Chat Completions and Responses tool-call IDs. Missing upstream message IDs receive independent random IDs. Responses streams emit one message start even when the upstream start is absent or repeated, and stop once on completion. Native Anthropic message IDs remain unchanged.
+Claude protocol conversion gives whole and streamed Chat Completions, Responses and Gemini replies Anthropic message IDs, preserving their tool-call IDs. Missing upstream message IDs receive independent random IDs. Responses streams emit one message start even when the upstream start is absent or repeated, and stop once on completion. Native Anthropic message IDs remain unchanged.
+
+Gemini tool results match historical calls by ID and use the original function name, including parallel calls to the same function and reordered results. Missing reply call IDs receive UUIDs; tool failures retain an error result. Unmatched or repeated history IDs are rejected locally with an API error. Duplicate reply IDs stop conversion without emitting a second tool call or a normal completion, and conversion failures retain reported usage while counting as failures. Tool identity tracking is limited to 4096 calls and 1024 bytes per ID; these limits do not cover the entire parser or reasoning-signature history.
+
+Whole and streamed Gemini replies share usage parsing rules, preserving valid input, output, reasoning and cache readings even without a total token count. Whole replies include reported reasoning tokens in output usage. Accounting keeps the upstream model name, and failover after a conversion failure does not count the request twice.
 
 Responses conversion also supports standard reasoning summary/text events and data-only event types. Reasoning parts keep separate block identities, close before text or tools, and avoid replaying completed snapshots. Final-only parts are recovered when deltas are absent. Reasoning tracking has part and identity limits; adapter errors count as failed requests even when the vendor completed its reply. These limits apply to reasoning state, not the entire stream parser.
 

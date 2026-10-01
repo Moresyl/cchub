@@ -8,22 +8,8 @@ use tauri::AppHandle;
 use super::{ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
 
 pub(super) fn parse_usage_metrics_from_response(body: &Value) -> Option<ProxyUsageMetrics> {
-    if let Some(usage) = body.get("usageMetadata") {
-        let input_tokens = usage.get("promptTokenCount")?.as_u64()?;
-        let total_tokens = usage.get("totalTokenCount")?.as_u64()?;
-        return Some(ProxyUsageMetrics {
-            response_model: body
-                .get("modelVersion")
-                .and_then(|value| value.as_str())
-                .map(|value| value.to_string()),
-            input_tokens,
-            output_tokens: total_tokens.saturating_sub(input_tokens),
-            cache_read_tokens: usage
-                .get("cachedContentTokenCount")
-                .and_then(|value| value.as_u64())
-                .unwrap_or(0),
-            cache_creation_tokens: 0,
-        });
+    if body.get("usageMetadata").is_some() {
+        return parse_gemini_usage(body, &mut GeminiUsage::default());
     }
 
     let usage = body.get("usage")?;
@@ -65,6 +51,22 @@ pub(super) fn parse_usage_metrics_from_response(body: &Value) -> Option<ProxyUsa
             .get("cache_creation_input_tokens")
             .and_then(|value| value.as_u64())
             .unwrap_or(0),
+    })
+}
+
+fn parse_gemini_usage(body: &Value, gemini: &mut GeminiUsage) -> Option<ProxyUsageMetrics> {
+    if !gemini.observe(body.get("usageMetadata")?) {
+        return None;
+    }
+    Some(ProxyUsageMetrics {
+        response_model: body
+            .get("modelVersion")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        input_tokens: gemini.input.unwrap_or(0),
+        output_tokens: gemini.output(),
+        cache_read_tokens: gemini.cached.unwrap_or(0),
+        cache_creation_tokens: 0,
     })
 }
 
@@ -149,20 +151,8 @@ fn extract_stream_usage_with_gemini(
         return parse_partial_stream_usage(usage, response_model);
     }
 
-    if let Some(usage) = body.get("usageMetadata") {
-        if !gemini.observe(usage) {
-            return None;
-        }
-        return Some(ProxyUsageMetrics {
-            response_model: body
-                .get("modelVersion")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            input_tokens: gemini.input.unwrap_or(0),
-            output_tokens: gemini.output(),
-            cache_read_tokens: gemini.cached.unwrap_or(0),
-            cache_creation_tokens: 0,
-        });
+    if body.get("usageMetadata").is_some() {
+        return parse_gemini_usage(body, gemini);
     }
 
     if let Some(response) = body.get("response") {

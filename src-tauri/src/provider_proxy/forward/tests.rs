@@ -18,6 +18,8 @@ use tokio::sync::Notify;
 
 #[path = "deadline_tests.rs"]
 mod deadline_tests;
+#[path = "gemini_tool_tests.rs"]
+mod gemini_tool_tests;
 #[path = "gemini_usage_tests.rs"]
 mod gemini_usage_tests;
 #[path = "managed_auth_tests.rs"]

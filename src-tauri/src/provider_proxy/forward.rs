@@ -286,7 +286,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                         upstream.is_codex_oauth,
                     ) {
                         Ok(body) => body,
-                        Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+                        Err(error) => {
+                            return body::conversion_error_response(StatusCode::BAD_REQUEST, &error)
+                        }
                     };
                     (rewritten_path, rewritten_query, transformed_body)
                 }
@@ -429,6 +431,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                             upstream: upstream.clone(),
                                             insights: request_insights.clone(),
                                             error_message,
+                                            usage: None,
                                         });
                                     }
                                     Err(error) => last_error = Some(error),
@@ -469,6 +472,15 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         last_error =
                                             Some("Upstream returned invalid JSON".to_string());
                                         log_attempt(None, 502, last_error.as_deref());
+                                        if claude_transform.is_some() && last_response.is_none() {
+                                            last_response =
+                                                Some(body::RetainedReply::conversion_failed(
+                                                    upstream.clone(),
+                                                    request_insights.clone(),
+                                                    None,
+                                                    "Upstream returned invalid JSON".into(),
+                                                ));
+                                        }
                                         continue 'endpoints;
                                     }
                                     if status.is_success()
@@ -533,6 +545,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         }
                                     }
 
+                                    let transform_usage =
+                                        parsed.as_ref().and_then(parse_usage_metrics_from_response);
                                     let transformed_body = match (claude_transform, parsed) {
                                         (Some(api_format), Some(parsed)) => {
                                             match transform_claude_response_body(
@@ -548,12 +562,22 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                         upstream.profile_name, tool_id, upstream.profile_id
                                                     );
                                                     log_attempt(
-                                                        None,
+                                                        transform_usage.as_ref(),
                                                         StatusCode::BAD_GATEWAY.as_u16(),
                                                         Some(&message),
                                                     );
                                                     endpoint_lease.failure();
                                                     endpoint_failed = true;
+                                                    if last_response.is_none() {
+                                                        last_response = Some(
+                                                            body::RetainedReply::conversion_failed(
+                                                                upstream.clone(),
+                                                                request_insights.clone(),
+                                                                transform_usage.clone(),
+                                                                message.clone(),
+                                                            ),
+                                                        );
+                                                    }
                                                     last_error = Some(message);
                                                     continue 'endpoints;
                                                 }
@@ -593,9 +617,11 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                             );
                                         }
                                     }
-                                    let usage = transformed_body
-                                        .as_ref()
-                                        .and_then(parse_usage_metrics_from_response);
+                                    let usage = transform_usage.or_else(|| {
+                                        transformed_body
+                                            .as_ref()
+                                            .and_then(parse_usage_metrics_from_response)
+                                    });
                                     let error_message = if status.is_success() {
                                         None
                                     } else {

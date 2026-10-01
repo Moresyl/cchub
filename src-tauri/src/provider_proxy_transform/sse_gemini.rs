@@ -28,6 +28,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
         let mut finished = false;
         let mut usage = GeminiUsage::default();
         let msg_id = super::anthropic_message_id(None);
+        let mut tool_ids = crate::gemini_transform::ToolReplyIds::default();
 
         tokio::pin!(stream);
         while let Some(chunk) = stream.next().await {
@@ -125,10 +126,14 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                                         has_tool_use = true;
                                         let name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
                                         let args = fc.get("args").cloned().unwrap_or(json!({}));
-                                        let tool_id = format!("toolu_{:08x}{:04x}",
-                                            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_nanos(),
-                                            (next_content_index as u16).wrapping_mul(7919)
-                                        );
+                                        let tool_id = match tool_ids.next(fc) {
+                                            Ok(id) => id,
+                                            Err(message) => {
+                                                let error = json!({"type":"error","error":{"type":"api_error","message":message}});
+                                                yield Ok(Bytes::from(format!("event: error\ndata: {}\n\n", error)));
+                                                return;
+                                            }
+                                        };
 
                                         let index = next_content_index;
                                         next_content_index += 1;

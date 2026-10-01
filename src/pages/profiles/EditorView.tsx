@@ -6,7 +6,6 @@ import { type ModelInfo } from "../../components/ModelSelector";
 import {
   type ApiFormat,
   type ClaudeAuthField,
-  type CodexReasoningEffort,
   type CodexWireApi,
   type OpenClawApiProtocol,
   type OpenCodeNpmPackage,
@@ -81,7 +80,6 @@ interface ProfileEditorViewProps {
   draftRequestBodyOverrides: string;
   draftAuthField: ClaudeAuthField;
   draftApiFormat: ApiFormat;
-  draftCodexReasoningEffort: CodexReasoningEffort;
   draftCodexWireApi: CodexWireApi;
   draftApiProtocol: OpenClawApiProtocol;
   draftModelCatalogAlias: string;
@@ -199,7 +197,6 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
             providerId={editingProfile?.id}
             draftAuthField={props.draftAuthField}
             draftApiFormat={props.draftApiFormat}
-            draftCodexReasoningEffort={props.draftCodexReasoningEffort}
             draftCodexWireApi={props.draftCodexWireApi}
             draftApiProtocol={props.draftApiProtocol}
             draftModelCatalogAlias={props.draftModelCatalogAlias}

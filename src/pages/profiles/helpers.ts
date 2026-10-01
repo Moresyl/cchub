@@ -2,7 +2,6 @@
 import { Monitor, Code, Sparkles, Globe, Cat, Terminal } from "lucide-react";
 import { createDefaultStructuredFields, findTomlValue } from "../../lib/configProfiles";
 import type {
-  CodexReasoningEffort,
   CodexWireApi,
   OpenClawApiProtocol,
   OpenCodeNpmPackage,
@@ -132,7 +131,6 @@ export const OPENCODE_NPM_OPTIONS: OpenCodeNpmPackage[] = [
   "@ai-sdk/google",
 ];
 
-export const CODEX_REASONING_OPTIONS: CodexReasoningEffort[] = ["low", "medium", "high", "xhigh"];
 export const CODEX_WIRE_API_OPTIONS: CodexWireApi[] = ["responses", "chat"];
 export const THINKING_LEVEL_OPTIONS: OpenCodeThinkingLevel[] = ["minimal", "low", "medium", "high"];
 export const SECTION_TITLE_STYLE = {

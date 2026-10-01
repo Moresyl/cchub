@@ -59,7 +59,7 @@ export default function Tools() {
   const [claudeModel, setClaudeModel] = useState(cachedToolsPageData?.claudeModel ?? "");
   const [toolSearch, setToolSearch] = useState(cachedToolsPageData?.toolSearchEnabled ?? false);
   const [codexApproval, setCodexApproval] = useState(cachedToolsPageData?.codexSettings.approval_mode ?? "suggest");
-  const [codexReasoning, setCodexReasoning] = useState(cachedToolsPageData?.codexSettings.reasoning_effort ?? "medium");
+  const [codexReasoning, setCodexReasoning] = useState(cachedToolsPageData?.codexSettings.reasoning_effort ?? "");
   const [codexDisableStorage, setCodexDisableStorage] = useState(
     cachedToolsPageData?.codexSettings.disable_response_storage ?? false,
   );
@@ -430,7 +430,6 @@ export default function Tools() {
     hudPathLevelOptions,
     hudContextValueOptions,
     codexApprovalOptions,
-    codexReasoningOptions,
     permLevelOptions,
     hudGitStatusOptions,
     hudDisplayOptions,
@@ -877,7 +876,6 @@ export default function Tools() {
             codexApprovalOptions={codexApprovalOptions}
             handleSelectCodexApproval={handleSelectCodexApproval}
             codexReasoning={codexReasoning}
-            codexReasoningOptions={codexReasoningOptions}
             handleSelectCodexReasoning={handleSelectCodexReasoning}
             codexDisableStorage={codexDisableStorage}
             handleToggleCodexDisableStorage={handleToggleCodexDisableStorage}

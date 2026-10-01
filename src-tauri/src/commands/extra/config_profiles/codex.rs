@@ -3,6 +3,9 @@
 use super::super::types::*;
 use super::*;
 
+#[cfg(test)]
+mod reasoning_tests;
+
 pub fn read_codex_structured_config_from_content(
     content: &str,
     api_key: String,
@@ -38,8 +41,7 @@ pub fn read_codex_structured_config_from_content(
         base_url: provider_field("base_url").unwrap_or_default(),
         wire_api: provider_field("wire_api").unwrap_or_else(|| "responses".to_string()),
         model: scalar(doc.get("model")).unwrap_or_default(),
-        reasoning_effort: scalar(doc.get("model_reasoning_effort"))
-            .unwrap_or_else(|| "medium".to_string()),
+        reasoning_effort: scalar(doc.get("model_reasoning_effort")).unwrap_or_default(),
         personality: scalar(doc.get("personality")).unwrap_or_else(|| "pragmatic".to_string()),
         disable_response_storage: doc
             .get("disable_response_storage")
@@ -68,8 +70,6 @@ pub fn write_codex_structured_config_to_text(
         normalized_non_empty(&config.provider_label).unwrap_or_else(|| provider_name.clone());
     let wire_api =
         normalized_non_empty(&config.wire_api).unwrap_or_else(|| "responses".to_string());
-    let reasoning_effort =
-        normalized_non_empty(&config.reasoning_effort).unwrap_or_else(|| "medium".to_string());
     let personality =
         normalized_non_empty(&config.personality).unwrap_or_else(|| "pragmatic".to_string());
 
@@ -78,10 +78,7 @@ pub fn write_codex_structured_config_to_text(
         toml_edit::value(provider_name.clone()),
     );
     set_scalar(&mut doc["model"], toml_edit::value(config.model.trim()));
-    set_scalar(
-        &mut doc["model_reasoning_effort"],
-        toml_edit::value(reasoning_effort),
-    );
+    set_codex_reasoning_effort(&mut doc, &config.reasoning_effort);
     set_scalar(&mut doc["personality"], toml_edit::value(personality));
     set_scalar(
         &mut doc["disable_response_storage"],
@@ -130,6 +127,14 @@ pub fn write_codex_structured_config_to_text(
     }
 
     doc.to_string()
+}
+
+pub(crate) fn set_codex_reasoning_effort(doc: &mut toml_edit::DocumentMut, value: &str) {
+    if let Some(value) = normalized_non_empty(value) {
+        set_scalar(&mut doc["model_reasoning_effort"], toml_edit::value(value));
+    } else {
+        doc.as_table_mut().remove("model_reasoning_effort");
+    }
 }
 
 fn set_scalar(item: &mut toml_edit::Item, mut desired: toml_edit::Item) {

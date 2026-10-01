@@ -98,7 +98,6 @@ export function buildEditorViewProps(input: BuildEditorPropsInput) {
     draftRequestBodyOverrides: draftFields.requestBodyOverrides,
     draftAuthField: draftFields.authField,
     draftApiFormat: draftFields.apiFormat,
-    draftCodexReasoningEffort: draftFields.codexReasoningEffort,
     draftCodexWireApi: draftFields.codexWireApi,
     draftApiProtocol: draftFields.apiProtocol,
     draftModelCatalogAlias: draftFields.modelCatalogAlias,

@@ -5,6 +5,9 @@ use crate::hermes;
 
 use super::*;
 
+#[cfg(test)]
+mod reasoning_tests;
+
 pub fn sync_profiles_from_compatible_databases(
     conn: &rusqlite::Connection,
     now: &str,
@@ -345,6 +348,9 @@ fn overlay_codex_user_fields_into_snapshot(
     for key in CODEX_USER_MANAGED_KEYS {
         if let Some(existing_value) = existing_doc.get(key) {
             snapshot_doc[*key] = existing_value.clone();
+        } else if *key == "model_reasoning_effort" {
+            // An omitted effort is a deliberate model default, not a missing edit.
+            snapshot_doc.as_table_mut().remove(key);
         }
     }
 

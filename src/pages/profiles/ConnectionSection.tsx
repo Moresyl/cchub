@@ -13,7 +13,6 @@ import { SimpleSelect } from "../../components/ui/simple-select";
 import {
   type ApiFormat,
   type ClaudeAuthField,
-  type CodexReasoningEffort,
   type CodexWireApi,
   type OpenClawApiProtocol,
   type OpenCodeNpmPackage,
@@ -22,7 +21,6 @@ import {
   type StructuredDraftFields,
 } from "../../lib/configProfiles";
 import {
-  CODEX_REASONING_OPTIONS,
   CODEX_WIRE_API_OPTIONS,
   FIELD_STACK_STYLE,
   OPENCLAW_PROTOCOL_OPTIONS,
@@ -51,7 +49,6 @@ interface ProfileConnectionSectionProps {
   draftCustomEndpoints: string[];
   draftAuthField: ClaudeAuthField;
   draftApiFormat: ApiFormat;
-  draftCodexReasoningEffort: CodexReasoningEffort;
   draftCodexWireApi: CodexWireApi;
   draftApiProtocol: OpenClawApiProtocol;
   draftModelCatalogAlias: string;
@@ -117,7 +114,6 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
   draftCustomEndpoints,
   draftAuthField,
   draftApiFormat,
-  draftCodexReasoningEffort,
   draftCodexWireApi,
   draftApiProtocol,
   draftModelCatalogAlias,
@@ -291,13 +287,6 @@ export const ProfileConnectionSection = memo(function ProfileConnectionSection({
 
         {draftTool === "codex" && (
           <div style={TWO_COLUMN_GRID_STYLE}>
-            <Field label={locale === "zh" ? "推理强度" : "Reasoning Effort"}>
-              <SelectField
-                value={draftCodexReasoningEffort}
-                onChange={(value) => onDraftChange(draftTool, { codexReasoningEffort: value as CodexReasoningEffort })}
-                options={CODEX_REASONING_OPTIONS}
-              />
-            </Field>
             <Field label={locale === "zh" ? "Wire API" : "Wire API"}>
               <SelectField
                 value={draftCodexWireApi}

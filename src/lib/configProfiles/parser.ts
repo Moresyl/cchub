@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type {
   ApiFormat,
-  CodexReasoningEffort,
   CodexWireApi,
   ModelCost,
   OpenClawApiProtocol,
@@ -22,6 +21,7 @@ import {
   stringifyTemplateValues,
 } from "./helpers";
 import { normalizeModelCatalog } from "../modelCatalog";
+import { parseCodexStructuredConfig } from "../codexConfig";
 import { defaultOpenCodeNpm } from "./opencode";
 import { parseModelAliases } from "./modelAliases";
 
@@ -118,8 +118,7 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
         apiKey: auth.OPENAI_API_KEY || "",
         baseUrl: findTomlValue(config, "base_url") || defaults.baseUrl,
         model: findTomlValue(config, "model") || defaults.model,
-        codexReasoningEffort:
-          (findTomlValue(config, "model_reasoning_effort") as CodexReasoningEffort) || defaults.codexReasoningEffort,
+        codexReasoningEffort: parseCodexStructuredConfig(config).reasoningEffort,
         codexWireApi: (findTomlValue(config, "wire_api") as CodexWireApi) || defaults.codexWireApi,
         websiteUrl: metadata.websiteUrl || defaults.websiteUrl,
         apiKeyUrl: metadata.apiKeyUrl || defaults.apiKeyUrl,

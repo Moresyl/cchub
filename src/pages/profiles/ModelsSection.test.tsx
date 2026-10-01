@@ -4,6 +4,45 @@ import { createDefaultStructuredFields } from "../../lib/configProfiles";
 import { ProfileModelsSection } from "./ModelsSection";
 
 describe("profile model section", () => {
+  it("binds reasoning to the selected model and preserves the original effort through capability changes", () => {
+    const fields = { ...createDefaultStructuredFields("codex"), model: "plain", codexReasoningEffort: "" };
+    const onDraftChange = vi.fn();
+    const props = {
+      locale: "zh",
+      localeText: (zh: string) => zh,
+      draftTool: "codex",
+      draftFields: fields,
+      fetchedModels: ["plain", "thinking"],
+      fetchedModelDetails: [
+        { id: "plain", supportedReasoningLevels: [] },
+        { id: "thinking", supportedReasoningLevels: ["max"] },
+      ],
+      fetchingModels: false,
+      modelFetchError: null,
+      onFetchModels: vi.fn(),
+      onDraftChange,
+    };
+    const view = render(<ProfileModelsSection {...props} />);
+    expect(screen.getByRole("combobox", { name: "推理强度" })).toHaveProperty("disabled", true);
+    const label = [...view.container.querySelectorAll("label")].find((element) => element.textContent === "推理强度");
+    expect(label?.control).toBe(screen.getByRole("combobox", { name: "推理强度" }));
+    expect(screen.getByText("无可配置等级")).toBeTruthy();
+    view.rerender(
+      <ProfileModelsSection {...props} draftFields={{ ...fields, model: "thinking", codexReasoningEffort: "high" }} />,
+    );
+    expect(screen.getByRole("combobox", { name: "推理强度" }).textContent).toContain("high（原配置");
+    expect(screen.getByText("max")).toBeTruthy();
+    view.rerender(
+      <ProfileModelsSection
+        {...props}
+        draftFields={{ ...fields, model: "custom", codexReasoningEffort: "custom-effort" }}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "推理强度" }).textContent).toBe("custom-effort");
+    expect(screen.getByText(/尚未获取当前模型/)).toBeTruthy();
+    expect(onDraftChange).not.toHaveBeenCalled();
+  });
+
   it("shows reported capabilities and applies them only after the explicit action", () => {
     const onChange = vi.fn();
     render(

@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import { CheckboxField } from "../../components/ui/checkbox-field";
 import { Input } from "../../components/ui/input";
 import { SimpleSelect } from "../../components/ui/simple-select";
+import ReasoningEffortSelect from "../../components/ReasoningEffortSelect";
 import type { CodexStructuredConfig, CodexStructuredValidation } from "../../lib/codexConfig";
 
 interface Props {
@@ -169,14 +170,13 @@ export default function CodexStructuredFields({
           </div>
         </div>
         <div>
-          <label className="field-label">{zh ? "推理强度" : "Reasoning Effort"}</label>
-          <SimpleSelect
+          <label className="field-label" htmlFor="config-file-reasoning-effort">
+            {zh ? "推理强度" : "Reasoning Effort"}
+          </label>
+          <ReasoningEffortSelect
+            id="config-file-reasoning-effort"
             value={codexStructuredConfig.reasoningEffort}
-            ariaLabel={zh ? "推理强度" : "Reasoning effort"}
-            options={["low", "medium", "high", "xhigh"].map((option) => ({
-              value: option,
-              label: option,
-            }))}
+            localeText={(chinese, english) => (zh ? chinese : english)}
             onValueChange={(value) => updateCodexConfig({ reasoningEffort: value })}
           />
         </div>

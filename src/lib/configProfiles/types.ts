@@ -18,7 +18,8 @@ export type OpenClawApiProtocol =
   | "anthropic-messages"
   | "google-generative-ai"
   | "bedrock-converse-stream";
-export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+/** Provider-defined level; an empty value omits the effort setting. */
+export type CodexReasoningEffort = string;
 export type CodexWireApi = "responses" | "chat";
 export type OpenCodeNpmPackage =
   | "@ai-sdk/openai"

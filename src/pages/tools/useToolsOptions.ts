@@ -58,15 +58,6 @@ export function useToolsOptions(uiText: UiText, tab: "claude" | "codex") {
     ],
     [uiText],
   );
-  const codexReasoningOptions = useMemo(
-    () => [
-      { value: "low", label: uiText("低", "Low", "低") },
-      { value: "medium", label: uiText("中", "Medium", "中") },
-      { value: "high", label: uiText("高", "High", "高") },
-      { value: "xhigh", label: uiText("极高", "XHigh", "最高") },
-    ],
-    [uiText],
-  );
   const permLevelOptions = useMemo(
     () => PERM_LEVELS.map((level, index) => ({ value: index, label: permLevelLabels[index], color: level.color })),
     [permLevelLabels],
@@ -274,7 +265,6 @@ export function useToolsOptions(uiText: UiText, tab: "claude" | "codex") {
     hudPathLevelOptions,
     hudContextValueOptions,
     codexApprovalOptions,
-    codexReasoningOptions,
     permLevelOptions,
     hudGitStatusOptions,
     hudDisplayOptions,

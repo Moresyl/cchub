@@ -46,7 +46,7 @@ export function parseCodexStructuredConfig(content: string): CodexStructuredConf
     baseUrl: provider("base_url"),
     wireApi: provider("wire_api", "responses"),
     model: String(scalar(["model"], "string")),
-    reasoningEffort: String(scalar(["model_reasoning_effort"], "string", "medium")),
+    reasoningEffort: String(scalar(["model_reasoning_effort"], "string")),
     personality: String(scalar(["personality"], "string", "pragmatic")),
     disableResponseStorage: Boolean(scalar(["disable_response_storage"], "boolean", false)),
     modelContextWindow: String(scalar(["model_context_window"], "integer")),
@@ -97,9 +97,12 @@ export function updateCodexStructuredContent(content: string, patch: Partial<Cod
     const key = field as keyof CodexStructuredConfig;
     const path = fields[key];
     const sameProvider = path?.[0] !== "model_providers" || providerKey === current.modelProvider;
-    if (!path || value === undefined || (sameProvider && value === current[key])) continue;
+    const clearingEffort = key === "reasoningEffort" && value !== undefined && !String(value).trim();
+    if (!path || value === undefined || (sameProvider && value === current[key] && !clearingEffort)) continue;
     let rendered: string | null;
-    if (key === "modelContextWindow" || key === "modelAutoCompactTokenLimit") {
+    if (clearingEffort) {
+      rendered = null;
+    } else if (key === "modelContextWindow" || key === "modelAutoCompactTokenLimit") {
       const integer = normalizeCodexInteger(String(value));
       if (integer === null) throw new Error("Token limits must be positive 64-bit integers");
       rendered = integer || null;

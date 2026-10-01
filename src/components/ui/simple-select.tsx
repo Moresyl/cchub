@@ -9,11 +9,13 @@ export interface SimpleSelectOption {
 }
 
 interface SimpleSelectProps {
+  id?: string;
   value: string;
   options: readonly SimpleSelectOption[];
   onValueChange: (value: string) => void;
   placeholder?: string;
   ariaLabel?: string;
+  ariaDescribedBy?: string;
   disabled?: boolean;
   className?: string;
   contentClassName?: string;
@@ -23,11 +25,13 @@ interface SimpleSelectProps {
 const EMPTY_OPTION_VALUE = "__cchub_empty_option__";
 
 export function SimpleSelect({
+  id,
   value,
   options,
   onValueChange,
   placeholder,
   ariaLabel,
+  ariaDescribedBy,
   disabled,
   className,
   contentClassName,
@@ -40,7 +44,13 @@ export function SimpleSelect({
       onValueChange={(nextValue) => onValueChange(nextValue === EMPTY_OPTION_VALUE ? "" : nextValue)}
       disabled={disabled}
     >
-      <SelectTrigger className={cn(className)} aria-label={ariaLabel} controlSize={controlSize}>
+      <SelectTrigger
+        id={id}
+        className={cn(className)}
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
+        controlSize={controlSize}
+      >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent className={contentClassName}>

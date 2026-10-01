@@ -1,5 +1,33 @@
 [
   {
+    "name": "explicit empty effort can be cleared without discarding its comment",
+    "source": "model_reasoning_effort = '' # preserved\nmodel = 'keep'\n",
+    "patch": { "reasoningEffort": "" },
+    "expected": " # preserved\nmodel = 'keep'\n",
+    "fields": { "reasoningEffort": "", "model": "keep" }
+  },
+  {
+    "name": "clearing reasoning leaves its comment and newer model",
+    "source": "model_reasoning_effort = 'high' # keep reasoning note\r\nmodel = 'custom-model'\r\n",
+    "patch": { "reasoningEffort": "" },
+    "expected": " # keep reasoning note\r\nmodel = 'custom-model'\r\n",
+    "fields": { "reasoningEffort": "", "model": "custom-model" }
+  },
+  {
+    "name": "absent reasoning remains absent during other edits",
+    "source": "model = 'old'\n",
+    "patch": { "model": "new" },
+    "expected": "model = \"new\"\n",
+    "fields": { "reasoningEffort": "", "model": "new" }
+  },
+  {
+    "name": "provider-defined reasoning levels remain strings",
+    "source": "'model_reasoning_effort' = 'max' # keep\n",
+    "patch": { "reasoningEffort": "none" },
+    "expected": "'model_reasoning_effort' = \"none\" # keep\n",
+    "fields": { "reasoningEffort": "none" }
+  },
+  {
     "name": "quoted provider, comments, BOM and CRLF",
     "source": "\ufeffmodel_provider = 'team.example'\r\nmodel = 'old' # keep\r\n[model_providers.\"team.example\"] # header\r\nbase_url = 'https://old.test'\r\nrequires_openai_auth = false\r\n",
     "patch": { "model": "new" },

@@ -1,5 +1,7 @@
 import ToolsChoiceCard from "../../components/ToolsChoiceCard";
 import ToolsToggleCard from "../../components/ToolsToggleCard";
+import ReasoningEffortSelect from "../../components/ReasoningEffortSelect";
+import { Card } from "../../components/ui/card";
 
 type UiText = (zh: string, en: string, ja?: string) => string;
 
@@ -10,7 +12,6 @@ export interface CodexTabProps {
   codexApprovalOptions: any[];
   handleSelectCodexApproval: (value: string | number) => void;
   codexReasoning: string;
-  codexReasoningOptions: any[];
   handleSelectCodexReasoning: (value: string | number) => void;
   codexDisableStorage: boolean;
   handleToggleCodexDisableStorage: any;
@@ -25,7 +26,6 @@ export default function CodexTab(props: CodexTabProps) {
     codexApprovalOptions,
     handleSelectCodexApproval,
     codexReasoning,
-    codexReasoningOptions,
     handleSelectCodexReasoning,
     codexDisableStorage,
     handleToggleCodexDisableStorage,
@@ -44,13 +44,10 @@ export default function CodexTab(props: CodexTabProps) {
       />
 
       {/* Reasoning Effort */}
-      <ToolsChoiceCard
-        title={uiText("推理强度", "Reasoning Effort", "推論強度")}
-        description={uiText("模型推理计算量", "Model reasoning compute", "モデルの推論計算量")}
-        value={codexReasoning}
-        onSelect={handleSelectCodexReasoning}
-        options={codexReasoningOptions}
-      />
+      <Card className="space-y-3 p-4">
+        <h4 className="text-sm font-[590]">{uiText("推理强度", "Reasoning Effort", "推論強度")}</h4>
+        <ReasoningEffortSelect value={codexReasoning} onValueChange={handleSelectCodexReasoning} localeText={uiText} />
+      </Card>
 
       {/* Disable Response Storage */}
       <ToolsToggleCard

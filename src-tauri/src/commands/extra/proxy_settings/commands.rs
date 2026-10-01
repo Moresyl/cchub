@@ -474,7 +474,7 @@ pub fn get_codex_settings() -> Result<serde_json::Value, String> {
     if !path.exists() {
         return Ok(serde_json::json!({
             "approval_mode": "suggest",
-            "reasoning_effort": "medium",
+            "reasoning_effort": "",
             "disable_response_storage": false,
             "context_window_1m": false,
         }));
@@ -504,7 +504,7 @@ pub fn get_codex_settings() -> Result<serde_json::Value, String> {
     let reasoning = doc
         .get("model_reasoning_effort")
         .and_then(|v| v.as_str())
-        .unwrap_or("medium");
+        .unwrap_or_default();
     let disable_storage = doc
         .get("disable_response_storage")
         .and_then(|v| v.as_bool())
@@ -529,7 +529,7 @@ pub fn set_codex_setting(key: String, value: String) -> Result<(), String> {
     let path = home.join(".codex").join("config.toml");
 
     let content = if path.exists() {
-        std::fs::read_to_string(&path).unwrap_or_default()
+        std::fs::read_to_string(&path).map_err(|e| e.to_string())?
     } else {
         String::new()
     };
@@ -544,7 +544,7 @@ pub fn set_codex_setting(key: String, value: String) -> Result<(), String> {
             doc["personality"] = toml_edit::value(&value);
         }
         "reasoning_effort" => {
-            doc["model_reasoning_effort"] = toml_edit::value(&value);
+            super::super::config_profiles::set_codex_reasoning_effort(&mut doc, &value);
         }
         "disable_response_storage" => {
             doc["disable_response_storage"] = toml_edit::value(value == "true");

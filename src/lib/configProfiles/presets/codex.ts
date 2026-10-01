@@ -93,6 +93,5 @@ export const codexPresets: ConfigPreset[] = [
     baseUrl: "",
     model: "gpt-5.6-sol",
     codexWireApi: "responses",
-    codexReasoningEffort: "high",
   },
 ];

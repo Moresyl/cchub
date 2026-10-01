@@ -108,14 +108,16 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     const providerName = "custom";
     const config = [
       `model_provider = "${providerName}"`,
-      `model = "${fields.model.trim() || "gpt-5.6-sol"}"`,
-      `model_reasoning_effort = "${fields.codexReasoningEffort}"`,
+      `model = ${JSON.stringify(fields.model.trim() || "gpt-5.6-sol")}`,
+      ...(fields.codexReasoningEffort.trim()
+        ? [`model_reasoning_effort = ${JSON.stringify(fields.codexReasoningEffort.trim())}`]
+        : []),
       "disable_response_storage = true",
       "",
       `[model_providers.${providerName}]`,
       `name = "${providerName}"`,
-      `base_url = "${fields.baseUrl.trim()}"`,
-      `wire_api = "${fields.codexWireApi}"`,
+      `base_url = ${JSON.stringify(fields.baseUrl.trim())}`,
+      `wire_api = ${JSON.stringify(fields.codexWireApi)}`,
       "requires_openai_auth = true",
     ].join("\n");
 

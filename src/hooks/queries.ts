@@ -398,7 +398,7 @@ export async function fetchToolsPageData(): Promise<ToolSettingsQueryResult> {
         context_window_1m: boolean;
       }>("get_codex_settings").catch(() => ({
         approval_mode: "suggest",
-        reasoning_effort: "medium",
+        reasoning_effort: "",
         disable_response_storage: false,
         context_window_1m: false,
       })),

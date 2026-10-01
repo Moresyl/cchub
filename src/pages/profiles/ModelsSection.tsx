@@ -1,6 +1,7 @@
 import { cloneElement, memo, useId, type ReactElement } from "react";
 import { RefreshCw } from "lucide-react";
 import ModelSelector from "../../components/ModelSelector";
+import ReasoningEffortSelect from "../../components/ReasoningEffortSelect";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { discoveredModelFields, selectProfileModel } from "../../lib/configProfiles/modelSelection";
@@ -55,6 +56,7 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
       selected.maxOutputTokens,
       selected.nativeEndpoints?.length,
       selected.supportedReasoningLevels?.length,
+      Array.isArray(selected.supportedReasoningLevels),
       selected.inputModalities?.length,
       selected.outputModalities?.length,
     ].some(Boolean);
@@ -132,6 +134,16 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
                 placeholder={localeText("可选，默认同 ID", "Optional, defaults to ID", "任意、既定は ID")}
               />
             </Field>
+            {draftTool === "codex" && (
+              <Field label={localeText("推理强度", "Reasoning effort", "推論強度")}>
+                <ReasoningEffortSelect
+                  value={fields.codexReasoningEffort}
+                  reportedLevels={selected?.supportedReasoningLevels}
+                  localeText={localeText}
+                  onValueChange={(value) => onDraftChange(draftTool, { codexReasoningEffort: value })}
+                />
+              </Field>
+            )}
             {draftTool === "opencode" && (
               <>
                 <Field label={localeText("上下文上限", "Context limit", "コンテキスト上限")}>
@@ -201,10 +213,14 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
                 <dd>{tokenNumber(selected.maxOutputTokens)} tokens</dd>
               </div>
             )}
-            {!!selected.supportedReasoningLevels?.length && (
+            {Array.isArray(selected.supportedReasoningLevels) && (
               <div>
                 <dt>{localeText("推理等级", "Reasoning levels", "推論レベル")}</dt>
-                <dd>{selected.supportedReasoningLevels.join(" · ")}</dd>
+                <dd>
+                  {selected.supportedReasoningLevels.length
+                    ? selected.supportedReasoningLevels.join(" · ")
+                    : localeText("无可配置等级", "No configurable levels", "設定可能なレベルなし")}
+                </dd>
               </div>
             )}
             {!!selected.inputModalities?.length && (

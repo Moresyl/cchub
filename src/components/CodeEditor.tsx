@@ -10,6 +10,8 @@ import { toml } from "@codemirror/legacy-modes/mode/toml";
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { EditorView as CodeMirrorView, ViewUpdate, placeholder as editorPlaceholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { getTomlSyntaxError } from "../lib/tomlSyntax";
+import { getLocale } from "../lib/i18n";
 
 interface CodeEditorProps {
   value: string;
@@ -38,6 +40,14 @@ const jsonLinter = linter((view) => {
     });
   }
   return diagnostics;
+});
+
+const tomlLinter = linter((view) => {
+  const source = view.state.doc.toString();
+  const error = getTomlSyntaxError(source);
+  if (!error) return [];
+  const from = Math.min(error.index, source.length);
+  return [{ from, to: Math.min(from + 1, source.length), severity: "error" as const, message: error.message }];
 });
 
 const cmTheme = EditorView.theme({
@@ -136,7 +146,7 @@ function getLangExtension(language: string) {
     case "yaml":
       return [yaml()];
     case "toml":
-      return [StreamLanguage.define(toml)];
+      return [StreamLanguage.define(toml), tomlLinter];
     case "markdown":
       return [markdown()];
     case "text":
@@ -159,6 +169,13 @@ function CodeEditorComponent({
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const tomlError = useMemo(() => (language === "toml" ? getTomlSyntaxError(value) : null), [language, value]);
+  const syntaxStatus =
+    language === "toml"
+      ? (tomlError?.message ?? (getLocale() === "zh" ? "TOML 语法正确" : "Valid TOML syntax"))
+      : getLocale() === "zh"
+        ? "代码编辑器"
+        : "Code editor";
 
   const extensions = useMemo(() => {
     const nextExtensions = [
@@ -238,7 +255,15 @@ function CodeEditorComponent({
     >
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-[var(--bg-elevated)]/65 px-3">
         <span className="text-[11px] font-semibold uppercase text-muted-foreground">{language}</span>
-        <span className="size-1.5 rounded-full bg-[var(--success)] opacity-75" aria-hidden="true" />
+        <span
+          className="size-1.5 rounded-full opacity-75"
+          role="status"
+          aria-label={syntaxStatus}
+          title={syntaxStatus}
+          style={{
+            background: tomlError ? "var(--danger)" : language === "toml" ? "var(--success)" : "var(--text-muted)",
+          }}
+        />
       </div>
       <div ref={containerRef} className="min-h-0 flex-1" />
     </div>

@@ -15,6 +15,40 @@ fn fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
+fn frontend_field_edits_use_native_grammar_and_preserve_exact_committed_bytes() {
+    let cases: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../src/lib/codexConfig/fixtures.json"
+    )))
+    .unwrap();
+    for case in cases.as_array().unwrap() {
+        let (_dir, config_path, auth_path) = fixture();
+        let source = case["source"].as_str().unwrap();
+        let expected = case["expected"].as_str().unwrap();
+        std::fs::write(&config_path, source).unwrap();
+        let initial = read_codex_structured_files(&config_path, &auth_path).unwrap();
+        write_codex_structured_files(
+            &config_path,
+            &auth_path,
+            expected,
+            &initial.config.api_key,
+            &initial.file_revision,
+        )
+        .unwrap_or_else(|error| panic!("{}: {error}", case["name"]));
+        assert_eq!(std::fs::read(&config_path).unwrap(), expected.as_bytes());
+        let actual = serde_json::to_value(
+            read_codex_structured_files(&config_path, &auth_path)
+                .unwrap()
+                .config,
+        )
+        .unwrap();
+        for (field, value) in case["fields"].as_object().unwrap() {
+            assert_eq!(&actual[field], value, "{}: {field}", case["name"]);
+        }
+    }
+}
+
+#[test]
 fn structured_save_preserves_toml_and_auth_fields_and_returns_the_committed_revision() {
     let (_dir, config_path, auth_path) = fixture();
     let initial = read_codex_structured_files(&config_path, &auth_path).unwrap();

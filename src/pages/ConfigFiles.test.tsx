@@ -78,6 +78,69 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("configuration editor ownership", () => {
+  it("saves the latest credential with the keyboard shortcut after several edits", async () => {
+    await open();
+    fireEvent.change(key(), { target: { value: "first-key" } });
+    fireEvent.change(key(), { target: { value: "latest-key" } });
+    fireEvent(window, new Event("cchub-shortcut-save"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "write_codex_toml_structured",
+        expect.objectContaining({ apiKey: "latest-key" }),
+      ),
+    );
+  });
+
+  it("retains incomplete raw TOML, blocks saving and resumes the form after correction", async () => {
+    await open();
+    const invalid = content + 'broken = "unfinished';
+    fireEvent.change(raw(), { target: { value: invalid } });
+    expect(raw().value).toBe(invalid);
+    expect(screen.getByRole("alert").textContent).toContain("TOML");
+    expect(saveButton().disabled).toBe(true);
+    fireEvent(window, new Event("cchub-shortcut-save"));
+    expect(invoke).not.toHaveBeenCalledWith("write_codex_toml_structured", expect.anything());
+    fireEvent.change(raw(), { target: { value: content + "# corrected\n" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(key().value).toBe("old-key");
+    expect(saveButton().disabled).toBe(false);
+  });
+
+  it("keeps invalid numeric drafts visible without erasing TOML and retains them across other field edits", async () => {
+    await open();
+    const context = screen.getByLabelText("上下文窗口") as HTMLInputElement;
+    fireEvent.change(context, { target: { value: "40k" } });
+    expect(context.value).toBe("40k");
+    expect(context.getAttribute("aria-invalid")).toBe("true");
+    expect(raw().value).toBe(content);
+    expect(saveButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("模型 ID"), { target: { value: "new-model" } });
+    expect(context.value).toBe("40k");
+    expect(raw().value).toBe(content.replace('model = "old"', 'model = "new-model"'));
+    fireEvent.change(context, { target: { value: "400,000" } });
+    expect(context.value).toBe("400000");
+    expect(context.getAttribute("aria-invalid")).toBe("false");
+    expect(raw().value).toMatch(/"?model_context_window"? = 400000/);
+    expect(saveButton().disabled).toBe(false);
+  });
+
+  it("counts pending numeric drafts as unsaved edits and discards them on revert or file change", async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText("上下文窗口"), { target: { value: "invalid" } });
+    fireEvent.click(screen.getByRole("button", { name: "auth.json" }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: t().common.cancel }));
+    fireEvent.click(screen.getByRole("button", { name: t().configFiles.revert }));
+    expect((screen.getByLabelText("上下文窗口") as HTMLInputElement).value).toBe("");
+    expect(saveButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("上下文窗口"), { target: { value: "invalid-again" } });
+    fireEvent.click(screen.getByRole("button", { name: "auth.json" }));
+    fireEvent.click(await screen.findByRole("button", { name: "继续" }));
+    await waitFor(() => expect(raw().value).toContain("other file"));
+    fireEvent.click(screen.getByRole("button", { name: "config.toml" }));
+    await waitFor(() => expect(key().value).toBe("old-key"));
+    expect((screen.getByLabelText("上下文窗口") as HTMLInputElement).value).toBe("");
+  });
   it("saves an API-key-only edit with the loaded file revision and uses the new revision next time", async () => {
     await open();
     expect(saveButton().disabled).toBe(true);

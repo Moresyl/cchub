@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
+import { diagnosticCount, forceLinting } from "@codemirror/lint";
 import CodeEditor, { getEditorCspNonce } from "./CodeEditor";
 
 const addedStyles: HTMLStyleElement[] = [];
@@ -12,6 +13,20 @@ afterEach(() => {
 });
 
 describe("bounded configuration editor", () => {
+  it("shows real TOML diagnostics and clears them when raw syntax is corrected", async () => {
+    const mounted = render(<CodeEditor language="toml" value='model = "unfinished' />);
+    const content = screen.getByRole("textbox", { name: "TOML configuration editor" });
+    const view = EditorView.findFromDOM(content)!;
+    expect(screen.getByRole("status").getAttribute("aria-label")).toContain("TOML (1:");
+    expect(screen.getByRole("status").style.background).toBe("var(--danger)");
+    forceLinting(view);
+    await waitFor(() => expect(diagnosticCount(view.state)).toBe(1));
+    mounted.rerender(<CodeEditor language="toml" value='model = "corrected"' />);
+    forceLinting(view);
+    await waitFor(() => expect(diagnosticCount(view.state)).toBe(0));
+    expect(screen.getByRole("status").style.background).toBe("var(--success)");
+    mounted.unmount();
+  });
   it("keeps long JSON scrollable inside its maximum height", () => {
     const mounted = render(
       <CodeEditor

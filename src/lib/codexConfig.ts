@@ -1,3 +1,5 @@
+import { CodexTomlDocument } from "./codexConfig/document";
+
 export interface CodexStructuredConfig {
   modelProvider: string;
   providerLabel: string;
@@ -18,270 +20,113 @@ export interface CodexStructuredValidation {
   warnings: string[];
 }
 
-const SECTION_RE = /^\s*\[([^\]]+)\]\s*$/;
-
-function stripQuotes(value: string) {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith("\"") && trimmed.endsWith("\""))
-    || (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function normalizeContent(content: string) {
-  return content.replace(/\r\n/g, "\n");
-}
-
-function splitLines(content: string) {
-  return normalizeContent(content).split("\n");
-}
-
-function firstSectionIndex(lines: string[]) {
-  return lines.findIndex((line) => SECTION_RE.test(line));
-}
-
-function findTopLevelAssignment(lines: string[], key: string) {
-  const boundary = firstSectionIndex(lines);
-  const end = boundary === -1 ? lines.length : boundary;
-  const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*(.+)$`);
-  for (let index = 0; index < end; index += 1) {
-    const match = lines[index]?.match(pattern);
-    if (match) {
-      return { index, value: match[1] };
-    }
-  }
-  return null;
-}
-
-function findSectionRange(lines: string[], header: string) {
-  const target = `[${header}]`;
-  const start = lines.findIndex((line) => line.trim() === target);
-  if (start === -1) return null;
-
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (SECTION_RE.test(lines[index] || "")) {
-      end = index;
-      break;
-    }
-  }
-  return { start, end };
-}
-
-function findSectionAssignment(lines: string[], header: string, key: string) {
-  const range = findSectionRange(lines, header);
-  if (!range) return null;
-
-  const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*(.+)$`);
-  for (let index = range.start + 1; index < range.end; index += 1) {
-    const match = lines[index]?.match(pattern);
-    if (match) {
-      return { index, value: match[1] };
-    }
-  }
-  return null;
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function upsertTopLevelAssignment(lines: string[], key: string, renderedValue: string) {
-  const assignment = `${key} = ${renderedValue}`;
-  const existing = findTopLevelAssignment(lines, key);
-  if (existing) {
-    lines[existing.index] = assignment;
-    return lines;
-  }
-
-  const boundary = firstSectionIndex(lines);
-  const insertAt = boundary === -1 ? lines.length : boundary;
-  lines.splice(insertAt, 0, assignment);
-  return lines;
-}
-
-function removeTopLevelAssignment(lines: string[], key: string) {
-  const existing = findTopLevelAssignment(lines, key);
-  if (!existing) return lines;
-  lines.splice(existing.index, 1);
-  return lines;
-}
-
-function appendSection(lines: string[], header: string, assignments: string[]) {
-  while (lines.length > 0 && lines[lines.length - 1] === "") {
-    lines.pop();
-  }
-  if (lines.length > 0) {
-    lines.push("");
-  }
-  lines.push(`[${header}]`);
-  lines.push(...assignments);
-  return lines;
-}
-
-function upsertSectionAssignment(lines: string[], header: string, key: string, renderedValue: string) {
-  const assignment = `${key} = ${renderedValue}`;
-  const existing = findSectionAssignment(lines, header, key);
-  if (existing) {
-    lines[existing.index] = assignment;
-    return lines;
-  }
-
-  const range = findSectionRange(lines, header);
-  if (!range) {
-    return appendSection(lines, header, [assignment]);
-  }
-
-  lines.splice(range.end, 0, assignment);
-  return lines;
-}
-
-function ensureMcpServersTable(lines: string[]) {
-  const hasAnyMcpSection = lines.some((line) => /^\s*\[mcp_servers(\]|\.)/.test(line));
-  if (hasAnyMcpSection) return lines;
-  return appendSection(lines, "mcp_servers", []);
-}
-
-function readTopLevelString(lines: string[], key: string, fallback = "") {
-  const assignment = findTopLevelAssignment(lines, key);
-  return assignment ? stripQuotes(assignment.value) : fallback;
-}
-
-function readTopLevelBoolean(lines: string[], key: string, fallback = false) {
-  const assignment = findTopLevelAssignment(lines, key);
-  if (!assignment) return fallback;
-  return assignment.value.trim().toLowerCase() === "true";
-}
-
-function readTopLevelInteger(lines: string[], key: string) {
-  const assignment = findTopLevelAssignment(lines, key);
-  return assignment ? assignment.value.trim() : "";
-}
-
-function readSectionString(lines: string[], header: string, key: string, fallback = "") {
-  const assignment = findSectionAssignment(lines, header, key);
-  return assignment ? stripQuotes(assignment.value) : fallback;
-}
-
 export function isCodexConfigToml(activeRoot: string, activeFile: string | null) {
   return activeRoot === "codex" && Boolean(activeFile && /[\\/]config\.toml$/i.test(activeFile));
 }
 
 export function parseCodexStructuredConfig(content: string): CodexStructuredConfig {
-  const lines = splitLines(content);
-  const modelProvider = readTopLevelString(lines, "model_provider", "custom") || "custom";
-  const providerSection = `model_providers.${modelProvider}`;
-  const mcpServers = Array.from(
-    new Set(
-      normalizeContent(content)
-        .match(/^\s*\[mcp_servers\.([^\]]+)\]\s*$/gm)
-        ?.map((line) => line.replace(/^\s*\[mcp_servers\.([^\]]+)\]\s*$/, "$1").replace(/^"(.*)"$/, "$1"))
-        || [],
-    ),
-  );
-
+  const doc = new CodexTomlDocument(content);
+  const scalar = (path: string[], kind: "string" | "integer" | "boolean", fallback: string | boolean = "") => {
+    const node = doc.get(path);
+    if (!node && !doc.has(path)) return fallback;
+    if (!node || node.type !== "TOMLValue" || node.kind !== kind) {
+      throw new Error(`${path.join(".")} must be a TOML ${kind}`);
+    }
+    return node.kind === "integer" ? node.bigint.toString() : node.value;
+  };
+  const modelProvider = String(scalar(["model_provider"], "string", "custom"));
+  for (const path of [["model_providers"], ["model_providers", modelProvider]]) {
+    if (doc.has(path) && !doc.isTable(path)) throw new Error(`${path.join(".")} must be a TOML table`);
+  }
+  const provider = (key: string, fallback = "") =>
+    String(scalar(["model_providers", modelProvider, key], "string", fallback));
   return {
     modelProvider,
-    providerLabel: readSectionString(lines, providerSection, "name", modelProvider),
-    baseUrl: readSectionString(lines, providerSection, "base_url"),
-    wireApi: readSectionString(lines, providerSection, "wire_api", "responses"),
-    model: readTopLevelString(lines, "model"),
-    reasoningEffort: readTopLevelString(lines, "model_reasoning_effort", "medium"),
-    personality: readTopLevelString(lines, "personality", "pragmatic"),
-    disableResponseStorage: readTopLevelBoolean(lines, "disable_response_storage", false),
-    modelContextWindow: readTopLevelInteger(lines, "model_context_window"),
-    modelAutoCompactTokenLimit: readTopLevelInteger(lines, "model_auto_compact_token_limit"),
-    mcpServers,
-    malformedMcpServers: Boolean(findTopLevelAssignment(lines, "mcp_servers")),
+    providerLabel: provider("name", modelProvider),
+    baseUrl: provider("base_url"),
+    wireApi: provider("wire_api", "responses"),
+    model: String(scalar(["model"], "string")),
+    reasoningEffort: String(scalar(["model_reasoning_effort"], "string", "medium")),
+    personality: String(scalar(["personality"], "string", "pragmatic")),
+    disableResponseStorage: Boolean(scalar(["disable_response_storage"], "boolean", false)),
+    modelContextWindow: String(scalar(["model_context_window"], "integer")),
+    modelAutoCompactTokenLimit: String(scalar(["model_auto_compact_token_limit"], "integer")),
+    mcpServers: doc.isTable(["mcp_servers"]) ? doc.children(["mcp_servers"]) : [],
+    malformedMcpServers: doc.has(["mcp_servers"]) && !doc.isTable(["mcp_servers"]),
   };
 }
 
-function renderString(value: string) {
-  return JSON.stringify(value);
+export function normalizeCodexInteger(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (!/^(?:\d+|\d{1,3}(?:,\d{3})+|\d+(?:_\d+)+)$/.test(trimmed)) return null;
+  const number = BigInt(trimmed.replace(/[_,]/g, ""));
+  return number > 0n && number <= 9223372036854775807n ? number.toString() : null;
 }
 
-function renderBoolean(value: boolean) {
-  return value ? "true" : "false";
-}
-
-function normalizeIntegerLike(value: string) {
-  const trimmed = value.trim().replace(/[_\s,]/g, "");
-  return /^\d+$/.test(trimmed) ? trimmed : "";
-}
-
+/** Only add an absent table. Never discard existing malformed or valid MCP data. */
 export function repairCodexConfigContent(content: string) {
-  const lines = splitLines(content);
-  removeTopLevelAssignment(lines, "mcp_servers");
-  ensureMcpServersTable(lines);
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
+  const doc = new CodexTomlDocument(content);
+  if (doc.has(["mcp_servers"])) {
+    if (!doc.isTable(["mcp_servers"]))
+      throw new Error("Repair mcp_servers in the raw editor; automatic repair would discard its contents");
+    return content;
+  }
+  const next = `${content}${content && !content.endsWith("\n") ? doc.newline : ""}[mcp_servers]${doc.newline}`;
+  new CodexTomlDocument(next);
+  return next;
 }
 
-export function updateCodexStructuredContent(
-  content: string,
-  patch: Partial<CodexStructuredConfig>,
-) {
+export function updateCodexStructuredContent(content: string, patch: Partial<CodexStructuredConfig>) {
   const current = parseCodexStructuredConfig(content);
-  const next = { ...current, ...patch };
-  const lines = splitLines(content);
-  const providerKey = next.modelProvider.trim() || "custom";
-  const providerSection = `model_providers.${providerKey}`;
-
-  upsertTopLevelAssignment(lines, "model_provider", renderString(providerKey));
-  upsertTopLevelAssignment(lines, "model", renderString(next.model.trim()));
-  upsertTopLevelAssignment(lines, "model_reasoning_effort", renderString(next.reasoningEffort.trim() || "medium"));
-  upsertTopLevelAssignment(lines, "personality", renderString(next.personality.trim() || "pragmatic"));
-  upsertTopLevelAssignment(lines, "disable_response_storage", renderBoolean(next.disableResponseStorage));
-
-  const normalizedContextWindow = normalizeIntegerLike(next.modelContextWindow);
-  if (normalizedContextWindow) {
-    upsertTopLevelAssignment(lines, "model_context_window", normalizedContextWindow);
-  } else {
-    removeTopLevelAssignment(lines, "model_context_window");
+  const providerKey = patch.modelProvider ?? current.modelProvider;
+  let next = content;
+  const fields: Partial<Record<keyof CodexStructuredConfig, string[]>> = {
+    modelProvider: ["model_provider"],
+    model: ["model"],
+    reasoningEffort: ["model_reasoning_effort"],
+    personality: ["personality"],
+    disableResponseStorage: ["disable_response_storage"],
+    modelContextWindow: ["model_context_window"],
+    modelAutoCompactTokenLimit: ["model_auto_compact_token_limit"],
+    providerLabel: ["model_providers", providerKey, "name"],
+    baseUrl: ["model_providers", providerKey, "base_url"],
+    wireApi: ["model_providers", providerKey, "wire_api"],
+  };
+  for (const [field, value] of Object.entries(patch)) {
+    const key = field as keyof CodexStructuredConfig;
+    const path = fields[key];
+    const sameProvider = path?.[0] !== "model_providers" || providerKey === current.modelProvider;
+    if (!path || value === undefined || (sameProvider && value === current[key])) continue;
+    let rendered: string | null;
+    if (key === "modelContextWindow" || key === "modelAutoCompactTokenLimit") {
+      const integer = normalizeCodexInteger(String(value));
+      if (integer === null) throw new Error("Token limits must be positive 64-bit integers");
+      rendered = integer || null;
+    } else {
+      rendered = JSON.stringify(value);
+    }
+    next = new CodexTomlDocument(next).set(path, rendered);
   }
-
-  const normalizedCompactLimit = normalizeIntegerLike(next.modelAutoCompactTokenLimit);
-  if (normalizedCompactLimit) {
-    upsertTopLevelAssignment(lines, "model_auto_compact_token_limit", normalizedCompactLimit);
-  } else {
-    removeTopLevelAssignment(lines, "model_auto_compact_token_limit");
-  }
-
-  upsertSectionAssignment(lines, providerSection, "name", renderString(next.providerLabel.trim() || providerKey));
-  upsertSectionAssignment(lines, providerSection, "base_url", renderString(next.baseUrl.trim()));
-  upsertSectionAssignment(lines, providerSection, "wire_api", renderString(next.wireApi.trim() || "responses"));
-  upsertSectionAssignment(lines, providerSection, "requires_openai_auth", renderBoolean(true));
-
-  const repaired = repairCodexConfigContent(lines.join("\n"));
-  return repaired;
+  // Re-parse the result before publishing any patch to the editor.
+  parseCodexStructuredConfig(next);
+  return next;
 }
 
 export function validateCodexStructuredConfig(config: CodexStructuredConfig): CodexStructuredValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
-
-  if (!config.model.trim()) {
-    errors.push("Model is required.");
+  if (!config.modelProvider.trim()) errors.push("Model provider is required.");
+  if (!config.baseUrl.trim() && config.modelProvider !== "openai") {
+    warnings.push("Base URL is empty. Check the selected provider's endpoint before use.");
   }
-  if (!config.modelProvider.trim()) {
-    errors.push("Model provider is required.");
-  }
-  if (!config.baseUrl.trim()) {
-    warnings.push("Base URL is empty. Local auth-only providers may fail without a configured endpoint.");
-  }
-  const contextWindow = normalizeIntegerLike(config.modelContextWindow);
-  if (config.modelContextWindow.trim() && !contextWindow) {
-    errors.push("Context window must be an integer.");
-  }
-  const compactLimit = normalizeIntegerLike(config.modelAutoCompactTokenLimit);
-  if (config.modelAutoCompactTokenLimit.trim() && !compactLimit) {
-    errors.push("Auto compact token limit must be an integer.");
-  }
-  if (config.malformedMcpServers) {
-    warnings.push("Detected a malformed top-level mcp_servers assignment. Repairing will normalize it to a TOML table.");
-  }
-
+  if (normalizeCodexInteger(config.modelContextWindow) === null)
+    errors.push("Context window must be a positive 64-bit integer.");
+  if (normalizeCodexInteger(config.modelAutoCompactTokenLimit) === null)
+    errors.push("Auto compact token limit must be a positive 64-bit integer.");
+  if (config.malformedMcpServers)
+    warnings.push(
+      "mcp_servers must be a TOML table. Correct it in the raw editor; its existing contents will be preserved.",
+    );
   return { errors, warnings };
 }

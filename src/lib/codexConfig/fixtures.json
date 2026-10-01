@@ -1,0 +1,37 @@
+[
+  {
+    "name": "quoted provider, comments, BOM and CRLF",
+    "source": "\ufeffmodel_provider = 'team.example'\r\nmodel = 'old' # keep\r\n[model_providers.\"team.example\"] # header\r\nbase_url = 'https://old.test'\r\nrequires_openai_auth = false\r\n",
+    "patch": { "model": "new" },
+    "expected": "\ufeffmodel_provider = 'team.example'\r\nmodel = \"new\" # keep\r\n[model_providers.\"team.example\"] # header\r\nbase_url = 'https://old.test'\r\nrequires_openai_auth = false\r\n",
+    "fields": { "modelProvider": "team.example", "model": "new", "baseUrl": "https://old.test" }
+  },
+  {
+    "name": "inline provider and MCP contents",
+    "source": "model_provider = 'team.example'\nmodel_providers = { 'team.example' = { base_url = 'https://old.test', requires_openai_auth = false } }\nmcp_servers = { 'fs.local' = { command = 'node', args = ['keep'] } }\n",
+    "patch": { "baseUrl": "https://new.test" },
+    "expected": "model_provider = 'team.example'\nmodel_providers = { 'team.example' = { base_url = \"https://new.test\", requires_openai_auth = false } }\nmcp_servers = { 'fs.local' = { command = 'node', args = ['keep'] } }\n",
+    "fields": { "modelProvider": "team.example", "baseUrl": "https://new.test", "mcpServers": ["fs.local"] }
+  },
+  {
+    "name": "implicit provider with child table",
+    "source": "model_provider = 'custom'\n[model_providers.custom.headers]\nkey = 'keep'\n",
+    "patch": { "baseUrl": "https://new.test" },
+    "expected": "model_provider = 'custom'\nmodel_providers.custom.base_url = \"https://new.test\"\n[model_providers.custom.headers]\nkey = 'keep'\n",
+    "fields": { "modelProvider": "custom", "baseUrl": "https://new.test" }
+  },
+  {
+    "name": "precise integer replacement",
+    "source": "model_context_window = 9_007_199_254_740_993 # exact\n",
+    "patch": { "modelContextWindow": "9223372036854775807" },
+    "expected": "model_context_window = 9223372036854775807 # exact\n",
+    "fields": { "modelContextWindow": "9223372036854775807" }
+  },
+  {
+    "name": "limit removal preserves its comment",
+    "source": "model_context_window = 400_000 # user note\nmodel = 'keep'\n",
+    "patch": { "modelContextWindow": "" },
+    "expected": " # user note\nmodel = 'keep'\n",
+    "fields": { "model": "keep", "modelContextWindow": "" }
+  }
+]

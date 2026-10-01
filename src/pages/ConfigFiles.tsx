@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Eye, EyeOff, FileText, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { FileText, RefreshCw, RotateCcw, Save } from "lucide-react";
 import ConfigFilesRootTabs from "../components/ConfigFilesRootTabs";
 import ConfigFilesTreePanel from "../components/ConfigFilesTreePanel";
 import { getLocale, t } from "../lib/i18n";
@@ -12,18 +12,11 @@ import OpenClawConfigSection from "../components/OpenClawConfigSection";
 import HermesConfigSection from "../components/HermesConfigSection";
 import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 import { Checkbox } from "../components/ui/checkbox";
-import { CheckboxField } from "../components/ui/checkbox-field";
-import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
-import { SimpleSelect } from "../components/ui/simple-select";
 import { useConfigFiles } from "../hooks/queries";
-import {
-  isCodexConfigToml,
-  parseCodexStructuredConfig,
-  repairCodexConfigContent,
-  updateCodexStructuredContent,
-  validateCodexStructuredConfig,
-} from "../lib/codexConfig";
+import { isCodexConfigToml, type CodexStructuredConfig } from "../lib/codexConfig";
+import { useCodexEditor } from "./config-files/useCodexEditor";
+import CodexStructuredFields from "./config-files/CodexStructuredFields";
 
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
 const CodeEditor = lazy(() => import("../components/CodeEditor"));
@@ -86,6 +79,7 @@ export default function ConfigFiles() {
   const [loading, setLoading] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [needsReload, setNeedsReload] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>([
     "claude",
@@ -101,7 +95,6 @@ export default function ConfigFiles() {
   const [codexFileRevision, setCodexFileRevision] = useState<string | null>(null);
   const fileGeneration = useRef(0);
   const saveInFlight = useRef(false);
-  const [showCodexApiKey, setShowCodexApiKey] = useState(false);
   const [claudeToggles, setClaudeToggles] = useState<ClaudeConfigToggles | null>(null);
   const [loadingClaudeToggles, setLoadingClaudeToggles] = useState(false);
   const [writingClaudeToggleKey, setWritingClaudeToggleKey] = useState<string | null>(null);
@@ -112,8 +105,21 @@ export default function ConfigFiles() {
     refetch: refetchTree,
   } = useConfigFiles(activeRoot, Boolean(activeRoot));
 
+  const codexEditor = useCodexEditor(
+    content,
+    setContent,
+    `${activeRoot}:${activeFile}`,
+    isCodexConfigToml(activeRoot, activeFile),
+  );
+  const codexStructuredConfig = codexEditor.config;
+  const codexValidation = codexEditor.validation;
+  const codexBlocked = Boolean(
+    codexEditor.error || codexValidation?.errors.length || codexStructuredConfig?.malformedMcpServers,
+  );
   const hasChanges =
-    content !== originalContent || (isCodexConfigToml(activeRoot, activeFile) && codexApiKey !== originalCodexApiKey);
+    codexEditor.hasPendingDraft ||
+    content !== originalContent ||
+    (isCodexConfigToml(activeRoot, activeFile) && codexApiKey !== originalCodexApiKey);
   const visibleRoots = useMemo(
     () => roots.filter((root) => visibleApps.includes(root.id as ManagedAppId)),
     [roots, visibleApps],
@@ -128,17 +134,10 @@ export default function ConfigFiles() {
     () => activeRoot === "claude" && Boolean(activeFile && /[\\/]settings\.local\.json$/i.test(activeFile)),
     [activeRoot, activeFile],
   );
-  const codexStructuredConfig = useMemo(
-    () => (structuredCodexFile ? parseCodexStructuredConfig(content) : null),
-    [structuredCodexFile, content],
-  );
-  const codexValidation = useMemo(
-    () => (codexStructuredConfig ? validateCodexStructuredConfig(codexStructuredConfig) : null),
-    [codexStructuredConfig],
-  );
 
   const openFile = useCallback(
     async (path: string) => {
+      codexEditor.reset();
       const generation = ++fileGeneration.current;
       setLoadingFile(true);
       setActiveFile(path);
@@ -147,6 +146,8 @@ export default function ConfigFiles() {
       setCodexApiKey("");
       setOriginalCodexApiKey("");
       setCodexFileRevision(null);
+      setNeedsReload(false);
+      setWritingClaudeToggleKey(null);
       try {
         const nextStructuredCodex = isCodexConfigToml(activeRoot, path);
         const nextClaudeQuickToggleFile = activeRoot === "claude" && /[\\/]settings\.local\.json$/i.test(path);
@@ -156,7 +157,9 @@ export default function ConfigFiles() {
           nextStructuredCodex
             ? invoke<CodexStructuredBackendConfig>("read_codex_toml_structured", { path })
             : Promise.resolve(null),
-          nextClaudeQuickToggleFile ? invoke<ClaudeConfigToggles>("read_claude_config_toggles") : Promise.resolve(null),
+          nextClaudeQuickToggleFile
+            ? invoke<ClaudeConfigToggles>("read_claude_config_toggles").catch(() => null)
+            : Promise.resolve(null),
         ]);
         if (fileGeneration.current !== generation) return;
         startTransition(() => {
@@ -166,7 +169,6 @@ export default function ConfigFiles() {
           setCodexApiKey(nextCodexStructured?.apiKey || "");
           setOriginalCodexApiKey(nextCodexStructured?.apiKey || "");
           setCodexFileRevision(nextCodexStructured?.fileRevision ?? null);
-          setShowCodexApiKey(false);
           setClaudeToggles(nextClaudeToggles);
         });
       } catch (error) {
@@ -233,15 +235,16 @@ export default function ConfigFiles() {
   }, []);
   useEffect(() => {
     fileGeneration.current++;
+    codexEditor.reset();
     setActiveFile(null);
     setContent("");
     setOriginalContent("");
     setCodexApiKey("");
     setOriginalCodexApiKey("");
     setCodexFileRevision(null);
+    setNeedsReload(false);
     setLoadingFile(false);
     setWritingClaudeToggleKey(null);
-    setShowCodexApiKey(false);
     setClaudeToggles(null);
   }, [activeRoot]);
   useEffect(() => {
@@ -263,7 +266,17 @@ export default function ConfigFiles() {
     };
     window.addEventListener("cchub-shortcut-save", handleSave);
     return () => window.removeEventListener("cchub-shortcut-save", handleSave);
-  }, [activeFile, hasChanges, saving, content]);
+  }, [
+    activeFile,
+    hasChanges,
+    saving,
+    content,
+    codexApiKey,
+    codexFileRevision,
+    codexBlocked,
+    writingClaudeToggleKey,
+    needsReload,
+  ]);
 
   async function loadRoots() {
     setLoading(true);
@@ -288,7 +301,7 @@ export default function ConfigFiles() {
   }
 
   async function saveFile() {
-    if (!activeFile || loadingFile || saveInFlight.current) return;
+    if (!activeFile || loadingFile || saveInFlight.current || codexBlocked || needsReload) return;
     const generation = fileGeneration.current;
     saveInFlight.current = true;
     setSaving(true);
@@ -310,6 +323,15 @@ export default function ConfigFiles() {
         await invoke("write_config_file_content", { path: activeFile, content });
         if (fileGeneration.current !== generation) return;
         setOriginalContent(content);
+        if (claudeQuickToggleFile) {
+          try {
+            const refreshed = await invoke<ClaudeConfigToggles>("read_claude_config_toggles");
+            if (fileGeneration.current === generation) setClaudeToggles(refreshed);
+          } catch (error) {
+            if (fileGeneration.current === generation) setNeedsReload(true);
+            throw error;
+          }
+        }
       }
       showToast("success", zh ? "已保存" : "Saved");
     } catch (error) {
@@ -322,13 +344,21 @@ export default function ConfigFiles() {
     }
   }
 
-  function updateCodexConfig(patch: Parameters<typeof updateCodexStructuredContent>[1]) {
-    setContent((current) => updateCodexStructuredContent(current, patch));
+  function updateCodexConfig(patch: Partial<CodexStructuredConfig>) {
+    try {
+      codexEditor.update(patch);
+    } catch (error) {
+      showToast("error", String(error));
+    }
   }
 
   function repairCodexConfig() {
-    setContent((current) => repairCodexConfigContent(current));
-    showToast("success", zh ? "已修复 Codex MCP 表结构" : "Codex MCP table repaired");
+    try {
+      codexEditor.addMcpTable();
+      showToast("success", zh ? "MCP 表已就绪" : "MCP table is ready");
+    } catch (error) {
+      showToast("error", String(error));
+    }
   }
 
   function toggleCodexContextWindow1M(enabled: boolean) {
@@ -347,11 +377,13 @@ export default function ConfigFiles() {
   }
 
   async function handleClaudeQuickToggle(key: string, enabled: boolean) {
+    if (saveInFlight.current || loadingFile || needsReload || !claudeToggles) return;
     if (!activeFile || hasChanges) {
       showToast("error", zh ? "请先保存或还原当前修改" : "Save or revert current edits first");
       return;
     }
 
+    saveInFlight.current = true;
     setWritingClaudeToggleKey(key);
     const generation = fileGeneration.current;
     try {
@@ -366,9 +398,11 @@ export default function ConfigFiles() {
       showToast("success", zh ? "Claude 快捷开关已更新" : "Claude quick toggle updated");
     } catch (error) {
       if (fileGeneration.current !== generation) return;
+      setNeedsReload(true);
       console.error(error);
       showToast("error", String(error));
     } finally {
+      saveInFlight.current = false;
       if (fileGeneration.current === generation) setWritingClaudeToggleKey(null);
     }
   }
@@ -411,7 +445,18 @@ export default function ConfigFiles() {
             <RefreshCw size={14} />
             {i.common.refresh}
           </Button>
-          <Button onClick={saveFile} disabled={!activeFile || !hasChanges || saving || loadingFile}>
+          <Button
+            onClick={saveFile}
+            disabled={
+              !activeFile ||
+              !hasChanges ||
+              saving ||
+              loadingFile ||
+              !!writingClaudeToggleKey ||
+              codexBlocked ||
+              needsReload
+            }
+          >
             <Save size={14} />
             {i.common.save}
           </Button>
@@ -481,6 +526,7 @@ export default function ConfigFiles() {
               <Button
                 variant="secondary"
                 onClick={() => {
+                  codexEditor.reset();
                   setContent(originalContent);
                   setCodexApiKey(originalCodexApiKey);
                 }}
@@ -493,6 +539,29 @@ export default function ConfigFiles() {
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 16 }}>
+            {needsReload && activeFile && (
+              <div role="alert" className="card" style={{ padding: 12, marginBottom: 16, fontSize: 12 }}>
+                {zh
+                  ? "文件操作后未能重新读取配置。请重新加载并核对磁盘内容，再继续修改。当前草稿已保留。"
+                  : "The configuration could not be re-read after the file operation. Reload and review the file before continuing. Your draft has been retained."}
+                <Button variant="secondary" onClick={() => requestOpenFile(activeFile)} style={{ marginTop: 8 }}>
+                  <RefreshCw size={14} />
+                  {zh ? "重新加载配置" : "Reload configuration"}
+                </Button>
+              </div>
+            )}
+            {codexEditor.error && !loadingFile && (
+              <div
+                role="alert"
+                className="card"
+                style={{ padding: 12, marginBottom: 16, fontSize: 12, borderColor: "var(--danger)" }}
+              >
+                {zh
+                  ? "结构化字段暂不可用，请在下方修正原始配置。草稿已保留。"
+                  : "Correct the raw configuration below to resume structured editing. Your draft has been retained."}
+                <div style={{ marginTop: 6 }}>{codexEditor.error}</div>
+              </div>
+            )}
             {!activeFile ? (
               <div className="empty-state" style={{ minHeight: "100%" }}>
                 <div className="empty-icon">
@@ -511,211 +580,18 @@ export default function ConfigFiles() {
               </div>
             ) : structuredCodexFile && codexStructuredConfig ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div className="section-card" style={{ padding: 16 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      marginBottom: 14,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700 }}>
-                        {zh ? "Codex 结构化编辑" : "Codex Structured Editor"}
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-                        {zh
-                          ? "字段级编辑会直接同步到下方的 config.toml，原始内容仍可继续手动修改。"
-                          : "Field edits write back into the TOML below, while preserving raw editing for advanced cases."}
-                      </div>
-                    </div>
-                    <Button variant="secondary" onClick={repairCodexConfig} style={{ gap: 6 }}>
-                      <RefreshCw size={14} />
-                      {zh ? "修复 MCP 表" : "Repair MCP Table"}
-                    </Button>
-                  </div>
-
-                  {codexValidation && (codexValidation.errors.length > 0 || codexValidation.warnings.length > 0) && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-                      {codexValidation.errors.map((message) => (
-                        <div
-                          key={`error:${message}`}
-                          className="card"
-                          style={{
-                            padding: "10px 12px",
-                            borderColor: "var(--danger)",
-                            background: "color-mix(in srgb, var(--danger) 8%, var(--bg-card))",
-                            fontSize: 12,
-                          }}
-                        >
-                          {zh ? `错误：${message}` : `Error: ${message}`}
-                        </div>
-                      ))}
-                      {codexValidation.warnings.map((message) => (
-                        <div
-                          key={`warning:${message}`}
-                          className="card"
-                          style={{
-                            padding: "10px 12px",
-                            borderColor: "var(--warning)",
-                            background: "color-mix(in srgb, var(--warning) 10%, var(--bg-card))",
-                            fontSize: 12,
-                          }}
-                        >
-                          {zh ? `提示：${message}` : `Warning: ${message}`}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div
-                    style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}
-                  >
-                    <div>
-                      <label className="field-label">{zh ? "模型 Provider" : "Model Provider"}</label>
-                      <Input
-                        value={codexStructuredConfig.modelProvider}
-                        onChange={(event) => updateCodexConfig({ modelProvider: event.target.value || "custom" })}
-                        placeholder="custom"
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "Provider 显示名" : "Provider Label"}</label>
-                      <Input
-                        value={codexStructuredConfig.providerLabel}
-                        onChange={(event) => updateCodexConfig({ providerLabel: event.target.value })}
-                        placeholder="custom"
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "模型 ID" : "Model ID"}</label>
-                      <Input
-                        value={codexStructuredConfig.model}
-                        onChange={(event) => updateCodexConfig({ model: event.target.value })}
-                        placeholder="gpt-5.6-sol"
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "Base URL" : "Base URL"}</label>
-                      <Input
-                        value={codexStructuredConfig.baseUrl}
-                        onChange={(event) => updateCodexConfig({ baseUrl: event.target.value })}
-                        placeholder="https://api.example.com/v1"
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label" htmlFor="config-file-api-key">
-                        API Key
-                      </label>
-                      <div style={{ position: "relative" }}>
-                        <Input
-                          id="config-file-api-key"
-                          type={showCodexApiKey ? "text" : "password"}
-                          value={codexApiKey}
-                          onChange={(event) => setCodexApiKey(event.target.value)}
-                          placeholder="sk-..."
-                          style={{ paddingRight: 40 }}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={
-                            showCodexApiKey
-                              ? zh
-                                ? "隐藏 API Key"
-                                : "Hide API key"
-                              : zh
-                                ? "显示 API Key"
-                                : "Show API key"
-                          }
-                          type="button"
-                          onClick={() => setShowCodexApiKey((current) => !current)}
-                          style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}
-                        >
-                          {showCodexApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </Button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "推理强度" : "Reasoning Effort"}</label>
-                      <SimpleSelect
-                        value={codexStructuredConfig.reasoningEffort}
-                        ariaLabel={zh ? "推理强度" : "Reasoning effort"}
-                        options={["low", "medium", "high", "xhigh"].map((option) => ({
-                          value: option,
-                          label: option,
-                        }))}
-                        onValueChange={(value) => updateCodexConfig({ reasoningEffort: value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "Wire API" : "Wire API"}</label>
-                      <SimpleSelect
-                        value={codexStructuredConfig.wireApi}
-                        ariaLabel={zh ? "Wire API" : "Wire API"}
-                        options={["responses", "chat"].map((option) => ({ value: option, label: option }))}
-                        onValueChange={(value) => updateCodexConfig({ wireApi: value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "执行人格" : "Personality"}</label>
-                      <SimpleSelect
-                        value={codexStructuredConfig.personality}
-                        ariaLabel={zh ? "执行人格" : "Personality"}
-                        options={["pragmatic", "full-auto", "auto-edit", "explain"].map((option) => ({
-                          value: option,
-                          label: option,
-                        }))}
-                        onValueChange={(value) => updateCodexConfig({ personality: value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "上下文窗口" : "Context Window"}</label>
-                      <Input
-                        value={codexStructuredConfig.modelContextWindow}
-                        onChange={(event) =>
-                          updateCodexConfig({ modelContextWindow: event.target.value.replace(/[,_\s]/g, "") })
-                        }
-                        placeholder="1000000"
-                      />
-                    </div>
-                    <div>
-                      <label className="field-label">{zh ? "自动压缩阈值" : "Auto Compact Limit"}</label>
-                      <Input
-                        value={codexStructuredConfig.modelAutoCompactTokenLimit}
-                        onChange={(event) =>
-                          updateCodexConfig({ modelAutoCompactTokenLimit: event.target.value.replace(/[,_\s]/g, "") })
-                        }
-                        placeholder="900000"
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 14, flexWrap: "wrap" }}>
-                    <CheckboxField
-                      checked={codexStructuredConfig.disableResponseStorage}
-                      onCheckedChange={(checked) => updateCodexConfig({ disableResponseStorage: checked })}
-                      label={zh ? "禁用响应存储" : "Disable Response Storage"}
-                    />
-                    <CheckboxField
-                      checked={codexStructuredConfig.modelContextWindow === "1000000"}
-                      onCheckedChange={toggleCodexContextWindow1M}
-                      label={zh ? "1M 上下文窗口" : "1M Context Window"}
-                    />
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                      {codexStructuredConfig.mcpServers.length > 0
-                        ? zh
-                          ? `已检测到 ${codexStructuredConfig.mcpServers.length} 个 MCP Server: ${codexStructuredConfig.mcpServers.join(", ")}`
-                          : `${codexStructuredConfig.mcpServers.length} MCP server(s): ${codexStructuredConfig.mcpServers.join(", ")}`
-                        : zh
-                          ? "当前未配置 MCP Server 表项。"
-                          : "No MCP server sections detected yet."}
-                    </div>
-                  </div>
-                </div>
+                <CodexStructuredFields
+                  zh={zh}
+                  config={codexStructuredConfig}
+                  validation={codexValidation}
+                  onPatch={updateCodexConfig}
+                  onAddMcp={repairCodexConfig}
+                  onContextWindow1M={toggleCodexContextWindow1M}
+                  apiKey={codexApiKey}
+                  onApiKeyChange={setCodexApiKey}
+                  invalidContextWindow={codexEditor.invalidContextWindow}
+                  invalidCompactLimit={codexEditor.invalidCompactLimit}
+                />
 
                 <CodeEditor value={content} onChange={setContent} language={activeLanguage} minHeight={520} />
               </div>
@@ -749,28 +625,35 @@ export default function ConfigFiles() {
                     )}
                   </div>
 
+                  {!claudeToggles && (
+                    <p role="status" style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
+                      {zh
+                        ? "快捷开关暂不可用，请在下方修正原始 JSON 配置后保存。"
+                        : "Quick toggles are unavailable. Correct and save the raw JSON below."}
+                    </p>
+                  )}
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {[
                       {
                         key: "hideAttribution",
-                        label: zh ? "Hide Attribution" : "Hide Attribution",
+                        label: zh ? "隐藏署名" : "Hide Attribution",
                         checked: claudeToggles?.hideAttribution ?? false,
                       },
                       {
                         key: "enableTeammates",
-                        label: zh ? "Enable Teammates" : "Enable Teammates",
+                        label: zh ? "启用团队协作" : "Enable Teammates",
                         checked: claudeToggles?.enableTeammates ?? false,
                       },
                       {
                         key: "maxThinkingTokens",
                         label: zh
-                          ? `Max Thinking Tokens (${claudeToggles?.maxThinkingTokensValue || "32000"})`
+                          ? `深度思考 (${claudeToggles?.maxThinkingTokensValue || "32000"} tokens)`
                           : `Max Thinking Tokens (${claudeToggles?.maxThinkingTokensValue || "32000"})`,
                         checked: claudeToggles?.maxThinkingTokens ?? false,
                       },
                       {
                         key: "enableToolSearch",
-                        label: zh ? "Enable Tool Search" : "Enable Tool Search",
+                        label: zh ? "启用工具搜索" : "Enable Tool Search",
                         checked: claudeToggles?.enableToolSearch ?? false,
                       },
                     ].map((toggle) => (
@@ -789,10 +672,17 @@ export default function ConfigFiles() {
                       >
                         <Checkbox
                           checked={toggle.checked}
-                          disabled={hasChanges || loadingClaudeToggles || writingClaudeToggleKey === toggle.key}
+                          disabled={
+                            hasChanges ||
+                            loadingClaudeToggles ||
+                            saving ||
+                            !!writingClaudeToggleKey ||
+                            needsReload ||
+                            !claudeToggles
+                          }
                           onCheckedChange={(checked) => void handleClaudeQuickToggle(toggle.key, checked === true)}
                         />
-                        <span style={{ fontSize: 13 }}>{toggle.label}</span>
+                        <span style={{ fontSize: 12 }}>{toggle.label}</span>
                         {writingClaudeToggleKey === toggle.key && (
                           <div className="spinner" style={{ width: 12, height: 12, marginLeft: "auto" }} />
                         )}

@@ -383,7 +383,8 @@ pub fn normalize_session_query(query: Option<String>) -> String {
     query.unwrap_or_default().trim().to_lowercase()
 }
 
-pub fn session_roots_for_tool(
+/// Capture configured ownership without filesystem IO under the application DB lock.
+pub fn session_root_candidates_for_tool(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<Vec<PathBuf>, String> {
@@ -391,20 +392,15 @@ pub fn session_roots_for_tool(
     let mut seen = HashSet::new();
 
     if let Ok(global_root) = resolve_tool_config_dir(conn, tool_id) {
-        if global_root.exists() {
-            let key = global_root.to_string_lossy().to_string();
-            if seen.insert(key) {
-                roots.push(global_root);
-            }
+        let key = global_root.to_string_lossy().to_string();
+        if seen.insert(key) {
+            roots.push(global_root);
         }
     }
 
     if let Some(hidden_dir) = tool_hidden_dir(tool_id) {
-        for project_root in discover_project_roots(conn) {
+        for project_root in configured_project_roots(conn) {
             let session_root = project_root.join(hidden_dir);
-            if !session_root.exists() {
-                continue;
-            }
             let key = session_root.to_string_lossy().to_string();
             if seen.insert(key) {
                 roots.push(session_root);
@@ -415,12 +411,11 @@ pub fn session_roots_for_tool(
     if tool_id == "opencode" {
         if let Some(home) = dirs::home_dir() {
             let database = crate::opencode_paths::database_path(&home);
-            if database.is_file() && seen.insert(database.to_string_lossy().to_string()) {
+            if seen.insert(database.to_string_lossy().to_string()) {
                 roots.push(database.clone());
             }
             let root = crate::opencode_paths::data_dir(&home);
             if database.parent() == Some(root.as_path())
-                && root.exists()
                 && seen.insert(root.to_string_lossy().to_string())
             {
                 roots.push(root);

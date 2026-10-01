@@ -1,6 +1,8 @@
-use super::super::config_profiles::session_roots_for_tool;
 use super::super::types::SessionDeleteTarget;
-use super::{delete_session_impl, session_trash};
+use super::{
+    session_tasks::{self, SessionDeletePlan, SessionRestorePlan},
+    session_trash,
+};
 use crate::db::DbState;
 use serde::Serialize;
 use tauri::State;
@@ -21,11 +23,11 @@ pub struct SessionBatchDeleteResult {
 
 fn delete_batch(
     targets: Vec<SessionDeleteTarget>,
-    mut delete: impl FnMut(&SessionDeleteTarget) -> Result<(), String>,
+    mut delete: impl FnMut(usize, &SessionDeleteTarget) -> Result<(), String>,
 ) -> SessionBatchDeleteResult {
     let mut result = SessionBatchDeleteResult::default();
     let mut seen = std::collections::HashSet::new();
-    for target in targets {
+    for (index, target) in targets.into_iter().enumerate() {
         let path = if target.tool_id == "codex" {
             crate::shared::session_archive::logical_path(std::path::Path::new(&target.source_path))
         } else {
@@ -39,7 +41,7 @@ fn delete_batch(
         )) {
             continue;
         }
-        match delete(&target) {
+        match delete(index, &target) {
             Ok(()) => result.deleted.push(target),
             Err(error) => result.failed.push(SessionDeleteFailure { target, error }),
         }
@@ -48,32 +50,41 @@ fn delete_batch(
 }
 
 #[tauri::command]
-pub fn delete_sessions_checked(
+pub async fn delete_sessions_checked(
     sessions: Vec<SessionDeleteTarget>,
     db: State<'_, DbState>,
 ) -> Result<SessionBatchDeleteResult, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    Ok(delete_batch(sessions, |target| {
-        delete_session_impl(
-            &conn,
-            &target.tool_id,
-            &target.session_id,
-            &target.source_path,
-            &target.source_backend,
-        )
-    }))
+    let permit = session_tasks::mutation_permit().await;
+    let plans = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        sessions
+            .iter()
+            .cloned()
+            .map(|target| SessionDeletePlan::prepare(&conn, target))
+            .collect::<Vec<_>>()
+    };
+    session_tasks::mutate(permit, move || {
+        Ok(delete_batch(sessions, |index, _| {
+            plans[index].as_ref().map_err(Clone::clone)?.execute()
+        }))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_session_trash() -> Result<Vec<session_trash::TrashedSession>, String> {
-    session_trash::list(&session_trash::directory()?)
+pub async fn list_session_trash() -> Result<Vec<session_trash::TrashedSession>, String> {
+    let permit = session_tasks::mutation_permit().await;
+    session_tasks::mutate(permit, || session_trash::list(&session_trash::directory()?)).await
 }
 
 #[tauri::command]
-pub fn restore_session_trash(key: String, db: State<'_, DbState>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let roots = session_roots_for_tool(&conn, "codex")?;
-    session_trash::restore(&session_trash::directory()?, &key, &roots)
+pub async fn restore_session_trash(key: String, db: State<'_, DbState>) -> Result<(), String> {
+    let permit = session_tasks::mutation_permit().await;
+    let plan = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        SessionRestorePlan::prepare(&conn, key)?
+    };
+    session_tasks::mutate(permit, move || plan.execute(&session_trash::directory()?)).await
 }
 
 #[cfg(test)]
@@ -94,7 +105,7 @@ mod tests {
                 target("two.jsonl"),
                 target("one.jsonl.zst"),
             ],
-            |t| {
+            |_, t| {
                 if t.source_path.starts_with("bad") {
                     Err("fixture failure".into())
                 } else {

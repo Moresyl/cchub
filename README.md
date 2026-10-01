@@ -63,6 +63,8 @@ Codex session browsing, details and usage imports support both `.jsonl` and comp
 
 Deleting a Codex session retains original copies of the selected log and its plain/compressed twin in Recently deleted. Files updated within the last minute are refused. Restore verifies identity and content hashes, preserving existing files with different content. Shared client indexes and databases stay unchanged; recovery does not include other segments or subagents of the same thread. Other apps' deletions cannot be restored here. Bulk deletion reports each outcome, removes successful items and lets you retry only failed items.
 
+Session list/detail reads and deletion/recovery use background file workers, leaving the configuration database available during file processing. Reads run with bounded concurrency; deletion, recovery and recovery-list reads share one queue. Cancelling a wait does not release the queue while a file worker is still running.
+
 ![CCHub recently deleted sessions and recovery](screenshots/session-recovery.png)
 
 This screenshot shows the actual page component with isolated demonstration data.

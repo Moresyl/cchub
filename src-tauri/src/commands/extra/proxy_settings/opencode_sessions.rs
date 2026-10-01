@@ -258,7 +258,7 @@ pub fn scan_opencode_sessions(path: &Path, query: &str) -> Result<Vec<SessionSum
 }
 
 pub fn delete_opencode_session(path: &Path, id: &str) -> Result<(), String> {
-    // Path authorization happens in delete_session_impl. Never create a missing database.
+    // The owned session plan authorizes paths. Never create a missing database.
     let mut conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
         .map_err(|error| error.to_string())?;
     conn.busy_timeout(std::time::Duration::from_secs(2))

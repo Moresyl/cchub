@@ -64,6 +64,14 @@ pub fn collect_backup_entry_row(
 }
 
 pub fn discover_project_roots(conn: &rusqlite::Connection) -> Vec<PathBuf> {
+    configured_project_roots(conn)
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect()
+}
+
+/// Database-only lookup; callers can check the filesystem after releasing the lock.
+pub fn configured_project_roots(conn: &rusqlite::Connection) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let mut seen = HashSet::new();
 
@@ -79,9 +87,7 @@ pub fn discover_project_roots(conn: &rusqlite::Connection) -> Vec<PathBuf> {
         }
 
         let path = PathBuf::from(trimmed);
-        if path.exists() {
-            roots.push(path);
-        }
+        roots.push(path);
     };
 
     if let Ok(mut stmt) = conn.prepare(

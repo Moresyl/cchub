@@ -7,20 +7,22 @@ use super::super::config_profiles::*;
 use super::super::log_command_timing;
 use super::super::statusline::*;
 use super::super::types::*;
+use super::session_tasks::{self, SessionAccessPlan, SessionDeletePlan};
 use super::*;
 
 #[tauri::command]
-pub fn get_sessions(
+pub async fn get_sessions(
     tool_id: Option<String>,
     query: Option<String>,
     limit: Option<usize>,
     db: State<'_, DbState>,
 ) -> Result<Vec<SessionSummary>, String> {
     let started_at = std::time::Instant::now();
-    let result = (|| {
+    let plan = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        scan_sessions_from_conn(&conn, tool_id, query, limit)
-    })();
+        prepare_session_scan(&conn, tool_id, query, limit)?
+    };
+    let result = session_tasks::read(move || execute_session_scan(plan)).await;
     log_command_timing("get_sessions", started_at);
     result
 }
@@ -28,18 +30,15 @@ pub fn get_sessions(
 /// Lightweight session-message endpoint used by external integrations. It
 /// reuses the same path allow-list and parsers as the full session detail view.
 #[tauri::command(rename_all = "camelCase")]
-pub fn get_session_messages(
+pub async fn get_session_messages(
     provider_id: String,
     source_path: String,
     db: State<'_, DbState>,
 ) -> Result<Vec<SessionEntry>, String> {
-    let valid = {
+    let access = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        is_valid_session_source_path(&conn, &provider_id, &source_path)
+        SessionAccessPlan::prepare(&conn, &provider_id)?
     };
-    if !valid {
-        return Err("Invalid session source path".to_string());
-    }
     let path = std::path::Path::new(&source_path);
     let is_jsonl = path.extension().and_then(|value| value.to_str()) == Some("jsonl")
         || (provider_id == "codex" && crate::shared::session_archive::compressed(path));
@@ -84,12 +83,18 @@ pub fn get_session_messages(
         can_resume: false,
         can_delete: false,
     };
-    load_session_detail(&session).map(|detail| detail.entries)
+    session_tasks::read(move || {
+        if !access.allows(&session.source_path) {
+            return Err("Invalid session source path".into());
+        }
+        load_session_detail(&session).map(|detail| detail.entries)
+    })
+    .await
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn get_session_detail(
+pub async fn get_session_detail(
     tool_id: String,
     session_id: String,
     source_path: String,
@@ -109,70 +114,87 @@ pub fn get_session_detail(
     db: State<'_, DbState>,
 ) -> Result<SessionDetail, String> {
     let started_at = std::time::Instant::now();
-    let result = (|| {
+    let access = {
         let conn = db.0.lock().map_err(|e| e.to_string())?;
-        if !is_valid_session_source_path(&conn, &tool_id, &source_path) {
-            return Err("Invalid session source path".to_string());
+        SessionAccessPlan::prepare(&conn, &tool_id)?
+    };
+    let summary = SessionSummary {
+        id: session_id,
+        tool_id: tool_id.clone(),
+        tool_name: tool_label(&tool_id).to_string(),
+        title,
+        cwd,
+        source_kind,
+        source_backend,
+        source_path,
+        created_at,
+        updated_at,
+        preview,
+        message_count,
+        input_tokens,
+        output_tokens,
+        tokens_used,
+        search_hit_count: 0,
+        can_resume,
+        can_delete,
+    };
+    let result = session_tasks::read(move || {
+        if !access.allows(&summary.source_path) {
+            return Err("Invalid session source path".into());
         }
-
-        let summary = SessionSummary {
-            id: session_id,
-            tool_id: tool_id.clone(),
-            tool_name: tool_label(&tool_id).to_string(),
-            title,
-            cwd,
-            source_kind,
-            source_backend,
-            source_path,
-            created_at,
-            updated_at,
-            preview,
-            message_count,
-            input_tokens,
-            output_tokens,
-            tokens_used,
-            search_hit_count: 0,
-            can_resume,
-            can_delete,
-        };
         load_session_detail(&summary)
-    })();
+    })
+    .await;
     log_command_timing("get_session_detail", started_at);
     result
 }
 
 #[tauri::command]
-pub fn delete_session(
+pub async fn delete_session(
     tool_id: String,
     session_id: String,
     source_path: String,
     source_backend: String,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    delete_session_impl(&conn, &tool_id, &session_id, &source_path, &source_backend)
+    let permit = session_tasks::mutation_permit().await;
+    let plan = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        SessionDeletePlan::prepare(
+            &conn,
+            SessionDeleteTarget {
+                tool_id,
+                session_id,
+                source_path,
+                source_backend,
+            },
+        )?
+    };
+    session_tasks::mutate(permit, move || plan.execute()).await
 }
 
 #[tauri::command]
-pub fn delete_sessions(
+pub async fn delete_sessions(
     sessions: Vec<SessionDeleteTarget>,
     db: State<'_, DbState>,
 ) -> Result<usize, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut deleted = 0usize;
-
-    for session in sessions {
-        delete_session_impl(
-            &conn,
-            &session.tool_id,
-            &session.session_id,
-            &session.source_path,
-            &session.source_backend,
-        )?;
-        deleted += 1;
-    }
-
-    Ok(deleted)
+    let permit = session_tasks::mutation_permit().await;
+    let plans = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        sessions
+            .into_iter()
+            .map(|target| SessionDeletePlan::prepare(&conn, target))
+            .collect::<Vec<_>>()
+    };
+    session_tasks::mutate(permit, move || {
+        let mut deleted = 0;
+        for plan in plans {
+            plan?.execute()?;
+            deleted += 1;
+        }
+        Ok(deleted)
+    })
+    .await
 }
 
 /// Write a tool's config file content

@@ -1,8 +1,9 @@
 #![allow(clippy::too_many_arguments)]
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
 
-use super::super::config_profiles::*;
+use super::super::config_profiles::{
+    format_timestamp_text, format_unix_timestamp, preferred_texts_from_value,
+};
 use super::super::types::*;
 use super::*;
 
@@ -345,70 +346,12 @@ pub fn load_session_detail(session: &SessionSummary) -> Result<SessionDetail, St
     })
 }
 
+#[cfg(test)]
 pub fn is_valid_session_source_path(
     conn: &rusqlite::Connection,
     tool_id: &str,
     source_path: &str,
 ) -> bool {
-    let source = PathBuf::from(source_path);
-    let source = if tool_id == "codex" && crate::shared::session_archive::jsonl(&source) {
-        match crate::shared::session_archive::resolve(&source) {
-            Ok(path) => path,
-            Err(_) => return false,
-        }
-    } else {
-        source
-    };
-    let Ok(roots) = session_roots_for_tool(conn, tool_id) else {
-        return false;
-    };
-
-    roots
-        .into_iter()
-        .any(|root| crate::shared::session_archive::confined(&source, &root))
-}
-
-pub fn delete_session_impl(
-    conn: &rusqlite::Connection,
-    tool_id: &str,
-    session_id: &str,
-    source_path: &str,
-    source_backend: &str,
-) -> Result<(), String> {
-    if !is_valid_session_source_path(conn, tool_id, source_path) {
-        return Err("Invalid session source path".to_string());
-    }
-    let root = resolve_tool_config_dir(conn, tool_id)?;
-
-    if source_backend == "mcode_sqlite" {
-        return Err("MiniMax Code sessions are read-only".to_string());
-    }
-    if source_backend == "grokbuild_native" {
-        return delete_grokbuild_session(&root, &PathBuf::from(source_path), session_id);
-    }
-    if tool_id == "opencode" && source_backend == "opencode_sqlite" {
-        return delete_opencode_session(&PathBuf::from(source_path), session_id);
-    }
-    if tool_id == "codex" && source_backend == "jsonl" {
-        return super::session_trash::delete_from_conn(
-            conn,
-            &SessionDeleteTarget {
-                tool_id: tool_id.into(),
-                session_id: session_id.into(),
-                source_path: source_path.into(),
-                source_backend: source_backend.into(),
-            },
-        )
-        .map(|_| ());
-    }
-
-    if source_backend == "jsonl" {
-        let path = PathBuf::from(source_path);
-        if path.exists() {
-            std::fs::remove_file(path).map_err(|e| e.to_string())?;
-        }
-        return Ok(());
-    }
-
-    Err("This session backend does not support deletion".into())
+    super::session_tasks::SessionAccessPlan::prepare(conn, tool_id)
+        .is_ok_and(|plan| plan.allows(source_path))
 }

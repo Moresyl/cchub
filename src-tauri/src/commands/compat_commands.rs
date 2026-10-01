@@ -295,13 +295,13 @@ pub fn get_current_provider(
 }
 
 #[tauri::command]
-pub fn list_sessions(
+pub async fn list_sessions(
     tool_id: Option<String>,
     query: Option<String>,
     limit: Option<usize>,
     db: State<'_, DbState>,
 ) -> Result<Vec<crate::commands::extra_commands::SessionSummary>, String> {
-    crate::commands::extra_commands::get_sessions(tool_id, query, limit, db)
+    crate::commands::extra_commands::get_sessions(tool_id, query, limit, db).await
 }
 
 #[tauri::command]

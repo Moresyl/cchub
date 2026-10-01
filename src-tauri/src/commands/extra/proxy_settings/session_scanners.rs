@@ -70,8 +70,7 @@ pub fn codex_state_databases(root: &std::path::Path) -> Vec<PathBuf> {
     paths
 }
 
-/// 并行版 codex 扫描：plan 中的 root / db_files / generic_roots 已在 db lock 内备好,
-/// 此处只做文件 IO + SQLite 读取，不再依赖主 db 连接，可以安全跨线程执行。
+/// File/SQLite scanning runs on owned paths without the application connection.
 pub fn scan_codex_sessions_from_plan(
     root: Option<&std::path::Path>,
     db_files: &[PathBuf],
@@ -623,12 +622,34 @@ fn session_tool_ids(requested_tool: Option<&str>) -> Vec<&'static str> {
     }
 }
 
-pub fn scan_sessions_from_conn(
+enum ToolPlan {
+    Codex {
+        root: Option<PathBuf>,
+        generic_roots: Vec<PathBuf>,
+    },
+    Generic {
+        roots: Vec<PathBuf>,
+    },
+    GrokBuild {
+        root: Option<PathBuf>,
+    },
+    Mcode {
+        database: Option<PathBuf>,
+    },
+}
+
+pub(super) struct SessionScanPlan {
+    query: String,
+    max_results: usize,
+    tools: Vec<(&'static str, ToolPlan)>,
+}
+
+pub(super) fn prepare_session_scan(
     conn: &rusqlite::Connection,
     tool_id: Option<String>,
     query: Option<String>,
     limit: Option<usize>,
-) -> Result<Vec<SessionSummary>, String> {
+) -> Result<SessionScanPlan, String> {
     let query = normalize_session_query(query);
     let max_results = limit.unwrap_or(200).clamp(1, 500);
     let requested_tool = tool_id
@@ -638,83 +659,69 @@ pub fn scan_sessions_from_conn(
 
     let tool_ids = session_tool_ids(requested_tool);
 
-    // 第一阶段：在 db lock 持有期间收集每个 tool 的 session 根目录与 codex 候选文件，
-    // 这是唯一需要 conn 的工作。之后释放 db 影响，把昂贵的文件 IO + JSON 解析
-    // 放到独立线程并行执行 —— 6 个 tool 同时跑，磁盘 IO 并发度直接提升 ~6x。
-    enum ToolPlan {
-        Codex {
-            root: Option<PathBuf>,
-            db_files: Vec<PathBuf>,
-            generic_roots: Vec<PathBuf>,
-        },
-        Generic {
-            roots: Vec<PathBuf>,
-        },
-        GrokBuild {
-            root: Option<PathBuf>,
-        },
-        Mcode {
-            database: Option<PathBuf>,
-        },
-    }
-
-    let plans: Vec<(&str, ToolPlan)> = tool_ids
+    let tools = tool_ids
         .into_iter()
         .map(|tool| {
             if tool == "codex" {
-                let root = resolve_tool_config_dir(conn, "codex")
-                    .ok()
-                    .filter(|p| p.exists());
-                let db_files = root
-                    .as_ref()
-                    .map(|r| codex_state_databases(r))
-                    .unwrap_or_default();
-                let generic_roots = session_roots_for_tool(conn, "codex").unwrap_or_default();
+                let root = resolve_tool_config_dir(conn, "codex").ok();
+                let generic_roots =
+                    session_root_candidates_for_tool(conn, "codex").unwrap_or_default();
                 (
                     tool,
                     ToolPlan::Codex {
                         root,
-                        db_files,
                         generic_roots,
                     },
                 )
             } else if tool == "grokbuild" {
-                let root = resolve_tool_config_dir(conn, tool)
-                    .ok()
-                    .filter(|path| path.exists());
+                let root = resolve_tool_config_dir(conn, tool).ok();
                 (tool, ToolPlan::GrokBuild { root })
             } else if tool == "mcode" {
                 let database = resolve_tool_config_dir(conn, tool)
                     .ok()
-                    .map(|root| root.join("v2/sqlite/runtime-state.sqlite"))
-                    .filter(|path| path.exists());
+                    .map(|root| root.join("v2/sqlite/runtime-state.sqlite"));
                 (tool, ToolPlan::Mcode { database })
             } else {
-                let roots = session_roots_for_tool(conn, tool).unwrap_or_default();
+                let roots = session_root_candidates_for_tool(conn, tool).unwrap_or_default();
                 (tool, ToolPlan::Generic { roots })
             }
         })
         .collect();
+    Ok(SessionScanPlan {
+        query,
+        max_results,
+        tools,
+    })
+}
 
-    // 第二阶段：并行扫描（不再需要 conn）。std::thread::scope 让每个 tool 的工作借用
-    // `query` 与 plan 的引用，scope 结束前 join 所有子线程，确保安全。
+pub(super) fn execute_session_scan(plan: SessionScanPlan) -> Result<Vec<SessionSummary>, String> {
+    let SessionScanPlan {
+        query,
+        max_results,
+        tools,
+    } = plan;
     let query_ref = &query;
-    let sessions: Vec<SessionSummary> = std::thread::scope(|s| {
-        let handles: Vec<_> = plans
+    let sessions: Result<Vec<SessionSummary>, String> = std::thread::scope(|s| {
+        let handles: Vec<_> = tools
             .into_iter()
             .map(|(tool, plan)| {
                 s.spawn(move || -> Vec<SessionSummary> {
                     match plan {
                         ToolPlan::Codex {
                             root,
-                            db_files,
                             generic_roots,
-                        } => scan_codex_sessions_from_plan(
-                            root.as_deref(),
-                            &db_files,
-                            &generic_roots,
-                            query_ref,
-                        ),
+                        } => {
+                            let db_files = root
+                                .as_deref()
+                                .map(codex_state_databases)
+                                .unwrap_or_default();
+                            scan_codex_sessions_from_plan(
+                                root.as_deref(),
+                                &db_files,
+                                &generic_roots,
+                                query_ref,
+                            )
+                        }
                         ToolPlan::Generic { roots } => {
                             scan_generic_tool_sessions_from_roots(tool, &roots, query_ref)
                         }
@@ -724,19 +731,25 @@ pub fn scan_sessions_from_conn(
                             .unwrap_or_default(),
                         ToolPlan::Mcode { database } => database
                             .as_deref()
+                            .filter(|path| path.is_file())
                             .map(|path| scan_mcode_sessions(path, query_ref))
                             .unwrap_or_default(),
                     }
                 })
             })
             .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| h.join().unwrap_or_default())
-            .collect()
+        let mut sessions = Vec::new();
+        for handle in handles {
+            sessions.extend(
+                handle
+                    .join()
+                    .map_err(|_| "Session scanner task failed".to_string())?,
+            );
+        }
+        Ok(sessions)
     });
 
-    let mut sessions = sessions;
+    let mut sessions = sessions?;
     sessions.sort_by(|left, right| {
         right
             .updated_at

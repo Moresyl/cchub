@@ -7,7 +7,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::super::config_profiles::session_roots_for_tool;
 use super::super::types::SessionDeleteTarget;
 use crate::shared::session_archive as archive;
 
@@ -405,17 +404,6 @@ pub(super) fn restore(trash: &Path, key: &str, roots: &[PathBuf]) -> Result<(), 
     }
     manifest.session.state = "restored".into();
     save(&dir, &manifest)
-}
-
-pub(super) fn delete_from_conn(
-    conn: &rusqlite::Connection,
-    target: &SessionDeleteTarget,
-) -> Result<TrashedSession, String> {
-    delete(
-        target,
-        &session_roots_for_tool(conn, "codex")?,
-        &directory()?,
-    )
 }
 
 #[cfg(test)]

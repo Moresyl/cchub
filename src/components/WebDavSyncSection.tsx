@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import { memo, startTransition, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, CheckCircle, Copy, Download, Link2, RefreshCw, Save, Upload, Wifi } from "lucide-react";
@@ -15,6 +15,12 @@ import { CloudUploadStatus } from "./cloud-sync/CloudUploadStatus";
 import { confirmCloudUpload } from "../lib/cloudUploadReview";
 import { backupPasswordAvailable, maskBackupEncryption } from "../lib/backupEncryption";
 import { refreshBackupRestoreState } from "../lib/backupRestoreState";
+import {
+  useCloudCallback,
+  useCloudOperations,
+  useCloudWindowRefresh,
+  type CloudOperation,
+} from "./cloud-sync/useCloudOperations";
 
 import {
   EMPTY_SETTINGS,
@@ -52,6 +58,7 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
   const [presetId, setPresetId] = useState("custom");
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [actionState, setActionState] = useState<ActionState>("loading");
+  const operations = useCloudOperations();
   const dirty =
     passwordTouched ||
     settings.backup_encryption.passphraseTouched ||
@@ -72,25 +79,25 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
   const remoteActionsDisabled = actionState !== "idle" || dirty || !savedSettings || !savedSettings.enabled;
 
   const applyLoadedState = useCallback((nextSettings: WebDavSyncSettings, nextRemoteInfo: WebDavRemoteInfo | null) => {
-    startTransition(() => {
-      const masked = {
-        ...EMPTY_SETTINGS,
-        ...nextSettings,
-        password: "",
-        backup_encryption: maskBackupEncryption(nextSettings.backup_encryption),
-      };
-      setSettings(masked);
-      setSavedSettings(masked);
-      setRemoteInfo(nextRemoteInfo);
-      setPresetId(detectPreset(nextSettings.base_url));
-      setPasswordTouched(false);
-    });
+    const masked = {
+      ...EMPTY_SETTINGS,
+      ...nextSettings,
+      password: "",
+      backup_encryption: maskBackupEncryption(nextSettings.backup_encryption),
+    };
+    setSettings(masked);
+    setSavedSettings(masked);
+    setRemoteInfo(nextRemoteInfo);
+    setPresetId(detectPreset(nextSettings.base_url));
+    setPasswordTouched(false);
   }, []);
 
   const loadState = useCallback(
-    async (silent = false) => {
-      if (silent && draftRef.current) return;
-      if (!silent) {
+    async (silent = false, owned?: CloudOperation) => {
+      if (!owned && silent && draftRef.current) return false;
+      const operation = owned ?? operations.beginRead();
+      if (!operation) return false;
+      if (!silent && !owned) {
         setActionState("loading");
       }
       try {
@@ -98,21 +105,29 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
           invoke<WebDavSyncSettings>("get_webdav_sync_settings"),
           invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info").catch(() => null),
         ]);
-        if (!silent || !draftRef.current) applyLoadedState(nextSettings, nextRemoteInfo);
+        if (!operation.current() || (!owned && silent && draftRef.current)) return false;
+        applyLoadedState(nextSettings, nextRemoteInfo);
+        return true;
       } catch (error) {
-        if (!silent) {
+        if (!silent && operation.current()) {
           showToast("error", String(error));
         }
+        return false;
       } finally {
-        if (!silent) {
-          setActionState("idle");
+        if (!owned && operation.current()) {
+          if (!silent) setActionState("idle");
+          operation.finish();
         }
       }
     },
-    [applyLoadedState],
+    [applyLoadedState, operations],
   );
 
-  const handleSyncEvent = useEffectEvent((payload: WebDavSyncEvent) => {
+  useCloudWindowRefresh(() => {
+    if (actionState === "idle" && !dirty) void loadState(true);
+  });
+
+  const handleSyncEvent = useCloudCallback((payload: WebDavSyncEvent) => {
     if (actionState !== "idle") return;
     void loadState(true);
     if (payload.status === "success") {
@@ -136,17 +151,20 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
 
   useEffect(() => {
     void loadState();
-    const unlisten = listen<WebDavSyncEvent>("webdav-sync-status-updated", (event) => handleSyncEvent(event.payload));
+    const unlisten = listen<WebDavSyncEvent>("webdav-sync-status-updated", (event) =>
+      handleSyncEvent(event.payload),
+    ).catch(() => () => undefined);
     return () => {
-      unlisten.then((dispose) => dispose());
+      void unlisten.then((dispose) => dispose()).catch(() => {});
     };
-  }, [loadState]);
+  }, [handleSyncEvent, loadState]);
 
   const busy = actionState !== "idle";
   const activePreset = useMemo(() => WEBDAV_PRESETS.find((preset) => preset.id === presetId), [presetId]);
 
-  const updateSettings = useCallback(<K extends keyof WebDavSyncSettings>(key: K, value: WebDavSyncSettings[K]) => {
-    startTransition(() => {
+  const updateSettings = useCallback(
+    <K extends keyof WebDavSyncSettings>(key: K, value: WebDavSyncSettings[K]) => {
+      operations.invalidateReads();
       setSettings((current) => ({ ...current, [key]: value }));
       if (key === "password") {
         setPasswordTouched(true);
@@ -154,8 +172,9 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
       if (key === "base_url") {
         setPresetId(detectPreset(String(value)));
       }
-    });
-  }, []);
+    },
+    [operations],
+  );
 
   const handleCopy = useCallback(
     async (value: string, label: string) => {
@@ -171,57 +190,74 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
   );
 
   const handleSave = useCallback(async () => {
+    if (!savedSettings) return;
+    const operation = operations.beginAction();
+    if (!operation) return;
     setActionState("saving");
     try {
       const saved = await setWebDavSyncSettingsMutation.mutateAsync({
         settings,
         passwordTouched,
       });
+      if (!operation.current()) return;
       applyLoadedState(saved, null);
       showToast("success", uiText("WebDAV 设置已保存", "WebDAV settings saved", "WebDAV 設定を保存しました"));
       const nextRemoteInfo = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info").catch((error) => {
         console.warn("Failed to refresh WebDAV remote info after saving settings", error);
         return null;
       });
-      startTransition(() => {
-        setRemoteInfo(nextRemoteInfo);
-      });
+      if (!operation.current()) return;
+      setRemoteInfo(nextRemoteInfo);
     } catch (error) {
-      showToast("error", String(error));
+      if (operation.current()) showToast("error", String(error));
     } finally {
-      setActionState("idle");
+      if (operation.current()) {
+        setActionState("idle");
+        operation.finish();
+      }
     }
-  }, [applyLoadedState, passwordTouched, remoteInfo, setWebDavSyncSettingsMutation, settings, uiText]);
+  }, [applyLoadedState, operations, passwordTouched, savedSettings, setWebDavSyncSettingsMutation, settings, uiText]);
 
   const handleTest = useCallback(async () => {
+    if (!savedSettings) return;
+    const operation = operations.beginAction();
+    if (!operation) return;
     setActionState("testing");
     try {
       await invoke("webdav_test_connection", {
         settings,
         preserveEmptyPassword: !passwordTouched,
       });
+      if (!operation.current()) return;
       showToast("success", uiText("WebDAV 连接成功", "WebDAV connection succeeded", "WebDAV 接続に成功しました"));
     } catch (error) {
-      showToast("error", String(error));
+      if (operation.current()) showToast("error", String(error));
     } finally {
-      setActionState("idle");
+      if (operation.current()) {
+        setActionState("idle");
+        operation.finish();
+      }
     }
-  }, [passwordTouched, settings, uiText]);
+  }, [operations, passwordTouched, savedSettings, settings, uiText]);
 
   const refreshRemoteInfo = useCallback(async () => {
     if (remoteActionsDisabled) return;
+    const operation = operations.beginAction();
+    if (!operation) return;
     setActionState("refreshing");
     try {
       const nextRemoteInfo = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info");
-      startTransition(() => {
-        setRemoteInfo(nextRemoteInfo);
-      });
+      if (!operation.current()) return;
+      setRemoteInfo(nextRemoteInfo);
     } catch (error) {
-      showToast("error", String(error));
+      if (operation.current()) showToast("error", String(error));
     } finally {
-      setActionState("idle");
+      if (operation.current()) {
+        setActionState("idle");
+        operation.finish();
+      }
     }
-  }, [remoteActionsDisabled]);
+  }, [operations, remoteActionsDisabled]);
 
   const handleUpload = useCallback(async () => {
     if (remoteActionsDisabled || !passwordAvailable) return;
@@ -236,9 +272,12 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
       );
       return;
     }
+    const operation = operations.beginAction();
+    if (!operation) return;
     setActionState("reviewing");
     try {
       const latest = await invoke<WebDavRemoteInfo>("webdav_sync_fetch_remote_info");
+      if (!operation.current()) return;
       setRemoteInfo(latest);
       if (!latest.compatible)
         throw new Error(
@@ -254,13 +293,13 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
         appDialog.confirm,
         uiText,
       );
-      if (reviewedRevision === null) return;
+      if (reviewedRevision === null || !operation.current()) return;
       setActionState("uploading");
       const info = await invoke<WebDavRemoteInfo>("webdav_sync_upload", { reviewedRevision });
-      startTransition(() => {
-        setRemoteInfo(info);
-      });
-      await loadState(true);
+      if (!operation.current()) return;
+      setRemoteInfo(info);
+      await loadState(true, operation);
+      if (!operation.current()) return;
       showToast(
         "success",
         uiText(
@@ -270,11 +309,14 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
         ),
       );
     } catch (error) {
-      showToast("error", String(error));
+      if (operation.current()) showToast("error", String(error));
     } finally {
-      setActionState("idle");
+      if (operation.current()) {
+        setActionState("idle");
+        operation.finish();
+      }
     }
-  }, [appDialog, loadState, passwordAvailable, remoteActionsDisabled, settings.enabled, uiText]);
+  }, [appDialog, loadState, operations, passwordAvailable, remoteActionsDisabled, settings.enabled, uiText]);
 
   const handleDownload = useCallback(async () => {
     if (
@@ -296,34 +338,39 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
       );
       return;
     }
-    const confirmed = await appDialog.confirm({
-      title: uiText("从 WebDAV 恢复", "Restore from WebDAV", "WebDAV から復元"),
-      message: allowPlaintext
-        ? uiText(
-            "这份旧备份未加密。恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
-            "This older backup is unencrypted. Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
-            "この旧バックアップは暗号化されていません。設定データを復元し、この端末のクラウドアカウント、ツールの保存先、プロキシ設定は保持します。プロジェクトファイルには保存先の指定が必要です。作業を保存してください。",
-          )
-        : uiText(
-            "恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
-            "Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
-            "設定データを復元し、この端末のクラウドアカウント、ツールの保存先、プロキシ設定は保持します。プロジェクトファイルには保存先の指定が必要です。作業を保存してください。",
-          ),
-      confirmText: uiText("继续恢复", "Restore", "復元を続行"),
-      cancelText: uiText("取消", "Cancel", "キャンセル"),
-      tone: "warning",
-    });
-    if (!confirmed) {
-      return;
-    }
-    setActionState("downloading");
+    const operation = operations.beginAction();
+    if (!operation) return;
+    setActionState("confirming");
     try {
+      const confirmed = await appDialog.confirm({
+        title: uiText("从 WebDAV 恢复", "Restore from WebDAV", "WebDAV から復元"),
+        message: allowPlaintext
+          ? uiText(
+              "这份旧备份未加密。恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+              "This older backup is unencrypted. Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
+              "この旧バックアップは暗号化されていません。設定データを復元し、この端末のクラウドアカウント、ツールの保存先、プロキシ設定は保持します。プロジェクトファイルには保存先の指定が必要です。作業を保存してください。",
+            )
+          : uiText(
+              "恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+              "Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
+              "設定データを復元し、この端末のクラウドアカウント、ツールの保存先、プロキシ設定は保持します。プロジェクトファイルには保存先の指定が必要です。作業を保存してください。",
+            ),
+        confirmText: uiText("继续恢复", "Restore", "復元を続行"),
+        cancelText: uiText("取消", "Cancel", "キャンセル"),
+        tone: "warning",
+      });
+      if (!confirmed || !operation.current()) {
+        return;
+      }
+      setActionState("downloading");
       await invoke<string>("webdav_sync_download", { allowPlaintext });
-      const refreshed = await refreshBackupRestoreState(onRestored);
-      await loadState(true);
+      const refreshed = await refreshBackupRestoreState(operation.current() ? onRestored : undefined);
+      if (!operation.current()) return;
+      const loaded = await loadState(true, operation);
+      if (!operation.current()) return;
       showToast(
-        refreshed ? "success" : "info",
-        refreshed
+        refreshed && loaded ? "success" : "info",
+        refreshed && loaded
           ? uiText("已从 WebDAV 恢复快照", "Snapshot restored from WebDAV", "WebDAV のスナップショットを復元しました")
           : uiText(
               "快照已恢复，部分页面未刷新，请重新打开相关页面。",
@@ -332,14 +379,18 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
             ),
       );
     } catch (error) {
-      showToast("error", String(error));
+      if (operation.current()) showToast("error", String(error));
     } finally {
-      setActionState("idle");
+      if (operation.current()) {
+        setActionState("idle");
+        operation.finish();
+      }
     }
   }, [
     appDialog,
     loadState,
     onRestored,
+    operations,
     passwordAvailable,
     remoteActionsDisabled,
     remoteInfo,
@@ -685,9 +736,11 @@ function WebDavSyncSectionComponent({ onRestored }: { onRestored?: () => Promise
         />
         <WebDavActionButton
           label={
-            actionState === "downloading"
-              ? uiText("恢复中...", "Restoring...", "復元中...")
-              : uiText("从远端恢复", "Restore From Remote", "リモートから復元")
+            actionState === "confirming"
+              ? uiText("等待确认", "Waiting for confirmation", "確認待ち")
+              : actionState === "downloading"
+                ? uiText("恢复中...", "Restoring...", "復元中...")
+                : uiText("从远端恢复", "Restore From Remote", "リモートから復元")
           }
           loading={actionState === "downloading"}
           disabled={

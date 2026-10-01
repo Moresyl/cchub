@@ -88,7 +88,7 @@ describe("WebDavSyncSection", () => {
       expect(screen.getByRole("button", { name: "从远端恢复" }).hasAttribute("disabled")).toBe(false),
     );
     fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
-    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: "取消" })));
     expect(onRestored).not.toHaveBeenCalled();
     expect(invokeMock.mock.calls.some(([command]) => command === "webdav_sync_download")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
@@ -116,7 +116,7 @@ describe("WebDavSyncSection", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "上传当前快照" }));
     expect(await screen.findByRole("button", { name: "替换备份" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "取消" })));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "上传当前快照" }).hasAttribute("disabled")).toBe(false),
     );
@@ -222,7 +222,7 @@ describe("WebDavSyncSection", () => {
     expect(screen.getByRole("button", { name: "上传当前快照" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
     expect(await screen.findByText(/这份旧备份未加密/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "取消" })));
     expect(invokeMock.mock.calls.some(([command]) => command === "webdav_sync_download")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "从远端恢复" }));
     fireEvent.click(await screen.findByRole("button", { name: "继续恢复" }));

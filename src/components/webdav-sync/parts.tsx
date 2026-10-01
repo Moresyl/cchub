@@ -51,6 +51,7 @@ export type ActionState =
   | "testing"
   | "refreshing"
   | "reviewing"
+  | "confirming"
   | "uploading"
   | "downloading";
 

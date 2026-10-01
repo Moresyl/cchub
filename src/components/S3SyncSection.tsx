@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Cloud, Download, Loader2, RefreshCw, Save, Upload, Wifi } from "lucide-react";
 import { getLocale } from "../lib/i18n";
@@ -12,6 +12,7 @@ import { BackupEncryptionField } from "./cloud-sync/BackupEncryptionField";
 import { CloudUploadStatus } from "./cloud-sync/CloudUploadStatus";
 import { confirmCloudUpload, type CloudUploadReview } from "../lib/cloudUploadReview";
 import { refreshBackupRestoreState } from "../lib/backupRestoreState";
+import { useCloudOperations, useCloudWindowRefresh, type CloudOperation } from "./cloud-sync/useCloudOperations";
 import {
   backupPasswordAvailable,
   EMPTY_BACKUP_ENCRYPTION,
@@ -63,7 +64,16 @@ const DEFAULT_SETTINGS: S3SyncSettings = {
   lastError: null,
 };
 
-type Action = "idle" | "loading" | "saving" | "testing" | "refreshing" | "reviewing" | "uploading" | "downloading";
+type Action =
+  | "idle"
+  | "loading"
+  | "saving"
+  | "testing"
+  | "refreshing"
+  | "reviewing"
+  | "confirming"
+  | "uploading"
+  | "downloading";
 
 export default function S3SyncSection({ onRestored }: { onRestored?: () => Promise<void> }) {
   const appDialog = useAppDialog();
@@ -73,6 +83,9 @@ export default function S3SyncSection({ onRestored }: { onRestored?: () => Promi
   const [remote, setRemote] = useState<S3RemoteInfo | null>(null);
   const [action, setAction] = useState<Action>("loading");
   const [secretTouched, setSecretTouched] = useState(false);
+  const operations = useCloudOperations();
+  const loadedRef = useRef<S3SyncSettings | null>(null);
+  const draftRef = useRef(false);
   const text = useCallback((zh: string, en: string) => (locale === "zh" ? zh : en), [locale]);
   const busy = action !== "idle";
   const dirty =
@@ -89,92 +102,139 @@ export default function S3SyncSection({ onRestored }: { onRestored?: () => Promi
       "profile",
       "autoSync",
     ]);
+  draftRef.current = dirty;
   const savedAccount = savedSettings !== null && sameS3Account(settings, savedSettings);
   const sameBackup = savedSettings !== null && sameS3BackupLocation(settings, savedSettings);
   const passwordAvailable = backupPasswordAvailable(settings.backupEncryption, sameBackup);
   const remoteActionsDisabled = busy || dirty || !savedSettings || !savedSettings.enabled;
 
-  const load = useCallback(async () => {
-    setAction("loading");
-    try {
-      const response = await invoke<S3SyncSettings>("get_s3_sync_settings");
-      const loaded = {
-        ...DEFAULT_SETTINGS,
-        ...response,
-        secretAccessKey: "",
-        backupEncryption: maskBackupEncryption(response.backupEncryption),
-      };
-      setSettings(loaded);
-      setSavedSettings(loaded);
-      setSecretTouched(false);
-    } catch (error) {
-      showToast("error", `${text("读取 S3 设置失败", "Failed to load S3 settings")}: ${error}`);
-    } finally {
-      setAction("idle");
-    }
-  }, [text]);
+  const applyLoaded = useCallback((response: S3SyncSettings) => {
+    const loaded = {
+      ...DEFAULT_SETTINGS,
+      ...response,
+      secretAccessKey: "",
+      backupEncryption: maskBackupEncryption(response.backupEncryption),
+    };
+    if (
+      !loaded.enabled ||
+      !loadedRef.current ||
+      !sameS3BackupLocation(loaded, loadedRef.current) ||
+      (loaded.region.trim() || "us-east-1") !== (loadedRef.current.region.trim() || "us-east-1")
+    )
+      setRemote(null);
+    loadedRef.current = loaded;
+    setSettings(loaded);
+    setSavedSettings(loaded);
+    setSecretTouched(false);
+  }, []);
+
+  const load = useCallback(
+    async (silent = false, owned?: CloudOperation) => {
+      if (!owned && silent && draftRef.current) return false;
+      const operation = owned ?? operations.beginRead();
+      if (!operation) return false;
+      if (!silent && !owned) setAction("loading");
+      try {
+        const response = await invoke<S3SyncSettings>("get_s3_sync_settings");
+        if (!operation.current() || (!owned && silent && draftRef.current)) return false;
+        applyLoaded(response);
+        return true;
+      } catch (error) {
+        if (!silent && operation.current())
+          showToast("error", `${getLocale() === "zh" ? "读取 S3 设置失败" : "Failed to load S3 settings"}: ${error}`);
+        return false;
+      } finally {
+        if (!owned && operation.current()) {
+          if (!silent) setAction("idle");
+          operation.finish();
+        }
+      }
+    },
+    [applyLoaded, operations],
+  );
+
+  useCloudWindowRefresh(() => {
+    if (!busy && !dirty) void load(true);
+  });
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const update = <K extends keyof S3SyncSettings>(key: K, value: S3SyncSettings[K]) => {
+    operations.invalidateReads();
     setSettings((current) => ({ ...current, [key]: value }));
   };
 
   const save = async () => {
     if (busy || !savedSettings) return;
+    const operation = operations.beginAction();
+    if (!operation) return;
     setAction("saving");
     try {
       const saved = await invoke<S3SyncSettings>("set_s3_sync_settings", { settings, secretTouched });
-      const masked = {
-        ...DEFAULT_SETTINGS,
-        ...saved,
-        secretAccessKey: "",
-        backupEncryption: maskBackupEncryption(saved.backupEncryption),
-      };
-      setSettings(masked);
-      setSavedSettings(masked);
+      if (!operation.current()) return;
+      applyLoaded(saved);
       setRemote(null);
-      setSecretTouched(false);
       showToast("success", text("S3 设置已保存", "S3 settings saved"));
     } catch (error) {
-      showToast("error", `${text("保存 S3 设置失败", "Failed to save S3 settings")}: ${error}`);
+      if (operation.current())
+        showToast("error", `${text("保存 S3 设置失败", "Failed to save S3 settings")}: ${error}`);
     } finally {
-      setAction("idle");
+      if (operation.current()) {
+        setAction("idle");
+        operation.finish();
+      }
     }
   };
 
   const test = async () => {
     if (busy || !savedSettings) return;
+    const operation = operations.beginAction();
+    if (!operation) return;
     setAction("testing");
     try {
       await invoke("s3_test_connection", { settings, preserveEmptySecret: !secretTouched });
+      if (!operation.current()) return;
       showToast("success", text("S3 连接成功", "S3 connection succeeded"));
     } catch (error) {
-      showToast("error", `${text("S3 连接失败", "S3 connection failed")}: ${error}`);
+      if (operation.current()) showToast("error", `${text("S3 连接失败", "S3 connection failed")}: ${error}`);
     } finally {
-      setAction("idle");
+      if (operation.current()) {
+        setAction("idle");
+        operation.finish();
+      }
     }
   };
 
   const refreshRemote = async () => {
     if (remoteActionsDisabled) return;
+    const operation = operations.beginAction();
+    if (!operation) return;
     setAction("refreshing");
     try {
-      setRemote(await invoke<S3RemoteInfo>("s3_sync_fetch_remote_info"));
+      const latest = await invoke<S3RemoteInfo>("s3_sync_fetch_remote_info");
+      if (!operation.current()) return;
+      setRemote(latest);
     } catch (error) {
-      showToast("error", `${text("读取远端状态失败", "Failed to read remote status")}: ${error}`);
+      if (operation.current())
+        showToast("error", `${text("读取远端状态失败", "Failed to read remote status")}: ${error}`);
     } finally {
-      setAction("idle");
+      if (operation.current()) {
+        setAction("idle");
+        operation.finish();
+      }
     }
   };
 
   const upload = async () => {
     if (remoteActionsDisabled || !passwordAvailable) return;
+    const operation = operations.beginAction();
+    if (!operation) return;
     setAction("reviewing");
     try {
       const latest = await invoke<S3RemoteInfo>("s3_sync_fetch_remote_info");
+      if (!operation.current()) return;
       setRemote(latest);
       if (!latest.compatible)
         throw new Error(
@@ -190,15 +250,21 @@ export default function S3SyncSection({ onRestored }: { onRestored?: () => Promi
         appDialog.confirm,
         text,
       );
-      if (reviewedRevision === null) return;
+      if (reviewedRevision === null || !operation.current()) return;
       setAction("uploading");
-      setRemote(await invoke<S3RemoteInfo>("s3_sync_upload", { reviewedRevision }));
-      await load();
+      const info = await invoke<S3RemoteInfo>("s3_sync_upload", { reviewedRevision });
+      if (!operation.current()) return;
+      setRemote(info);
+      await load(true, operation);
+      if (!operation.current()) return;
       showToast("success", text("快照已上传到 S3", "Snapshot uploaded to S3"));
     } catch (error) {
-      showToast("error", `${text("S3 上传失败", "S3 upload failed")}: ${error}`);
+      if (operation.current()) showToast("error", `${text("S3 上传失败", "S3 upload failed")}: ${error}`);
     } finally {
-      setAction("idle");
+      if (operation.current()) {
+        setAction("idle");
+        operation.finish();
+      }
     }
   };
 
@@ -206,30 +272,35 @@ export default function S3SyncSection({ onRestored }: { onRestored?: () => Promi
     if (remoteActionsDisabled || !remote?.exists || !remote.compatible || (remote.encrypted && !passwordAvailable))
       return;
     const allowPlaintext = !remote.encrypted;
-    const confirmed = await appDialog.confirm({
-      title: text("从 S3 恢复", "Restore from S3"),
-      message: allowPlaintext
-        ? text(
-            "这份旧备份未加密。恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
-            "This older backup is unencrypted. Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
-          )
-        : text(
-            "恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
-            "Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
-          ),
-      confirmText: text("继续恢复", "Restore"),
-      cancelText: text("取消", "Cancel"),
-      tone: "warning",
-    });
-    if (!confirmed) return;
-    setAction("downloading");
+    const operation = operations.beginAction();
+    if (!operation) return;
+    setAction("confirming");
     try {
+      const confirmed = await appDialog.confirm({
+        title: text("从 S3 恢复", "Restore from S3"),
+        message: allowPlaintext
+          ? text(
+              "这份旧备份未加密。恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+              "This older backup is unencrypted. Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
+            )
+          : text(
+              "恢复会替换配置数据并保留本机云账号、工具目录和代理设置。项目文件需确认本机路径后迁移，请先保存本地工作。",
+              "Restoring replaces configuration data while keeping this device's cloud accounts, tool directories and proxy settings. Project files require local path mapping. Save local work first.",
+            ),
+        confirmText: text("继续恢复", "Restore"),
+        cancelText: text("取消", "Cancel"),
+        tone: "warning",
+      });
+      if (!confirmed || !operation.current()) return;
+      setAction("downloading");
       await invoke<string>("s3_sync_download", { allowPlaintext });
-      const refreshed = await refreshBackupRestoreState(onRestored);
-      await load();
+      const refreshed = await refreshBackupRestoreState(operation.current() ? onRestored : undefined);
+      if (!operation.current()) return;
+      const loaded = await load(true, operation);
+      if (!operation.current()) return;
       showToast(
-        refreshed ? "success" : "info",
-        refreshed
+        refreshed && loaded ? "success" : "info",
+        refreshed && loaded
           ? text("已从 S3 恢复快照", "Snapshot restored from S3")
           : text(
               "快照已恢复，部分页面未刷新，请重新打开相关页面。",
@@ -237,9 +308,12 @@ export default function S3SyncSection({ onRestored }: { onRestored?: () => Promi
             ),
       );
     } catch (error) {
-      showToast("error", `${text("S3 恢复失败", "S3 restore failed")}: ${error}`);
+      if (operation.current()) showToast("error", `${text("S3 恢复失败", "S3 restore failed")}: ${error}`);
     } finally {
-      setAction("idle");
+      if (operation.current()) {
+        setAction("idle");
+        operation.finish();
+      }
     }
   };
 
@@ -389,7 +463,13 @@ export default function S3SyncSection({ onRestored }: { onRestored?: () => Promi
         />
         <ActionButton
           icon={Download}
-          label={action === "downloading" ? text("恢复中...", "Restoring...") : text("从远端恢复", "Restore remote")}
+          label={
+            action === "confirming"
+              ? text("等待确认", "Waiting for confirmation")
+              : action === "downloading"
+                ? text("恢复中...", "Restoring...")
+                : text("从远端恢复", "Restore remote")
+          }
           disabled={
             remoteActionsDisabled || !remote?.exists || !remote.compatible || (!!remote.encrypted && !passwordAvailable)
           }

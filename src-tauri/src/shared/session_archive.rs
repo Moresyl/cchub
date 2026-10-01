@@ -5,7 +5,7 @@ use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 
 pub(crate) const MAX_SESSION_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_LINE_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const MAX_LINE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub(crate) fn compressed(path: &Path) -> bool {
     path.file_name()

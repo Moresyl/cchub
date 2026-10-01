@@ -7,7 +7,7 @@ mod preferences;
 mod session_management;
 mod session_parsers;
 mod session_scanners;
-mod session_tasks;
+pub(crate) mod session_tasks;
 mod session_trash;
 
 pub use commands::*;

@@ -762,6 +762,7 @@ pub fn run() {
             commands::codex_history_compat::has_codex_unify_history_backup,
             commands::codex_history_compat::restore_codex_unified_history,
             commands::codex_history_compat::migrate_codex_history,
+            commands::codex_history_compat::preview_codex_history_migration,
             commands::extended_compat::restart_app,
             commands::tool_lifecycle_compat::probe_tool_installations,
             commands::tool_lifecycle_compat::run_tool_lifecycle_action,

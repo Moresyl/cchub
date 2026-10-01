@@ -65,6 +65,10 @@ Deleting a Codex session retains original copies of the selected log and its pla
 
 Session list/detail reads and deletion/recovery use background file workers, leaving the configuration database available during file processing. Reads run with bounded concurrency; deletion, recovery and recovery-list reads share one queue. Cancelling a wait does not release the queue while a file worker is still running.
 
+Codex history migration in Integration settings previews source/target buckets, plain/compressed files and state-row counts before confirmation. Default sources are old buckets declared in the current Codex configuration. Execution checks the preview revision and requires another review if history changed. Logs updated within the last minute are refused. Migration shares the background deletion/recovery queue without holding the configuration database during file processing.
+
+Original logs, consistent state-database snapshots including WAL data and a migration journal are retained before writes. Failures roll back changes still owned by this operation and preserve newer external edits; incomplete rollback reports the original-copy path. This is not a process-crash or power-loss transaction, nor proof that full backup recovery covers all client data.
+
 ![CCHub recently deleted sessions and recovery](screenshots/session-recovery.png)
 
 This screenshot shows the actual page component with isolated demonstration data.

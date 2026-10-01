@@ -6,7 +6,10 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use tauri::State;
 
+use crate::commands::extra_commands::session_file_tasks;
 use crate::db::DbState;
+
+mod migration;
 
 const MAX_BACKUP_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
@@ -200,63 +203,59 @@ pub fn restore_codex_unified_history(
 /// Re-bucket existing Codex sessions after a provider id was renamed or consolidated.
 /// Every changed file/database is copied into a unique managed backup before mutation.
 #[tauri::command(rename_all = "camelCase")]
-pub fn migrate_codex_history(
+pub async fn migrate_codex_history(
+    source_provider_ids: Option<Vec<String>>,
+    target_provider_id: Option<String>,
+    expected_revision: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<CodexHistoryMigrationResult, String> {
+    let permit = session_file_tasks::mutation_permit().await;
+    let root = {
+        let conn = db.0.lock().map_err(|_| "配置数据库当前不可用")?;
+        crate::commands::extra_commands::resolve_tool_config_dir(&conn, "codex")?
+    };
+    session_file_tasks::mutate(permit, move || {
+        prepare_migration(root, source_provider_ids, target_provider_id)?.execute(
+            &crate::commands::extra_commands::managed_backups_dir()?,
+            expected_revision.as_deref(),
+        )
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn preview_codex_history_migration(
     source_provider_ids: Option<Vec<String>>,
     target_provider_id: Option<String>,
     db: State<'_, DbState>,
-) -> Result<CodexHistoryMigrationResult, String> {
-    let target = normalize_provider_id(
-        target_provider_id
-            .as_deref()
-            .unwrap_or(DEFAULT_HISTORY_PROVIDER),
-    )?;
-    let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let codex_root = crate::commands::extra_commands::resolve_tool_config_dir(&conn, "codex")?;
-    drop(conn);
-
-    let sources = match source_provider_ids {
-        Some(values) => normalize_explicit_provider_ids(values, &target)?,
-        None => infer_history_provider_ids(&codex_root, &target),
+) -> Result<migration::MigrationPreview, String> {
+    let permit = session_file_tasks::mutation_permit().await;
+    let root = {
+        let conn = db.0.lock().map_err(|_| "配置数据库当前不可用")?;
+        crate::commands::extra_commands::resolve_tool_config_dir(&conn, "codex")?
     };
-    if sources.is_empty() {
-        return Ok(CodexHistoryMigrationResult {
-            source_provider_ids: Vec::new(),
-            target_provider_id: target,
-            migrated_jsonl_files: 0,
-            migrated_state_rows: 0,
-            backup_path: None,
-            skipped_reason: Some("no_source_provider_ids".to_string()),
-        });
-    }
-
-    let backup_root = crate::commands::extra_commands::ensure_managed_backups_dir()?
-        .join(format!("codex-history-migration-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
-    let migrated_jsonl_files =
-        migrate_codex_jsonl_files(&codex_root, &sources, &target, &backup_root)?;
-    let migrated_state_rows =
-        migrate_codex_state_databases(&codex_root, &sources, &target, &backup_root)?;
-
-    if migrated_jsonl_files == 0 && migrated_state_rows == 0 {
-        let _ = std::fs::remove_dir_all(&backup_root);
-        return Ok(CodexHistoryMigrationResult {
-            source_provider_ids: sources,
-            target_provider_id: target,
-            migrated_jsonl_files: 0,
-            migrated_state_rows: 0,
-            backup_path: None,
-            skipped_reason: Some("nothing_to_migrate".to_string()),
-        });
-    }
-
-    Ok(CodexHistoryMigrationResult {
-        source_provider_ids: sources,
-        target_provider_id: target,
-        migrated_jsonl_files,
-        migrated_state_rows,
-        backup_path: Some(backup_root.to_string_lossy().to_string()),
-        skipped_reason: None,
+    session_file_tasks::mutate(permit, move || {
+        Ok(prepare_migration(root, source_provider_ids, target_provider_id)?.preview())
     })
+    .await
+}
+
+fn prepare_migration(
+    root: PathBuf,
+    sources: Option<Vec<String>>,
+    target: Option<String>,
+) -> Result<migration::MigrationPlan, String> {
+    let target = normalize_provider_id(target.as_deref().unwrap_or(DEFAULT_HISTORY_PROVIDER))?;
+    let sources = match sources {
+        Some(values) => {
+            if values.len() > 128 {
+                return Err("单次迁移来源超过限制".into());
+            }
+            normalize_explicit_provider_ids(values, &target)?
+        }
+        None => infer_history_provider_ids(&root, &target)?,
+    };
+    migration::MigrationPlan::prepare(root, sources, target)
 }
 
 fn normalize_provider_id(value: &str) -> Result<String, String> {
@@ -273,6 +272,7 @@ fn normalize_provider_id(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+#[cfg(test)]
 fn normalize_provider_ids(values: Vec<String>, target: &str) -> Vec<String> {
     let mut ids = BTreeSet::new();
     for value in values {
@@ -299,14 +299,22 @@ fn normalize_explicit_provider_ids(
     Ok(ids.into_iter().collect())
 }
 
-fn infer_history_provider_ids(codex_root: &Path, target: &str) -> Vec<String> {
+fn infer_history_provider_ids(codex_root: &Path, target: &str) -> Result<Vec<String>, String> {
     let config_path = codex_root.join("config.toml");
-    let Ok(content) = std::fs::read_to_string(config_path) else {
-        return Vec::new();
-    };
-    let Ok(document) = content.parse::<toml_edit::DocumentMut>() else {
-        return Vec::new();
-    };
+    if !config_path
+        .try_exists()
+        .map_err(|_| "无法检查 Codex 配置")?
+    {
+        return Ok(Vec::new());
+    }
+    if !crate::shared::session_archive::confined(&config_path, codex_root) {
+        return Err("Codex 配置路径包含链接或越界".into());
+    }
+    let content = migration::read_file(&config_path, 1024 * 1024)?;
+    let content = std::str::from_utf8(&content).map_err(|_| "Codex 配置不是有效 UTF-8")?;
+    let document = content
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| "Codex 配置 TOML 无效，请修复后重试")?;
     let mut ids = Vec::new();
     if let Some(table) = document
         .get("model_providers")
@@ -319,87 +327,10 @@ fn infer_history_provider_ids(codex_root: &Path, target: &str) -> Vec<String> {
             }
         }
     }
-    normalize_provider_ids(ids, target)
-}
-
-fn collect_codex_jsonl_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for directory in [root.join("sessions"), root.join("archived_sessions")] {
-        collect_codex_files(&directory, &mut files, 0, 10);
+    if ids.len() > 128 {
+        return Err("单次迁移来源超过限制".into());
     }
-    files
-}
-
-fn collect_codex_files(directory: &Path, files: &mut Vec<PathBuf>, depth: u8, max_depth: u8) {
-    if depth > max_depth {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_codex_files(&path, files, depth + 1, max_depth);
-        } else if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
-            files.push(path);
-        }
-    }
-}
-
-fn migrate_codex_jsonl_files(
-    root: &Path,
-    sources: &[String],
-    target: &str,
-    backup_root: &Path,
-) -> Result<usize, String> {
-    let source_ids = sources.iter().collect::<std::collections::HashSet<_>>();
-    let mut changed_files = 0;
-    for path in collect_codex_jsonl_files(root) {
-        let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
-        if metadata.len() > MAX_SESSION_FILE_BYTES {
-            continue;
-        }
-        let content = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        let mut rewritten = String::with_capacity(content.len());
-        let mut changed = false;
-        for segment in content.split_inclusive('\n') {
-            let (line, newline) = segment
-                .strip_suffix('\n')
-                .map(|line| (line, "\n"))
-                .unwrap_or((segment, ""));
-            let next = rewrite_history_meta_line(line, &source_ids, target);
-            if next.is_some() {
-                changed = true;
-                rewritten.push_str(&next.unwrap_or_default());
-            } else {
-                rewritten.push_str(line);
-            }
-            rewritten.push_str(newline);
-        }
-        if !changed {
-            continue;
-        }
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|_| "Codex session path escaped config directory".to_string())?;
-        let backup_path = backup_root.join("jsonl").join(relative);
-        if let Some(parent) = backup_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::copy(&path, &backup_path).map_err(|error| error.to_string())?;
-        let current = std::fs::metadata(&path).map_err(|error| error.to_string())?;
-        if current.len() != metadata.len() || current.modified().ok() != metadata.modified().ok() {
-            return Err(format!(
-                "Codex session changed during migration: {}",
-                path.display()
-            ));
-        }
-        crate::utils::atomic_write(&path, rewritten.as_bytes())
-            .map_err(|error| error.to_string())?;
-        changed_files += 1;
-    }
-    Ok(changed_files)
+    normalize_explicit_provider_ids(ids, target)
 }
 
 fn rewrite_history_meta_line(
@@ -424,91 +355,6 @@ fn rewrite_history_meta_line(
         serde_json::Value::String(target.to_string()),
     );
     serde_json::to_string(&value).ok()
-}
-
-fn migrate_codex_state_databases(
-    root: &Path,
-    sources: &[String],
-    target: &str,
-    backup_root: &Path,
-) -> Result<usize, String> {
-    let mut paths = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(root) {
-        paths.extend(entries.flatten().map(|entry| entry.path()).filter(|path| {
-            let name = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or_default();
-            path.is_file() && name.starts_with("state_") && name.ends_with(".sqlite")
-        }));
-    }
-    let fallback = root.join("state.sqlite");
-    if fallback.is_file() {
-        paths.push(fallback);
-    }
-    let mut migrated = 0;
-    for path in paths {
-        let mut connection =
-            rusqlite::Connection::open(&path).map_err(|error| error.to_string())?;
-        connection
-            .busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| error.to_string())?;
-        if !sqlite_has_column(&connection, "threads", "model_provider")? {
-            continue;
-        }
-        let placeholders = std::iter::repeat_n("?", sources.len())
-            .collect::<Vec<_>>()
-            .join(",");
-        let count_sql =
-            format!("SELECT COUNT(*) FROM threads WHERE model_provider IN ({placeholders})");
-        let count: i64 = connection
-            .query_row(
-                &count_sql,
-                rusqlite::params_from_iter(sources.iter()),
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?;
-        if count == 0 {
-            continue;
-        }
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|_| "Codex state DB path escaped config directory".to_string())?;
-        let backup_path = backup_root.join("state").join(relative);
-        if let Some(parent) = backup_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        std::fs::copy(&path, &backup_path).map_err(|error| error.to_string())?;
-        let mut values = Vec::with_capacity(sources.len() + 1);
-        values.push(target.to_string());
-        values.extend(sources.iter().cloned());
-        let update_sql = format!(
-            "UPDATE threads SET model_provider = ? WHERE model_provider IN ({placeholders})"
-        );
-        let transaction = connection
-            .transaction()
-            .map_err(|error| error.to_string())?;
-        migrated += transaction
-            .execute(&update_sql, rusqlite::params_from_iter(values.iter()))
-            .map_err(|error| error.to_string())?;
-        transaction.commit().map_err(|error| error.to_string())?;
-    }
-    Ok(migrated)
-}
-
-fn sqlite_has_column(
-    connection: &rusqlite::Connection,
-    table: &str,
-    column: &str,
-) -> Result<bool, String> {
-    let mut statement = connection
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(|error| error.to_string())?;
-    let rows = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|error| error.to_string())?;
-    let has_column = rows.flatten().any(|value| value == column);
-    Ok(has_column)
 }
 
 #[cfg(test)]
@@ -573,15 +419,18 @@ mod tests {
             .expect("seed state db");
         drop(connection);
 
-        let migrated = super::migrate_codex_state_databases(
-            root.path(),
-            &["legacy".to_string()],
-            "custom",
-            backup.path(),
+        let result = super::migration::MigrationPlan::prepare(
+            root.path().to_path_buf(),
+            vec!["legacy".into()],
+            "custom".into(),
         )
+        .expect("prepare state migration")
+        .execute(backup.path(), None)
         .expect("migrate state db");
-        assert_eq!(migrated, 1);
-        assert!(backup.path().join("state/state_1.sqlite").exists());
+        assert_eq!(result.migrated_state_rows, 1);
+        assert!(std::path::Path::new(&result.backup_path.unwrap())
+            .join("state/state_1.sqlite")
+            .exists());
 
         let connection = rusqlite::Connection::open(state_path).expect("reopen state db");
         let provider: String = connection

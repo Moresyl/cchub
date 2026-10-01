@@ -21,6 +21,7 @@ pub use config_profiles::*;
 pub use custom_paths::*;
 pub use mcp_clients::*;
 pub use project_profiles::*;
+pub(crate) use proxy_settings::session_tasks as session_file_tasks;
 pub use proxy_settings::*;
 pub use statusline::*;
 pub use types::*;

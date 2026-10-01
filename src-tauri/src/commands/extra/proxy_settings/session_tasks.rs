@@ -11,11 +11,11 @@ static READERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 /// The permit must enter the blocking closure: dropping an IPC future does not
 /// stop spawn_blocking work, so releasing it on the awaiting side would race.
-pub(super) async fn mutation_permit() -> tokio::sync::MutexGuard<'static, ()> {
+pub(crate) async fn mutation_permit() -> tokio::sync::MutexGuard<'static, ()> {
     MUTATIONS.lock().await
 }
 
-pub(super) async fn read<T: Send + 'static>(
+pub(crate) async fn read<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     let permit = READERS.acquire().await.map_err(|e| e.to_string())?;
@@ -26,7 +26,7 @@ pub(super) async fn read<T: Send + 'static>(
     .await
 }
 
-pub(super) async fn mutate<T: Send + 'static>(
+pub(crate) async fn mutate<T: Send + 'static>(
     permit: tokio::sync::MutexGuard<'static, ()>,
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {

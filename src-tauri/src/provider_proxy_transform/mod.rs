@@ -1,9 +1,11 @@
+mod message_id;
 mod responses;
 mod sse_chat;
 mod sse_gemini;
 mod sse_responses;
 mod stream_decode;
 mod stream_errors;
+pub(crate) use message_id::anthropic_message_id;
 pub use responses::{anthropic_to_responses, responses_to_anthropic};
 pub use sse_chat::create_anthropic_sse_stream;
 pub use sse_gemini::create_anthropic_sse_stream_from_gemini;
@@ -663,7 +665,7 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, String> {
     }
 
     Ok(json!({
-        "id": body.get("id").and_then(|i| i.as_str()).unwrap_or(""),
+        "id": anthropic_message_id(body.get("id").and_then(Value::as_str)),
         "type": "message",
         "role": "assistant",
         "content": content,

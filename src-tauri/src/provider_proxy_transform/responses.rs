@@ -669,7 +669,7 @@ pub fn responses_to_anthropic(body: Value) -> Result<Value, String> {
     );
 
     Ok(json!({
-        "id": body.get("id").and_then(|i| i.as_str()).unwrap_or(""),
+        "id": super::anthropic_message_id(body.get("id").and_then(Value::as_str)),
         "type": "message",
         "role": "assistant",
         "content": content,

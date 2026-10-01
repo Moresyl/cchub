@@ -87,6 +87,10 @@ The profile usage dialog shows every reported currency and quota window, includi
 
 Refreshing after a network failure retains the same configuration's last successful reading with a visible stale-data notice. Credential failures replace the result. Switching profiles, tools or configuration invalidates previous readings and late requests. The expandable read-only JSON view supports syntax highlighting and scrolling through long responses.
 
+### Protocol reply compatibility
+
+Claude protocol conversion gives whole and streamed Chat Completions, Responses and Gemini replies Anthropic message IDs, preserving Chat Completions and Responses tool-call IDs. Missing upstream message IDs receive independent random IDs. Responses streams emit one message start even when the upstream start is absent or repeated, and stop once on completion. Native Anthropic message IDs remain unchanged.
+
 ### OAuth account status
 
 Claude proxy requests using Codex OAuth, xAI OAuth or GitHub Copilot carry the resolved account and sign-in revision. Unbound profiles follow the default account; explicitly bound profiles retain their chosen account. Codex request account headers use that resolved account too. After account removal or a new sign-in, old requests cannot promote endpoint preferences or emit profile-failover notifications. Grok Build's xAI OAuth proxy uses the same account checks.

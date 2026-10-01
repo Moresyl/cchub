@@ -8,6 +8,7 @@ use super::strip_sse_field;
 
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamChunk {
+    #[serde(default)]
     id: String,
     model: String,
     choices: Vec<StreamChoice>,
@@ -121,7 +122,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                 }
                                 if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
                                     if message_id.is_none() {
-                                        message_id = Some(chunk.id.clone());
+                                        message_id = Some(super::anthropic_message_id(Some(&chunk.id)));
                                     }
                                     if current_model.is_none() {
                                         current_model = Some(chunk.model.clone());

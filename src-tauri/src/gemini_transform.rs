@@ -170,7 +170,7 @@ pub fn gemini_to_anthropic(gemini_response: Value, model: &str) -> Result<Value,
         .unwrap_or(0);
 
     Ok(json!({
-        "id": format!("msg_{}", generate_msg_id()),
+        "id": crate::provider_proxy_transform::anthropic_message_id(None),
         "type": "message",
         "role": "assistant",
         "content": content,
@@ -317,15 +317,6 @@ fn generate_tool_id() -> String {
         .unwrap_or_default()
         .subsec_nanos();
     format!("{:08x}{:04x}", nanos, rand_u16())
-}
-
-fn generate_msg_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    format!("{:012x}", millis & 0xffffffffffff)
 }
 
 fn rand_u16() -> u16 {

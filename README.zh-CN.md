@@ -87,6 +87,10 @@ OpenCode 使用已有的 `opencode.jsonc` 或 `opencode.json`。配置档案保�
 
 网络失败后刷新会保留同一配置上次成功的数据，并明确标记刷新失败；鉴权失败会替换旧结果。切换配置、工具或配置内容后清除旧读数，迟到请求不会覆盖当前结果。展开的只读 JSON 视图支持代码高亮和长内容滚动。
 
+### 协议回复兼容
+
+跨协议 Claude 代理将 Chat Completions、Responses 和 Gemini 的普通与流式回复统一为 Anthropic 消息 ID，保留 Chat Completions 和 Responses 的工具调用 ID。缺少上游消息 ID 时生成独立随机 ID；Responses 流缺少或重复起始事件时仍只输出一次消息开始，完成后只输出一次结束。原生 Anthropic 回复的消息 ID 保持原值。
+
 ### OAuth 账号状态
 
 Claude 代理使用 Codex OAuth、xAI OAuth 或 GitHub Copilot 时，每次请求携带实际选中的账号与登录版本；未绑定配置跟随默认账号，明确绑定的配置保持指定账号。Codex 请求的账号头也使用实际选中的账号。账号移除或重新登录后，旧请求不能更新端点偏好或发送配置故障转移通知；Grok Build 的 xAI OAuth 代理也使用同样的账号校验。

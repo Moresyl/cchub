@@ -27,10 +27,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
         let mut has_tool_use = false;
         let mut finished = false;
         let mut usage = GeminiUsage::default();
-        let msg_id = format!("msg_{:012x}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() & 0xffffffffffff);
+        let msg_id = super::anthropic_message_id(None);
 
         tokio::pin!(stream);
         while let Some(chunk) = stream.next().await {

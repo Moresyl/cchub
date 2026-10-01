@@ -22,6 +22,8 @@ mod deadline_tests;
 mod gemini_usage_tests;
 #[path = "managed_auth_tests.rs"]
 mod managed_auth_tests;
+#[path = "message_id_tests.rs"]
+mod message_id_tests;
 #[path = "passthrough_tests.rs"]
 mod passthrough_tests;
 #[path = "routing_tests.rs"]

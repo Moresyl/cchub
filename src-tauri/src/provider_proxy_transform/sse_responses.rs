@@ -125,7 +125,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
         let mut buffer = String::new();
-        let mut message_id: Option<String> = None;
+        let mut message_id = super::anthropic_message_id(None);
         let mut current_model: Option<String> = None;
         let mut has_sent_message_start = false;
         let mut has_tool_use = false;
@@ -175,45 +175,32 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                             yield Ok(error);
                             return;
                         }
-                        match event_name {
-                            "response.created" => {
+                        if !has_sent_message_start && matches!(event_name,
+                            "response.created" | "response.content_part.added" |
+                            "response.output_text.delta" | "response.refusal.delta" |
+                            "response.output_item.added" | "response.output_item.done" |
+                            "response.function_call_arguments.delta" | "response.reasoning.delta" |
+                            "response.completed") {
+                            if matches!(event_name, "response.created" | "response.completed") {
                                 let response_obj = response_object_from_event(&data);
-                                if let Some(id) = response_obj.get("id").and_then(|i| i.as_str()) {
-                                    message_id = Some(id.to_string());
-                                }
+                                message_id = super::anthropic_message_id(response_obj.get("id").and_then(Value::as_str));
                                 if let Some(model) = response_obj.get("model").and_then(|m| m.as_str()) {
                                     current_model = Some(model.to_string());
                                 }
-
-                                has_sent_message_start = true;
-                                let start_usage = build_anthropic_usage_from_responses(response_obj.get("usage"));
-                                let event = json!({
-                                    "type": "message_start",
-                                    "message": {
-                                        "id": message_id.clone().unwrap_or_default(),
-                                        "type": "message",
-                                        "role": "assistant",
-                                        "model": current_model.clone().unwrap_or_default(),
-                                        "usage": start_usage
-                                    }
-                                });
-                                yield Ok(Bytes::from(format!("event: message_start\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
                             }
+                            let usage = if event_name == "response.created" {
+                                build_anthropic_usage_from_responses(response_object_from_event(&data).get("usage"))
+                            } else { json!({"input_tokens": 0, "output_tokens": 0}) };
+                            let start = json!({"type":"message_start", "message":{
+                                "id":message_id.clone(), "type":"message", "role":"assistant",
+                                "model":current_model.clone().unwrap_or_default(), "usage":usage
+                            }});
+                            yield Ok(Bytes::from(format!("event: message_start\ndata: {start}\n\n")));
+                            has_sent_message_start = true;
+                        }
+                        match event_name {
+                            "response.created" => {}
                             "response.content_part.added" => {
-                                if !has_sent_message_start {
-                                    let start_event = json!({
-                                        "type": "message_start",
-                                        "message": {
-                                            "id": message_id.clone().unwrap_or_default(),
-                                            "type": "message",
-                                            "role": "assistant",
-                                            "model": current_model.clone().unwrap_or_default(),
-                                            "usage": { "input_tokens": 0, "output_tokens": 0 }
-                                        }
-                                    });
-                                    yield Ok(Bytes::from(format!("event: message_start\ndata: {}\n\n", serde_json::to_string(&start_event).unwrap_or_default())));
-                                    has_sent_message_start = true;
-                                }
 
                                 if let Some(part) = data.get("part") {
                                     let part_type = part.get("type").and_then(|t| t.as_str());
@@ -269,20 +256,6 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 if let Some(item) = data.get("item") {
                                     let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
                                     if item_type == "web_search_call" {
-                                        if !has_sent_message_start {
-                                            let start_event = json!({
-                                                "type": "message_start",
-                                                "message": {
-                                                    "id": message_id.clone().unwrap_or_default(),
-                                                    "type": "message",
-                                                    "role": "assistant",
-                                                    "model": current_model.clone().unwrap_or_default(),
-                                                    "usage": { "input_tokens": 0, "output_tokens": 0 }
-                                                }
-                                            });
-                                            yield Ok(Bytes::from(format!("event: message_start\ndata: {}\n\n", serde_json::to_string(&start_event).unwrap_or_default())));
-                                            has_sent_message_start = true;
-                                        }
                                         if let Some(index) = current_text_index.take() {
                                             if open_indices.remove(&index) {
                                                 let stop_event = json!({"type": "content_block_stop", "index": index});
@@ -314,20 +287,6 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                             if fallback_open_index == Some(index) {
                                                 fallback_open_index = None;
                                             }
-                                        }
-                                        if !has_sent_message_start {
-                                            let start_event = json!({
-                                                "type": "message_start",
-                                                "message": {
-                                                    "id": message_id.clone().unwrap_or_default(),
-                                                    "type": "message",
-                                                    "role": "assistant",
-                                                    "model": current_model.clone().unwrap_or_default(),
-                                                    "usage": { "input_tokens": 0, "output_tokens": 0 }
-                                                }
-                                            });
-                                            yield Ok(Bytes::from(format!("event: message_start\ndata: {}\n\n", serde_json::to_string(&start_event).unwrap_or_default())));
-                                            has_sent_message_start = true;
                                         }
 
                                         let call_id = item.get("call_id").and_then(|i| i.as_str()).unwrap_or("");
@@ -365,6 +324,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                             }
                             "response.function_call_arguments.delta" => {
                                 if let Some(delta) = data.get("delta").and_then(|d| d.as_str()) {
+                                    has_tool_use = true;
                                     let item_id = data.get("item_id").and_then(|v| v.as_str());
                                     let index = if let Some(id) = item_id {
                                         tool_index_by_item_id.get(id).copied()
@@ -526,8 +486,6 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                         open_indices.remove(&index);
                                     }
                                 }
-                                fallback_open_index = None;
-
                                 let usage_json = response_obj.get("usage").map(|u| build_anthropic_usage_from_responses(Some(u)));
                                 let delta_event = json!({
                                     "type": "message_delta",
@@ -540,6 +498,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 yield Ok(Bytes::from(format!("event: message_delta\ndata: {}\n\n", serde_json::to_string(&delta_event).unwrap_or_default())));
                                 let stop_event = json!({"type": "message_stop"});
                                 yield Ok(Bytes::from(format!("event: message_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
+                                return;
                             }
                             "response.output_item.done" => {
                                 if let Some(item) = data.get("item") {

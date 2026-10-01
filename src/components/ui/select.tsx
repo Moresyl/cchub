@@ -70,7 +70,7 @@ export const SelectContent = forwardRef<
       position={position}
       data-slot="select-content"
       className={cn(
-        "relative z-[2100] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[8rem] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-card-solid)] text-foreground shadow-[var(--shadow-popover)] outline-none data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
+        "relative z-[2100] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[8rem] max-w-[var(--radix-select-content-available-width)] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-card-solid)] text-foreground shadow-[var(--shadow-popover)] outline-none data-[state=closed]:animate-[dialog-fade-out_100ms_ease-in] data-[state=open]:animate-[dialog-fade-in_120ms_ease-out]",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className,
@@ -114,7 +114,7 @@ export const SelectItem = forwardRef<
         <Check size={13} aria-hidden="true" />
       </SelectPrimitive.ItemIndicator>
     </span>
-    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    <SelectPrimitive.ItemText className="min-w-0 whitespace-normal break-words">{children}</SelectPrimitive.ItemText>
   </SelectPrimitive.Item>
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;

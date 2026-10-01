@@ -54,14 +54,46 @@ impl CopilotAuthManager {
         F: FnOnce(String) -> Fut,
         Fut: Future<Output = Result<CopilotToken, CopilotAuthError>>,
     {
-        let id = self
-            .resolve_account_id(requested)
+        self.lease_for_revision_using(requested, None, refresh)
             .await
-            .ok_or(CopilotAuthError::GitHubTokenInvalid)?;
+    }
+
+    pub(super) async fn lease_for_revision(
+        &self,
+        id: &str,
+        revision: &str,
+    ) -> Result<TokenLease, CopilotAuthError> {
+        self.lease_for_revision_using(Some(id), Some(revision), |token| async move {
+            self.fetch_copilot_token_with_github_token(&token).await
+        })
+        .await
+    }
+
+    async fn lease_for_revision_using<F, Fut>(
+        &self,
+        requested: Option<&str>,
+        expected_revision: Option<&str>,
+        refresh: F,
+    ) -> Result<TokenLease, CopilotAuthError>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: Future<Output = Result<CopilotToken, CopilotAuthError>>,
+    {
+        let id =
+            self.resolve_account_id(requested)
+                .await
+                .ok_or(if expected_revision.is_some() {
+                    CopilotAuthError::AccountChanged
+                } else {
+                    CopilotAuthError::GitHubTokenInvalid
+                })?;
         let revision = {
             let _guard = self.mutation_lock.lock().await;
             let accounts = self.accounts.read().await;
             let account = accounts.get(&id).ok_or(CopilotAuthError::AccountChanged)?;
+            if expected_revision.is_some_and(|revision| revision != account.revision) {
+                return Err(CopilotAuthError::AccountChanged);
+            }
             if let Some(token) = self.cached_lease(&id, &account.revision).await {
                 return Ok(token);
             }

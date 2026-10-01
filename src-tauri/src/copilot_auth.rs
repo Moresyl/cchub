@@ -15,8 +15,10 @@ const COPILOT_USAGE_URL: &str = "https://api.github.com/copilot_internal/user";
 const COPILOT_MODELS_URL: &str = "https://api.githubcopilot.com/models";
 const TOKEN_REFRESH_BUFFER_SECONDS: i64 = 60;
 
+mod resource;
 mod storage;
 mod tokens;
+pub use resource::CopilotAccountResources;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -41,6 +43,10 @@ pub enum CopilotAuthError {
     AccountNotFound(String),
     #[error("GitHub account changed during the request; retry with the current account")]
     AccountChanged,
+    #[error("Copilot API returned HTTP {0}")]
+    QueryHttp(u16),
+    #[error("Copilot resource query timed out")]
+    QueryTimeout,
     #[error("Network error: {0}")]
     Network(String),
     #[error("Parse error: {0}")]
@@ -92,6 +98,7 @@ pub struct GitHubAccount {
     pub login: String,
     pub avatar_url: Option<String>,
     pub authenticated_at: i64,
+    pub revision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,22 +112,25 @@ pub struct CopilotAuthStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopilotQuotaDetail {
-    pub entitlement: i64,
-    pub remaining: i64,
-    pub percent_remaining: f64,
+    pub entitlement: Option<f64>,
+    #[serde(alias = "quota_remaining")]
+    pub remaining: Option<f64>,
+    pub percent_remaining: Option<f64>,
+    #[serde(default)]
     pub unlimited: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopilotQuotaSnapshots {
-    pub chat: CopilotQuotaDetail,
-    pub completions: CopilotQuotaDetail,
-    pub premium_interactions: CopilotQuotaDetail,
+    pub chat: Option<CopilotQuotaDetail>,
+    pub completions: Option<CopilotQuotaDetail>,
+    pub premium_interactions: Option<CopilotQuotaDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopilotUsage {
     pub copilot_plan: String,
+    #[serde(default)]
     pub quota_reset_date: String,
     pub quota_snapshots: CopilotQuotaSnapshots,
 }
@@ -207,6 +217,7 @@ impl From<&GitHubAccountData> for GitHubAccount {
             login: value.user.login.clone(),
             avatar_url: value.user.avatar_url.clone(),
             authenticated_at: value.authenticated_at,
+            revision: value.revision.clone(),
         }
     }
 }
@@ -219,9 +230,9 @@ impl CopilotAuthManager {
             copilot_tokens: RwLock::new(HashMap::new()),
             refresh_locks: RwLock::new(HashMap::new()),
             mutation_lock: Mutex::new(()),
-            http_client: crate::shared::http_client::build_http_client(
+            http_client: crate::shared::oauth_request::client(
                 proxy_url.as_deref(),
-                Some(COPILOT_USER_AGENT),
+                COPILOT_USER_AGENT,
                 std::time::Duration::from_secs(30),
             )
             .unwrap_or_else(|error| {
@@ -230,7 +241,12 @@ impl CopilotAuthManager {
                     "copilot_auth",
                     &format!("Failed to build configured HTTP client: {error}"),
                 );
-                crate::shared::http_client::default_http_client()
+                crate::shared::oauth_request::client(
+                    None,
+                    COPILOT_USER_AGENT,
+                    std::time::Duration::from_secs(30),
+                )
+                .expect("default Copilot HTTP client")
             }),
             storage_path,
         };
@@ -390,80 +406,6 @@ impl CopilotAuthManager {
         }
     }
 
-    pub async fn fetch_usage(
-        &self,
-        account_id: Option<&str>,
-    ) -> Result<CopilotUsage, CopilotAuthError> {
-        let resolved = self
-            .resolve_account_id(account_id)
-            .await
-            .ok_or(CopilotAuthError::GitHubTokenInvalid)?;
-        let github_token = {
-            let accounts = self.accounts.read().await;
-            accounts
-                .get(&resolved)
-                .map(|account| account.github_token.clone())
-                .ok_or_else(|| CopilotAuthError::AccountNotFound(resolved.clone()))?
-        };
-        let response = self
-            .http_client
-            .get(COPILOT_USAGE_URL)
-            .header("Authorization", format!("token {github_token}"))
-            .header("Content-Type", "application/json")
-            .header("editor-version", COPILOT_EDITOR_VERSION)
-            .header("editor-plugin-version", COPILOT_PLUGIN_VERSION)
-            .header("user-agent", COPILOT_USER_AGENT)
-            .header("x-github-api-version", COPILOT_API_VERSION)
-            .send()
-            .await?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(CopilotAuthError::GitHubTokenInvalid);
-        }
-        let response = response
-            .error_for_status()
-            .map_err(|error| CopilotAuthError::Token(error.to_string()))?;
-        response
-            .json::<CopilotUsage>()
-            .await
-            .map_err(|error| CopilotAuthError::Parse(error.to_string()))
-    }
-
-    pub async fn fetch_models(
-        &self,
-        account_id: Option<&str>,
-    ) -> Result<Vec<CopilotModel>, CopilotAuthError> {
-        let token = self.get_valid_token_for_account(account_id).await?;
-        let response = self
-            .http_client
-            .get(COPILOT_MODELS_URL)
-            .header("Authorization", format!("Bearer {token}"))
-            .header("Content-Type", "application/json")
-            .header("copilot-integration-id", COPILOT_INTEGRATION_ID)
-            .header("editor-version", COPILOT_EDITOR_VERSION)
-            .header("editor-plugin-version", COPILOT_PLUGIN_VERSION)
-            .header("user-agent", COPILOT_USER_AGENT)
-            .header("x-github-api-version", COPILOT_API_VERSION)
-            .send()
-            .await?;
-        let response = response
-            .error_for_status()
-            .map_err(|error| CopilotAuthError::Token(error.to_string()))?;
-        let payload = response
-            .json::<CopilotModelsResponse>()
-            .await
-            .map_err(|error| CopilotAuthError::Parse(error.to_string()))?;
-        Ok(payload
-            .data
-            .into_iter()
-            .filter(|item| item.model_picker_enabled)
-            .map(|item| CopilotModel {
-                id: item.id,
-                name: item.name,
-                vendor: item.vendor,
-            })
-            .collect())
-    }
-
     async fn add_account_internal(
         &self,
         github_token: String,
@@ -479,6 +421,7 @@ impl CopilotAuthManager {
             authenticated_at: now,
             revision: new_account_revision(),
         };
+        let public_account = GitHubAccount::from(&account_data);
 
         let mut next = self.accounts.read().await.clone();
         next.insert(account_id.clone(), account_data);
@@ -497,12 +440,7 @@ impl CopilotAuthManager {
         *self.default_account_id.write().await = default;
         *accounts = next;
 
-        Ok(GitHubAccount {
-            id: account_id,
-            login: user.login,
-            avatar_url: user.avatar_url,
-            authenticated_at: now,
-        })
+        Ok(public_account)
     }
 
     async fn resolve_account_id(&self, requested: Option<&str>) -> Option<String> {

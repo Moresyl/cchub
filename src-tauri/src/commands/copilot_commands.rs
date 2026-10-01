@@ -1,8 +1,8 @@
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::copilot_auth::{
-    CopilotAuthState, CopilotAuthStatus, CopilotModel, CopilotUsage, GitHubAccount,
-    GitHubDeviceCodeResponse,
+    CopilotAccountResources, CopilotAuthState, CopilotAuthStatus, CopilotModel, CopilotUsage,
+    GitHubAccount, GitHubDeviceCodeResponse,
 };
 
 #[tauri::command]
@@ -19,13 +19,18 @@ pub async fn copilot_start_device_flow(
 #[tauri::command(rename_all = "camelCase")]
 pub async fn copilot_poll_for_account(
     device_code: String,
+    app: AppHandle,
     state: State<'_, CopilotAuthState>,
 ) -> Result<Option<GitHubAccount>, String> {
     let manager = state.0.clone();
-    manager
+    let account = manager
         .poll_for_token(&device_code)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if account.is_some() {
+        let _ = app.emit("copilot-auth-changed", ());
+    }
+    Ok(account)
 }
 
 #[tauri::command]
@@ -39,34 +44,45 @@ pub async fn copilot_list_accounts(
 #[tauri::command(rename_all = "camelCase")]
 pub async fn copilot_remove_account(
     account_id: String,
+    app: AppHandle,
     state: State<'_, CopilotAuthState>,
 ) -> Result<(), String> {
     let manager = state.0.clone();
     manager
         .remove_account(&account_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("copilot-auth-changed", ());
+    Ok(())
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn copilot_set_default_account(
     account_id: String,
+    app: AppHandle,
     state: State<'_, CopilotAuthState>,
 ) -> Result<(), String> {
     let manager = state.0.clone();
     manager
         .set_default_account(&account_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("copilot-auth-changed", ());
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn copilot_logout(state: State<'_, CopilotAuthState>) -> Result<(), String> {
+pub async fn copilot_logout(
+    app: AppHandle,
+    state: State<'_, CopilotAuthState>,
+) -> Result<(), String> {
     state
         .0
         .clear_auth()
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("copilot-auth-changed", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -109,6 +125,19 @@ pub async fn copilot_get_models(
     state
         .0
         .fetch_models(account_id.as_deref())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn copilot_get_account_resources(
+    account_id: String,
+    expected_revision: String,
+    state: State<'_, CopilotAuthState>,
+) -> Result<CopilotAccountResources, String> {
+    state
+        .0
+        .account_resources(&account_id, &expected_revision)
         .await
         .map_err(|error| error.to_string())
 }
@@ -157,11 +186,8 @@ pub async fn copilot_is_authenticated(state: State<'_, CopilotAuthState>) -> Res
 #[tauri::command(rename_all = "camelCase")]
 pub async fn copilot_poll_for_auth(
     device_code: String,
+    app: AppHandle,
     state: State<'_, CopilotAuthState>,
 ) -> Result<Option<GitHubAccount>, String> {
-    state
-        .0
-        .poll_for_token(&device_code)
-        .await
-        .map_err(|error| error.to_string())
+    copilot_poll_for_account(device_code, app, state).await
 }

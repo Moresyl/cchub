@@ -5,21 +5,7 @@ import { Copy, ExternalLink, Github, Loader2, RefreshCw, Trash2 } from "lucide-r
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
 import { SimpleSelect } from "./ui/simple-select";
-
-interface GitHubAccount {
-  id: string;
-  login: string;
-  avatar_url: string | null;
-  authenticated_at: number;
-}
-
-interface CopilotAuthStatus {
-  accounts: GitHubAccount[];
-  default_account_id: string | null;
-  authenticated: boolean;
-  username: string | null;
-  expires_at: number | null;
-}
+import type { CopilotAuthStatus, GitHubAccount } from "../lib/copilotAccounts";
 
 interface GitHubDeviceCodeResponse {
   device_code: string;

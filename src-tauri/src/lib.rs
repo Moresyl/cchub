@@ -610,6 +610,7 @@ pub fn run() {
             commands::copilot_commands::copilot_get_token,
             commands::copilot_commands::copilot_get_usage,
             commands::copilot_commands::copilot_get_models,
+            commands::copilot_commands::copilot_get_account_resources,
             commands::copilot_commands::copilot_get_token_for_account,
             commands::copilot_commands::copilot_get_usage_for_account,
             commands::copilot_commands::copilot_get_models_for_account,

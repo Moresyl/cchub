@@ -489,7 +489,7 @@ export default function Profiles() {
       try {
         const result = await invoke<ProviderStreamCheckResult>("stream_check_config_profile", { id: profile.id });
         setStreamCheckResults((current) => ({ ...current, [profile.id]: result }));
-        if (result.status === "healthy" || result.status === "reachable") {
+        if (result.status === "healthy") {
           showToast(
             "success",
             locale === "zh"

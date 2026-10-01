@@ -33,7 +33,7 @@ function compact(value) {
 }
 
 function parseCommands() {
-  const commandPattern = /#\[(?:tauri::)?command(?:\([^)]*\))?\]\s*(?:pub(?:\([^)]*\))?\s+)?(?:(async)\s+)?fn\s+([A-Za-z0-9_]+)\s*\(([\s\S]*?)\)\s*(?:->\s*([^{]+))?\{/g;
+  const commandPattern = /#\[(?:tauri::)?command(?:\([^)]*\))?\]\s*(?:pub(?:\([^)]*\))?\s+)?(?:(async)\s+)?fn\s+([A-Za-z0-9_]+)\s*(?:<[^>]+>\s*)?\(([\s\S]*?)\)\s*(?:->\s*([^{]+))?\{/g;
   return walk(srcTauriDir).flatMap((filePath) => {
     const content = fs.readFileSync(filePath, "utf8");
     const modulePath = modulePathForFile(filePath);

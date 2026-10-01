@@ -497,7 +497,7 @@ fn extract_toml_string(content: &str, key: &str) -> Option<String> {
         }
     })
 }
-fn extract_transport_headers(parsed: &Value) -> Vec<(String, String)> {
+pub(crate) fn extract_transport_headers(parsed: &Value) -> Vec<(String, String)> {
     let metadata = parsed.get("metadata").and_then(Value::as_object);
     let custom_user_agent = metadata
         .and_then(|value| {
@@ -583,7 +583,9 @@ fn extract_transport_headers(parsed: &Value) -> Vec<(String, String)> {
     headers
 }
 
-fn extract_local_proxy_overrides(parsed: &Value) -> (Vec<(String, String)>, Option<Value>) {
+pub(crate) fn extract_local_proxy_overrides(
+    parsed: &Value,
+) -> (Vec<(String, String)>, Option<Value>) {
     let overrides = parsed
         .get("metadata")
         .and_then(Value::as_object)

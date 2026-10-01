@@ -82,12 +82,16 @@ pub(super) fn build_openai_responses_endpoint(
     join_api_endpoint(base_url, path, use_full_url)
 }
 
-pub(super) async fn resolve_copilot_headers(
-    app_handle: &AppHandle,
+pub(super) async fn resolve_copilot_headers<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     parsed: &serde_json::Value,
 ) -> Result<Vec<(String, String)>, String> {
     let account_id = extract_copilot_account_id(parsed);
-    let manager = app_handle.state::<CopilotAuthState>().0.clone();
+    let manager = app_handle
+        .try_state::<CopilotAuthState>()
+        .ok_or("Copilot authentication is unavailable")?
+        .0
+        .clone();
     let token = manager
         .get_valid_token_for_account(account_id.as_deref())
         .await
@@ -95,12 +99,16 @@ pub(super) async fn resolve_copilot_headers(
     Ok(copilot_auth::copilot_request_headers(&token))
 }
 
-pub(super) async fn resolve_codex_headers(
-    app_handle: &AppHandle,
+pub(super) async fn resolve_codex_headers<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     parsed: &serde_json::Value,
 ) -> Result<Vec<(String, String)>, String> {
     let account_id = extract_bound_account_id(parsed, "codex_oauth");
-    let manager = app_handle.state::<CodexOAuthState>().0.clone();
+    let manager = app_handle
+        .try_state::<CodexOAuthState>()
+        .ok_or("Codex authentication is unavailable")?
+        .0
+        .clone();
     let token = manager
         .get_valid_token(account_id.as_deref())
         .await
@@ -113,12 +121,16 @@ pub(super) async fn resolve_codex_headers(
     Ok(headers)
 }
 
-pub(super) async fn resolve_xai_headers(
-    app_handle: &AppHandle,
+pub(super) async fn resolve_xai_headers<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     parsed: &serde_json::Value,
 ) -> Result<Vec<(String, String)>, String> {
     let account_id = extract_bound_account_id(parsed, "xai_oauth");
-    let manager = app_handle.state::<XaiOAuthState>().0.clone();
+    let manager = app_handle
+        .try_state::<XaiOAuthState>()
+        .ok_or("xAI authentication is unavailable")?
+        .0
+        .clone();
     let token = manager
         .get_valid_token(account_id.as_deref())
         .await

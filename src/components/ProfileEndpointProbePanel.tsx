@@ -1,13 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Gauge, Loader2, Plus, Trash2, XCircle } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
-
-interface EndpointLatency {
-  url: string;
-  latency: number | null;
-  status: number | null;
-  error: string | null;
-}
+import { useEffect, useId, useMemo, useState } from "react";
+import { CheckCircle2, Gauge, Loader2, Plus, Trash2, TriangleAlert, XCircle } from "lucide-react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { collectProbeEndpoints, normalizeEndpoint, useEndpointProbe } from "./profileEndpointProbe";
 
 interface ProfileEndpointProbePanelProps {
   locale: string;
@@ -20,14 +15,7 @@ interface ProfileEndpointProbePanelProps {
   onCustomEndpointsChange?: (urls: string[]) => void;
 }
 
-function classify(result: EndpointLatency) {
-  if (result.error || result.status === null) return "error";
-  if (result.status >= 200 && result.status < 400) return "success";
-  return "warning";
-}
-
 export default function ProfileEndpointProbePanel({
-  locale,
   localeText,
   appId,
   providerId,
@@ -36,238 +24,188 @@ export default function ProfileEndpointProbePanel({
   customEndpoints,
   onCustomEndpointsChange,
 }: ProfileEndpointProbePanelProps) {
-  const [results, setResults] = useState<EndpointLatency[]>([]);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [customUrls, setCustomUrls] = useState<string[]>(customEndpoints);
+  const inputId = useId();
+  const headingId = useId();
   const [customInput, setCustomInput] = useState("");
   const [customError, setCustomError] = useState<string | null>(null);
-
-  const normalize = (value: string) => value.trim().replace(/\/+$/, "");
-  const updateCustomUrls = useCallback(
-    (next: string[]) => {
-      const unique = Array.from(new Set(next.map(normalize).filter(Boolean)));
-      setCustomUrls(unique);
-      onCustomEndpointsChange?.(unique);
-    },
-    [onCustomEndpointsChange],
+  const scope = JSON.stringify([appId, providerId ?? "new"]);
+  const customUrls = [...new Set(customEndpoints.map(normalizeEndpoint).filter(Boolean))];
+  const entries = useMemo(
+    () => collectProbeEndpoints(baseUrl, candidates, customEndpoints),
+    [baseUrl, candidates, customEndpoints],
   );
+  const { results, running, error, run } = useEndpointProbe(scope, entries);
 
   useEffect(() => {
-    if (!providerId) {
-      const next = Array.from(new Set(customEndpoints.map(normalize).filter(Boolean)));
-      setCustomUrls((current) => (current.join("\n") === next.join("\n") ? current : next));
+    setCustomInput("");
+    setCustomError(null);
+  }, [scope]);
+
+  const addCustomEndpoint = () => {
+    const value = normalizeEndpoint(customInput);
+    if (!collectProbeEndpoints(value, "", []).length) {
+      setCustomError(
+        localeText(
+          "请输入不含用户名和密码的 HTTP(S) 地址",
+          "Enter an HTTP(S) URL without a username or password",
+          "ユーザー名とパスワードを含まない HTTP(S) URL を入力してください",
+        ),
+      );
       return;
     }
-    let cancelled = false;
-    void invoke<unknown[]>("get_custom_endpoints", { app: appId, providerId })
-      .then((items) => {
-        if (cancelled) return;
-        const urls = items
-          .map((item) => (typeof item === "string" ? item : (item as { url?: unknown })?.url))
-          .filter((item): item is string => typeof item === "string")
-          .map(normalize);
-        setCustomUrls(Array.from(new Set(urls.filter(Boolean))));
-      })
-      .catch((reason) => {
-        if (!cancelled) setCustomError(String(reason));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [appId, customEndpoints, providerId]);
-  const entries = useMemo(() => {
-    const all = [baseUrl, ...candidates.split(/[,\n]/), ...customUrls];
-    const valid: string[] = [];
-    for (const raw of all) {
-      const value = raw.trim().replace(/\/$/, "");
-      if (!value || valid.includes(value)) continue;
-      try {
-        const parsed = new URL(value);
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") valid.push(value);
-      } catch {
-        // Ignore incomplete draft values; the editor will still preserve them for saving.
-      }
-    }
-    return valid.slice(0, 64);
-  }, [baseUrl, candidates, customUrls]);
-
-  const addCustomEndpoint = async () => {
-    const value = normalize(customInput);
-    try {
-      const parsed = new URL(value);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
-        throw new Error("Only HTTP(S) URLs are supported");
-      if (!value || customUrls.includes(value)) throw new Error("Endpoint already exists");
-      if (providerId) {
-        await invoke("add_custom_endpoint", { app: appId, providerId, url: value });
-      }
-      updateCustomUrls([...customUrls, value]);
-      setCustomInput("");
-      setCustomError(null);
-    } catch (reason) {
-      setCustomError(String(reason));
-    }
-  };
-
-  const removeCustomEndpoint = async (value: string) => {
-    try {
-      if (providerId) {
-        await invoke("remove_custom_endpoint", { app: appId, providerId, url: value });
-      }
-      updateCustomUrls(customUrls.filter((item) => item !== value));
-    } catch (reason) {
-      setCustomError(String(reason));
-    }
-  };
-
-  const runProbe = async () => {
-    if (entries.length === 0) return;
-    setRunning(true);
-    setError(null);
-    try {
-      const next = await invoke<EndpointLatency[]>("test_api_endpoints", {
-        urls: entries,
-        timeoutSecs: 10,
-      });
-      setResults(
-        [...next].sort((a, b) => (a.latency ?? Number.MAX_SAFE_INTEGER) - (b.latency ?? Number.MAX_SAFE_INTEGER)),
+    if (customUrls.includes(value)) {
+      setCustomError(
+        localeText("这个端点已经添加", "This endpoint has already been added", "このエンドポイントは追加済みです"),
       );
-    } catch (reason) {
-      setResults([]);
-      setError(String(reason));
-    } finally {
-      setRunning(false);
+      return;
     }
+    if (customUrls.length >= 128) {
+      setCustomError(
+        localeText(
+          "最多添加 128 个自定义端点",
+          "You can add up to 128 custom endpoints",
+          "カスタムエンドポイントは最大 128 件です",
+        ),
+      );
+      return;
+    }
+    onCustomEndpointsChange?.([...customUrls, value]);
+    setCustomInput("");
+    setCustomError(null);
   };
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 7,
-        padding: 12,
-        background: "var(--bg-secondary)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6, fontSize: 12, fontWeight: 600 }}>
-        <Gauge size={14} style={{ color: "var(--accent)" }} />
+    <section aria-labelledby={headingId} className="min-w-0 rounded-lg border border-border bg-card p-3">
+      <h3 id={headingId} className="mb-1 flex items-center gap-2 text-xs font-[590]">
+        <Gauge size={14} aria-hidden="true" />
         {localeText("端点测速", "Endpoint probe", "エンドポイント測定")}
-      </div>
-      <div style={{ color: "var(--text-muted)", fontSize: 11, lineHeight: 1.5, marginBottom: 10 }}>
+      </h3>
+      <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
         {localeText(
-          "以 HEAD 请求测量主地址和候选地址，必要时自动回退 GET，不会发送模型请求。",
-          "Measure the primary and candidate URLs with HEAD, falling back to GET when needed. No model request is sent.",
-          "HEAD で主 URL と候補 URL を測定し、必要なら GET にフォールバックします。モデルリクエストは送信しません。",
+          "使用当前草稿地址发送 HEAD 请求，必要时回退 GET。结果只表示地址响应和延迟，不验证密钥或模型。",
+          "Send HEAD requests to the current draft URLs, falling back to GET when needed. Results show URL responses and latency, not key or model validity.",
+          "現在の下書き URL に HEAD を送信し、必要なら GET に切り替えます。URL の応答と遅延のみを測定し、キーやモデルは検証しません。",
         )}
-      </div>
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        onClick={() => void runProbe()}
-        disabled={running || entries.length === 0}
-      >
-        {running ? <Loader2 size={14} className="spin" /> : <Gauge size={14} />}
+      </p>
+      <Button type="button" variant="outline" onClick={() => void run()} disabled={running || !entries.length}>
+        {running ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> : <Gauge size={14} />}
         {running
           ? localeText("测速中…", "Probing…", "測定中…")
           : localeText("开始测速", "Probe endpoints", "エンドポイントを測定")}
-      </button>
-      <div style={{ display: "flex", gap: 7, marginTop: 10, alignItems: "center" }}>
-        <input
-          className="input"
-          value={customInput}
-          onChange={(event) => setCustomInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void addCustomEndpoint();
-            }
-          }}
-          placeholder={localeText("添加自定义端点", "Add custom endpoint", "カスタムエンドポイントを追加")}
-          style={{ minWidth: 0, flex: 1, fontSize: 12 }}
-        />
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => void addCustomEndpoint()}
-          disabled={!customInput.trim()}
-        >
-          <Plus size={14} /> {localeText("添加", "Add", "追加")}
-        </button>
-      </div>
-      {customUrls.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
-          {customUrls.map((url) => (
-            <div key={url} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11 }}>
-              <span
-                style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                title={url}
-              >
-                {url}
-              </span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon-sm"
-                onClick={() => void removeCustomEndpoint(url)}
-                title={localeText("删除自定义端点", "Remove custom endpoint", "カスタムエンドポイントを削除")}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {customError && <div style={{ color: "var(--danger)", fontSize: 11, marginTop: 6 }}>{customError}</div>}
-      {entries.length === 0 && (
-        <span style={{ marginLeft: 8, color: "var(--text-muted)", fontSize: 11 }}>
+      </Button>
+      {!entries.length && (
+        <p className="mt-2 text-xs text-muted-foreground">
           {localeText(
             "先填写有效的 HTTP(S) 地址",
             "Enter at least one valid HTTP(S) URL",
             "有効な HTTP(S) URL を入力してください",
           )}
-        </span>
+        </p>
       )}
-      {error && <div style={{ color: "var(--danger)", fontSize: 11, marginTop: 8 }}>{error}</div>}
-      {results.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 10 }}>
-          {results.map((result) => {
-            const state = classify(result);
-            return (
-              <div
-                key={result.url}
-                style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, minWidth: 0 }}
+      <div className="mt-3">
+        <label htmlFor={inputId} className="mb-1.5 block text-xs text-muted-foreground">
+          {localeText("自定义端点", "Custom endpoint", "カスタムエンドポイント")}
+        </label>
+        <div className="flex items-center gap-2">
+          <Input
+            id={inputId}
+            value={customInput}
+            className="min-w-0 flex-1"
+            disabled={!onCustomEndpointsChange}
+            aria-invalid={!!customError}
+            aria-describedby={customError ? `${inputId}-error` : undefined}
+            onChange={(event) => {
+              setCustomInput(event.target.value);
+              setCustomError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                addCustomEndpoint();
+              }
+            }}
+            placeholder="https://api.example.com"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={addCustomEndpoint}
+            disabled={!customInput.trim() || !onCustomEndpointsChange}
+          >
+            <Plus size={14} /> {localeText("添加", "Add", "追加")}
+          </Button>
+        </div>
+        {customError && (
+          <p id={`${inputId}-error`} role="alert" className="mt-1.5 text-xs text-[var(--danger)]">
+            {customError}
+          </p>
+        )}
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          {localeText(
+            "端点修改随配置保存，取消编辑会放弃修改。每次最多测速 64 个地址。",
+            "Endpoint changes are saved with the profile and discarded when editing is cancelled. Each probe checks up to 64 URLs.",
+            "エンドポイントの変更は設定と一緒に保存され、編集をキャンセルすると破棄されます。1 回の測定は最大 64 URL です。",
+          )}
+        </p>
+      </div>
+      {!!customUrls.length && (
+        <ul className="mt-2 grid min-w-0 gap-1">
+          {customUrls.map((url) => (
+            <li key={url} className="flex min-w-0 items-center gap-2 text-xs">
+              <span className="min-w-0 flex-1 truncate" title={url}>
+                {url}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                disabled={!onCustomEndpointsChange}
+                aria-label={localeText(`删除端点 ${url}`, `Remove endpoint ${url}`, `エンドポイント ${url} を削除`)}
+                onClick={() => onCustomEndpointsChange?.(customUrls.filter((item) => item !== url))}
               >
-                {state === "error" ? (
-                  <XCircle size={13} style={{ color: "var(--danger)", flexShrink: 0 }} />
-                ) : (
-                  <CheckCircle2
-                    size={13}
-                    style={{ color: state === "success" ? "var(--success)" : "var(--warning)", flexShrink: 0 }}
+                <Trash2 size={13} />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 break-words text-xs text-[var(--danger)]">
+          {error}
+        </p>
+      )}
+      {!!results.length && (
+        <div className="mt-3 border-t border-border pt-3">
+          <p role="status" className="mb-2 text-[11px] text-muted-foreground">
+            {localeText(
+              `已测量 ${results.length} 个地址，按延迟排序；密钥和模型尚未验证。`,
+              `Measured ${results.length} URLs, sorted by latency; key and model validity have not been checked.`,
+              `${results.length} 件の URL を遅延順に表示します。キーとモデルは未検証です。`,
+            )}
+          </p>
+          <ul className="grid min-w-0 gap-2">
+            {results.map((result) => {
+              const failed = !!result.error || result.status === null;
+              const successful = !failed && result.status! >= 200 && result.status! < 400;
+              const Icon = failed ? XCircle : successful ? CheckCircle2 : TriangleAlert;
+              return (
+                <li key={result.url} className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1 text-xs">
+                  <Icon
+                    size={14}
+                    aria-hidden="true"
+                    className="mt-0.5 shrink-0"
+                    style={{ color: failed ? "var(--danger)" : successful ? "var(--success)" : "var(--warning)" }}
                   />
-                )}
-                <span
-                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
-                  title={result.url}
-                >
-                  {result.url}
-                </span>
-                <span style={{ color: state === "error" ? "var(--danger)" : "var(--text-secondary)", flexShrink: 0 }}>
-                  {result.error ?? `${result.status ?? "-"} · ${result.latency ?? "-"} ms`}
-                </span>
-              </div>
-            );
-          })}
+                  <span className="min-w-0 flex-[1_1_180px] break-all">{result.url}</span>
+                  <span className="min-w-0 max-w-full break-words text-muted-foreground">
+                    {result.error ?? `HTTP ${result.status ?? "—"} · ${result.latency ?? "—"} ms`}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
-      {results.length > 1 && (
-        <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
-          {locale === "zh"
-            ? "结果按延迟从低到高排列"
-            : locale === "ja"
-              ? "結果は低遅延順に並んでいます"
-              : "Results are sorted by latency"}
-        </div>
-      )}
-    </div>
+    </section>
   );
 }

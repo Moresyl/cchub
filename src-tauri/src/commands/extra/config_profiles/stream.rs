@@ -266,8 +266,8 @@ pub fn classify_provider_latency_status(latency_ms: u64) -> String {
     }
 }
 
-pub async fn extract_stream_check_request(
-    app_handle: &AppHandle,
+pub async fn extract_stream_check_request<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
     profile: &ConfigProfile,
 ) -> Result<StreamCheckRequestSpec, String> {
     let parsed: serde_json::Value =
@@ -399,23 +399,38 @@ pub async fn extract_stream_check_request(
                 .get("config")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
-            let token = parsed
-                .get("auth")
-                .and_then(|value| value.get("OPENAI_API_KEY"))
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| "No Codex OPENAI_API_KEY configured".to_string())?;
-            let explicit_base_url = parse_toml_assignment(config, "base_url");
+            config
+                .trim_start_matches('\u{feff}')
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|_| "Correct the Codex TOML before testing models")?;
+            let fields = read_codex_structured_config_from_content(
+                config.trim_start_matches('\u{feff}'),
+                String::new(),
+            );
+            let headers = if provider_type.as_deref() == Some("codex_oauth") {
+                resolve_codex_headers(app_handle, &parsed).await?
+            } else {
+                let token = parsed
+                    .get("auth")
+                    .and_then(|value| value.get("OPENAI_API_KEY"))
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "No Codex OPENAI_API_KEY configured".to_string())?;
+                vec![("authorization".to_string(), format!("Bearer {token}"))]
+            };
+            let explicit_base_url = (!fields.base_url.trim().is_empty()).then_some(fields.base_url);
             let base_url = if use_full_url {
                 explicit_base_url.ok_or_else(|| "No Codex base URL configured".to_string())?
             } else {
                 explicit_base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string())
             };
-            let wire_api = parse_toml_assignment(config, "wire_api")
-                .unwrap_or_else(|| "responses".to_string());
-            let model =
-                parse_toml_assignment(config, "model").unwrap_or_else(|| "gpt-5.6-sol".to_string());
+            let wire_api = fields.wire_api;
+            let model = if fields.model.trim().is_empty() {
+                "gpt-5.6-sol".to_string()
+            } else {
+                fields.model
+            };
             let (endpoint, body) = if wire_api == "chat" {
                 (
                     join_api_endpoint(&base_url, "chat/completions", use_full_url),
@@ -442,7 +457,7 @@ pub async fn extract_stream_check_request(
 
             Ok(StreamCheckRequestSpec {
                 endpoint,
-                headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                headers,
                 body,
             })
         }

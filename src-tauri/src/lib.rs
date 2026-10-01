@@ -410,6 +410,7 @@ pub fn run() {
             extra_commands::scan_provider_endpoints,
             extra_commands::probe_config_profile,
             extra_commands::stream_check_config_profile,
+            extra_commands::test_profile_draft,
             extra_commands::stream_check_all_config_profiles,
             extra_commands::get_local_auth_status,
             commands::universal_provider_commands::get_universal_providers,

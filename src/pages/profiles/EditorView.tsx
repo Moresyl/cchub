@@ -25,6 +25,7 @@ import {
   ProfileRawConfigSection,
 } from "./sections";
 import type { ConfigProfile, DetectedTool, ProviderConfigFragment } from "./helpers";
+import DraftModelTestPanel from "./DraftModelTestPanel";
 
 type LocaleText = (zh: string, en: string, ja?: string) => string;
 
@@ -222,6 +223,26 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
             modelFetchError={props.modelFetchError}
             onFetchModels={props.handleFetchModels}
             onDraftChange={props.updateStructuredDraft}
+          />
+
+          <DraftModelTestPanel
+            scope={editingProfile?.id ?? "new"}
+            toolId={props.draftTool}
+            snapshot={props.draftContent}
+            model={props.draftModel}
+            configuredModels={
+              props.draftTool === "claude"
+                ? [
+                    props.draftModel,
+                    props.draftReasoningModel,
+                    props.draftHaikuModel,
+                    props.draftSonnetModel,
+                    props.draftOpusModel,
+                  ]
+                : [props.draftModel]
+            }
+            catalog={props.fetchedModelDetails}
+            localeText={localeText}
           />
 
           <ProfileRawConfigSection

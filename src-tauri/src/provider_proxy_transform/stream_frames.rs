@@ -3,7 +3,7 @@ use futures_util::{Stream, StreamExt};
 
 pub(super) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
-pub(super) fn event_data(frame: &str) -> Option<String> {
+pub(crate) fn event_data(frame: &str) -> Option<String> {
     let fields = frame
         .trim_start_matches('\u{feff}')
         .lines()
@@ -33,7 +33,7 @@ impl std::error::Error for FrameError {}
 
 // Retain one bounded event, rather than a whole network chunk or an unfinished
 // stream. A coalesced chunk can contain any number of individually valid events.
-pub(super) fn frames<S, E>(stream: S) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
+pub(crate) fn frames<S, E>(stream: S) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
     E: std::error::Error + Send + 'static,

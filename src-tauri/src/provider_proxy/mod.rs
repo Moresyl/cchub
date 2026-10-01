@@ -42,6 +42,7 @@ use upstream::{
     is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
     reqwest_client, transform_claude_request_body,
 };
+pub(crate) use upstream::{extract_local_proxy_overrides, extract_transport_headers};
 
 use crate::db::DbState;
 

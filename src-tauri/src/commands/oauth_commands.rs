@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tauri::State;
 
-use crate::codex_oauth::{CodexAccount, CodexAuthStatus, CodexDeviceCodeResponse, CodexOAuthState};
+use crate::codex_oauth::{
+    CodexAccount, CodexAuthStatus, CodexDeviceCodeResponse, CodexOAuthError, CodexOAuthState,
+};
 use crate::db::DbState;
 
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
@@ -226,9 +228,9 @@ fn proxy_url(conn: &rusqlite::Connection) -> Option<String> {
 }
 
 fn build_client(conn: &rusqlite::Connection) -> Result<reqwest::Client, String> {
-    crate::shared::http_client::build_http_client(
+    crate::shared::oauth_request::client(
         proxy_url(conn).as_deref(),
-        Some("CCHub Codex OAuth"),
+        "CCHub Codex OAuth",
         REQUEST_TIMEOUT,
     )
 }
@@ -489,72 +491,25 @@ pub async fn get_codex_oauth_quota(
     state: State<'_, CodexOAuthState>,
     db: State<'_, DbState>,
 ) -> Result<CodexCliQuota, String> {
-    let resolved_account_id = match account_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => Some(value.to_string()),
-        None => state.0.default_account_id().await,
-    };
-    let token = match state
-        .0
-        .get_valid_token(resolved_account_id.as_deref())
-        .await
-    {
-        Ok(token) => token,
-        Err(error) => {
-            return Ok(CodexCliQuota {
-                tool: "codex_oauth".to_string(),
-                ..quota_not_found(Some(error.to_string()))
-            })
-        }
-    };
     let client = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         build_client(&conn)?
     };
-    let mut request = client
-        .get(CODEX_USAGE_URL)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("User-Agent", "CCHub OAuth")
-        .header("Accept", "application/json");
-    if let Some(id) = resolved_account_id.as_deref() {
-        request = request.header("ChatGPT-Account-Id", id);
-    }
-    let response = request
-        .send()
+    let value = match state
+        .0
+        .resource_json(account_id.as_deref(), |id, token| {
+            client
+                .get(CODEX_USAGE_URL)
+                .bearer_auth(token)
+                .header("User-Agent", "CCHub OAuth")
+                .header("Accept", "application/json")
+                .header("ChatGPT-Account-Id", id)
+        })
         .await
-        .map_err(|error| format!("OAuth quota request failed: {error}"))?;
-    let status = response.status();
-    if matches!(
-        status,
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
-    ) {
-        return Ok(CodexCliQuota {
-            tool: "codex_oauth".to_string(),
-            ..quota_error(
-                "expired",
-                format!("OAuth token was rejected (HTTP {status})"),
-            )
-        });
-    }
-    if !status.is_success() {
-        return Ok(CodexCliQuota {
-            tool: "codex_oauth".to_string(),
-            ..quota_error(
-                "valid",
-                format!(
-                    "OAuth quota API returned HTTP {status}: {}",
-                    truncate_body(response.text().await.unwrap_or_default())
-                ),
-            )
-        });
-    }
-    let value: Value = response
-        .json()
-        .await
-        .map_err(|error| format!("Failed to parse OAuth quota response: {error}"))?;
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(oauth_quota_failure(error)),
+    };
     Ok(CodexCliQuota {
         tool: "codex_oauth".to_string(),
         credential_status: "valid".to_string(),
@@ -572,47 +527,36 @@ pub async fn get_codex_oauth_models(
     state: State<'_, CodexOAuthState>,
     db: State<'_, DbState>,
 ) -> Result<Vec<CodexCliModel>, String> {
-    let resolved_account_id = match account_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => Some(value.to_string()),
-        None => state.0.default_account_id().await,
-    };
-    let token = state
-        .0
-        .get_valid_token(resolved_account_id.as_deref())
-        .await
-        .map_err(|error| error.to_string())?;
     let client = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         build_client(&conn)?
     };
-    let mut request = client
-        .get(CODEX_MODELS_URL)
-        .query(&[("client_version", env!("CARGO_PKG_VERSION"))])
-        .header("Authorization", format!("Bearer {token}"))
-        .header("originator", "cchub");
-    if let Some(id) = resolved_account_id.as_deref() {
-        request = request.header("ChatGPT-Account-Id", id);
-    }
-    let response = request
-        .send()
+    let value = state
+        .0
+        .resource_json(account_id.as_deref(), |id, token| {
+            client
+                .get(CODEX_MODELS_URL)
+                .query(&[("client_version", env!("CARGO_PKG_VERSION"))])
+                .bearer_auth(token)
+                .header("originator", "cchub")
+                .header("ChatGPT-Account-Id", id)
+        })
         .await
-        .map_err(|error| format!("OAuth model request failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!(
-            "OAuth model API returned HTTP {status}: {}",
-            truncate_body(response.text().await.unwrap_or_default())
-        ));
-    }
-    let value: Value = response
-        .json()
-        .await
-        .map_err(|error| format!("Failed to parse OAuth model response: {error}"))?;
+        .map_err(|error| error.to_string())?;
     Ok(parse_models(&value))
+}
+
+fn oauth_quota_failure(error: CodexOAuthError) -> CodexCliQuota {
+    let status = match error {
+        CodexOAuthError::ReauthRequired | CodexOAuthError::RefreshTokenInvalid => "expired",
+        CodexOAuthError::AccountNotFound(_) => "not_found",
+        CodexOAuthError::AccountChanged => "changed",
+        _ => "query_error",
+    };
+    CodexCliQuota {
+        tool: "codex_oauth".into(),
+        ..quota_error(status, error.to_string())
+    }
 }
 
 #[tauri::command]
@@ -798,6 +742,30 @@ pub async fn get_subscription_quota(
 mod tests {
     use super::{parse_claude_quota, parse_credentials, parse_models, parse_quota, tier_name};
     use serde_json::json;
+
+    #[test]
+    fn oauth_quota_errors_distinguish_expired_accounts_from_query_failures() {
+        use super::{oauth_quota_failure, CodexOAuthError};
+        for (error, status) in [
+            (CodexOAuthError::ReauthRequired, "expired"),
+            (
+                CodexOAuthError::AccountNotFound("missing".into()),
+                "not_found",
+            ),
+            (CodexOAuthError::AccountChanged, "changed"),
+            (
+                CodexOAuthError::TokenFetchFailed("HTTP 403".into()),
+                "query_error",
+            ),
+            (CodexOAuthError::Network("offline".into()), "query_error"),
+        ] {
+            let quota = oauth_quota_failure(error);
+            assert_eq!(quota.tool, "codex_oauth");
+            assert_eq!(quota.credential_status, status);
+            assert!(!quota.success);
+            assert!(quota.tiers.is_empty());
+        }
+    }
 
     #[test]
     fn parses_chatgpt_auth_without_exposing_token() {

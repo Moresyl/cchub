@@ -1,7 +1,9 @@
 use tauri::State;
 
 use crate::commands::oauth_commands::{CodexCliModel, CodexCliQuota};
-use crate::xai_oauth::{XaiAccount, XaiAuthStatus, XaiDeviceCodeResponse, XaiOAuthState};
+use crate::xai_oauth::{
+    XaiAccount, XaiAuthStatus, XaiDeviceCodeResponse, XaiOAuthError, XaiOAuthState,
+};
 
 fn error_message(error: crate::xai_oauth::XaiOAuthError) -> String {
     error.to_string()
@@ -119,12 +121,45 @@ pub async fn get_xai_oauth_quota(
         }),
         Err(error) => Ok(CodexCliQuota {
             tool: "xai_oauth".to_string(),
-            credential_status: "expired".to_string(),
+            credential_status: quota_error_status(&error).to_string(),
             credential_message: Some(error.to_string()),
             success: false,
             tiers: Vec::new(),
             error: Some(error.to_string()),
             queried_at: Some(chrono::Utc::now().timestamp_millis()),
         }),
+    }
+}
+
+fn quota_error_status(error: &XaiOAuthError) -> &'static str {
+    match error {
+        XaiOAuthError::ReauthRequired(_) | XaiOAuthError::RefreshTokenInvalid => "expired",
+        XaiOAuthError::AccountNotFound(_) => "not_found",
+        XaiOAuthError::AccountChanged => "changed",
+        _ => "query_error",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_and_proxy_failures_are_not_reported_as_expired_credentials() {
+        for (error, expected) in [
+            (XaiOAuthError::Network("offline".into()), "query_error"),
+            (
+                XaiOAuthError::TokenFetchFailed("HTTP 403".into()),
+                "query_error",
+            ),
+            (XaiOAuthError::ReauthRequired("one".into()), "expired"),
+            (
+                XaiOAuthError::AccountNotFound("missing".into()),
+                "not_found",
+            ),
+            (XaiOAuthError::AccountChanged, "changed"),
+        ] {
+            assert_eq!(quota_error_status(&error), expected);
+        }
     }
 }

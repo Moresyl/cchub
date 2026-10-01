@@ -15,6 +15,7 @@ use tauri::Manager;
 use tokio::sync::{Mutex, RwLock};
 
 mod refresh;
+mod resource;
 mod storage;
 
 const XAI_ISSUER: &str = "https://auth.x.ai";
@@ -44,7 +45,7 @@ pub enum XaiOAuthError {
     RefreshTokenInvalid,
     #[error("xAI account requires re-authentication: {0}")]
     ReauthRequired(String),
-    #[error("xAI account changed while refreshing; retry with the current account")]
+    #[error("xAI account changed during the request; retry with the current account")]
     AccountChanged,
     #[error("xAI network error: {0}")]
     Network(String),
@@ -204,6 +205,7 @@ pub struct XaiOAuthManager {
     endpoints: RwLock<Option<OAuthEndpoints>>,
     mutation_lock: Mutex<()>,
     http_client: reqwest::Client,
+    resource_client: Result<reqwest::Client, String>,
     storage_path: PathBuf,
 }
 
@@ -217,6 +219,11 @@ impl XaiOAuthManager {
             std::time::Duration::from_secs(30),
         )
         .unwrap_or_else(|_| crate::shared::http_client::default_http_client());
+        let resource_client = crate::shared::oauth_request::client(
+            proxy_url.as_deref(),
+            XAI_USER_AGENT,
+            std::time::Duration::from_secs(15),
+        );
         let manager = Self {
             accounts: RwLock::new(HashMap::new()),
             default_account_id: RwLock::new(None),
@@ -226,6 +233,7 @@ impl XaiOAuthManager {
             endpoints: RwLock::new(None),
             mutation_lock: Mutex::new(()),
             http_client,
+            resource_client,
             storage_path,
         };
         if let Err(error) = manager.load_from_disk_sync() {
@@ -413,20 +421,15 @@ impl XaiOAuthManager {
         &self,
         account_id: Option<&str>,
     ) -> Result<Vec<XaiModel>, XaiOAuthError> {
-        let token = self.get_valid_token(account_id).await?;
-        let response = self
-            .http_client
-            .get("https://api.x.ai/v1/models")
-            .bearer_auth(token)
-            .send()
+        let client = self
+            .resource_client
+            .as_ref()
+            .map_err(|error| XaiOAuthError::Network(error.clone()))?;
+        let value = self
+            .resource_json(account_id, |token| {
+                client.get("https://api.x.ai/v1/models").bearer_auth(token)
+            })
             .await?;
-        let status = response.status();
-        let value = read_json_response(response).await?;
-        if !status.is_success() {
-            return Err(XaiOAuthError::TokenFetchFailed(format_http_error(
-                status, &value,
-            )));
-        }
         let mut models = value
             .get("data")
             .and_then(Value::as_array)

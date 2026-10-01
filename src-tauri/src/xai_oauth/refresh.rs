@@ -18,6 +18,20 @@ impl XaiOAuthManager {
         F: FnOnce(String) -> Fut,
         Fut: Future<Output = Result<TokenPayload, XaiOAuthError>>,
     {
+        self.get_token_for_revision_using(account_id, None, refresh)
+            .await
+    }
+
+    pub(super) async fn get_token_for_revision_using<F, Fut>(
+        &self,
+        account_id: Option<&str>,
+        expected_revision: Option<&str>,
+        refresh: F,
+    ) -> Result<String, XaiOAuthError>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: Future<Output = Result<TokenPayload, XaiOAuthError>>,
+    {
         let id = self
             .resolve_account_id(account_id)
             .await
@@ -28,6 +42,9 @@ impl XaiOAuthManager {
             let account = accounts
                 .get(&id)
                 .ok_or_else(|| XaiOAuthError::AccountNotFound(id.clone()))?;
+            if expected_revision.is_some_and(|revision| revision != account.revision) {
+                return Err(XaiOAuthError::AccountChanged);
+            }
             if account.requires_reauth {
                 return Err(XaiOAuthError::ReauthRequired(id));
             }
@@ -46,6 +63,9 @@ impl XaiOAuthManager {
                 .get(&id)
                 .cloned()
                 .ok_or_else(|| XaiOAuthError::AccountNotFound(id.clone()))?;
+            if expected_revision.is_some_and(|revision| revision != account.revision) {
+                return Err(XaiOAuthError::AccountChanged);
+            }
             if account.requires_reauth {
                 return Err(XaiOAuthError::ReauthRequired(id));
             }
@@ -114,7 +134,7 @@ impl XaiOAuthManager {
         Ok(token)
     }
 
-    async fn record_reauth(&self, id: &str) -> Result<(), XaiOAuthError> {
+    pub(super) async fn record_reauth(&self, id: &str) -> Result<(), XaiOAuthError> {
         self.accounts
             .write()
             .await

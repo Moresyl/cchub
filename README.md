@@ -83,6 +83,8 @@ Refreshing after a network failure retains the same configuration's last success
 
 Explicitly rejected refresh credentials leave Codex OAuth and xAI OAuth accounts marked as requiring sign-in on this device. Ordinary network or proxy-challenge failures do not clear the account. Old refresh responses cannot overwrite a new sign-in or restore a removed account; cancelling device-code sign-in also cancels the backend flow so later authorization cannot commit. The Codex account panel keeps expired accounts visible with a sign-in action, offers retries for quota failures, and isolates late readings by account.
 
+Codex OAuth quota/model queries and xAI OAuth model queries recover from an HTTP 401 by refreshing and retrying once for the original account. A second rejection marks only that current login as requiring sign-in. Changing the default account does not redirect an in-flight query, and late rejections cannot evict a newer cached token. HTTP 403, rate limits and server/network failures remain query failures. The recovery flow has a 45-second total deadline and a streaming 2 MiB response limit; redirects stay within the initial origin and vendor error bodies are not displayed. xAI quota remains unavailable through this integration and is not estimated.
+
 ### Balance and quota alerts
 
 Enable alerts in a profile’s usage and balance dialog. Monitoring defaults off and checks approximately every five minutes while CCHub runs; it uses that profile’s configured usage script or provider API. Quota thresholds and balance thresholds are separate, with balances matched by currency or credit unit. Changing the query account pauses monitoring until the settings are saved again. Failed or stale readings do not trigger alerts.

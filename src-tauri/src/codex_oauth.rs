@@ -19,6 +19,7 @@ const DEFAULT_DEVICE_EXPIRY_SECS: u64 = 900;
 const KEYRING_SERVICE: &str = "CCHub Codex OAuth";
 
 mod refresh;
+mod resource;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CodexOAuthError {
@@ -32,7 +33,7 @@ pub enum CodexOAuthError {
     RefreshTokenInvalid,
     #[error("OAuth account requires authorization; sign in again")]
     ReauthRequired,
-    #[error("OAuth account changed while refreshing; retry with the current account")]
+    #[error("OAuth account changed during the request; retry with the current account")]
     AccountChanged,
     #[error("Network error: {0}")]
     Network(String),
@@ -372,10 +373,6 @@ impl CodexOAuthManager {
             default_account_id: default,
             username,
         }
-    }
-
-    pub async fn default_account_id(&self) -> Option<String> {
-        self.resolve_default_account_id().await
     }
 
     pub async fn remove_account(&self, account_id: &str) -> Result<(), CodexOAuthError> {

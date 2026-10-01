@@ -21,6 +21,20 @@ impl CodexOAuthManager {
         F: FnOnce(String) -> Fut,
         Fut: Future<Output = Result<TokenPayload, CodexOAuthError>>,
     {
+        self.get_token_for_revision_using(account_id, None, refresh)
+            .await
+    }
+
+    pub(super) async fn get_token_for_revision_using<F, Fut>(
+        &self,
+        account_id: Option<&str>,
+        expected_revision: Option<&str>,
+        refresh: F,
+    ) -> Result<String, CodexOAuthError>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: Future<Output = Result<TokenPayload, CodexOAuthError>>,
+    {
         let id = self.resolve_account_id(account_id).await.ok_or_else(|| {
             CodexOAuthError::AccountNotFound("No OAuth account is available".into())
         })?;
@@ -30,6 +44,9 @@ impl CodexOAuthManager {
             let account = accounts
                 .get(&id)
                 .ok_or_else(|| CodexOAuthError::AccountNotFound(id.clone()))?;
+            if expected_revision.is_some_and(|revision| revision != account.revision) {
+                return Err(CodexOAuthError::AccountChanged);
+            }
             if account.requires_reauth {
                 return Err(CodexOAuthError::ReauthRequired);
             }
@@ -54,6 +71,9 @@ impl CodexOAuthManager {
                 .get(&id)
                 .cloned()
                 .ok_or_else(|| CodexOAuthError::AccountNotFound(id.clone()))?;
+            if expected_revision.is_some_and(|revision| revision != account.revision) {
+                return Err(CodexOAuthError::AccountChanged);
+            }
             if account.requires_reauth {
                 return Err(CodexOAuthError::ReauthRequired);
             }
@@ -128,7 +148,7 @@ impl CodexOAuthManager {
         Ok(token)
     }
 
-    async fn record_reauth(&self, id: &str) -> Result<(), CodexOAuthError> {
+    pub(super) async fn record_reauth(&self, id: &str) -> Result<(), CodexOAuthError> {
         self.accounts
             .write()
             .await

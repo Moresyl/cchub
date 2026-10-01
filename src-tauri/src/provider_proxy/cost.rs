@@ -179,6 +179,9 @@ pub(super) fn log_proxy_request<R: tauri::Runtime>(
         );
         return;
     }
+    if (200..300).contains(&status_code) {
+        super::affinity::commit(app_handle, &conn, tool_id, upstream, &usage);
+    }
     drop(conn);
     let _ = app_handle.emit(
         "usage-log-recorded",

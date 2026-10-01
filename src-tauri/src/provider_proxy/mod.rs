@@ -13,6 +13,7 @@ use std::time::Instant;
 use tauri::{AppHandle, Manager, State as TauriState};
 use tokio::sync::oneshot;
 
+mod affinity;
 mod alpha_search;
 mod circuits;
 mod cost;
@@ -96,6 +97,7 @@ pub(super) struct LocalProviderProxyRuntimeInner {
     pub(super) optimizer_config: Option<crate::proxy_optimizer::OptimizerConfig>,
     pub(super) rectifier_config: Option<crate::proxy_optimizer::config::RectifierConfig>,
     pub(super) routing_rotations: std::collections::VecDeque<(String, u64)>,
+    pub(in crate::provider_proxy) affinity: affinity::Store,
 }
 
 pub(crate) struct LocalProviderProxyRuntime(pub(super) Arc<Mutex<LocalProviderProxyRuntimeInner>>);
@@ -251,6 +253,7 @@ pub(super) struct UpstreamTarget {
     pub(super) candidate_base_urls: Vec<String>,
     pub(super) headers: Vec<(String, String)>,
     pub(in crate::provider_proxy) managed_principal: Option<managed_auth::ManagedPrincipal>,
+    pub(in crate::provider_proxy) affinity: Option<affinity::Attempt>,
     pub(super) request_header_overrides: Vec<(String, String)>,
     pub(super) request_body_override: Option<serde_json::Value>,
     pub(super) claude_api_format: Option<ClaudeApiFormat>,

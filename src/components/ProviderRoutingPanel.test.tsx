@@ -79,6 +79,31 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("provider routing editor", () => {
+  it("saves conversation routing with the exact revision and retains it after a conflict", async () => {
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "get_provider_routing") return document();
+      if (command === "get_available_providers_for_failover") return profiles;
+      if (command === "set_provider_routing") throw new Error("Routing changed elsewhere");
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    render(<ProviderRoutingPanel />);
+    const affinity = await screen.findByRole("combobox", { name: "会话路由" });
+    expect((affinity as HTMLSelectElement).value).toBe("off");
+    fireEvent.change(affinity, { target: { value: "session" } });
+    expect(screen.getByRole("combobox", { name: "路由工具" }).matches(":disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "保存路由" }));
+    await screen.findByText("Error: Routing changed elsewhere");
+    expect(invoke).toHaveBeenCalledWith("set_provider_routing", {
+      appType: "claude",
+      expectedRevision: "saved-revision",
+      policy: { ...document().policy, affinity: "session" },
+    });
+    expect((affinity as HTMLSelectElement).value).toBe("session");
+    expect(invoke.mock.calls.filter(([command]) => command === "set_provider_routing")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "撤销修改" }));
+    expect((affinity as HTMLSelectElement).value).toBe("off");
+  });
+
   it("saves exact revisions, protects unsaved drafts on tool changes and supports undo", async () => {
     render(<ProviderRoutingPanel />);
     const name = await screen.findByRole("textbox", { name: "分组名称" });

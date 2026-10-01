@@ -110,6 +110,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 is_github_copilot,
                 is_codex_oauth,
                 managed_principal: None,
+                affinity: None,
                 cost_multiplier,
             })
         }
@@ -142,6 +143,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 is_github_copilot: false,
                 is_codex_oauth: false,
                 managed_principal: None,
+                affinity: None,
                 cost_multiplier,
             })
         }
@@ -242,6 +244,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 is_github_copilot: false,
                 is_codex_oauth: false,
                 managed_principal: None,
+                affinity: None,
                 cost_multiplier,
             })
         }
@@ -280,6 +283,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 is_github_copilot: false,
                 is_codex_oauth: false,
                 managed_principal: None,
+                affinity: None,
                 cost_multiplier,
             })
         }
@@ -326,6 +330,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 is_github_copilot: false,
                 is_codex_oauth: false,
                 managed_principal: None,
+                affinity: None,
                 cost_multiplier,
             })
         }
@@ -403,6 +408,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 is_github_copilot: false,
                 is_codex_oauth: false,
                 managed_principal: None,
+                affinity: None,
                 cost_multiplier,
             })
         }
@@ -462,6 +468,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 is_github_copilot: false,
                 is_codex_oauth: false,
                 managed_principal: None,
+                affinity: None,
                 cost_multiplier,
             })
         }

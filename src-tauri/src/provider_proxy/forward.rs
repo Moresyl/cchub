@@ -18,6 +18,8 @@ use super::cost::{
 use super::desktop;
 #[path = "forward/body.rs"]
 mod body;
+#[path = "forward/context.rs"]
+mod context;
 #[path = "forward/streaming.rs"]
 mod streaming;
 #[path = "forward/streaming_errors.rs"]
@@ -37,9 +39,8 @@ use super::{
     build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
     build_upstream_request_url, extract_request_insights, extract_upstream_target,
     is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
-    read_local_provider_proxy_settings_from_conn, reqwest_client, transform_claude_request_body,
-    ClaudeApiFormat, LocalProviderProxyRuntime, MAX_PROXY_BODY_BYTES,
-    MAX_PROXY_RESPONSE_BODY_BYTES,
+    reqwest_client, transform_claude_request_body, ClaudeApiFormat, LocalProviderProxyRuntime,
+    MAX_PROXY_BODY_BYTES, MAX_PROXY_RESPONSE_BODY_BYTES,
 };
 use body::apply_local_proxy_body_override;
 use timeouts::{read_response_body_limited, AttemptBudget};
@@ -61,54 +62,10 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     client: Option<reqwest::Client>,
 ) -> Response<Body> {
     let is_desktop = tool_id == "claude-desktop";
-    let (settings, proxy_url) = {
-        let db = app_handle.state::<DbState>();
-        let conn = match db.0.lock() {
-            Ok(conn) => conn,
-            Err(error) => {
-                return build_proxy_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Database lock failed: {error}"),
-                );
-            }
-        };
-        let proxy_url = conn
-            .query_row(
-                "SELECT value FROM app_settings WHERE key = 'proxy_url'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        (
-            read_local_provider_proxy_settings_from_conn(&conn),
-            proxy_url,
-        )
+    let proxy_url = match context::setup(&app_handle, &tool_id, &mut request) {
+        Ok(proxy_url) => proxy_url,
+        Err(response) => return response,
     };
-
-    if !settings.enabled_apps.iter().any(|item| item == &tool_id) {
-        return build_proxy_error(
-            StatusCode::NOT_FOUND,
-            format!("Local provider proxy is not enabled for {tool_id}"),
-        );
-    }
-
-    if is_desktop {
-        let db = app_handle.state::<DbState>();
-        let conn = match db.0.lock() {
-            Ok(conn) => conn,
-            Err(_) => {
-                return build_proxy_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Database lock failed".to_string(),
-                )
-            }
-        };
-        if let Err(error) = desktop::authorize(&conn, request.headers()) {
-            return build_proxy_error(StatusCode::UNAUTHORIZED, error);
-        }
-        request.headers_mut().remove("authorization");
-        request.headers_mut().remove("x-api-key");
-    }
 
     let request_query = request.uri().query().map(str::to_string);
     let profile_candidates = {
@@ -158,8 +115,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
         }
     };
 
-    let (profile_candidates, routed) = if is_desktop {
-        (profile_candidates, false)
+    let (mut profile_candidates, routed, routing) = if is_desktop {
+        (profile_candidates, false, None)
     } else {
         match super::routing::apply(
             &app_handle,
@@ -181,6 +138,16 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     if let Err(error) = optimizer_config.validate_timeouts() {
         return build_proxy_error(StatusCode::INTERNAL_SERVER_ERROR, error);
     }
+    let affinity = super::affinity::prepare(
+        &app_handle,
+        &tool_id,
+        &original_relative_path,
+        &original_headers,
+        &body_bytes,
+        routing.as_ref(),
+        &mut profile_candidates,
+        &optimizer_config,
+    );
 
     let runtime = app_handle.state::<LocalProviderProxyRuntime>().0.clone();
     let profile_budget = if optimizer_config.failover_enabled {
@@ -205,12 +172,20 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
         ) {
             continue;
         }
-        let upstream = match extract_upstream_target(
+        let snapshot = match affinity
+            .as_ref()
+            .map(|affinity| affinity.snapshot(&candidate))
+            .transpose()
+        {
+            Ok(snapshot) => snapshot.unwrap_or_else(|| candidate.snapshot.clone()),
+            Err(error) => return build_proxy_error(StatusCode::CONFLICT, error),
+        };
+        let mut upstream = match extract_upstream_target(
             &app_handle,
             &tool_id,
             candidate.profile_id.clone(),
             candidate.profile_name.clone(),
-            &candidate.snapshot,
+            &snapshot,
         )
         .await
         {
@@ -233,6 +208,11 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                     .unwrap_or_else(|| build_proxy_error(StatusCode::BAD_GATEWAY, error));
             }
         };
+        if let Some(affinity) = &affinity {
+            if let Err(error) = affinity.attach(&candidate, &mut upstream) {
+                return build_proxy_error(StatusCode::CONFLICT, error);
+            }
+        }
 
         let forwarded_headers: Vec<(axum::http::HeaderName, axum::http::HeaderValue)> =
             original_headers

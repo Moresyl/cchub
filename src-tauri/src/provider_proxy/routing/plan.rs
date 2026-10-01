@@ -147,14 +147,21 @@ pub(in crate::provider_proxy) fn apply<R: tauri::Runtime>(
     path: &str,
     body: &[u8],
     candidates: Vec<ProfileCandidate>,
-) -> Result<(Vec<ProfileCandidate>, bool), String> {
+) -> Result<
+    (
+        Vec<ProfileCandidate>,
+        bool,
+        Option<(RoutingDocument, Option<String>)>,
+    ),
+    String,
+> {
     let document = {
         let db = app.state::<DbState>();
         let conn = db.0.lock().map_err(|_| "Database lock failed")?;
         storage::load(&conn, tool)?
     };
     if !document.policy.enabled {
-        return Ok((candidates, false));
+        return Ok((candidates, false, None));
     }
     let available = candidates
         .iter()
@@ -189,5 +196,5 @@ pub(in crate::provider_proxy) fn apply<R: tauri::Runtime>(
                 .map(|index| candidates.remove(index))
         })
         .collect();
-    Ok((ordered, routed))
+    Ok((ordered, routed, Some((document, plan.group_id))))
 }

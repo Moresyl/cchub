@@ -7,14 +7,14 @@ use tauri::{AppHandle, Manager};
 
 use super::profiles::{extract_bound_account_id, extract_copilot_account_id};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AuthProvider {
     Copilot,
     Codex,
     Xai,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct ManagedPrincipal {
     pub(super) provider: AuthProvider,
     pub(super) account_id: String,

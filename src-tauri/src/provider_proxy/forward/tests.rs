@@ -16,6 +16,8 @@ use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use tauri::{App, AppHandle, Manager};
 use tokio::sync::Notify;
 
+#[path = "affinity_tests.rs"]
+mod affinity_tests;
 #[path = "deadline_tests.rs"]
 mod deadline_tests;
 #[path = "gemini_tool_tests.rs"]

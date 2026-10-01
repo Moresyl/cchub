@@ -221,6 +221,36 @@ export default function ProviderRoutingPanel({ appType }: { appType?: RoutingToo
             <summary className="cursor-pointer text-xs font-medium">
               {text("管理分组与规则", "Manage groups and rules")}
             </summary>
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">{text("会话路由", "Conversation routing")}</p>
+              <SimpleSelect
+                ariaLabel={text("会话路由", "Conversation routing")}
+                value={policy.affinity ?? "off"}
+                disabled={busy}
+                options={[
+                  { value: "off", label: text("不固定 · 每次按分组顺序", "Off · Follow group order") },
+                  {
+                    value: "auto",
+                    label: text("自动 · 保留工具轮次与近期缓存", "Auto · Keep tool turns and recent cache"),
+                  },
+                  {
+                    value: "session",
+                    label: text("整个会话 · 优先使用上次成功的配置", "Session · Prefer the last successful profile"),
+                  },
+                  {
+                    value: "turn",
+                    label: text("当前轮次 · 工具调用结束后重新选择", "Turn · Choose again after tool calls"),
+                  },
+                ]}
+                onValueChange={(affinity) => change({ ...policy, affinity: affinity as RoutingPolicy["affinity"] })}
+              />
+              <p className="text-xs text-muted-foreground">
+                {text(
+                  "仅关联客户端明确标识的会话。配置不可用时继续故障切换，账号登录或配置变化会使旧绑定失效。",
+                  "Only explicitly identified client conversations are linked. Unavailable profiles can fail over; login or configuration changes invalidate old bindings.",
+                )}
+              </p>
+            </div>
             {profiles.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 {text(

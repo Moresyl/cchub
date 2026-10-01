@@ -20,6 +20,7 @@ fn group(id: &str, members: &[&str]) -> RoutingGroup {
 fn policy() -> RoutingPolicy {
     RoutingPolicy {
         enabled: true,
+        affinity: AffinityMode::Off,
         default_group_id: Some("g".into()),
         groups: vec![group("g", &["p2", "p1"])],
         rules: vec![],

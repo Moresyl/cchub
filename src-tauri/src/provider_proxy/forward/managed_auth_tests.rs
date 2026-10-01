@@ -4,6 +4,9 @@ use crate::copilot_auth::{CopilotAuthManager, CopilotAuthState};
 use crate::xai_oauth::{XaiOAuthManager, XaiOAuthState};
 use axum::http::HeaderMap;
 
+#[path = "affinity_auth_tests.rs"]
+mod affinity_auth_tests;
+
 enum AccountManager {
     Codex(Arc<CodexOAuthManager>),
     Xai(Arc<XaiOAuthManager>),

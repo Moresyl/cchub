@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::responses::{build_anthropic_usage_from_responses, map_responses_stop_reason};
 use super::responses_reasoning::ReasoningBlocks;
+use super::stream_limits::{allocate, BLOCK_LIMIT};
 use super::strip_sse_field;
 
 #[inline]
@@ -60,23 +61,21 @@ fn resolve_content_index(
     next_content_index: &mut u32,
     index_by_key: &mut HashMap<String, u32>,
     fallback_open_index: &mut Option<u32>,
-) -> u32 {
+) -> Option<u32> {
     if let Some(k) = content_part_key(data) {
         if let Some(existing) = index_by_key.get(&k).copied() {
-            existing
+            Some(existing)
         } else {
-            let assigned = *next_content_index;
-            *next_content_index += 1;
+            let assigned = allocate(next_content_index)?;
             index_by_key.insert(k, assigned);
-            assigned
+            Some(assigned)
         }
     } else if let Some(existing) = *fallback_open_index {
-        existing
+        Some(existing)
     } else {
-        let assigned = *next_content_index;
-        *next_content_index += 1;
+        let assigned = allocate(next_content_index)?;
         *fallback_open_index = Some(assigned);
-        assigned
+        Some(assigned)
     }
 }
 
@@ -125,6 +124,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
+        let stream = super::stream_frames::frames(stream);
         let mut buffer = String::new();
         let mut message_id = super::anthropic_message_id(None);
         let mut current_model: Option<String> = None;
@@ -155,7 +155,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
 
                         let mut event_type: Option<String> = None;
                         let mut data_parts: Vec<String> = Vec::new();
-                        for line in block.lines() {
+                        for line in block.trim_start_matches('\u{feff}').lines() {
                             if let Some(evt) = strip_sse_field(line, "event") {
                                 event_type = Some(evt.trim().to_string());
                             } else if let Some(d) = strip_sse_field(line, "data") {
@@ -171,6 +171,9 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                             Ok(v) => v,
                             Err(_) => continue,
                         };
+                        if !super::stream_limits::valid_response_ids(&data) {
+                            yield Ok(super::stream_errors::api_error_event("Upstream content identity exceeded the byte limit")); return;
+                        }
                         let event_name = event_type.as_deref().filter(|event| !event.is_empty())
                             .or_else(|| data.get("type").and_then(Value::as_str)).unwrap_or("");
 
@@ -247,7 +250,9 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                         let index = if let Some(index) = current_text_index {
                                             index
                                         } else {
-                                            let index = resolve_content_index(&data, &mut next_content_index, &mut index_by_key, &mut fallback_open_index);
+                                            let Some(index) = resolve_content_index(&data, &mut next_content_index, &mut index_by_key, &mut fallback_open_index) else {
+                                                yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                            };
                                             current_text_index = Some(index);
                                             index
                                         };
@@ -269,7 +274,9 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                     let index = if let Some(index) = current_text_index {
                                         index
                                     } else {
-                                        let index = resolve_content_index(&data, &mut next_content_index, &mut index_by_key, &mut fallback_open_index);
+                                        let Some(index) = resolve_content_index(&data, &mut next_content_index, &mut index_by_key, &mut fallback_open_index) else {
+                                            yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                        };
                                         current_text_index = Some(index);
                                         index
                                     };
@@ -301,8 +308,9 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                                 yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
                                             }
                                         }
-                                        let index = next_content_index;
-                                        next_content_index += 1;
+                                        let Some(index) = allocate(&mut next_content_index) else {
+                                            yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                        };
                                         let start_event = json!({
                                             "type": "content_block_start",
                                             "index": index,
@@ -334,14 +342,16 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                             if let Some(existing) = index_by_key.get(&k).copied() {
                                                 existing
                                             } else {
-                                                let assigned = next_content_index;
-                                                next_content_index += 1;
+                                                let Some(assigned) = allocate(&mut next_content_index) else {
+                                                    yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                                };
                                                 index_by_key.insert(k, assigned);
                                                 assigned
                                             }
                                         } else {
-                                            let assigned = next_content_index;
-                                            next_content_index += 1;
+                                            let Some(assigned) = allocate(&mut next_content_index) else {
+                                                yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                            };
                                             assigned
                                         };
                                         if let Some(item_id) = item.get("id").and_then(|v| v.as_str()).or_else(|| data.get("item_id").and_then(|v| v.as_str())) {
@@ -365,18 +375,19 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 if let Some(delta) = data.get("delta").and_then(|d| d.as_str()) {
                                     has_tool_use = true;
                                     let item_id = data.get("item_id").and_then(|v| v.as_str());
-                                    let index = if let Some(id) = item_id {
+                                    let existing = if let Some(id) = item_id {
                                         tool_index_by_item_id.get(id).copied()
                                     } else {
                                         None
                                     }
                                     .or_else(|| tool_item_key_from_event(&data).and_then(|k| index_by_key.get(&k).copied()))
-                                    .or(last_tool_index)
-                                    .unwrap_or_else(|| {
-                                        let assigned = next_content_index;
-                                        next_content_index += 1;
+                                    .or(last_tool_index);
+                                    let index = if let Some(existing) = existing { existing } else {
+                                        let Some(assigned) = allocate(&mut next_content_index) else {
+                                            yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                        };
                                         assigned
-                                    });
+                                    };
 
                                     if !open_indices.contains(&index) {
                                         let start_event = json!({
@@ -496,8 +507,9 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                             "response.output_item.done" => {
                                 if let Some(item) = data.get("item") {
                                     if item.get("type").and_then(Value::as_str) == Some("web_search_call") {
-                                        let index = next_content_index;
-                                        next_content_index += 1;
+                                        let Some(index) = allocate(&mut next_content_index) else {
+                                            yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                        };
                                         let start_event = json!({
                                             "type": "content_block_start",
                                             "index": index,
@@ -518,12 +530,13 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                         }
                     }
                 }
-                Err(_) => {
-                    yield Ok(super::stream_errors::interrupted_event());
-                    break;
+                Err(error) => {
+                    yield Ok(super::stream_errors::decoder_error_event(&error));
+                    return;
                 }
             }
         }
+        yield Ok(super::stream_errors::interrupted_event());
     }
 }
 

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 
-use super::strip_sse_field;
+use super::stream_limits::{allocate, BLOCK_LIMIT, MAX_ID_BYTES, MAX_PENDING_ARGS};
 
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamChunk {
@@ -83,15 +83,18 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
+        let stream = super::stream_frames::frames(stream);
         let mut buffer = String::new();
         let mut message_id = None;
         let mut current_model = None;
         let mut next_content_index: u32 = 0;
         let mut has_sent_message_start = false;
+        let mut has_finish_reason = false;
         let mut current_non_tool_block_type: Option<&'static str> = None;
         let mut current_non_tool_block_index: Option<u32> = None;
         let mut tool_blocks_by_index: HashMap<usize, ToolBlockState> = HashMap::new();
         let mut open_tool_block_indices: HashSet<u32> = HashSet::new();
+        let mut pending_args_bytes: usize = 0;
 
         tokio::pin!(stream);
         while let Some(chunk) = stream.next().await {
@@ -106,12 +109,12 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                             continue;
                         }
 
-                        for l in line.lines() {
-                            if let Some(data) = strip_sse_field(l, "data") {
+                        if let Some(data) = super::stream_frames::event_data(&line) {
+                            let data = data.as_str();
                                 if data.trim() == "[DONE]" {
                                     let event = json!({"type": "message_stop"});
                                     yield Ok(Bytes::from(format!("event: message_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
-                                    continue;
+                                    return;
                                 }
 
                                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
@@ -160,8 +163,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                     let event = json!({"type": "content_block_stop", "index": index});
                                                     yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
                                                 }
-                                                let index = next_content_index;
-                                                next_content_index += 1;
+                                                let Some(index) = allocate(&mut next_content_index) else {
+                                                    yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                                };
                                                 let event = json!({
                                                     "type": "content_block_start",
                                                     "index": index,
@@ -189,8 +193,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                         let event = json!({"type": "content_block_stop", "index": index});
                                                         yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
                                                     }
-                                                    let index = next_content_index;
-                                                    next_content_index += 1;
+                                                    let Some(index) = allocate(&mut next_content_index) else {
+                                                        yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                                    };
                                                     let event = json!({
                                                         "type": "content_block_start",
                                                         "index": index,
@@ -220,18 +225,20 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             current_non_tool_block_type = None;
 
                                             for tool_call in tool_calls {
-                                                let (anthropic_index, id, name, should_start, pending_after_start, immediate_delta) = {
-                                                    let state = tool_blocks_by_index.entry(tool_call.index).or_insert_with(|| {
-                                                        let index = next_content_index;
-                                                        next_content_index += 1;
-                                                        ToolBlockState {
-                                                            anthropic_index: index,
-                                                            id: String::new(),
-                                                            name: String::new(),
-                                                            started: false,
-                                                            pending_args: String::new(),
-                                                        }
+                                                if tool_call.id.as_ref().is_some_and(|id| id.len() > MAX_ID_BYTES)
+                                                    || tool_call.function.as_ref().and_then(|function| function.name.as_ref()).is_some_and(|name| name.len() > MAX_ID_BYTES) {
+                                                    yield Ok(super::stream_errors::api_error_event("Upstream tool identity exceeded the byte limit")); return;
+                                                }
+                                                if !tool_blocks_by_index.contains_key(&tool_call.index) {
+                                                    let Some(index) = allocate(&mut next_content_index) else {
+                                                        yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                                    };
+                                                    tool_blocks_by_index.insert(tool_call.index, ToolBlockState {
+                                                        anthropic_index: index, id: String::new(), name: String::new(), started: false, pending_args: String::new(),
                                                     });
+                                                }
+                                                let (anthropic_index, id, name, should_start, pending_after_start, immediate_delta) = {
+                                                    let state = tool_blocks_by_index.get_mut(&tool_call.index).expect("registered tool");
 
                                                     if let Some(id) = &tool_call.id {
                                                         state.id = id.clone();
@@ -247,6 +254,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                         state.started = true;
                                                     }
                                                     let pending_after_start = if should_start && !state.pending_args.is_empty() {
+                                                        pending_args_bytes -= state.pending_args.len();
                                                         Some(std::mem::take(&mut state.pending_args))
                                                     } else {
                                                         None
@@ -256,6 +264,10 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                         if state.started {
                                                             Some(args)
                                                         } else {
+                                                            if pending_args_bytes.saturating_add(args.len()) > MAX_PENDING_ARGS {
+                                                                yield Ok(super::stream_errors::api_error_event("Upstream pending tool arguments exceeded the 8 MiB limit")); return;
+                                                            }
+                                                            pending_args_bytes += args.len();
                                                             state.pending_args.push_str(&args);
                                                             None
                                                         }
@@ -303,6 +315,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         }
 
                                         if let Some(finish_reason) = &choice.finish_reason {
+                                            has_finish_reason = !finish_reason.is_empty();
                                             if let Some(index) = current_non_tool_block_index.take() {
                                                 let event = json!({"type": "content_block_stop", "index": index});
                                                 yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
@@ -383,15 +396,19 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         }
                                     }
                                 }
-                            }
                         }
                     }
                 }
-                Err(_) => {
-                    yield Ok(super::stream_errors::interrupted_event());
-                    break;
+                Err(error) => {
+                    yield Ok(super::stream_errors::decoder_error_event(&error));
+                    return;
                 }
             }
+        }
+        if has_finish_reason {
+            yield Ok(Bytes::from_static(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+        } else {
+            yield Ok(super::stream_errors::interrupted_event());
         }
     }
 }

@@ -6,6 +6,8 @@ mod sse_gemini;
 mod sse_responses;
 mod stream_decode;
 mod stream_errors;
+mod stream_frames;
+mod stream_limits;
 #[cfg(test)]
 mod tool_strict_tests;
 pub(crate) use message_id::anthropic_message_id;

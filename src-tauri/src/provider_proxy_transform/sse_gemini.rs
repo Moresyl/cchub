@@ -1,3 +1,4 @@
+use super::stream_limits::{allocate, BLOCK_LIMIT};
 use crate::shared::gemini_usage::GeminiUsage;
 use bytes::Bytes;
 use futures_util::stream::{Stream, StreamExt};
@@ -20,6 +21,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
     model: String,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
+        let stream = super::stream_frames::frames(stream);
         let mut buffer = String::new();
         let mut has_sent_message_start = false;
         let mut next_content_index: u32 = 0;
@@ -45,11 +47,8 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                             continue;
                         }
 
-                        let data = segment
-                            .lines()
-                            .find_map(|l| l.strip_prefix("data: ").or_else(|| l.strip_prefix("data:")))
-                            .unwrap_or("")
-                            .trim();
+                        let data = super::stream_frames::event_data(&segment).unwrap_or_default();
+                        let data = data.trim();
 
                         if data.is_empty() || data == "[DONE]" {
                             continue;
@@ -99,8 +98,9 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                                 for part in parts {
                                     if let Some(text_val) = part.get("text").and_then(|t| t.as_str()) {
                                         if current_text_block_index.is_none() {
-                                            let index = next_content_index;
-                                            next_content_index += 1;
+                                            let Some(index) = allocate(&mut next_content_index) else {
+                                                yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                            };
                                             let start_event = json!({
                                                 "type": "content_block_start",
                                                 "index": index,
@@ -135,8 +135,9 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                                             }
                                         };
 
-                                        let index = next_content_index;
-                                        next_content_index += 1;
+                                        let Some(index) = allocate(&mut next_content_index) else {
+                                            yield Ok(super::stream_errors::api_error_event(BLOCK_LIMIT)); return;
+                                        };
 
                                         let start_event = json!({
                                             "type": "content_block_start",
@@ -195,26 +196,15 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                         }
                     }
                 }
-                Err(_) => {
-                    yield Ok(super::stream_errors::interrupted_event());
+                Err(error) => {
+                    yield Ok(super::stream_errors::decoder_error_event(&error));
                     return;
                 }
             }
         }
 
-        if has_sent_message_start && !finished {
-            if let Some(index) = current_text_block_index.take() {
-                let stop_event = json!({"type": "content_block_stop", "index": index});
-                yield Ok(Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
-            }
-            let delta_event = json!({
-                "type": "message_delta",
-                "delta": {"stop_reason": "end_turn", "stop_sequence": null},
-                "usage": anthropic_usage(&usage)
-            });
-            yield Ok(Bytes::from(format!("event: message_delta\ndata: {}\n\n", serde_json::to_string(&delta_event).unwrap_or_default())));
-            let stop_event = json!({"type": "message_stop"});
-            yield Ok(Bytes::from(format!("event: message_stop\ndata: {}\n\n", serde_json::to_string(&stop_event).unwrap_or_default())));
+        if !finished {
+            yield Ok(super::stream_errors::interrupted_event());
         }
     }
 }

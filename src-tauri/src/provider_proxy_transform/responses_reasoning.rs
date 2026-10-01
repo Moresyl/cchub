@@ -83,15 +83,16 @@ impl ReasoningBlocks {
             if self.blocks.len() >= MAX_PARTS {
                 return Err("Upstream reasoning stream exceeded the part limit");
             }
+            let index = super::stream_limits::allocate(next_index)
+                .ok_or(super::stream_limits::BLOCK_LIMIT)?;
             self.blocks.insert(
                 key.clone(),
                 Block {
-                    index: *next_index,
+                    index,
                     open: false,
                     has_text: false,
                 },
             );
-            *next_index += 1;
             let block = self.blocks.get_mut(&key).expect("inserted reasoning block");
             block.open = true;
             let mut events = vec![json!({"type":"content_block_start", "index":block.index,

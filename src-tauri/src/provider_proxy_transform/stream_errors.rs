@@ -5,6 +5,21 @@ pub(super) fn interrupted_event() -> Bytes {
     Bytes::from_static(b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Upstream stream was interrupted before completion\"}}\n\n")
 }
 
+pub(super) fn api_error_event(message: &str) -> Bytes {
+    let error = serde_json::json!({"type":"error","error":{"type":"api_error","message":message}});
+    Bytes::from(format!("event: error\ndata: {error}\n\n"))
+}
+
+pub(super) fn decoder_error_event(error: &std::io::Error) -> Bytes {
+    match error
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<super::stream_frames::FrameError>())
+    {
+        Some(error) => api_error_event(&error.to_string()),
+        None => interrupted_event(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

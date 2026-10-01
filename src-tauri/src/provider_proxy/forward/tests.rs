@@ -18,6 +18,8 @@ use tokio::sync::Notify;
 
 #[path = "affinity_tests.rs"]
 mod affinity_tests;
+#[path = "bounded_stream_tests.rs"]
+mod bounded_stream_tests;
 #[path = "deadline_tests.rs"]
 mod deadline_tests;
 #[path = "gemini_tool_tests.rs"]

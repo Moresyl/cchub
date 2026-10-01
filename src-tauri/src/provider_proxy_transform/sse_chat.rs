@@ -386,15 +386,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                         }
                     }
                 }
-                Err(e) => {
-                    let error_event = json!({
-                        "type": "error",
-                        "error": {
-                            "type": "stream_error",
-                            "message": format!("Stream error: {e}")
-                        }
-                    });
-                    yield Ok(Bytes::from(format!("event: error\ndata: {}\n\n", serde_json::to_string(&error_event).unwrap_or_default())));
+                Err(_) => {
+                    yield Ok(super::stream_errors::interrupted_event());
                     break;
                 }
             }

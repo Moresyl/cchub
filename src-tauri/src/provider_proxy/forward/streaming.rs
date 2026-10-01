@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use tauri::AppHandle;
 
+use super::streaming_errors::{terminate, Protocol};
 use super::streaming_health::{observe, StreamHealth};
 use super::timeouts::{prepare_raw_stream, Deadline, ResponseStream};
 use crate::provider_proxy::desktop;
@@ -25,6 +26,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn streaming_body<R: tauri::Runtime>(
     response: reqwest::Response,
+    relative_path: &str,
     transform: Option<ClaudeApiFormat>,
     app_handle: AppHandle<R>,
     request_id: String,
@@ -63,7 +65,10 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
                 .clone()
                 .unwrap_or_else(|| "gemini-3.6-flash".to_string()),
         )),
-        _ => boxed(observed),
+        _ => match Protocol::for_path(relative_path) {
+            Some(protocol) => boxed(terminate(observed, protocol, upstream.profile_name.clone())),
+            None => boxed(observed),
+        },
     };
     let body = Body::from_stream(create_usage_tracking_stream(
         stream,

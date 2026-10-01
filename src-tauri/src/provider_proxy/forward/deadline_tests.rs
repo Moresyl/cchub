@@ -231,7 +231,11 @@ async fn stream_idle_timeout_after_first_raw_byte_records_failure() {
     );
     let response = forward(app.handle().clone(), true).await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(to_bytes(response.into_body(), 1024).await.is_err());
+    let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(text.contains("event: error"));
+    assert!(text.contains("api_error"));
+    assert!(!text.contains("message_stop"));
     assert_eq!(endpoint(&app, "p1", &upstream.url).consecutive_failures, 1);
     streaming_tests::assert_single_outcome(&app, 502, 0, 0);
 }

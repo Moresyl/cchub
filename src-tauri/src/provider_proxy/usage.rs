@@ -140,8 +140,40 @@ pub(super) fn extract_stream_usage_metrics_from_event(body: &Value) -> Option<Pr
         return parse_partial_stream_usage(usage, response_model);
     }
 
-    if body.get("usageMetadata").is_some() {
-        return parse_usage_metrics_from_response(body);
+    if let Some(usage) = body.get("usageMetadata").and_then(Value::as_object) {
+        let count = |key: &str| usage.get(key).and_then(Value::as_u64);
+        if ![
+            "promptTokenCount",
+            "candidatesTokenCount",
+            "thoughtsTokenCount",
+            "totalTokenCount",
+            "cachedContentTokenCount",
+        ]
+        .iter()
+        .any(|key| count(key).is_some())
+        {
+            return None;
+        }
+        // A partial total without its input split cannot be assigned to output.
+        let input = count("promptTokenCount");
+        let output = count("totalTokenCount")
+            .zip(input)
+            .map(|(total, input)| total.saturating_sub(input))
+            .unwrap_or_else(|| {
+                count("candidatesTokenCount")
+                    .unwrap_or(0)
+                    .saturating_add(count("thoughtsTokenCount").unwrap_or(0))
+            });
+        return Some(ProxyUsageMetrics {
+            response_model: body
+                .get("modelVersion")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            input_tokens: input.unwrap_or(0),
+            output_tokens: output,
+            cache_read_tokens: count("cachedContentTokenCount").unwrap_or(0),
+            cache_creation_tokens: 0,
+        });
     }
 
     if let Some(response) = body.get("response") {
@@ -195,6 +227,10 @@ pub(super) fn scan_stream_usage_buffer(
 
 #[path = "usage/stream_log.rs"]
 mod stream_log;
+
+#[cfg(test)]
+#[path = "usage/partial_tests.rs"]
+mod partial_tests;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(

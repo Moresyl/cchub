@@ -4,6 +4,9 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
+#[path = "streaming_health/frame.rs"]
+mod frame;
+
 const FAILED: u8 = 1;
 const COMPLETED: u8 = 2;
 const REQUIRES_COMPLETION: u8 = 4;
@@ -27,13 +30,18 @@ impl StreamHealth {
     }
     fn completed(&self) {
         self.0.fetch_or(COMPLETED, Ordering::Relaxed);
+        // A terminal event proves completion even if earlier payloads exceeded the parser cap.
+        self.0.fetch_and(!UNVERIFIED, Ordering::Relaxed);
+    }
+    fn completed_successfully(&self) -> bool {
+        self.0.load(Ordering::Relaxed) & (FAILED | COMPLETED) == COMPLETED
     }
     fn unknown_frame(&self) {
         self.0.fetch_or(UNVERIFIED, Ordering::Relaxed);
     }
     fn incomplete(&self) -> bool {
         let flags = self.0.load(Ordering::Relaxed);
-        flags & REQUIRES_COMPLETION != 0 && flags & (FAILED | COMPLETED | UNVERIFIED) == 0
+        flags & REQUIRES_COMPLETION != 0 && flags & (FAILED | COMPLETED) == 0
     }
 }
 
@@ -60,30 +68,19 @@ where
     E: std::error::Error + Send + 'static,
 {
     async_stream::stream! {
-        let mut buffer = Vec::new();
-        let mut skipping_frame = false;
+        let mut inspector = frame::Inspector::default();
         tokio::pin!(stream);
         while let Some(chunk) = stream.next().await {
             match &chunk {
+                Err(_) if health.completed_successfully() => return,
                 Err(_) => health.fail(),
                 Ok(bytes) => {
-                    for byte in bytes {
-                        buffer.push(*byte);
-                        if buffer.ends_with(b"\n\n") || buffer.ends_with(b"\r\n\r\n") {
-                            if !skipping_frame { inspect_frame(&buffer, &health); }
-                            buffer.clear();
-                            skipping_frame = false;
-                        } else if buffer.len() > 1024 * 1024 {
-                            health.unknown_frame();
-                            buffer.drain(..buffer.len() - 3);
-                            skipping_frame = true;
-                        }
-                    }
+                    for byte in bytes { inspector.push(*byte, &health); }
                 }
             }
             yield chunk.map_err(|error| std::io::Error::other(error.to_string()));
         }
-        if !skipping_frame { inspect_frame(&buffer, &health); }
+        inspector.finish_eof(&health);
         if health.incomplete() {
             health.fail();
             yield Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Upstream stream ended before completion"));
@@ -213,5 +210,104 @@ mod tests {
         let output = observe(stream, health.clone()).collect::<Vec<_>>().await;
         assert!(health.failed());
         assert_eq!(output[0].as_ref().unwrap().as_ref(), frame);
+    }
+
+    #[tokio::test]
+    async fn large_terminal_events_keep_bytes_and_confirm_completion_after_the_blank_line() {
+        for (name, suffix) in [
+            ("response.completed", "\r\n\r\n"),
+            ("response.incomplete", "\n\n"),
+            ("message_stop", "\n\n"),
+        ] {
+            for header_first in [true, false] {
+                let data = format!("data: {{\"image\":\"{}\"}}", "A".repeat(2 * 1024 * 1024));
+                let frame = if header_first {
+                    format!("event: {name}\n{data}{suffix}")
+                } else {
+                    format!("{data}\nevent: {name}{suffix}")
+                };
+                let health = StreamHealth::requiring_completion();
+                let chunks = frame
+                    .as_bytes()
+                    .chunks(4093)
+                    .map(|chunk| Ok::<_, std::io::Error>(Bytes::copy_from_slice(chunk)))
+                    .collect::<Vec<_>>();
+                let output = observe(futures_util::stream::iter(chunks), health.clone())
+                    .collect::<Vec<_>>()
+                    .await;
+                let bytes = output
+                    .into_iter()
+                    .flat_map(|chunk| chunk.unwrap().to_vec())
+                    .collect::<Vec<_>>();
+                assert_eq!(bytes, frame.as_bytes());
+                assert!(!health.failed());
+                assert!(health.verified());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn large_nonterminal_and_cut_off_terminal_frames_do_not_bypass_completion_checks() {
+        let data = "A".repeat(2 * 1024 * 1024);
+        for frame in [
+            format!("event: response.output_text.delta\ndata: {data}\n\n"),
+            format!("event: response.completed\ndata: {{\"image\":\"{data}"),
+            format!("event: response.completed\nevent: custom\ndata: {data}\n\n"),
+            format!(
+                "event: response.completed\nevent: {}\ndata: {data}\n\n",
+                "x".repeat(512)
+            ),
+        ] {
+            let health = StreamHealth::requiring_completion();
+            let source = futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from(frame))]);
+            let output = observe(source, health.clone()).collect::<Vec<_>>().await;
+            assert!(health.failed());
+            assert!(output.last().unwrap().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn large_payload_followed_by_small_completion_is_healthy_and_large_error_is_failed() {
+        let data = "A".repeat(2 * 1024 * 1024);
+        for (frame, failed) in [
+            (
+                format!(
+                    "data: {data}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
+                ),
+                false,
+            ),
+            (format!("event: error\ndata: {data}\n\n"), true),
+            (format!("event: response.failed\ndata: {data}\n\n"), true),
+        ] {
+            let health = StreamHealth::requiring_completion();
+            let source =
+                futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from(frame.clone()))]);
+            let output = observe(source, health.clone()).collect::<Vec<_>>().await;
+            assert_eq!(health.failed(), failed);
+            assert_eq!(output.len(), 1);
+            assert_eq!(output[0].as_ref().unwrap().as_ref(), frame.as_bytes());
+            if !failed {
+                assert!(health.verified());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_transport_cut_after_a_complete_event_does_not_reclassify_the_reply_as_failed() {
+        let frame =
+            Bytes::from_static(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
+        let source = futures_util::stream::iter([
+            Ok(frame.clone()),
+            Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "connection closed after reply",
+            )),
+        ]);
+        let health = StreamHealth::requiring_completion();
+        let output = observe(source, health.clone()).collect::<Vec<_>>().await;
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].as_ref().unwrap(), &frame);
+        assert!(!health.failed());
+        assert!(health.verified());
     }
 }

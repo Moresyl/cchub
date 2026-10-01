@@ -20,6 +20,8 @@ use super::desktop;
 mod body;
 #[path = "forward/streaming.rs"]
 mod streaming;
+#[path = "forward/streaming_errors.rs"]
+mod streaming_errors;
 #[path = "forward/streaming_health.rs"]
 pub(super) mod streaming_health;
 #[path = "forward/timeouts.rs"]
@@ -671,6 +673,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             };
                             let body = streaming::streaming_body(
                                 response,
+                                &original_relative_path,
                                 claude_transform,
                                 app_handle.clone(),
                                 request_id.clone(),

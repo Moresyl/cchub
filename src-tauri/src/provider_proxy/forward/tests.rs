@@ -18,6 +18,8 @@ use tokio::sync::Notify;
 
 #[path = "deadline_tests.rs"]
 mod deadline_tests;
+#[path = "passthrough_tests.rs"]
+mod passthrough_tests;
 #[path = "streaming_tests.rs"]
 mod streaming_tests;
 
@@ -632,14 +634,11 @@ async fn incomplete_streams_fail_without_fabricating_a_normal_completion() {
         set_format(&app, "p1", format);
         open_profile(&app, "p1", true);
         let response = forward(app.handle().clone(), true).await;
-        let body = to_bytes(response.into_body(), 8192).await;
-        if format == "anthropic" {
-            assert!(body.is_err());
-        } else {
-            let text = String::from_utf8(body.unwrap().to_vec()).unwrap();
-            assert!(text.contains("event: error"), "{format}: {text}");
-            assert!(!text.contains("event: message_stop"), "{format}: {text}");
-        }
+        let body = to_bytes(response.into_body(), 8192).await.unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("event: error"), "{format}: {text}");
+        assert!(text.contains("api_error"), "{format}: {text}");
+        assert!(!text.contains("event: message_stop"), "{format}: {text}");
         assert_eq!(profile(&app, "p1").state, CircuitState::Open, "{format}");
         assert_eq!(profile(&app, "p1").consecutive_successes, 0, "{format}");
         streaming_tests::assert_single_outcome(&app, 502, 0, 0);

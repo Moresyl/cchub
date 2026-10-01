@@ -79,6 +79,48 @@ struct ToolBlockState {
     pending_args: String,
 }
 
+impl ToolBlockState {
+    fn accept_identity(
+        &mut self,
+        call: &DeltaToolCall,
+        claimed: &mut HashSet<String>,
+    ) -> Result<(), &'static str> {
+        let id = call.id.as_deref().filter(|id| !id.is_empty());
+        let name = call
+            .function
+            .as_ref()
+            .and_then(|function| function.name.as_deref())
+            .filter(|name| !name.is_empty());
+        if id.is_some_and(|id| !self.id.is_empty() && id != self.id)
+            || name.is_some_and(|name| !self.name.is_empty() && name != self.name)
+            || id.is_some_and(|id| self.id.is_empty() && claimed.contains(id))
+        {
+            return Err("Upstream tool identity conflicted with an existing call");
+        }
+        if let Some(id) = id {
+            if self.id.is_empty() {
+                claimed.insert(id.to_owned());
+                self.id = id.to_owned();
+            }
+        }
+        if let Some(name) = name {
+            self.name = name.to_owned();
+        }
+        Ok(())
+    }
+}
+
+fn fallback_tool_id(index: usize, claimed: &mut HashSet<String>) -> String {
+    let base = format!("tool_call_{index}");
+    let mut candidate = base.clone();
+    let mut suffix = 0;
+    while !claimed.insert(candidate.clone()) {
+        suffix += 1;
+        candidate = format!("{base}_{suffix}");
+    }
+    candidate
+}
+
 pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
@@ -93,6 +135,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
         let mut current_non_tool_block_type: Option<&'static str> = None;
         let mut current_non_tool_block_index: Option<u32> = None;
         let mut tool_blocks_by_index: HashMap<usize, ToolBlockState> = HashMap::new();
+        let mut claimed_tool_ids: HashSet<String> = HashSet::new();
         let mut open_tool_block_indices: HashSet<u32> = HashSet::new();
         let mut pending_args_bytes: usize = 0;
 
@@ -240,13 +283,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                 let (anthropic_index, id, name, should_start, pending_after_start, immediate_delta) = {
                                                     let state = tool_blocks_by_index.get_mut(&tool_call.index).expect("registered tool");
 
-                                                    if let Some(id) = &tool_call.id {
-                                                        state.id = id.clone();
-                                                    }
-                                                    if let Some(function) = &tool_call.function {
-                                                        if let Some(name) = &function.name {
-                                                            state.name = name.clone();
-                                                        }
+                                                    if let Err(error) = state.accept_identity(tool_call, &mut claimed_tool_ids) {
+                                                        yield Ok(super::stream_errors::api_error_event(error)); return;
                                                     }
 
                                                     let should_start = !state.started && !state.id.is_empty() && !state.name.is_empty();
@@ -332,7 +370,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                     continue;
                                                 }
                                                 let fallback_id = if state.id.is_empty() {
-                                                    format!("tool_call_{tool_idx}")
+                                                    fallback_tool_id(*tool_idx, &mut claimed_tool_ids)
                                                 } else {
                                                     state.id.clone()
                                                 };

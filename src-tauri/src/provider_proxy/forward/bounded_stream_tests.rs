@@ -59,3 +59,85 @@ async fn valid_chat_finish_reason_without_done_is_delivered_and_counted_once() {
     assert!(!output.contains("event: error\n"));
     streaming_tests::assert_single_outcome(&app, 200, 1, 7);
 }
+
+fn tool_frame(tool: serde_json::Value) -> String {
+    format!(
+        "data: {}\n\n",
+        json!({"id":"fixture","model":"fixture-model","choices":[{"delta":{"tool_calls":[tool]}}],"usage":{"prompt_tokens":7}})
+    )
+}
+
+#[tokio::test]
+async fn repeated_parallel_chat_identity_is_delivered_as_two_calls_and_counted_once() {
+    let mut wire =
+        tool_frame(json!({"index":0,"id":"call_a","function":{"name":"first","arguments":"{"}}));
+    wire += &tool_frame(
+        json!({"index":1,"id":"call_b","function":{"name":"second","arguments":"{\"b\":2}"}}),
+    );
+    wire += &tool_frame(
+        json!({"index":0,"id":"call_a","function":{"name":"first","arguments":"\"a\":1}"}}),
+    );
+    wire += "data: {\"id\":\"fixture\",\"model\":\"fixture-model\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n";
+    let upstream = dynamic_server(wire).await;
+    let app = app(&[("p1", &upstream.url, vec![])], OptimizerConfig::default());
+    set_format(&app, "p1", "openai_chat");
+    let response = forward(app.handle().clone(), true).await;
+    let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+    let output = String::from_utf8(bytes.to_vec()).unwrap();
+    let events = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|data| serde_json::from_str::<serde_json::Value>(data).unwrap())
+        .collect::<Vec<_>>();
+    let starts = events
+        .iter()
+        .filter(|event| event["type"] == "content_block_start")
+        .collect::<Vec<_>>();
+    assert_eq!(starts.len(), 2);
+    assert_eq!(starts[0]["content_block"]["id"], "call_a");
+    assert_eq!(starts[1]["content_block"]["id"], "call_b");
+    for (index, expected) in [(0, json!({"a":1})), (1, json!({"b":2}))] {
+        let arguments = events
+            .iter()
+            .filter(|event| event["index"] == index)
+            .filter_map(|event| {
+                event
+                    .pointer("/delta/partial_json")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .collect::<String>();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&arguments).unwrap(),
+            expected
+        );
+    }
+    assert!(!output.contains("event: error\n"));
+    assert_eq!(output.matches("event: message_stop\n").count(), 1);
+    streaming_tests::assert_single_outcome(&app, 200, 1, 7);
+}
+
+#[tokio::test]
+async fn conflicted_chat_identity_retains_usage_and_records_one_failed_request() {
+    for conflicting in [
+        json!({"index":0,"id":"private-call","function":{"name":"first","arguments":"private-data"}}),
+        json!({"index":0,"id":"call_a","function":{"name":"private-name","arguments":"private-data"}}),
+        json!({"index":1,"id":"call_a","function":{"name":"first","arguments":"private-data"}}),
+    ] {
+        let wire = tool_frame(
+            json!({"index":0,"id":"call_a","function":{"name":"first","arguments":"{"}}),
+        ) + &tool_frame(conflicting)
+            + "data: [DONE]\n\n";
+        let upstream = dynamic_server(wire).await;
+        let app = app(&[("p1", &upstream.url, vec![])], OptimizerConfig::default());
+        set_format(&app, "p1", "openai_chat");
+        let response = forward(app.handle().clone(), true).await;
+        let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+        let output = String::from_utf8(bytes.to_vec()).unwrap();
+        assert_eq!(output.matches("event: content_block_start\n").count(), 1);
+        assert_eq!(output.matches("event: error\n").count(), 1);
+        assert!(!output.contains("message_stop"));
+        assert!(!output.contains("private-"));
+        streaming_tests::assert_single_outcome(&app, 502, 0, 7);
+        assert_eq!(upstream.hits.load(Ordering::SeqCst), 1);
+    }
+}

@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod chat_identity_tests;
 mod message_id;
 mod responses;
 mod responses_reasoning;

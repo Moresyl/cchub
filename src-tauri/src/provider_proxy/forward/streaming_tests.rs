@@ -80,16 +80,28 @@ fn partial_usage_events_merge_without_losing_input_or_counting_duplicates() {
     use crate::provider_proxy::ProxyUsageMetrics;
     let mut buffer = String::new();
     let mut usage = ProxyUsageMetrics::default();
+    let mut gemini = crate::shared::gemini_usage::GeminiUsage::default();
     let start = "data: {\"message\":{\"model\":\"模型🦀\",\"usage\":{\"input_tokens\":7,\"cache_read_input_tokens\":2}}}\n\n";
     let delta = "data: {\"usage\":{\"output_tokens\":5}}\n\n";
-    assert!(scan_stream_usage_buffer(&mut buffer, start, &mut usage));
+    assert!(scan_stream_usage_buffer(
+        &mut buffer,
+        start,
+        &mut usage,
+        &mut gemini
+    ));
     for _ in 0..2 {
-        assert!(scan_stream_usage_buffer(&mut buffer, delta, &mut usage));
+        assert!(scan_stream_usage_buffer(
+            &mut buffer,
+            delta,
+            &mut usage,
+            &mut gemini
+        ));
     }
     assert!(!scan_stream_usage_buffer(
         &mut buffer,
         "data: {\"model\":\"ignored\",\"usage\":{}}\n\n",
-        &mut usage
+        &mut usage,
+        &mut gemini
     ));
     assert_eq!(usage.response_model.as_deref(), Some("模型🦀"));
     assert_eq!(usage.input_tokens, 7);

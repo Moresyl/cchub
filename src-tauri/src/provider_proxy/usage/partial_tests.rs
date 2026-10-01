@@ -2,6 +2,38 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn scanner_retains_independent_gemini_counters_across_byte_boundaries() {
+    let mut buffer = String::new();
+    let mut usage = ProxyUsageMetrics::default();
+    let mut gemini = GeminiUsage::default();
+    let input = concat!(
+        "data: {\"usageMetadata\":{\"totalTokenCount\":20}}\n\n",
+        "data: {\"usageMetadata\":{\"promptTokenCount\":7}}\n\n",
+        "data: {\"usageMetadata\":{\"candidatesTokenCount\":15}}\n\n",
+        "data: {\"usageMetadata\":{\"thoughtsTokenCount\":3}}\n\n",
+        "data: {\"usageMetadata\":{\"cachedContentTokenCount\":2}}\n\n"
+    );
+    for _ in 0..2 {
+        for byte in input.as_bytes() {
+            scan_stream_usage_buffer(
+                &mut buffer,
+                std::str::from_utf8(std::slice::from_ref(byte)).unwrap(),
+                &mut usage,
+                &mut gemini,
+            );
+        }
+    }
+    assert_eq!(
+        (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens
+        ),
+        (7, 18, 2)
+    );
+}
+
+#[test]
 fn partial_gemini_usage_preserves_input_cache_and_reasoning_without_double_counting() {
     let mut current = ProxyUsageMetrics::default();
     for (value, expected) in [

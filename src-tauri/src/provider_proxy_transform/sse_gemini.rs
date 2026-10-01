@@ -1,6 +1,18 @@
+use crate::shared::gemini_usage::GeminiUsage;
 use bytes::Bytes;
 use futures_util::stream::{Stream, StreamExt};
 use serde_json::{json, Value};
+
+fn anthropic_usage(usage: &GeminiUsage) -> Value {
+    let mut value = json!({
+        "input_tokens": usage.input.unwrap_or(0),
+        "output_tokens": usage.output()
+    });
+    if let Some(cached) = usage.cached {
+        value["cache_read_input_tokens"] = json!(cached);
+    }
+    value
+}
 
 /// Converts Gemini SSE stream (`streamGenerateContent?alt=sse`) to Anthropic SSE format.
 pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'static>(
@@ -14,6 +26,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
         let mut current_text_block_index: Option<u32> = None;
         let mut has_tool_use = false;
         let mut finished = false;
+        let mut usage = GeminiUsage::default();
         let msg_id = format!("msg_{:012x}", std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -53,17 +66,14 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                             yield Ok(error);
                             return;
                         }
-                        let usage_meta = parsed.get("usageMetadata");
-                        let input_tokens = usage_meta
-                            .and_then(|u| u.get("promptTokenCount"))
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let output_tokens = usage_meta
-                            .and_then(|u| u.get("candidatesTokenCount"))
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
+                        if finished { continue; }
+                        if let Some(metadata) = parsed.get("usageMetadata") {
+                            usage.observe(metadata);
+                        }
 
                         if !has_sent_message_start {
+                            let mut start_usage = anthropic_usage(&usage);
+                            start_usage["output_tokens"] = json!(0);
                             let event = json!({
                                 "type": "message_start",
                                 "message": {
@@ -71,10 +81,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                                     "type": "message",
                                     "role": "assistant",
                                     "model": model,
-                                    "usage": {
-                                        "input_tokens": input_tokens,
-                                        "output_tokens": 0
-                                    }
+                                    "usage": start_usage
                                 }
                             });
                             yield Ok(Bytes::from(format!("event: message_start\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
@@ -175,7 +182,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                                 let delta_event = json!({
                                     "type": "message_delta",
                                     "delta": {"stop_reason": stop_reason, "stop_sequence": null},
-                                    "usage": {"output_tokens": output_tokens}
+                                    "usage": anthropic_usage(&usage)
                                 });
                                 yield Ok(Bytes::from(format!("event: message_delta\ndata: {}\n\n", serde_json::to_string(&delta_event).unwrap_or_default())));
 
@@ -201,7 +208,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
             let delta_event = json!({
                 "type": "message_delta",
                 "delta": {"stop_reason": "end_turn", "stop_sequence": null},
-                "usage": {"output_tokens": 0}
+                "usage": anthropic_usage(&usage)
             });
             yield Ok(Bytes::from(format!("event: message_delta\ndata: {}\n\n", serde_json::to_string(&delta_event).unwrap_or_default())));
             let stop_event = json!({"type": "message_stop"});

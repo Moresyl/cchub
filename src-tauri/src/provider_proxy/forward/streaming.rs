@@ -7,7 +7,9 @@ use super::streaming_errors::{terminate, Protocol};
 use super::streaming_health::{observe, observe_delivery, StreamHealth};
 use super::timeouts::{prepare_raw_stream, Deadline, ResponseStream};
 use crate::provider_proxy::desktop;
-use crate::provider_proxy::usage::create_usage_tracking_stream;
+use crate::provider_proxy::usage::{
+    capture_stream_usage, create_usage_tracking_stream, UsageCapture,
+};
 use crate::provider_proxy::{ClaudeApiFormat, ProxyRequestInsights, UpstreamTarget};
 use crate::provider_proxy_transform::{
     create_anthropic_sse_stream, create_anthropic_sse_stream_from_gemini,
@@ -52,7 +54,8 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
     } else {
         raw
     };
-    let observed = observe(source, health.clone());
+    let capture = UsageCapture::default();
+    let observed = capture_stream_usage(observe(source, health.clone()), capture.clone());
     let stream = match transform {
         Some(ClaudeApiFormat::OpenAiChat) => boxed(create_anthropic_sse_stream(observed)),
         Some(ClaudeApiFormat::OpenAiResponses) => {
@@ -80,6 +83,7 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         upstream_status,
         started_at,
         health,
+        capture,
     ));
     if is_desktop {
         Ok(Body::from_stream(desktop::restore_stream_model(

@@ -1,4 +1,5 @@
 // 解析单次响应/流式响应里的 input/output/cache token 用量，并落库为整体合计 + 当日 rollup。
+use crate::shared::gemini_usage::GeminiUsage;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
@@ -120,7 +121,15 @@ fn parse_partial_stream_usage(
     )
 }
 
+#[cfg(test)]
 pub(super) fn extract_stream_usage_metrics_from_event(body: &Value) -> Option<ProxyUsageMetrics> {
+    extract_stream_usage_with_gemini(body, &mut GeminiUsage::default())
+}
+
+fn extract_stream_usage_with_gemini(
+    body: &Value,
+    gemini: &mut GeminiUsage,
+) -> Option<ProxyUsageMetrics> {
     let response_model = body
         .pointer("/message/model")
         .or_else(|| body.pointer("/response/model"))
@@ -140,38 +149,18 @@ pub(super) fn extract_stream_usage_metrics_from_event(body: &Value) -> Option<Pr
         return parse_partial_stream_usage(usage, response_model);
     }
 
-    if let Some(usage) = body.get("usageMetadata").and_then(Value::as_object) {
-        let count = |key: &str| usage.get(key).and_then(Value::as_u64);
-        if ![
-            "promptTokenCount",
-            "candidatesTokenCount",
-            "thoughtsTokenCount",
-            "totalTokenCount",
-            "cachedContentTokenCount",
-        ]
-        .iter()
-        .any(|key| count(key).is_some())
-        {
+    if let Some(usage) = body.get("usageMetadata") {
+        if !gemini.observe(usage) {
             return None;
         }
-        // A partial total without its input split cannot be assigned to output.
-        let input = count("promptTokenCount");
-        let output = count("totalTokenCount")
-            .zip(input)
-            .map(|(total, input)| total.saturating_sub(input))
-            .unwrap_or_else(|| {
-                count("candidatesTokenCount")
-                    .unwrap_or(0)
-                    .saturating_add(count("thoughtsTokenCount").unwrap_or(0))
-            });
         return Some(ProxyUsageMetrics {
             response_model: body
                 .get("modelVersion")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            input_tokens: input.unwrap_or(0),
-            output_tokens: output,
-            cache_read_tokens: count("cachedContentTokenCount").unwrap_or(0),
+            input_tokens: gemini.input.unwrap_or(0),
+            output_tokens: gemini.output(),
+            cache_read_tokens: gemini.cached.unwrap_or(0),
             cache_creation_tokens: 0,
         });
     }
@@ -187,6 +176,7 @@ pub(super) fn scan_stream_usage_buffer(
     buffer: &mut String,
     text: &str,
     usage: &mut ProxyUsageMetrics,
+    gemini: &mut GeminiUsage,
 ) -> bool {
     buffer.push_str(text);
     let mut changed = false;
@@ -216,7 +206,7 @@ pub(super) fn scan_stream_usage_buffer(
         let Ok(parsed) = serde_json::from_str::<Value>(&payload) else {
             continue;
         };
-        if let Some(metrics) = extract_stream_usage_metrics_from_event(&parsed) {
+        if let Some(metrics) = extract_stream_usage_with_gemini(&parsed, gemini) {
             merge_proxy_usage_metrics(usage, &metrics);
             changed = true;
         }
@@ -225,8 +215,11 @@ pub(super) fn scan_stream_usage_buffer(
     changed
 }
 
+#[path = "usage/capture.rs"]
+mod capture;
 #[path = "usage/stream_log.rs"]
 mod stream_log;
+pub(super) use capture::{capture_stream_usage, UsageCapture};
 
 #[cfg(test)]
 #[path = "usage/partial_tests.rs"]
@@ -243,6 +236,7 @@ pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(
     upstream_status: u16,
     started_at: std::time::Instant,
     health: super::forward::streaming_health::StreamHealth,
+    capture: UsageCapture,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
@@ -261,17 +255,14 @@ where
         error_message: Some("Client disconnected before the upstream response completed".into()),
         usage: ProxyUsageMetrics::default(),
         health: health.clone(),
+        capture,
     };
     async_stream::stream! {
         let mut log = log;
-        let mut buffer = String::new();
         tokio::pin!(stream);
         loop {
             match stream.next().await {
                 Some(Ok(bytes)) => {
-                    let normalized = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
-                    scan_stream_usage_buffer(&mut buffer, &normalized, &mut log.usage);
-                    if buffer.len() > 1024 * 1024 { buffer.clear(); }
                     if health.failed() { log.fail("Upstream returned a streaming error".into()); }
                     yield Ok(bytes);
                 }
@@ -282,9 +273,6 @@ where
                 }
                 None => break,
             }
-        }
-        if !buffer.trim().is_empty() {
-            scan_stream_usage_buffer(&mut buffer, "\n\n", &mut log.usage);
         }
         if health.failed() { log.fail("Upstream returned a streaming error".into()); }
         else { log.complete(); }

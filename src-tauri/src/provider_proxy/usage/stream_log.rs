@@ -16,6 +16,7 @@ pub(super) struct StreamRequestLog<R: tauri::Runtime> {
     pub error_message: Option<String>,
     pub usage: ProxyUsageMetrics,
     pub health: crate::provider_proxy::forward::streaming_health::StreamHealth,
+    pub capture: super::UsageCapture,
 }
 
 impl<R: tauri::Runtime> StreamRequestLog<R> {
@@ -43,6 +44,7 @@ impl<R: tauri::Runtime> StreamRequestLog<R> {
 
 impl<R: tauri::Runtime> Drop for StreamRequestLog<R> {
     fn drop(&mut self) {
+        self.usage = self.capture.snapshot();
         if self.health.failed() {
             self.fail("Upstream returned a streaming error".into());
         } else if self.health.delivered_successfully() {

@@ -40,6 +40,28 @@ afterEach(() => {
 });
 
 describe("session data ownership", () => {
+  it("retains selected details across packing and accepts the earlier logical source response", async () => {
+    const pending = deferred<SessionDetail>();
+    const { result } = mount();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    vi.mocked(invoke).mockReturnValueOnce(pending.promise);
+    act(() => {
+      void result.current.openSession(first);
+    });
+    const packed = { ...first, source_path: `${first.source_path}.zst` };
+    vi.mocked(fetchSessionsPageData).mockResolvedValue([packed, other]);
+    await act(async () => {
+      await result.current.loadSessions(false);
+    });
+    expect(result.current.selectedSession?.source_path).toBe(packed.source_path);
+    await act(async () => {
+      pending.resolve(detailFixture(first));
+      await pending.promise;
+    });
+    expect(result.current.detail?.session.source_path).toBe(packed.source_path);
+    expect(result.current.detail?.entries[0].content).toBe("Fixture question");
+    expect(result.current.detailError).toBeNull();
+  });
   it("loads details from the exact selected source and reconciles a rename", async () => {
     const { result } = mount();
     await waitFor(() => expect(result.current.loading).toBe(false));

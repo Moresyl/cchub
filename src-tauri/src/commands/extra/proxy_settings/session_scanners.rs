@@ -123,9 +123,6 @@ pub fn scan_codex_sessions_from_plan(
         for row in rows.flatten() {
             let (id, rollout_path, created_at_raw, updated_at_raw, cwd, title, first_user_message) =
                 row;
-            if !seen_ids.insert(id.clone()) {
-                continue;
-            }
             let rollout_file_path = {
                 let path = PathBuf::from(&rollout_path);
                 if path.is_absolute() {
@@ -134,6 +131,18 @@ pub fn scan_codex_sessions_from_plan(
                     root.join(&rollout_path)
                 }
             };
+            let Ok(rollout_file_path) = crate::shared::session_archive::resolve(&rollout_file_path)
+            else {
+                continue;
+            };
+            // Database paths can use forward slashes on Windows. Return the
+            // same spelling as directory scans so UI/import ownership is stable.
+            let rollout_file_path = rollout_file_path.components().collect::<PathBuf>();
+            if !crate::shared::session_archive::confined(&rollout_file_path, root)
+                || !seen_ids.insert(id.clone())
+            {
+                continue;
+            }
             let token_totals = read_codex_session_token_totals(&rollout_file_path);
             let history_items = history_index.get(&id).cloned().unwrap_or_default();
             let preview_source = history_items
@@ -164,7 +173,7 @@ pub fn scan_codex_sessions_from_plan(
                 cwd: (!cwd.trim().is_empty()).then_some(cwd),
                 source_kind: "codex_jsonl".to_string(),
                 source_backend: "jsonl".to_string(),
-                source_path: rollout_path,
+                source_path: rollout_file_path.to_string_lossy().to_string(),
                 created_at: format_unix_timestamp(created_at_raw),
                 updated_at: format_unix_timestamp(updated_at_raw),
                 preview,
@@ -210,6 +219,11 @@ pub fn scan_generic_tool_sessions_from_roots(
     }
 
     let mut sessions = Vec::new();
+    let jsonl_files = if tool_id == "codex" {
+        crate::shared::session_archive::preferred_files(jsonl_files)
+    } else {
+        jsonl_files
+    };
     for path in jsonl_files {
         let key = path.to_string_lossy().to_string();
         if !seen_jsonl.insert(key) {
@@ -245,9 +259,13 @@ pub fn parse_generic_jsonl_session_summary(
     path: &std::path::Path,
     query: &str,
 ) -> Option<SessionSummary> {
-    let file = std::fs::File::open(path).ok()?;
+    let lines = crate::shared::session_archive::lines(
+        path,
+        crate::shared::session_archive::MAX_SESSION_BYTES,
+    )
+    .ok()?;
     let metadata = std::fs::metadata(path).ok();
-    let file_stem = path
+    let file_stem = crate::shared::session_archive::logical_path(path)
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
@@ -277,14 +295,11 @@ pub fn parse_generic_jsonl_session_summary(
     //     用于让 created_at/title/cwd/preview 之类字段在前面行内尽快定位完
     const MAX_TOKEN_LINES: usize = 2000;
     const MAX_META_LINES: usize = 120;
-    for (line_index, line) in BufReader::new(file)
-        .lines()
-        .map_while(Result::ok)
-        .enumerate()
-    {
+    for (line_index, line) in lines.enumerate() {
         if line_index >= MAX_TOKEN_LINES {
             break;
         }
+        let line = line.ok()?;
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
@@ -373,6 +388,9 @@ pub fn parse_generic_jsonl_session_summary(
         }
     }
 
+    if tool_id == "codex" {
+        token_totals = try_read_codex_session_token_totals(path).ok()?;
+    }
     let title = title
         .or(first_message_summary)
         .unwrap_or_else(|| session_id.clone());

@@ -9,7 +9,6 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 
@@ -327,16 +326,19 @@ fn collect_jsonl_files(root: &Path, output: &mut Vec<PathBuf>, depth: usize) {
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
-        if file_type.is_symlink() {
+        if !fs::symlink_metadata(&path)
+            .is_ok_and(|metadata| !crate::shared::session_archive::is_link(&metadata))
+        {
             continue;
         }
         if file_type.is_dir() {
             collect_jsonl_files(&path, output, depth + 1);
         } else if file_type.is_file()
-            && matches!(
+            && (matches!(
                 path.extension().and_then(|value| value.to_str()),
                 Some("jsonl" | "json")
-            )
+            ) || (tool_for_path(&path) == "codex"
+                && crate::shared::session_archive::compressed(&path)))
         {
             output.push(path);
         }
@@ -344,7 +346,12 @@ fn collect_jsonl_files(root: &Path, output: &mut Vec<PathBuf>, depth: usize) {
 }
 
 fn request_id(path: &Path, line_number: usize, model: &str) -> String {
-    let key = format!("{}:{line_number}:{model}", path.to_string_lossy());
+    let logical = if tool_for_path(path) == "codex" {
+        crate::shared::session_archive::logical_path(path)
+    } else {
+        path.to_path_buf()
+    };
+    let key = format!("{}:{line_number}:{model}", logical.to_string_lossy());
     format!("session:{:x}", Sha256::digest(key.as_bytes()))
 }
 
@@ -396,6 +403,12 @@ fn scan_file(
     if only_tool.is_some_and(|expected| expected != tool) {
         return;
     }
+    let resolved = if tool == "codex" {
+        crate::shared::session_archive::resolve(path).unwrap_or_else(|_| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    };
+    let path = resolved.as_path();
     let Ok(metadata) = fs::metadata(path) else {
         result.deferred_files = result.deferred_files.saturating_add(1);
         return;
@@ -409,7 +422,7 @@ fn scan_file(
         return;
     }
     result.files_scanned = result.files_scanned.saturating_add(1);
-    let file = match fs::File::open(path) {
+    let file = match crate::shared::session_archive::open(path, MAX_FILE_BYTES) {
         Ok(file) => file,
         Err(error) => {
             result.errors.push(format!("{}: {error}", path.display()));
@@ -417,6 +430,7 @@ fn scan_file(
         }
     };
     let is_json = path.extension().and_then(|value| value.to_str()) == Some("json");
+    let record_start = records.len();
     let mut codex_token_state = CodexTokenState::default();
     let mut process = |line_number: usize, line: &str| {
         let value: Value = match serde_json::from_str(line) {
@@ -462,24 +476,42 @@ fn scan_file(
             source: path.display().to_string(),
         });
     };
-    if is_json {
+    let read_result = if is_json {
         let mut text = String::new();
         use std::io::Read;
-        if file
-            .take(MAX_FILE_BYTES + 1)
-            .read_to_string(&mut text)
-            .is_ok()
-        {
-            process(1, &text);
-        }
-        return;
-    }
-    for (line_number, line) in BufReader::new(file).lines().enumerate() {
-        if let Ok(line) = line {
+        let mut file = file;
+        file.read_to_string(&mut text).map(|_| process(1, &text))
+    } else {
+        let mut outcome = Ok(());
+        for (line_number, line) in crate::shared::session_archive::reader_lines(file).enumerate() {
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    outcome = Err(error);
+                    break;
+                }
+            };
             if !line.trim().is_empty() {
                 process(line_number + 1, &line);
             }
         }
+        outcome
+    };
+    drop(process);
+    let changed = !fs::metadata(path).is_ok_and(|current| {
+        current.len() == metadata.len() && current.modified().ok() == metadata.modified().ok()
+    });
+    if read_result.is_err() || changed {
+        records.truncate(record_start);
+        result.deferred_files = result.deferred_files.saturating_add(1);
+        result.errors.push(format!(
+            "{}: {}",
+            path.display(),
+            read_result
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "Session changed while reading; retry later".into())
+        ));
     }
 }
 
@@ -499,7 +531,16 @@ fn sync_with_filter(only_tool: Option<&str>) -> (SessionSyncResult, Vec<UsageRec
     }
     let mut result = SessionSyncResult::default();
     let mut records = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for path in files {
+        let path = if tool_for_path(&path) == "codex" {
+            crate::shared::session_archive::resolve(&path).unwrap_or(path)
+        } else {
+            path
+        };
+        if !seen.insert(crate::shared::session_archive::logical_path(&path)) {
+            continue;
+        }
         scan_file(&path, &mut result, &mut records, only_tool);
     }
     (result, records)
@@ -720,3 +761,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "session_usage_compat/archive_tests.rs"]
+mod archive_tests;

@@ -141,22 +141,40 @@ fn codex_cumulative_snapshot(value: &serde_json::Value) -> Option<SessionTokenTo
 }
 
 pub fn read_codex_session_token_totals(path: &std::path::Path) -> SessionTokenTotals {
+    try_read_codex_session_token_totals(path).unwrap_or_default()
+}
+
+pub fn try_read_codex_session_token_totals(
+    path: &std::path::Path,
+) -> std::io::Result<SessionTokenTotals> {
+    let path = crate::shared::session_archive::resolve(path)?;
+    if crate::shared::session_archive::compressed(&path) {
+        let tail = crate::shared::session_archive::tail(
+            &path,
+            crate::shared::session_archive::MAX_SESSION_BYTES,
+            CODEX_TOKEN_TAIL_BYTES as usize,
+        )?;
+        return Ok(totals_from_tail(&tail));
+    }
     let mut file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(_) => return SessionTokenTotals::default(),
+        Err(error) => return Err(error),
     };
     let file_len = match file.metadata() {
         Ok(metadata) => metadata.len(),
-        Err(_) => return SessionTokenTotals::default(),
+        Err(error) => return Err(error),
     };
     let start = file_len.saturating_sub(CODEX_TOKEN_TAIL_BYTES);
-    if file.seek(SeekFrom::Start(start)).is_err() {
-        return SessionTokenTotals::default();
-    }
+    file.seek(SeekFrom::Start(start))?;
 
     let mut tail = Vec::with_capacity((file_len - start) as usize);
-    if file.read_to_end(&mut tail).is_err() {
-        return SessionTokenTotals::default();
+    file.take(CODEX_TOKEN_TAIL_BYTES + 1)
+        .read_to_end(&mut tail)?;
+    if tail.len() as u64 > CODEX_TOKEN_TAIL_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Session changed while reading its tail",
+        ));
     }
     let complete_tail = if start == 0 {
         tail.as_slice()
@@ -167,6 +185,10 @@ pub fn read_codex_session_token_totals(path: &std::path::Path) -> SessionTokenTo
             .unwrap_or_default()
     };
 
+    Ok(totals_from_tail(complete_tail))
+}
+
+fn totals_from_tail(complete_tail: &[u8]) -> SessionTokenTotals {
     String::from_utf8_lossy(complete_tail)
         .lines()
         .rev()

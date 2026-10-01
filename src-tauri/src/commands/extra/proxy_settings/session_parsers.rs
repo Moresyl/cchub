@@ -15,14 +15,15 @@ pub fn codex_message_content(content: Option<&serde_json::Value>) -> String {
 }
 
 pub fn parse_codex_session_entries(path: &std::path::Path) -> Result<Vec<SessionEntry>, String> {
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let lines = crate::shared::session_archive::lines(
+        path,
+        crate::shared::session_archive::MAX_SESSION_BYTES,
+    )
+    .map_err(|e| e.to_string())?;
     let mut entries = Vec::new();
 
-    for (index, line) in BufReader::new(file)
-        .lines()
-        .map_while(Result::ok)
-        .enumerate()
-    {
+    for (index, line) in lines.enumerate() {
+        let line = line.map_err(|e| e.to_string())?;
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
@@ -350,78 +351,21 @@ pub fn is_valid_session_source_path(
     source_path: &str,
 ) -> bool {
     let source = PathBuf::from(source_path);
-    let normalized_source = source.canonicalize().unwrap_or(source);
+    let source = if tool_id == "codex" && crate::shared::session_archive::jsonl(&source) {
+        match crate::shared::session_archive::resolve(&source) {
+            Ok(path) => path,
+            Err(_) => return false,
+        }
+    } else {
+        source
+    };
     let Ok(roots) = session_roots_for_tool(conn, tool_id) else {
         return false;
     };
 
-    roots.into_iter().any(|root| {
-        let normalized_root = root.canonicalize().unwrap_or(root);
-        normalized_source.starts_with(&normalized_root)
-    })
-}
-
-pub fn scrub_codex_history(root: &std::path::Path, session_id: &str) -> Result<(), String> {
-    let history_path = root.join("history.jsonl");
-    if !history_path.exists() {
-        return Ok(());
-    }
-
-    let file = std::fs::File::open(&history_path).map_err(|e| e.to_string())?;
-    let mut kept_lines = Vec::new();
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let keep = serde_json::from_str::<serde_json::Value>(&line)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("session_id")
-                    .and_then(|item| item.as_str())
-                    .map(|id| id != session_id)
-            })
-            .unwrap_or(true);
-        if keep {
-            kept_lines.push(line);
-        }
-    }
-
-    let content = if kept_lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", kept_lines.join("\n"))
-    };
-    crate::utils::atomic_write_string(&history_path, &content).map_err(|e| e.to_string())
-}
-
-pub fn delete_codex_session_records(
-    root: &std::path::Path,
-    session_id: &str,
-) -> Result<(), String> {
-    scrub_codex_history(root, session_id)?;
-
-    for db_path in codex_state_databases(root) {
-        let conn = match rusqlite::Connection::open(&db_path) {
-            Ok(conn) => conn,
-            Err(_) => continue,
-        };
-        let _ = conn.execute(
-            "DELETE FROM thread_dynamic_tools WHERE thread_id = ?1",
-            rusqlite::params![session_id],
-        );
-        let _ = conn.execute(
-            "DELETE FROM thread_spawn_edges WHERE child_thread_id = ?1 OR parent_thread_id = ?1",
-            rusqlite::params![session_id],
-        );
-        let _ = conn.execute(
-            "DELETE FROM agent_job_items WHERE assigned_thread_id = ?1",
-            rusqlite::params![session_id],
-        );
-        let _ = conn.execute(
-            "DELETE FROM threads WHERE id = ?1",
-            rusqlite::params![session_id],
-        );
-    }
-
-    Ok(())
+    roots
+        .into_iter()
+        .any(|root| crate::shared::session_archive::confined(&source, &root))
 }
 
 pub fn delete_session_impl(
@@ -445,8 +389,17 @@ pub fn delete_session_impl(
     if tool_id == "opencode" && source_backend == "opencode_sqlite" {
         return delete_opencode_session(&PathBuf::from(source_path), session_id);
     }
-    if tool_id == "codex" {
-        delete_codex_session_records(&root, session_id)?;
+    if tool_id == "codex" && source_backend == "jsonl" {
+        return super::session_trash::delete_from_conn(
+            conn,
+            &SessionDeleteTarget {
+                tool_id: tool_id.into(),
+                session_id: session_id.into(),
+                source_path: source_path.into(),
+                source_backend: source_backend.into(),
+            },
+        )
+        .map(|_| ());
     }
 
     if source_backend == "jsonl" {
@@ -454,7 +407,8 @@ pub fn delete_session_impl(
         if path.exists() {
             std::fs::remove_file(path).map_err(|e| e.to_string())?;
         }
+        return Ok(());
     }
 
-    Ok(())
+    Err("This session backend does not support deletion".into())
 }

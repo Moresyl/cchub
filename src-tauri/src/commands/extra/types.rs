@@ -333,8 +333,12 @@ pub struct SessionResumeResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionDeleteTarget {
+    #[serde(alias = "tool_id")]
     pub tool_id: String,
+    #[serde(alias = "session_id")]
     pub session_id: String,
+    #[serde(alias = "source_path")]
     pub source_path: String,
+    #[serde(alias = "source_backend")]
     pub source_backend: String,
 }

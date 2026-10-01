@@ -1,4 +1,5 @@
 import { getAppLabel, type ManagedAppId } from "../../lib/appPreferences";
+import type { SessionDeleteResultTarget } from "../../hooks/mutations/sessions";
 
 export interface SessionSummary {
   id: string;
@@ -66,11 +67,22 @@ export const TOOL_ORDER: ManagedAppId[] = [
 type SessionIdentity = Pick<SessionSummary, "tool_id" | "id" | "source_path" | "source_backend">;
 
 export function sessionSelectionKey(session: SessionIdentity) {
-  return JSON.stringify([session.tool_id, session.id, session.source_path, session.source_backend]);
+  const path =
+    session.tool_id === "codex" ? session.source_path.replace(/(\.jsonl)\.zst$/i, "$1") : session.source_path;
+  return JSON.stringify([session.tool_id, session.id, path, session.source_backend]);
 }
 
 export function sameSession(left: SessionIdentity | null | undefined, right: SessionIdentity | null | undefined) {
   return Boolean(left && right && sessionSelectionKey(left) === sessionSelectionKey(right));
+}
+
+export function deleteResultKey(target: SessionDeleteResultTarget) {
+  return sessionSelectionKey({
+    tool_id: target.toolId,
+    id: target.sessionId,
+    source_path: target.sourcePath,
+    source_backend: target.sourceBackend,
+  });
 }
 
 export function sessionDetailArgs(session: SessionSummary) {

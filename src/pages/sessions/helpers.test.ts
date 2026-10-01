@@ -12,6 +12,14 @@ import {
 import { sessionFixture } from "./testFixtures";
 
 describe("session helpers", () => {
+  it("keeps Codex twin identity stable without merging other owners or backends", () => {
+    const plain = sessionFixture({ source_backend: "jsonl" });
+    const packed = { ...plain, source_path: `${plain.source_path}.zst` };
+    expect(sameSession(plain, packed)).toBe(true);
+    expect(sameSession(plain, { ...packed, source_path: "C:/other/one.jsonl.zst" })).toBe(false);
+    expect(sameSession(plain, { ...packed, source_backend: "sqlite" })).toBe(false);
+    expect(sameSession({ ...plain, tool_id: "claude" }, { ...packed, tool_id: "claude" })).toBe(false);
+  });
   it("keeps all nine managed tools available to the session filter", () => {
     const filters = buildSessionToolFilters(TOOL_ORDER, "All Apps");
 

@@ -576,6 +576,7 @@ dependencies = [
  "uuid",
  "zeroize",
  "zip 8.2.0",
+ "zstd",
 ]
 
 [[package]]

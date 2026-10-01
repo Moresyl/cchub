@@ -440,7 +440,7 @@ pub fn is_session_candidate_path(
         return false;
     }
     if tool_id == "codex"
-        && path
+        && crate::shared::session_archive::logical_path(path)
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| {
@@ -478,6 +478,9 @@ pub fn is_session_candidate_path(
     .any(|keyword| relative.contains(keyword));
 
     match extension.as_deref() {
+        Some("zst") if tool_id == "codex" && crate::shared::session_archive::compressed(path) => {
+            has_keyword
+        }
         Some("jsonl") => {
             if !has_keyword {
                 return false;
@@ -524,8 +527,17 @@ pub fn collect_session_candidate_files(
     };
 
     for entry in read_dir.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Ok(link_metadata) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if crate::shared::session_archive::is_link(&link_metadata) {
+            continue;
+        }
         let path = entry.path();
-        if path.is_dir() {
+        if metadata.is_dir() {
             let dir_name = path
                 .file_name()
                 .and_then(|value| value.to_str())
@@ -559,6 +571,7 @@ pub fn collect_session_candidate_files(
             .as_deref()
         {
             Some("jsonl") => jsonl_files.push(path),
+            Some("zst") if tool_id == "codex" => jsonl_files.push(path),
             Some("sqlite" | "db") => sqlite_files.push(path),
             _ => {}
         }

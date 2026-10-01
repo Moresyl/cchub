@@ -62,6 +62,66 @@ afterEach(() => {
 });
 
 describe("session page interactions", () => {
+  it("prevents repeated confirmation and dismissing an in-flight bulk deletion", async () => {
+    await loaded();
+    fireEvent.click(within(row(first.title)).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "删除选中 (1)" }));
+    const pending = deferred<{ deleted: unknown[]; failed: unknown[] }>();
+    vi.mocked(invoke).mockReturnValueOnce(pending.promise);
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "批量删除" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByRole("button", { name: "删除中…" }).hasAttribute("disabled")).toBe(true);
+    expect(within(dialog).getByRole("button", { name: "取消" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    window.dispatchEvent(new Event("cchub-shortcut-escape"));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await act(async () => {
+      pending.resolve({ deleted: [], failed: [] });
+      await pending.promise;
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("removes only successful bulk items and retries only failures", async () => {
+    await loaded();
+    fireEvent.click(within(row(first.title)).getByRole("checkbox"));
+    fireEvent.click(within(row(other.title)).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "删除选中 (2)" }));
+    const toTarget = (session: typeof first) => ({
+      toolId: session.tool_id,
+      sessionId: session.id,
+      sourcePath: session.source_path,
+      sourceBackend: session.source_backend,
+    });
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "delete_sessions_checked")
+        return { deleted: [toTarget(first)], failed: [{ target: toTarget(other), error: "Fixture locked file" }] };
+      return null;
+    });
+    vi.mocked(fetchSessionsPageData).mockResolvedValue([other]);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "批量删除" }));
+    await screen.findByText("Fixture locked file");
+    expect(screen.queryByText(first.title)).toBeNull();
+    expect(screen.getByRole("button", { name: "重试失败项" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试失败项" }));
+    vi.mocked(invoke).mockResolvedValueOnce({ deleted: [toTarget(other)], failed: [] });
+    vi.mocked(fetchSessionsPageData).mockResolvedValue([]);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "批量删除" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "重试失败项" })).toBeNull());
+    expect(invoke).toHaveBeenLastCalledWith("delete_sessions_checked", {
+      sessions: [
+        {
+          tool_id: other.tool_id,
+          session_id: other.id,
+          source_path: other.source_path,
+          source_backend: other.source_backend,
+        },
+      ],
+    });
+  });
   it("selects checkboxes without opening details and opens the row with Enter", async () => {
     await loaded();
     const item = row(first.title);

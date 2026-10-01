@@ -41,6 +41,8 @@ pub fn get_session_messages(
         return Err("Invalid session source path".to_string());
     }
     let path = std::path::Path::new(&source_path);
+    let is_jsonl = path.extension().and_then(|value| value.to_str()) == Some("jsonl")
+        || (provider_id == "codex" && crate::shared::session_archive::compressed(path));
     let session = SessionSummary {
         id: path
             .file_stem()
@@ -55,12 +57,17 @@ pub fn get_session_messages(
             .unwrap_or("Session")
             .to_string(),
         cwd: None,
-        source_kind: if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
-            "jsonl".to_string()
+        source_kind: if is_jsonl {
+            if provider_id == "codex" {
+                "codex_jsonl"
+            } else {
+                "jsonl"
+            }
+            .to_string()
         } else {
             "sqlite".to_string()
         },
-        source_backend: if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
+        source_backend: if is_jsonl {
             "jsonl".to_string()
         } else {
             "sqlite".to_string()

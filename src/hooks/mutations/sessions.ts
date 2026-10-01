@@ -17,6 +17,18 @@ export interface DeleteSessionsMutationInput {
   }>;
 }
 
+export interface SessionDeleteResultTarget {
+  toolId: string;
+  sessionId: string;
+  sourcePath: string;
+  sourceBackend: string;
+}
+
+export interface SessionBatchDeleteResult {
+  deleted: SessionDeleteResultTarget[];
+  failed: Array<{ target: SessionDeleteResultTarget; error: string }>;
+}
+
 export function useDeleteSessionMutation() {
   const queryClient = useQueryClient();
 
@@ -32,7 +44,8 @@ export function useDeleteSessionsMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: DeleteSessionsMutationInput) => invoke<number>("delete_sessions", { sessions: input.sessions }),
+    mutationFn: (input: DeleteSessionsMutationInput) =>
+      invoke<SessionBatchDeleteResult>("delete_sessions_checked", { sessions: input.sessions }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },

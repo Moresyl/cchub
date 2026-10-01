@@ -27,12 +27,15 @@ import {
   type SessionSummary,
   sameSession,
   sessionSelectionKey,
+  deleteResultKey,
   TOOL_ORDER,
 } from "./sessions/helpers";
 import SessionEntries from "./sessions/Entries";
 import { useSessionData } from "./sessions/useSessionData";
 import RefreshError from "./sessions/RefreshError";
 import DetailsHeader from "./sessions/DetailsHeader";
+import TrashDialog from "./sessions/TrashDialog";
+import DeleteFailures, { type DeleteFailure } from "./sessions/DeleteFailures";
 
 export default function Sessions() {
   const queryClient = useQueryClient();
@@ -58,9 +61,12 @@ export default function Sessions() {
   } = useSessionData(filterTool);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const bulkDeleteInFlight = useRef(false);
   const [checkedSessionKeys, setCheckedSessionKeys] = useState<string[]>([]);
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState<SessionSummary[]>([]);
+  const [deleteFailures, setDeleteFailures] = useState<DeleteFailure[]>([]);
+  const [trashOpen, setTrashOpen] = useState(false);
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const deleteSessionMutation = useDeleteSessionMutation();
@@ -88,6 +94,7 @@ export default function Sessions() {
       searchInputRef.current?.select();
     };
     const handleEscape = () => {
+      if (bulkDeleteInFlight.current) return;
       if (pendingBulkDelete.length > 0) {
         setPendingBulkDelete([]);
         return;
@@ -143,21 +150,40 @@ export default function Sessions() {
   }, [deleteSingleSession, pendingDelete]);
 
   const confirmBulkDeleteSessions = useCallback(async () => {
-    if (pendingBulkDelete.length === 0) return;
+    if (pendingBulkDelete.length === 0 || bulkDeleteInFlight.current) return;
+    bulkDeleteInFlight.current = true;
     setBulkDeleting(true);
-    const deletingKeys = new Set(pendingBulkDelete.map(sessionSelectionKey));
     try {
-      await deleteSessionsMutation.mutateAsync({
+      const result = await deleteSessionsMutation.mutateAsync({
         sessions: pendingBulkDelete.map(buildSessionDeleteTarget),
       });
-      removeSessions(pendingBulkDelete);
+      const deletingKeys = new Set(result.deleted.map(deleteResultKey));
+      removeSessions(pendingBulkDelete.filter((session) => deletingKeys.has(sessionSelectionKey(session))));
       setCheckedSessionKeys((current) => current.filter((key) => !deletingKeys.has(key)));
+      setDeleteFailures(
+        result.failed.flatMap(({ target, error }) => {
+          const session = pendingBulkDelete.find(
+            (candidate) => sessionSelectionKey(candidate) === deleteResultKey(target),
+          );
+          return session ? [{ session, error }] : [];
+        }),
+      );
       setPendingBulkDelete([]);
       await loadSessions(false);
-      showToast("success", uiText("已删除选中的会话", "Selected sessions deleted", "選択した会話を削除しました"));
+      if (result.failed.length)
+        showToast(
+          "error",
+          uiText(
+            `${result.failed.length} 个会话未删除，可重试失败项`,
+            `${result.failed.length} sessions could not be deleted; retry failed items`,
+            `${result.failed.length} 件を削除できませんでした。失敗した項目を再試行できます`,
+          ),
+        );
+      else showToast("success", uiText("已删除选中的会话", "Selected sessions deleted", "選択した会話を削除しました"));
     } catch (error) {
       showToast("error", String(error));
     } finally {
+      bulkDeleteInFlight.current = false;
       setBulkDeleting(false);
     }
   }, [deleteSessionsMutation, loadSessions, pendingBulkDelete, removeSessions]);
@@ -285,6 +311,10 @@ export default function Sessions() {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <SessionUsageActions />
+            <Button variant="secondary" onClick={() => setTrashOpen(true)}>
+              <History size={14} />
+              {uiText("最近删除", "Recently deleted", "最近削除した会話")}
+            </Button>
             <Button type="button" variant="secondary" onClick={() => void loadSessions(false)}>
               <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
               {uiText("刷新", "Refresh", "更新")}
@@ -292,6 +322,13 @@ export default function Sessions() {
           </div>
         </div>
 
+        <DeleteFailures
+          failures={deleteFailures}
+          busy={bulkDeleting}
+          onRetry={() => setPendingBulkDelete(deleteFailures.map(({ session }) => session))}
+          onDismiss={() => setDeleteFailures([])}
+          uiText={uiText}
+        />
         <Card className="section-card" style={{ padding: 16 }}>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ flex: "1 1 320px", minWidth: 240, position: "relative" }}>
@@ -647,15 +684,21 @@ export default function Sessions() {
         </div>
       </div>
 
+      <TrashDialog
+        open={trashOpen}
+        onClose={() => setTrashOpen(false)}
+        onRestored={() => void loadSessions(false)}
+        uiText={uiText}
+      />
       <ConfirmDialog
         isOpen={Boolean(pendingDelete)}
         title={uiText("删除会话", "Delete Session", "会話を削除")}
         message={
           pendingDelete
             ? uiText(
-                `确定删除会话「${pendingDelete.title}」吗？这会移除本地会话文件，并在支持的后端上清理索引。`,
-                `Delete session "${pendingDelete.title}"? This removes the local session file and cleans indexes where supported.`,
-                `会話「${pendingDelete.title}」を削除しますか？ ローカルの会話ファイルを削除し、対応バックエンドの索引も掃除します。`,
+                `确定删除会话「${pendingDelete.title}」吗？Codex 会话可在“最近删除”中恢复，其他 App 的会话无法在这里恢复。`,
+                `Delete session "${pendingDelete.title}"? Codex sessions can be restored from Recently deleted. Sessions from other apps cannot be restored here.`,
+                `会話「${pendingDelete.title}」を削除しますか？ Codex の会話は「最近削除した会話」で復元できます。他の App の会話はここでは復元できません。`,
               )
             : ""
         }
@@ -671,13 +714,16 @@ export default function Sessions() {
         message={
           pendingBulkDelete.length > 0
             ? uiText(
-                `确定删除选中的 ${pendingBulkDelete.length} 个会话吗？这会移除对应的本地会话文件。`,
-                `Delete ${pendingBulkDelete.length} selected session(s)? This removes the related local session files.`,
-                `選択した ${pendingBulkDelete.length} 件の会話を削除しますか？ 対応するローカル会話ファイルも削除されます。`,
+                `确定删除选中的 ${pendingBulkDelete.length} 个会话吗？Codex 会话可在“最近删除”中恢复，其他 App 的会话无法在这里恢复。`,
+                `Delete ${pendingBulkDelete.length} selected session(s)? Codex sessions can be restored from Recently deleted. Sessions from other apps cannot be restored here.`,
+                `選択した ${pendingBulkDelete.length} 件の会話を削除しますか？ Codex の会話は「最近削除した会話」で復元できます。他の App の会話はここでは復元できません。`,
               )
             : ""
         }
-        confirmText={uiText("批量删除", "Delete Selected", "選択を削除")}
+        confirmText={
+          bulkDeleting ? uiText("删除中…", "Deleting…", "削除中…") : uiText("批量删除", "Delete Selected", "選択を削除")
+        }
+        busy={bulkDeleting}
         cancelText={uiText("取消", "Cancel", "キャンセル")}
         variant="destructive"
         onCancel={() => setPendingBulkDelete([])}

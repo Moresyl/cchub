@@ -10,6 +10,7 @@ interface ConfirmDialogProps {
   confirmText?: string;
   cancelText?: string;
   variant?: "destructive" | "info";
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -21,6 +22,7 @@ function ConfirmDialogComponent({
   confirmText,
   cancelText,
   variant = "destructive",
+  busy = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -30,7 +32,7 @@ function ConfirmDialogComponent({
   const iconBg = isDestructive ? "var(--danger-subtle)" : "var(--accent-subtle)";
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !busy && onCancel()}>
       <DialogContent hideClose fullscreenOnMobile={false} className="max-w-[420px]">
         <DialogHeader className="min-h-0 shrink overflow-y-auto pr-5">
           <div
@@ -45,10 +47,10 @@ function ConfirmDialogComponent({
           </div>
         </DialogHeader>
         <DialogFooter className="flex-wrap">
-          <Button variant="secondary" onClick={onCancel}>
+          <Button variant="secondary" disabled={busy} onClick={onCancel}>
             {cancelText || "取消"}
           </Button>
-          <Button variant={isDestructive ? "destructive" : "default"} onClick={onConfirm}>
+          <Button variant={isDestructive ? "destructive" : "default"} disabled={busy} onClick={onConfirm}>
             {confirmText || "确认"}
           </Button>
         </DialogFooter>

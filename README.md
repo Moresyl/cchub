@@ -57,6 +57,16 @@ Model discovery follows the selected API protocol and retains provider-reported 
 | **Native Configs**   | OpenCode switching preserves JSONC comments, MCP, plugins, and other providers                 |
 | **Sessions & Usage** | Browse native sessions and import output, reasoning, and cache usage without duplicate billing |
 
+### Sessions and recovery
+
+Codex session browsing, details and usage imports support both `.jsonl` and compressed `.jsonl.zst` logs. The plain file takes precedence while both forms exist. Selection and record IDs survive compression, so repeated imports do not bill the format change twice. Damaged archives or decoding-limit errors discard that file's staged import results.
+
+Deleting a Codex session retains original copies of the selected log and its plain/compressed twin in Recently deleted. Files updated within the last minute are refused. Restore verifies identity and content hashes, preserving existing files with different content. Shared client indexes and databases stay unchanged; recovery does not include other segments or subagents of the same thread. Other apps' deletions cannot be restored here. Bulk deletion reports each outcome, removes successful items and lets you retry only failed items.
+
+![CCHub recently deleted sessions and recovery](screenshots/session-recovery.png)
+
+This screenshot shows the actual page component with isolated demonstration data.
+
 ### Prompt library
 
 Manage instruction versions for Claude, Codex, Gemini, OpenCode, OpenClaw, Hermes and Pi with Markdown editing, preview and search. Importing retains the file's exact contents; replacing live instructions retains the previous contents as another library entry. Deleting an entry preserves the tool's live file. The page reports file-read errors and mismatches instead of treating unreadable content as an empty file or claiming a mismatched version is active.

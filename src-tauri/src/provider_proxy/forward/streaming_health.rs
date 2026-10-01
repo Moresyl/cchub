@@ -19,6 +19,9 @@ impl StreamHealth {
     pub(crate) fn failed(&self) -> bool {
         self.0.load(Ordering::Relaxed) & FAILED != 0
     }
+    pub(super) fn finished(&self) -> bool {
+        self.0.load(Ordering::Relaxed) & (FAILED | COMPLETED) != 0
+    }
     fn fail(&self) {
         self.0.fetch_or(FAILED, Ordering::Relaxed);
     }

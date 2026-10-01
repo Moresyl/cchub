@@ -49,6 +49,9 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"));
     let raw = prepare_raw_stream(response, first_deadline, config.streaming_idle_timeout).await?;
+    // Track before normalization/framing: even a split comment or event can
+    // prove provider activity while the adapter has nothing to deliver yet.
+    let (raw, activity) = super::streaming_keepalive::observe_activity(raw);
     let source = if transform.is_some() || is_sse {
         boxed(normalize_sse_stream(raw))
     } else {
@@ -79,6 +82,12 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
             Some(protocol) => boxed(terminate(observed, protocol, upstream.profile_name.clone())),
             None => boxed(observed),
         },
+    };
+    let stream = if transform.is_some() {
+        super::streaming_keepalive::keep_alive(stream, activity, health.clone())
+    } else {
+        // Native protocols retain their exact bytes and their own event IDs.
+        stream
     };
     let body = Body::from_stream(create_usage_tracking_stream(
         observe_delivery(stream, health.clone()),

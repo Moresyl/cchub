@@ -34,6 +34,8 @@ mod streaming_chat;
 mod streaming_errors;
 #[path = "forward/streaming_health.rs"]
 pub(super) mod streaming_health;
+#[path = "forward/streaming_keepalive.rs"]
+mod streaming_keepalive;
 #[path = "forward/timeouts.rs"]
 mod timeouts;
 use super::optimizer::{read_optimizer_config, read_rectifier_config};

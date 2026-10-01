@@ -71,6 +71,7 @@ keyring = { version = "3", features = ["linux-native"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+tokio = { version = "1", features = ["test-util"] }
 
 [profile.dev]
 # Windows/MSVC has hit intermittent linker failures with optimized dev builds

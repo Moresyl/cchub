@@ -28,6 +28,8 @@ mod deadline_tests;
 mod gemini_tool_tests;
 #[path = "gemini_usage_tests.rs"]
 mod gemini_usage_tests;
+#[path = "keepalive_tests.rs"]
+mod keepalive_tests;
 #[path = "managed_auth_tests.rs"]
 mod managed_auth_tests;
 #[path = "message_id_tests.rs"]

@@ -140,6 +140,8 @@ pub struct CopilotModel {
     pub id: String,
     pub name: String,
     pub vendor: String,
+    #[serde(default)]
+    pub billing: crate::shared::model_billing::ModelBilling,
 }
 
 #[derive(Debug, Deserialize)]

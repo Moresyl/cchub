@@ -2,6 +2,52 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn model_billing_is_preserved_separately_from_token_prices_and_missing_metadata() {
+    let models = parse_catalog(&json!({"data":[
+        {"id":"free","billing":{"is_premium":false,"multiplier":0}},
+        {"id":"paid","billing":{"is_premium":true,"multiplier":0.33},"pricing":{"prompt":"0.001"}},
+        {"id":"unknown","billing":{"multiplier":"bad"}}, {"id":"old"}
+    ]}), false).unwrap();
+    use crate::shared::model_billing::BillingKind;
+    assert_eq!(
+        models[0].premium_request_billing.unwrap().kind,
+        BillingKind::Free
+    );
+    assert_eq!(
+        models[1].premium_request_billing.unwrap().multiplier,
+        Some(0.33)
+    );
+    assert_eq!(models[1].input_price.as_deref(), Some("0.001"));
+    assert_eq!(
+        models[2].premium_request_billing.unwrap().kind,
+        BillingKind::Unknown
+    );
+    assert_eq!(models[3].premium_request_billing, None);
+    assert_eq!(
+        serde_json::to_value(&models[1]).unwrap()["premiumRequestBilling"]["kind"],
+        "premium"
+    );
+}
+
+#[test]
+fn catalog_merge_retains_units_but_does_not_select_a_rate_from_conflicting_pages() {
+    let models = merge_catalog(
+        parse_catalog(
+            &json!({"data":[
+                {"id":"paid","billing":{"is_premium":true,"multiplier":1}},
+                {"id":"paid","billing":{"is_premium":true,"multiplier":2}},
+                {"id":"paid","name":"Paid"}
+            ]}),
+            false,
+        )
+        .unwrap(),
+    );
+    let billing = models[0].premium_request_billing.unwrap();
+    assert!(billing.premium());
+    assert_eq!(billing.multiplier, None);
+}
+
+#[test]
 fn vendor_capabilities_and_duplicate_enrichment_survive() {
     let models = merge_catalog(parse_catalog(&json!({"data":[
         {"id":" alpha ","name":"Alpha","context_length":200000,"native_endpoints":["/messages"],

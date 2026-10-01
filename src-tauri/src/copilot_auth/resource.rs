@@ -226,11 +226,15 @@ impl OwnedAccount<'_> {
             if payload.data.iter().any(|model| model.id.trim().is_empty()) {
                 return Err(ResourceError::InvalidPayload.into());
             }
+            let billing = crate::shared::model_billing::catalog(&value);
+            let mut seen = std::collections::HashSet::new();
             let models = payload
                 .data
                 .into_iter()
                 .filter(|model| model.model_picker_enabled)
+                .filter(|model| seen.insert(model.id.clone()))
                 .map(|model| CopilotModel {
+                    billing: billing.get(&model.id).copied().unwrap_or_default(),
                     id: model.id,
                     name: model.name,
                     vendor: model.vendor,

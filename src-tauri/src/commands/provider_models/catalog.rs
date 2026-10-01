@@ -19,6 +19,8 @@ pub struct ModelInfo {
     pub input_modalities: Option<Vec<String>>,
     #[serde(default)]
     pub output_modalities: Option<Vec<String>>,
+    #[serde(default)]
+    pub premium_request_billing: Option<crate::shared::model_billing::ModelBilling>,
 }
 
 fn text(value: &Value) -> Option<String> {
@@ -126,6 +128,9 @@ fn model(entry: &Value, gemini: bool) -> Option<ModelInfo> {
         ),
         input_price: entry.pointer("/pricing/prompt").and_then(price),
         output_price: entry.pointer("/pricing/completion").and_then(price),
+        premium_request_billing: entry
+            .get("billing")
+            .map(crate::shared::model_billing::ModelBilling::from_value),
         native_endpoints: first_list(
             entry,
             &[
@@ -198,6 +203,14 @@ pub(super) fn merge_catalog(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
             input_modalities,
             output_modalities
         );
+        if let Some(billing) = next.premium_request_billing {
+            previous.premium_request_billing = Some(
+                previous
+                    .premium_request_billing
+                    .map(|previous| previous.agree(billing))
+                    .unwrap_or(billing),
+            );
+        }
     }
     unique.into_values().collect()
 }

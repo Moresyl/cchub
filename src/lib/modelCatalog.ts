@@ -1,3 +1,5 @@
+import { agreeModelBilling, normalizeModelBilling, type ModelBilling } from "./modelBilling";
+
 export interface ModelInfo {
   id: string;
   displayName?: string | null;
@@ -9,6 +11,7 @@ export interface ModelInfo {
   supportedReasoningLevels?: string[] | null;
   inputModalities?: string[] | null;
   outputModalities?: string[] | null;
+  premiumRequestBilling?: ModelBilling | null;
 }
 
 export interface SavedModelCatalog {
@@ -37,6 +40,11 @@ export function normalizeModelCatalog(value: unknown): SavedModelCatalog | undef
         model[key] = [
           ...new Set(list.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim())),
         ];
+    }
+    if (row.premiumRequestBilling !== undefined && row.premiumRequestBilling !== null) {
+      model.premiumRequestBilling = model.premiumRequestBilling
+        ? agreeModelBilling(model.premiumRequestBilling, row.premiumRequestBilling)
+        : normalizeModelBilling(row.premiumRequestBilling);
     }
     unique.set(model.id, model);
   }

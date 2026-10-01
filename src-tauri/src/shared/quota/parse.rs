@@ -1,6 +1,5 @@
 use super::{Resource, Snapshot};
 use serde_json::Value;
-use std::collections::HashMap;
 
 fn number(value: Option<&Value>) -> Option<f64> {
     let value = value?;
@@ -122,33 +121,11 @@ pub(super) fn snapshot(resource: Resource, value: &Value) -> Snapshot {
                 premium: copilot_window(quotas.get("premium_interactions"), until),
             }
         }
-        Resource::CopilotModels => {
-            let mut models = HashMap::new();
-            if let Some(entries) = value
-                .get("data")
-                .and_then(Value::as_array)
-                .filter(|entries| entries.len() <= 512)
-            {
-                for entry in entries {
-                    let Some(id) = entry
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .filter(|id| !id.is_empty() && id.len() <= 1024)
-                    else {
-                        continue;
-                    };
-                    let billed = entry.get("billing").is_some_and(|billing| {
-                        billing.get("is_premium").and_then(Value::as_bool) == Some(true)
-                            && number(billing.get("multiplier"))
-                                .is_some_and(|multiplier| multiplier > 0.0)
-                    });
-                    models
-                        .entry(id.into())
-                        .and_modify(|previous| *previous &= billed)
-                        .or_insert(billed);
-                }
-            }
-            Snapshot::Models(models)
-        }
+        Resource::CopilotModels => Snapshot::Models(
+            crate::shared::model_billing::catalog(value)
+                .into_iter()
+                .map(|(id, billing)| (id, billing.premium()))
+                .collect(),
+        ),
     }
 }

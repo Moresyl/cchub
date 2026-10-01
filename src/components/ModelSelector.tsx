@@ -5,6 +5,8 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import type { ModelInfo } from "../lib/modelCatalog";
+import ModelBillingBadge from "./ModelBillingBadge";
+import { getLocale } from "../lib/i18n";
 
 export type { ModelInfo } from "../lib/modelCatalog";
 
@@ -26,6 +28,10 @@ function formatTokens(value: number | null | undefined): string {
 }
 
 function ModelSelectorComponent({ value, models, onChange, placeholder, disabled, label, id }: ModelSelectorProps) {
+  const locale = getLocale();
+  const text = (zh: string, en: string, ja: string) => (locale === "zh" ? zh : locale === "ja" ? ja : en);
+  const chooseLabel = text("选择模型", "Choose model", "モデルを選択");
+  const searchLabel = text("搜索模型", "Search models", "モデルを検索");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -65,7 +71,7 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        aria-label={label || placeholder || "选择模型"}
+        aria-label={label || placeholder || chooseLabel}
       />
     );
   }
@@ -80,26 +86,26 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
             variant="outline"
             className="model-selector-trigger"
             role="combobox"
-            aria-label={label || placeholder || "选择模型"}
+            aria-label={label || placeholder || chooseLabel}
             aria-expanded={open}
             disabled={disabled}
           >
             <span className={value ? "model-selector-value" : "model-selector-placeholder"}>
-              {value || placeholder || "选择模型"}
+              {value || placeholder || chooseLabel}
             </span>
             <ChevronDown size={13} className="model-selector-chevron" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
 
         <PopoverContent className="model-selector-popover" onOpenAutoFocus={(event) => event.preventDefault()}>
-          <Command defaultValue={value} shouldFilter={false} className="model-selector-command" label="搜索模型">
+          <Command defaultValue={value} shouldFilter={false} className="model-selector-command" label={searchLabel}>
             <div className="model-selector-search">
               <Search size={14} aria-hidden="true" />
               <Command.Input
                 value={search}
                 onValueChange={setSearch}
-                placeholder="搜索或输入模型 ID"
-                aria-label="搜索模型"
+                placeholder={text("搜索或输入模型 ID", "Search or enter a model ID", "モデル ID を検索または入力")}
+                aria-label={searchLabel}
                 autoFocus
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) {
@@ -117,7 +123,9 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
 
             <Command.List className="model-selector-list">
               {filteredModels.length === 0 && !canUseCustomValue && (
-                <Command.Empty className="model-selector-empty">没有匹配的模型</Command.Empty>
+                <Command.Empty className="model-selector-empty">
+                  {text("没有匹配的模型", "No matching models", "一致するモデルがありません")}
+                </Command.Empty>
               )}
               {filteredModels.map((model) => (
                 <Command.Item
@@ -130,10 +138,19 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
                   <span className="model-selector-item-check">
                     {model.id === value && <Check size={13} aria-hidden="true" />}
                   </span>
-                  <span className="model-selector-item-main">
-                    <span className="model-selector-item-id">{model.id}</span>
-                    {model.displayName && model.displayName !== model.id && (
-                      <span className="model-selector-item-name">{model.displayName}</span>
+                  <span
+                    className={`model-selector-item-main${model.premiumRequestBilling ? " model-selector-item-main-with-billing" : ""}`}
+                  >
+                    <span className="model-selector-item-id" title={model.id}>
+                      {model.id}
+                    </span>
+                    {((model.displayName && model.displayName !== model.id) || model.premiumRequestBilling) && (
+                      <span className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+                        {model.displayName && model.displayName !== model.id && (
+                          <span className="model-selector-item-name">{model.displayName}</span>
+                        )}
+                        {model.premiumRequestBilling && <ModelBillingBadge value={model.premiumRequestBilling} />}
+                      </span>
                     )}
                   </span>
                   <ModelMeta model={model} />
@@ -147,8 +164,12 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
                 >
                   <span className="model-selector-item-check" />
                   <span className="model-selector-item-main">
-                    <span className="model-selector-item-id">使用 “{trimmedSearch}”</span>
-                    <span className="model-selector-item-name">自定义模型 ID</span>
+                    <span className="model-selector-item-id">
+                      {text(`使用 “${trimmedSearch}”`, `Use “${trimmedSearch}”`, `「${trimmedSearch}」を使用`)}
+                    </span>
+                    <span className="model-selector-item-name">
+                      {text("自定义模型 ID", "Custom model ID", "カスタムモデル ID")}
+                    </span>
                   </span>
                 </Command.Item>
               )}
@@ -164,8 +185,8 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
           size="icon"
           className="model-selector-clear"
           onClick={() => onChange("")}
-          aria-label="清除模型"
-          title="清除模型"
+          aria-label={text("清除模型", "Clear model", "モデルをクリア")}
+          title={text("清除模型", "Clear model", "モデルをクリア")}
         >
           <X size={12} aria-hidden="true" />
         </Button>

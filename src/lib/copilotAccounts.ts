@@ -1,3 +1,5 @@
+import type { ModelBilling } from "./modelBilling";
+
 export interface GitHubAccount {
   id: string;
   login: string;
@@ -35,6 +37,7 @@ export interface CopilotModel {
   id: string;
   name: string;
   vendor: string;
+  billing?: ModelBilling;
 }
 
 export type CopilotResourceFailure =

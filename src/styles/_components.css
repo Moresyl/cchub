@@ -686,7 +686,7 @@ select.input option {
 
 .model-selector-item {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   min-height: 36px;
@@ -725,16 +725,34 @@ select.input option {
   white-space: nowrap;
 }
 
+.model-selector-item-main-with-billing {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-selector-item-main-with-billing > .model-selector-item-id {
+  max-width: 100%;
+}
+
 .model-selector-item-name,
 .model-selector-item-meta {
   color: var(--text-muted);
   font-size: 11px;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .model-selector-item-name {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.model-selector-item-meta {
+  grid-column: 2;
+  min-width: 0;
+  line-height: 1.5;
 }
 
 .model-selector-empty {

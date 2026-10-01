@@ -3,6 +3,52 @@ use crate::shared::usage_http::test_support::read_headers;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 
+#[tokio::test]
+async fn actual_account_model_query_preserves_units_deduplicates_and_matches_routing() {
+    let (_dir, manager) = test_support::seeded().await;
+    let owner = manager.owned_account(Some("1"), None).await.unwrap();
+    let (usage_url, usage_seen) = immediate(
+        200,
+        serde_json::json!({"copilot_plan":"individual_pro",
+        "quota_snapshots":{"premium_interactions":{"entitlement":300,"quota_remaining":0}}})
+        .to_string(),
+    )
+    .await;
+    owner.usage_at(&usage_url, query_deadline()).await.unwrap();
+    usage_seen.await.unwrap();
+    let (url, seen) = immediate(200, serde_json::json!({"data":[
+        {"id":"free","name":"Free","vendor":"fixture","model_picker_enabled":true,"billing":{"is_premium":false,"multiplier":0}},
+        {"id":"paid","name":"Paid","vendor":"fixture","model_picker_enabled":true,"billing":{"is_premium":true,"multiplier":0.33}},
+        {"id":"paid","name":"Other title","vendor":"fixture","model_picker_enabled":true,"billing":{"is_premium":true,"multiplier":1}},
+        {"id":"mixed","name":"Mixed","vendor":"fixture","model_picker_enabled":true,"billing":{"is_premium":true,"multiplier":1}},
+        {"id":"mixed","name":"Mixed","vendor":"fixture","model_picker_enabled":true,"billing":{"is_premium":false,"multiplier":0}},
+        {"id":"unknown","name":"Unknown","vendor":"fixture","model_picker_enabled":true,"billing":{"is_premium":true,"multiplier":-1}},
+        {"id":"hidden","name":"Hidden","vendor":"fixture","model_picker_enabled":false}
+    ]}).to_string()).await;
+    let models = owner.models_at(&url, query_deadline()).await.unwrap();
+    seen.await.unwrap();
+    use crate::shared::model_billing::BillingKind;
+    assert_eq!(models.len(), 4);
+    assert_eq!(models[0].billing.kind, BillingKind::Free);
+    assert_eq!(models[1].name, "Paid");
+    assert_eq!(models[1].billing.kind, BillingKind::Premium);
+    assert_eq!(models[1].billing.multiplier, None);
+    assert_eq!(models[2].billing.kind, BillingKind::Unknown);
+    assert_eq!(models[3].billing.kind, BillingKind::Unknown);
+    assert!(manager
+        .quota_blocked("1", &owner.account.revision, Some("paid"))
+        .is_some());
+    for id in ["free", "mixed", "unknown"] {
+        assert_eq!(
+            manager.quota_blocked("1", &owner.account.revision, Some(id)),
+            None
+        );
+    }
+    let value = serde_json::to_value(models).unwrap();
+    assert_eq!(value[0]["billing"]["multiplier"], 0.0);
+    assert_eq!(value[1]["billing"]["kind"], "premium");
+}
+
 fn usage() -> String {
     serde_json::json!({
         "copilot_plan": "individual_pro",

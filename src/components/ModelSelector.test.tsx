@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelSelector, { type ModelInfo } from "./ModelSelector";
+import { setLocale } from "../lib/i18n";
+
+beforeEach(() => setLocale("zh"));
 
 const models: ModelInfo[] = [
   { id: "model-alpha", displayName: "Alpha", contextWindow: 200_000 },
@@ -35,6 +38,33 @@ beforeAll(() => {
 });
 
 describe("ModelSelector", () => {
+  it("shows reported request units while selecting the unchanged model ID", async () => {
+    const onChange = vi.fn();
+    render(
+      <ModelSelector
+        value="model-alpha"
+        models={[
+          { ...models[0], premiumRequestBilling: { kind: "free", multiplier: 0 } },
+          { ...models[1], premiumRequestBilling: { kind: "premium", multiplier: 0.33 } },
+        ]}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "选择模型" }));
+    await screen.findByText("高级请求 ×0.33");
+    expect(screen.getByText("不消耗高级额度")).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: /model-beta/ }));
+    expect(onChange).toHaveBeenCalledWith("model-beta");
+  });
+  it("localizes search and custom-model controls in English", async () => {
+    setLocale("en");
+    render(<ModelSelector value="model-alpha" models={models} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Choose model" }));
+    const input = await screen.findByRole("combobox", { name: "Search models" });
+    fireEvent.change(input, { target: { value: "custom" } });
+    expect(screen.getByText("Custom model ID")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear model" })).toBeTruthy();
+  });
   it("starts keyboard navigation at the current model", async () => {
     const onChange = vi.fn();
     render(<ModelSelector value="model-beta" models={models} onChange={onChange} />);

@@ -6,6 +6,7 @@ import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { SimpleSelect } from "./ui/simple-select";
 import { QuotaItem } from "./copilotUsage/QuotaItem";
+import ModelsList from "./copilotUsage/ModelsList";
 
 type LocaleText = (zh: string, en: string, ja?: string) => string;
 
@@ -214,17 +215,12 @@ export default function CopilotUsagePanel({ localeText: text }: { localeText: Lo
                       <ChevronDown size={14} className={expanded ? "rotate-180" : ""} aria-hidden="true" />
                     </Button>
                     {expanded && data.models.length > 0 && (
-                      <ul id={modelsId} className="grid max-h-56 gap-2 overflow-y-auto pr-1">
-                        {data.models.map((model) => (
-                          <li key={model.id} className="grid min-w-0 gap-1 rounded-md bg-[var(--bg-input)] p-3">
-                            <span className="break-all">{model.name || model.id}</span>
-                            <span className="break-all font-mono text-[11px] text-muted-foreground">
-                              {model.id}
-                              {model.vendor ? ` · ${model.vendor}` : ""}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
+                      <ModelsList
+                        key={`${data.account.id}:${data.account.revision}`}
+                        models={data.models}
+                        id={modelsId}
+                        text={text}
+                      />
                     )}
                   </>
                 )

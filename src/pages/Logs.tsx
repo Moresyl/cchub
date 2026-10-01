@@ -1,6 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import { Activity, DollarSign, RefreshCw, Save, X } from "lucide-react";
 import ActivityLogRow from "../components/ActivityLogRow";
@@ -16,6 +15,7 @@ import { useDeleteModelPricingMutation, useSaveModelPricingMutation } from "../h
 import { CheckboxField } from "../components/ui/checkbox-field";
 import { Input } from "../components/ui/input";
 import { SimpleSelect } from "../components/ui/simple-select";
+import { useRequestDetail } from "./logs/useRequestDetail";
 
 interface ActivityItem {
   id: number;
@@ -129,8 +129,6 @@ export default function Logs() {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<(typeof AUTO_REFRESH_INTERVALS)[number]>(10);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState<ProxyRequestLogRow | null>(null);
-  const [requestDetailLoading, setRequestDetailLoading] = useState(false);
   const proxyListRef = useRef<HTMLDivElement | null>(null);
   const loadRequestIdRef = useRef(0);
   const deferredProviderQuery = useDeferredValue(proxyFilters.providerQuery);
@@ -157,16 +155,7 @@ export default function Logs() {
     () => filterProxyLogs(recentProxyLogs, effectiveProxyFilters),
     [effectiveProxyFilters, recentProxyLogs],
   );
-  const loadRequestDetail = useCallback(async (requestId: string) => {
-    setRequestDetailLoading(true);
-    try {
-      setSelectedRequest(await invoke<ProxyRequestLogRow | null>("get_request_detail", { requestId }));
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setRequestDetailLoading(false);
-    }
-  }, []);
+  const requestDetail = useRequestDetail(uiText);
 
   const load = useCallback(
     async (
@@ -726,17 +715,20 @@ export default function Logs() {
                     }
                     latencyLabel={`${item.latency_ms}ms`}
                     createdAtLabel={formatDateTime(item.created_at)}
-                    onSelect={() => void loadRequestDetail(item.request_id)}
+                    onSelect={() => void requestDetail.load(item.request_id)}
                   />
                 );
               })}
             </div>
             <RequestDetailPanel
-              record={selectedRequest}
-              loading={requestDetailLoading}
+              record={requestDetail.record}
+              loading={requestDetail.loading}
+              error={requestDetail.error}
+              onRetry={requestDetail.retry}
+              localeText={uiText}
               title={uiText("请求明细", "Request detail", "リクエスト詳細")}
               closeLabel={uiText("关闭", "Close", "閉じる")}
-              onClose={() => setSelectedRequest(null)}
+              onClose={requestDetail.close}
             />
           </>
         )}

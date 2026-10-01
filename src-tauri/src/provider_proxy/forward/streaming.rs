@@ -41,7 +41,7 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
     health: StreamHealth,
     started_at: std::time::Instant,
     first_deadline: Deadline,
-) -> Result<Body, String> {
+) -> Result<Body, super::streaming_preflight::Failure> {
     let upstream_status = response.status().as_u16();
     let is_sse = response
         .headers()
@@ -49,6 +49,11 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"));
     let raw = prepare_raw_stream(response, first_deadline, config.streaming_idle_timeout).await?;
+    let raw = if is_sse || transform.is_some() {
+        super::streaming_preflight::prepare(raw, relative_path, transform).await?
+    } else {
+        raw
+    };
     // Track before normalization/framing: even a split comment or event can
     // prove provider activity while the adapter has nothing to deliver yet.
     let (raw, activity) = super::streaming_keepalive::observe_activity(raw);

@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS proxy_request_logs (
     status_code INTEGER DEFAULT 0,
     is_streaming INTEGER DEFAULT 0,
     error_message TEXT,
+    stream_attempts_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL
 );
 
@@ -297,6 +298,12 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.execute_batch("ALTER TABLE proxy_request_logs ADD COLUMN input_tokens_is_total INTEGER NOT NULL DEFAULT 0;")?;
     }
 
+    if !log_columns
+        .iter()
+        .any(|column| column == "stream_attempts_json")
+    {
+        conn.execute_batch("ALTER TABLE proxy_request_logs ADD COLUMN stream_attempts_json TEXT NOT NULL DEFAULT '[]';")?;
+    }
     seed_builtin_model_pricing(conn)?;
 
     Ok(())
@@ -408,6 +415,29 @@ mod tests {
     }
 
     #[test]
+    fn stream_attempts_migrate_existing_logs_without_erasing_costs_or_later_details() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            &get_schema_sql().replace("    stream_attempts_json TEXT NOT NULL DEFAULT '[]',\n", ""),
+        )
+        .unwrap();
+        conn.execute("INSERT INTO proxy_request_logs(request_id,tool_id,profile_id,provider_name,input_tokens,total_cost_usd,created_at) VALUES('old','claude','p1','Provider',100,'2.500000','2026-10-01')", []).unwrap();
+        run_migrations(&conn).unwrap();
+        let row: (i64, String, String) = conn.query_row("SELECT input_tokens,total_cost_usd,stream_attempts_json FROM proxy_request_logs WHERE request_id='old'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(row, (100, "2.500000".into(), "[]".into()));
+        conn.execute("UPDATE proxy_request_logs SET stream_attempts_json='[{\"attempt_id\":\"retained\"}]' WHERE request_id='old'", []).unwrap();
+        run_migrations(&conn).unwrap();
+        let ledger: String = conn
+            .query_row(
+                "SELECT stream_attempts_json FROM proxy_request_logs WHERE request_id='old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ledger, "[{\"attempt_id\":\"retained\"}]");
+    }
+
+    #[test]
     fn run_migrations_is_idempotent() {
         let conn = Connection::open_in_memory().unwrap();
 
@@ -420,6 +450,11 @@ mod tests {
         assert!(table_exists(&conn, "project_profiles"));
         assert!(table_exists(&conn, "proxy_request_logs"));
         assert!(column_exists(&conn, "proxy_request_logs", "upstream_model"));
+        assert!(column_exists(
+            &conn,
+            "proxy_request_logs",
+            "stream_attempts_json"
+        ));
         assert!(table_exists(&conn, "session_usage_dedup"));
         assert!(column_exists(&conn, "mcp_servers", "config_path"));
         assert!(column_exists(&conn, "config_profiles", "source_type"));

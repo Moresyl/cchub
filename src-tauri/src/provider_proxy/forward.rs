@@ -36,6 +36,8 @@ mod streaming_errors;
 pub(super) mod streaming_health;
 #[path = "forward/streaming_keepalive.rs"]
 mod streaming_keepalive;
+#[path = "forward/streaming_preflight.rs"]
+mod streaming_preflight;
 #[path = "forward/timeouts.rs"]
 mod timeouts;
 use super::optimizer::{read_optimizer_config, read_rectifier_config};
@@ -725,10 +727,39 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             let body = match body {
                                 Ok(body) => body,
                                 Err(error) => {
-                                    log_attempt(None, 502, Some(&error));
+                                    log_attempt(
+                                        error.usage.as_ref(),
+                                        error.status.as_u16(),
+                                        Some(&error.message),
+                                    );
+                                    if let Err(message) = super::cost::record_stream_attempt(
+                                        &app_handle,
+                                        &request_id,
+                                        &upstream,
+                                        &request_insights,
+                                        error.status.as_u16(),
+                                        error.usage.as_ref(),
+                                    ) {
+                                        return build_proxy_error(
+                                            StatusCode::INTERNAL_SERVER_ERROR,
+                                            message,
+                                        );
+                                    }
+                                    if !error.retryable() {
+                                        return error.response(&original_relative_path);
+                                    }
                                     endpoint_lease.failure();
                                     endpoint_failed = true;
-                                    last_error = Some(error);
+                                    if error.usage.is_some() {
+                                        last_response = Some(body::RetainedReply {
+                                            response: error.response(&original_relative_path),
+                                            upstream: upstream.clone(),
+                                            insights: request_insights.clone(),
+                                            error_message: error.message.clone(),
+                                            usage: error.usage.clone(),
+                                        });
+                                    }
+                                    last_error = Some(error.message);
                                     continue 'endpoints;
                                 }
                             };

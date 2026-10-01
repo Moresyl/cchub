@@ -42,6 +42,8 @@ pub struct ProxyRequestLogRow {
     pub is_streaming: bool,
     pub error_message: Option<String>,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stream_attempts: Vec<crate::provider_proxy::StreamAttempt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -126,6 +128,7 @@ fn map_proxy_request_log_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProxyR
         is_streaming: row.get::<_, i64>(13)? != 0,
         error_message: row.get(14)?,
         created_at: row.get(15)?,
+        stream_attempts: Vec::new(),
     })
 }
 
@@ -358,10 +361,22 @@ pub fn get_request_detail(
         "SELECT request_id, tool_id, profile_id, provider_name, request_model,
                 response_model, input_tokens, output_tokens, cache_read_tokens,
                 cache_creation_tokens, total_cost_usd, latency_ms, status_code,
-                is_streaming, error_message, created_at
+                is_streaming, error_message, created_at, stream_attempts_json
          FROM proxy_request_logs WHERE request_id = ?1 LIMIT 1",
         rusqlite::params![request_id],
-        map_proxy_request_log_row,
+        |row| {
+            let mut record = map_proxy_request_log_row(row)?;
+            let ledger: String = row.get(16)?;
+            if ledger.len() > 1024 * 1024 {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "Stream attempt data exceeds its limit".into(),
+                ));
+            }
+            record.stream_attempts = serde_json::from_str(&ledger).map_err(|_| {
+                rusqlite::Error::InvalidParameterName("Stream attempt data is invalid".into())
+            })?;
+            Ok(record)
+        },
     )
     .optional()
     .map_err(|error| error.to_string())

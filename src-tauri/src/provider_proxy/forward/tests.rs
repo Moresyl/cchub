@@ -40,6 +40,8 @@ mod message_id_tests;
 mod model_alias_tests;
 #[path = "passthrough_tests.rs"]
 mod passthrough_tests;
+#[path = "preflight_tests.rs"]
+mod preflight_tests;
 #[path = "responses_history_tests.rs"]
 mod responses_history_tests;
 #[path = "responses_reasoning_tests.rs"]
@@ -602,7 +604,7 @@ async fn successful_stream_is_healthy_only_after_body_completion() {
 }
 
 #[tokio::test]
-async fn in_band_errors_are_forwarded_and_never_count_as_recovery() {
+async fn initial_in_band_errors_return_sanitized_failures_and_never_count_as_recovery() {
     for (format, event) in [
         ("anthropic", "event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"vendor quota\"}}\n\n"),
         ("openai_chat", "data: {\"error\":{\"message\":\"vendor quota\"}}\n\n"),
@@ -614,10 +616,12 @@ async fn in_band_errors_are_forwarded_and_never_count_as_recovery() {
         set_format(&app, "p1", format);
         open_profile(&app, "p1", true);
         let response = forward(app.handle().clone(), true).await;
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY, "{format}");
         let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
         let text = String::from_utf8(bytes.to_vec()).unwrap();
-        assert!(text.contains("event: error"), "{format}: {text}");
-        assert!(text.contains("vendor quota"), "{format}: {text}");
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(value["error"]["code"], 502, "{format}: {text}");
+        assert!(!text.contains("vendor quota"), "{format}: {text}");
         assert_eq!(profile(&app, "p1").state, CircuitState::Open, "{format}");
         assert_eq!(profile(&app, "p1").consecutive_successes, 0, "{format}");
         streaming_tests::assert_single_outcome(&app, 502, 0, 0);

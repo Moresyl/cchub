@@ -116,6 +116,9 @@ where
                 }
             }
             yield chunk.map_err(std::io::Error::other);
+            // An explicit error is terminal even if the vendor holds the socket open.
+            // Do not retry here: client-visible output may already have been sent.
+            if health.failed() { return; }
         }
         inspector.finish_eof(&health);
         if health.incomplete() {

@@ -103,7 +103,6 @@ async fn terminal_events_suppress_queued_and_future_activity() {
     for terminal in [
         b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".as_slice(),
         b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
-        b"event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"failed\"}}\n\n",
     ] {
         let (sender, mut output, health) = harness();
         send(&sender, b": alive\n\n").await;
@@ -118,6 +117,25 @@ async fn terminal_events_suppress_queued_and_future_activity() {
         drop(sender);
         assert!(output.next().await.is_none());
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_explicit_error_closes_the_source_instead_of_waiting_for_more_activity() {
+    let (sender, mut output, health) = harness();
+    send(&sender, b": alive\n\n").await;
+    ping(&mut output).await;
+    tokio::time::advance(QUIET_GAP).await;
+    send(
+        &sender,
+        b"event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"failed\"}}\n\n",
+    )
+    .await;
+    // This harness drops all non-content frames. Production adapters deliver
+    // the error; both must drop the upstream after consuming it.
+    assert!(output.next().await.is_none());
+    assert!(health.failed());
+    assert!(!health.delivered_successfully());
+    assert!(sender.is_closed());
 }
 
 #[tokio::test(start_paused = true)]

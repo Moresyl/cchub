@@ -11,6 +11,10 @@ use crate::provider_proxy_transform::{
 
 use super::{ClaudeApiFormat, ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
 
+mod attempts;
+pub(super) use attempts::record_stream_attempt;
+pub(crate) use attempts::StreamAttempt;
+
 pub(super) fn extract_error_message_from_response(body: &Value) -> Option<String> {
     body.get("error")
         .and_then(|value| value.get("message"))

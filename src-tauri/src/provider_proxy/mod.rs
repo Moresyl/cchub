@@ -18,6 +18,7 @@ mod alpha_search;
 mod circuits;
 mod cost;
 use circuits::{CircuitState, EndpointCircuitState};
+pub(crate) use cost::StreamAttempt;
 mod desktop;
 mod forward;
 mod managed_auth;

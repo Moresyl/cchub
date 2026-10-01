@@ -1,8 +1,11 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Copy, ExternalLink, KeyRound, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useAppDialog } from "./AppDialogProvider";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import AccountQuota from "./CodexOAuthAuthSection/AccountQuota";
 
 type LocaleText = (zh: string, en: string, ja?: string) => string;
 
@@ -10,6 +13,7 @@ interface CodexAccount {
   id: string;
   login: string;
   authenticatedAt: number;
+  requiresReauth?: boolean;
 }
 interface CodexStatus {
   accounts: CodexAccount[];
@@ -24,70 +28,8 @@ interface DeviceCode {
   expiresIn: number;
   interval: number;
 }
-interface AccountQuotaTier {
-  name: string;
-  utilization: number;
-  resetsAt?: string | null;
-}
-interface AccountQuota {
-  success: boolean;
-  tiers: AccountQuotaTier[];
-  error?: string | null;
-}
 interface Props {
   localeText: LocaleText;
-}
-
-function AccountQuota({ accountId, localeText }: { accountId: string; localeText: LocaleText }) {
-  const [quota, setQuota] = useState<AccountQuota | null>(null);
-  useEffect(() => {
-    let active = true;
-    void invoke<AccountQuota>("get_codex_oauth_quota", { accountId })
-      .then((value) => {
-        if (active) setQuota(value);
-      })
-      .catch(() => {
-        if (active) setQuota(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [accountId]);
-  if (!quota)
-    return (
-      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-        {localeText("配额读取中...", "Loading quota...", "クォータを読み込み中...")}
-      </span>
-    );
-  if (!quota.success || quota.tiers.length === 0)
-    return (
-      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-        {localeText("暂无配额", "Quota unavailable", "クォータなし")}
-      </span>
-    );
-  return (
-    <div style={{ display: "grid", gap: 3, minWidth: 180 }}>
-      {quota.tiers.map((tier) => {
-        const utilization = Math.max(0, Math.min(100, tier.utilization));
-        const color = utilization >= 90 ? "var(--danger)" : utilization >= 70 ? "var(--warning)" : "var(--accent)";
-        return (
-          <div
-            key={tier.name}
-            title={tier.resetsAt ? `${tier.name}: ${tier.resetsAt}` : tier.name}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
-          >
-            <span style={{ width: 58, fontSize: 10, color: "var(--text-muted)" }}>{tier.name.replace("_", " ")}</span>
-            <div style={{ height: 4, flex: 1, minWidth: 55, background: "var(--border)", borderRadius: 3 }}>
-              <div style={{ height: "100%", width: `${utilization}%`, background: color, borderRadius: 3 }} />
-            </div>
-            <span style={{ width: 36, textAlign: "right", fontSize: 10, color: "var(--text-muted)" }}>
-              {utilization.toFixed(0)}%
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
@@ -97,22 +39,50 @@ export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [quotaEpoch, setQuotaEpoch] = useState(0);
+  const owner = useRef({ generation: 0, healthGeneration: 0, mounted: true });
 
   const load = useCallback(async () => {
+    const generation = ++owner.current.generation;
     setLoading(true);
     try {
-      setStatus(await invoke<CodexStatus>("codex_oauth_get_status"));
+      const next = await invoke<CodexStatus>("codex_oauth_get_status");
+      if (!owner.current.mounted || generation !== owner.current.generation) return;
+      setStatus(next);
+      setQuotaEpoch((epoch) => epoch + 1);
       setMessage("");
     } catch (error) {
-      setMessage(String(error));
+      if (owner.current.mounted && generation === owner.current.generation) setMessage(String(error));
     } finally {
-      setLoading(false);
+      if (owner.current.mounted && generation === owner.current.generation) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    const active = owner.current;
+    active.mounted = true;
     void load();
+    return () => {
+      active.mounted = false;
+      ++active.generation;
+    };
   }, [load]);
+
+  const refreshHealth = useCallback(async () => {
+    const generation = owner.current.generation;
+    const healthGeneration = ++owner.current.healthGeneration;
+    try {
+      const next = await invoke<CodexStatus>("codex_oauth_get_status");
+      if (
+        owner.current.mounted &&
+        generation === owner.current.generation &&
+        healthGeneration === owner.current.healthGeneration
+      )
+        setStatus(next);
+    } catch {
+      /* The explicit refresh action remains available. */
+    }
+  }, []);
 
   useEffect(() => {
     if (!deviceCode) return undefined;
@@ -181,6 +151,16 @@ export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
     [load],
   );
 
+  const cancelLogin = useCallback(async () => {
+    if (!deviceCode) return;
+    setDeviceCode(null);
+    try {
+      await invoke("codex_oauth_cancel_device_flow", { deviceCode: deviceCode.deviceCode });
+    } catch (error) {
+      setMessage(String(error));
+    }
+  }, [deviceCode]);
+
   const remove = useCallback(
     async (accountId: string) => {
       const confirmed = await appDialog.confirm({
@@ -239,126 +219,144 @@ export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
     setMessage(localeText("设备码已复制", "Device code copied", "デバイスコードをコピーしました"));
   }, [deviceCode, localeText]);
 
-  if (loading)
+  if (loading && !status)
     return (
-      <div className="card" style={{ padding: 14 }}>
-        <div className="loading-center" style={{ minHeight: 80 }}>
-          <div className="spinner" />
-        </div>
-      </div>
+      <Card className="flex min-h-24 items-center justify-center" role="status">
+        <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+        <span className="sr-only">{localeText("正在读取账号…", "Loading accounts…", "アカウントを読み込み中…")}</span>
+      </Card>
     );
   const accounts = status?.accounts ?? [];
   return (
-    <div className="card" style={{ padding: 14, display: "grid", gap: 12 }}>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 700, fontSize: 14 }}>
-          <KeyRound size={16} />
+    <Card className="min-w-0 space-y-4 p-4" aria-busy={busy || loading}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <KeyRound size={16} aria-hidden="true" />
           {localeText("Codex OAuth 认证", "Codex OAuth Auth", "Codex OAuth 認証")}
-        </div>
-        <div style={{ display: "flex", gap: 7 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => void load()} disabled={busy}>
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => void load()} disabled={busy || loading}>
             <RefreshCw size={13} />
             {localeText("刷新", "Refresh", "更新")}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={() => void startLogin()} disabled={busy}>
+          </Button>
+          <Button onClick={() => void startLogin()} disabled={busy || !!deviceCode}>
             <KeyRound size={13} />
             {accounts.length
               ? localeText("添加账号", "Add account", "アカウント追加")
               : localeText("登录", "Sign in", "ログイン")}
-          </button>
+          </Button>
           {accounts.length > 0 && (
-            <button className="btn btn-ghost btn-sm" onClick={() => void logout()} disabled={busy}>
+            <Button variant="ghost" onClick={() => void logout()} disabled={busy}>
               {localeText("退出全部", "Sign out all", "すべて退出")}
-            </button>
+            </Button>
           )}
         </div>
       </div>
-      <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
+      <p className="text-xs leading-relaxed text-muted-foreground">
         {localeText(
           "使用设备码登录；令牌仅用于本地请求，账号列表不包含密钥。",
           "Sign in with a device code; tokens are used locally and account metadata never includes secrets.",
           "デバイスコードでログインします。トークンはローカル要求にのみ使用し、アカウント一覧に秘密情報は含めません。",
         )}
-      </div>
+      </p>
       <div>
-        <span className={`badge ${accounts.length ? "badge-success" : "badge-muted"}`}>
+        <span className="text-xs text-muted-foreground">
           {accounts.length
             ? localeText(
-                `已连接 ${accounts.length} 个账号`,
-                `${accounts.length} account(s) connected`,
-                `${accounts.length} 件接続済み`,
+                `已保存 ${accounts.length} 个账号`,
+                `${accounts.length} saved account(s)`,
+                `${accounts.length} 件保存済み`,
               )
             : localeText("未连接", "Not connected", "未接続")}
         </span>
       </div>
       {deviceCode && (
-        <div style={{ padding: 10, border: "1px solid var(--border)", borderRadius: 8, display: "grid", gap: 8 }}>
-          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             {localeText(
               "打开验证页并输入设备码，完成后此处会自动刷新。",
               "Open the verification page and enter the device code; this panel polls automatically.",
               "認証ページを開いてデバイスコードを入力すると、自動で更新されます。",
             )}
-          </div>
-          <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
-            <code className="badge badge-accent" style={{ fontSize: 17, letterSpacing: ".08em" }}>
-              {deviceCode.userCode}
-            </code>
-            <button className="btn btn-secondary btn-sm" onClick={() => void copyCode()}>
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="rounded-md bg-secondary px-3 py-2 text-base tracking-wider">{deviceCode.userCode}</code>
+            <Button variant="secondary" onClick={() => void copyCode()}>
               <Copy size={13} />
               {localeText("复制", "Copy", "コピー")}
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => void shellOpen(deviceCode.verificationUri)}>
+            </Button>
+            <Button variant="secondary" onClick={() => void shellOpen(deviceCode.verificationUri)}>
               <ExternalLink size={13} />
               {localeText("打开验证页", "Open", "開く")}
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setDeviceCode(null)}>
+            </Button>
+            <Button variant="ghost" onClick={() => void cancelLogin()}>
               {localeText("取消", "Cancel", "キャンセル")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
-      {message && <div style={{ color: "var(--text-muted)", fontSize: 11 }}>{message}</div>}
+      {message && (
+        <p role="status" className="break-words text-xs text-muted-foreground">
+          {message}
+        </p>
+      )}
       {accounts.map((account) => (
         <div
           key={account.id}
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 10,
-            alignItems: "center",
-            padding: "9px 10px",
-            background: "var(--bg-input)",
-            borderRadius: 8,
-          }}
+          className="flex min-w-0 flex-wrap items-start justify-between gap-3 rounded-lg border border-border bg-secondary/40 p-3"
         >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 600, fontSize: 12 }}>{account.login}</div>
-            <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 3 }}>{account.id}</div>
-            <AccountQuota accountId={account.id} localeText={localeText} />
+          <div className="min-w-0 flex-[1_1_240px] space-y-2">
+            <p className="break-words text-sm font-medium">{account.login}</p>
+            <p className="break-all text-[11px] text-muted-foreground">{account.id}</p>
+            {account.requiresReauth ? (
+              <p className="text-xs text-[var(--warning)]">
+                {localeText(
+                  "授权已失效，请重新登录此账号。",
+                  "Authorization expired. Sign in to this account again.",
+                  "認証が失効しました。このアカウントに再ログインしてください。",
+                )}
+              </p>
+            ) : (
+              <AccountQuota
+                key={`${account.id}:${quotaEpoch}`}
+                accountId={account.id}
+                localeText={localeText}
+                onFailure={refreshHealth}
+              />
+            )}
           </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+            {account.requiresReauth && (
+              <Button variant="secondary" disabled={busy || !!deviceCode} onClick={() => void startLogin()}>
+                {localeText("重新登录", "Sign in again", "再ログイン")}
+              </Button>
+            )}
             {account.id === status?.defaultAccountId ? (
               <span className="badge badge-success">{localeText("默认", "Default", "既定")}</span>
             ) : (
-              <button className="btn btn-secondary btn-xs" onClick={() => void setDefault(account.id)} disabled={busy}>
+              <Button
+                variant="secondary"
+                onClick={() => void setDefault(account.id)}
+                disabled={busy || account.requiresReauth}
+              >
                 {localeText("设为默认", "Set default", "既定に設定")}
-              </button>
+              </Button>
             )}
-            <button
-              className="btn btn-danger-ghost btn-icon-sm"
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-[var(--danger)]"
               onClick={() => void remove(account.id)}
               disabled={busy}
               title={localeText("移除", "Remove", "削除")}
+              aria-label={`${localeText("移除", "Remove", "削除")} ${account.login}`}
             >
               <Trash2 size={13} />
-            </button>
+            </Button>
           </div>
         </div>
       ))}
-      {busy && <Loader2 size={14} className="spin" style={{ color: "var(--text-muted)" }} />}
-    </div>
+      {busy && <Loader2 size={14} className="animate-spin text-muted-foreground" aria-hidden="true" />}
+    </Card>
   );
 });

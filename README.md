@@ -79,6 +79,10 @@ The profile usage dialog shows every reported currency and quota window, includi
 
 Refreshing after a network failure retains the same configuration's last successful reading with a visible stale-data notice. Credential failures replace the result. Switching profiles, tools or configuration invalidates previous readings and late requests. The expandable read-only JSON view supports syntax highlighting and scrolling through long responses.
 
+### OAuth account status
+
+Explicitly rejected refresh credentials leave Codex OAuth and xAI OAuth accounts marked as requiring sign-in on this device. Ordinary network or proxy-challenge failures do not clear the account. Old refresh responses cannot overwrite a new sign-in or restore a removed account; cancelling device-code sign-in also cancels the backend flow so later authorization cannot commit. The Codex account panel keeps expired accounts visible with a sign-in action, offers retries for quota failures, and isolates late readings by account.
+
 ### Balance and quota alerts
 
 Enable alerts in a profile’s usage and balance dialog. Monitoring defaults off and checks approximately every five minutes while CCHub runs; it uses that profile’s configured usage script or provider API. Quota thresholds and balance thresholds are separate, with balances matched by currency or credit unit. Changing the query account pauses monitoring until the settings are saved again. Failed or stale readings do not trigger alerts.

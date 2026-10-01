@@ -645,6 +645,15 @@ pub async fn codex_oauth_list_accounts(
     Ok(state.0.list_accounts().await)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub async fn codex_oauth_cancel_device_flow(
+    device_code: String,
+    state: State<'_, CodexOAuthState>,
+) -> Result<(), String> {
+    state.0.cancel_device_flow(&device_code).await;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn codex_oauth_get_status(
     state: State<'_, CodexOAuthState>,

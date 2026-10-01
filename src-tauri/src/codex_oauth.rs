@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -19,6 +18,8 @@ const TOKEN_REFRESH_BUFFER_MS: i64 = 60_000;
 const DEFAULT_DEVICE_EXPIRY_SECS: u64 = 900;
 const KEYRING_SERVICE: &str = "CCHub Codex OAuth";
 
+mod refresh;
+
 #[derive(Debug, thiserror::Error)]
 pub enum CodexOAuthError {
     #[error("OAuth authorization is pending")]
@@ -29,6 +30,10 @@ pub enum CodexOAuthError {
     TokenFetchFailed(String),
     #[error("OAuth refresh token is invalid or expired")]
     RefreshTokenInvalid,
+    #[error("OAuth account requires authorization; sign in again")]
+    ReauthRequired,
+    #[error("OAuth account changed while refreshing; retry with the current account")]
+    AccountChanged,
     #[error("Network error: {0}")]
     Network(String),
     #[error("Parse error: {0}")]
@@ -67,6 +72,7 @@ pub struct CodexAccount {
     pub id: String,
     pub login: String,
     pub authenticated_at: i64,
+    pub requires_reauth: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +141,10 @@ struct AccountData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     refresh_token: Option<String>,
     authenticated_at: i64,
+    #[serde(default)]
+    requires_reauth: bool,
+    #[serde(default = "new_revision")]
+    revision: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -169,6 +179,7 @@ pub struct CodexOAuthManager {
     tokens: RwLock<HashMap<String, CachedToken>>,
     refresh_locks: RwLock<HashMap<String, Arc<Mutex<()>>>>,
     pending: RwLock<HashMap<String, PendingDeviceCode>>,
+    mutation_lock: Mutex<()>,
     http_client: reqwest::Client,
     storage_path: PathBuf,
 }
@@ -183,6 +194,7 @@ impl CodexOAuthManager {
             tokens: RwLock::new(HashMap::new()),
             refresh_locks: RwLock::new(HashMap::new()),
             pending: RwLock::new(HashMap::new()),
+            mutation_lock: Mutex::new(()),
             http_client: crate::shared::http_client::build_http_client(
                 proxy_url.as_deref(),
                 Some("CCHub OAuth"),
@@ -291,77 +303,30 @@ impl CodexOAuthManager {
         let tokens = self
             .exchange_code(&payload.authorization_code, &payload.code_verifier)
             .await?;
-        self.pending.write().await.remove(device_code);
         let refresh_token = tokens.refresh_token.clone().ok_or_else(|| {
             CodexOAuthError::TokenFetchFailed("Refresh token missing".to_string())
         })?;
         let (account_id, email) = token_identity(&tokens);
         let account_id = account_id
             .ok_or_else(|| CodexOAuthError::Parse("Account identity missing".to_string()))?;
-        self.tokens.write().await.insert(
-            account_id.clone(),
-            CachedToken {
-                value: tokens.access_token,
-                expires_at_ms: expires_at(tokens.expires_in),
-            },
-        );
         Ok(Some(
-            self.add_account(account_id, refresh_token, email).await?,
+            self.add_account(
+                account_id,
+                refresh_token,
+                email,
+                device_code,
+                CachedToken {
+                    value: tokens.access_token,
+                    expires_at_ms: expires_at(tokens.expires_in),
+                },
+            )
+            .await?,
         ))
     }
 
-    pub async fn get_valid_token(
-        &self,
-        account_id: Option<&str>,
-    ) -> Result<String, CodexOAuthError> {
-        let id = self.resolve_account_id(account_id).await.ok_or_else(|| {
-            CodexOAuthError::AccountNotFound("No OAuth account is available".to_string())
-        })?;
-        {
-            let tokens = self.tokens.read().await;
-            if let Some(token) = tokens.get(&id).filter(|token| token.usable()) {
-                return Ok(token.value.clone());
-            }
-        }
-        let lock = self.refresh_lock(&id).await;
-        let _guard = lock.lock().await;
-        {
-            let tokens = self.tokens.read().await;
-            if let Some(token) = tokens.get(&id).filter(|token| token.usable()) {
-                return Ok(token.value.clone());
-            }
-        }
-        let refresh_token = self
-            .accounts
-            .read()
-            .await
-            .get(&id)
-            .and_then(|account| account.refresh_token.clone())
-            .or_else(|| keyring_get(&id).ok().flatten())
-            .ok_or_else(|| CodexOAuthError::AccountNotFound(id.clone()))?;
-        let refreshed = self.refresh_token(&refresh_token).await?;
-        if let Some(next_refresh) = refreshed
-            .refresh_token
-            .as_deref()
-            .filter(|value| !value.is_empty())
-        {
-            if next_refresh != refresh_token {
-                let stored_in_keyring = keyring_set(&id, next_refresh).is_ok();
-                if let Some(account) = self.accounts.write().await.get_mut(&id) {
-                    account.refresh_token = (!stored_in_keyring).then(|| next_refresh.to_string());
-                }
-                self.save_to_disk().await?;
-            }
-        }
-        let token = refreshed.access_token;
-        self.tokens.write().await.insert(
-            id,
-            CachedToken {
-                value: token.clone(),
-                expires_at_ms: expires_at(refreshed.expires_in),
-            },
-        );
-        Ok(token)
+    pub async fn cancel_device_flow(&self, device_code: &str) {
+        let _guard = self.mutation_lock.lock().await;
+        self.pending.write().await.remove(device_code);
     }
 
     pub async fn list_accounts(&self) -> Vec<CodexAccount> {
@@ -376,6 +341,7 @@ impl CodexOAuthManager {
                     .clone()
                     .unwrap_or_else(|| format!("ChatGPT ({})", account.id)),
                 authenticated_at: account.authenticated_at,
+                requires_reauth: account.requires_reauth,
             })
             .collect::<Vec<_>>();
         result.sort_by(|left, right| {
@@ -413,6 +379,7 @@ impl CodexOAuthManager {
     }
 
     pub async fn remove_account(&self, account_id: &str) -> Result<(), CodexOAuthError> {
+        let _guard = self.mutation_lock.lock().await;
         if self.accounts.write().await.remove(account_id).is_none() {
             return Err(CodexOAuthError::AccountNotFound(account_id.to_string()));
         }
@@ -427,14 +394,25 @@ impl CodexOAuthManager {
     }
 
     pub async fn set_default_account(&self, account_id: &str) -> Result<(), CodexOAuthError> {
+        let _guard = self.mutation_lock.lock().await;
         if !self.accounts.read().await.contains_key(account_id) {
             return Err(CodexOAuthError::AccountNotFound(account_id.to_string()));
+        }
+        if self
+            .accounts
+            .read()
+            .await
+            .get(account_id)
+            .is_some_and(|account| account.requires_reauth)
+        {
+            return Err(CodexOAuthError::ReauthRequired);
         }
         *self.default_account_id.write().await = Some(account_id.to_string());
         self.save_to_disk().await
     }
 
     pub async fn clear_auth(&self) -> Result<(), CodexOAuthError> {
+        let _guard = self.mutation_lock.lock().await;
         let account_ids = self
             .accounts
             .read()
@@ -499,22 +477,23 @@ impl CodexOAuthManager {
             ])
             .send()
             .await?;
-        if matches!(
-            response.status(),
-            reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
-        ) {
-            return Err(CodexOAuthError::RefreshTokenInvalid);
-        }
-        if !response.status().is_success() {
-            return Err(CodexOAuthError::TokenFetchFailed(format!(
-                "Token refresh returned HTTP {}",
-                response.status()
-            )));
-        }
-        response
-            .json()
+        use crate::shared::oauth_response::{read_refresh_response, RefreshResponseError};
+        let value = read_refresh_response(response)
             .await
-            .map_err(|error| CodexOAuthError::Parse(error.to_string()))
+            .map_err(|error| match error {
+                RefreshResponseError::ReauthRequired => CodexOAuthError::RefreshTokenInvalid,
+                RefreshResponseError::Rejected(status) => CodexOAuthError::TokenFetchFailed(
+                    format!("Token refresh returned HTTP {status}"),
+                ),
+                RefreshResponseError::InvalidPayload => {
+                    CodexOAuthError::Parse("Invalid OAuth refresh response".into())
+                }
+                RefreshResponseError::Transport => {
+                    CodexOAuthError::Network("Unable to read OAuth refresh response".into())
+                }
+            })?;
+        serde_json::from_value(value)
+            .map_err(|_| CodexOAuthError::Parse("Invalid OAuth token fields".into()))
     }
 
     async fn add_account(
@@ -522,23 +501,41 @@ impl CodexOAuthManager {
         id: String,
         refresh_token: String,
         email: Option<String>,
+        device_code: &str,
+        cached_token: CachedToken,
     ) -> Result<CodexAccount, CodexOAuthError> {
+        let _guard = self.mutation_lock.lock().await;
+        if self
+            .pending
+            .read()
+            .await
+            .get(device_code)
+            .is_none_or(|flow| flow.expires_at_ms <= chrono::Utc::now().timestamp_millis())
+        {
+            return Err(CodexOAuthError::ExpiredToken);
+        }
         let stored_in_keyring = keyring_set(&id, &refresh_token).is_ok();
         let data = AccountData {
             id: id.clone(),
             email: email.clone(),
             refresh_token: (!stored_in_keyring).then_some(refresh_token),
             authenticated_at: chrono::Utc::now().timestamp(),
+            requires_reauth: false,
+            revision: new_revision(),
         };
+        self.tokens.write().await.remove(&id);
         self.accounts.write().await.insert(id.clone(), data);
         if self.default_account_id.read().await.is_none() {
             *self.default_account_id.write().await = Some(id.clone());
         }
         self.save_to_disk().await?;
+        self.tokens.write().await.insert(id.clone(), cached_token);
+        self.pending.write().await.remove(device_code);
         Ok(CodexAccount {
             id: id.clone(),
             login: email.unwrap_or_else(|| format!("ChatGPT ({id})")),
             authenticated_at: chrono::Utc::now().timestamp(),
+            requires_reauth: false,
         })
     }
 
@@ -607,12 +604,7 @@ impl CodexOAuthManager {
         if migrated {
             let content = serde_json::to_string_pretty(&sanitized_store)
                 .map_err(|error| CodexOAuthError::Parse(error.to_string()))?;
-            fs::write(&self.storage_path, content)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&self.storage_path, fs::Permissions::from_mode(0o600))?;
-            }
+            crate::utils::atomic_write_string(&self.storage_path, &content)?;
         }
         let default_account_id = sanitized_store.default_account_id.clone();
         if let Ok(mut accounts) = self.accounts.try_write() {
@@ -639,34 +631,13 @@ impl CodexOAuthManager {
                 fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
             }
         }
-        let parent = self
-            .storage_path
-            .parent()
-            .ok_or_else(|| CodexOAuthError::Io("Invalid OAuth storage path".to_string()))?;
-        let file_name = self
-            .storage_path
-            .file_name()
-            .ok_or_else(|| CodexOAuthError::Io("Invalid OAuth storage filename".to_string()))?
-            .to_string_lossy();
-        let temp = parent.join(format!("{file_name}.tmp.{}", uuid::Uuid::new_v4()));
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)?;
-        file.write_all(content.as_bytes())?;
-        file.flush()?;
-        drop(file);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))?;
-        }
-        if self.storage_path.exists() {
-            let _ = fs::remove_file(&self.storage_path);
-        }
-        fs::rename(temp, &self.storage_path)?;
+        crate::utils::atomic_write_string(&self.storage_path, &content)?;
         Ok(())
     }
+}
+
+fn new_revision() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 fn parse_interval(value: Option<&Value>) -> u64 {

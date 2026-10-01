@@ -1,5 +1,4 @@
 use super::*;
-use std::io::Write;
 
 impl XaiOAuthManager {
     pub(super) fn load_from_disk_sync(&self) -> Result<(), XaiOAuthError> {
@@ -55,28 +54,7 @@ impl XaiOAuthManager {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
         }
-        let file_name = self
-            .storage_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| XaiOAuthError::Io("Invalid OAuth storage filename".to_string()))?;
-        let temp = parent.join(format!("{file_name}.tmp.{}", uuid::Uuid::new_v4()));
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)?;
-        file.write_all(content.as_bytes())?;
-        file.flush()?;
-        drop(file);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))?;
-        }
-        if self.storage_path.exists() {
-            fs::remove_file(&self.storage_path)?;
-        }
-        fs::rename(temp, &self.storage_path)?;
+        crate::utils::atomic_write_string(&self.storage_path, content)?;
         Ok(())
     }
 }

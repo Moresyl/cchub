@@ -1,0 +1,57 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import CodexOAuthAuthSection from "./CodexOAuthAuthSection";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/plugin-shell", () => ({ open: vi.fn() }));
+vi.mock("./AppDialogProvider", () => ({ useAppDialog: () => ({ confirm: vi.fn() }) }));
+const localeText = (zh: string) => zh;
+const account = { id: "one", login: "saved@example.com", authenticatedAt: 1, requiresReauth: true };
+const status = { accounts: [account], defaultAccountId: "one", authenticated: true };
+beforeEach(() => {
+  vi.mocked(invoke).mockReset();
+});
+
+describe("OAuth account health", () => {
+  it("keeps expired accounts visible with a direct reauthorization action", async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "codex_oauth_get_status") return status;
+      if (command === "codex_oauth_start_device_flow")
+        return {
+          deviceCode: "device",
+          userCode: "ABCD",
+          verificationUri: "https://example.test",
+          expiresIn: 300,
+          interval: 5,
+        };
+      if (command === "codex_oauth_cancel_device_flow") return null;
+      throw new Error(`Unexpected request: ${command}`);
+    });
+    render(<CodexOAuthAuthSection localeText={localeText} />);
+    expect(await screen.findByText("授权已失效，请重新登录此账号。")).toBeTruthy();
+    expect(screen.getByText("saved@example.com")).toBeTruthy();
+    expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "get_codex_oauth_quota")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "重新登录" }));
+    expect(await screen.findByText("ABCD")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "取消" }).getAttribute("data-slot")).toBe("button");
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(invoke).toHaveBeenCalledWith("codex_oauth_cancel_device_flow", { deviceCode: "device" });
+  });
+
+  it("reloads health after a rejected quota without querying an expired account again", async () => {
+    let reads = 0;
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "codex_oauth_get_status")
+        return reads++ === 0 ? { ...status, accounts: [{ ...account, requiresReauth: false }] } : status;
+      if (command === "get_codex_oauth_quota") return { success: false, tiers: [] };
+      throw new Error(`Unexpected request: ${command}`);
+    });
+    render(<CodexOAuthAuthSection localeText={localeText} />);
+    expect(await screen.findByText("授权已失效，请重新登录此账号。")).toBeTruthy();
+    await waitFor(() =>
+      expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "get_codex_oauth_quota")).toHaveLength(1),
+    );
+    expect(reads).toBe(2);
+  });
+});

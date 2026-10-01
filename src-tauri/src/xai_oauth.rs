@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Mutex, RwLock};
 
+mod refresh;
 mod storage;
 
 const XAI_ISSUER: &str = "https://auth.x.ai";
@@ -43,6 +44,8 @@ pub enum XaiOAuthError {
     RefreshTokenInvalid,
     #[error("xAI account requires re-authentication: {0}")]
     ReauthRequired(String),
+    #[error("xAI account changed while refreshing; retry with the current account")]
+    AccountChanged,
     #[error("xAI network error: {0}")]
     Network(String),
     #[error("xAI response parse error: {0}")]
@@ -158,6 +161,8 @@ struct AccountData {
     authenticated_at: i64,
     #[serde(default)]
     requires_reauth: bool,
+    #[serde(default = "new_revision")]
+    revision: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -355,10 +360,15 @@ impl XaiOAuthManager {
                     value: tokens.access_token,
                     expires_at_ms: expires_at(tokens.expires_in),
                 }),
+                device_code,
             )
             .await?;
-        self.pending.write().await.remove(device_code);
         Ok(Some(account))
+    }
+
+    pub async fn cancel_device_flow(&self, device_code: &str) {
+        let _guard = self.mutation_lock.lock().await;
+        self.pending.write().await.remove(device_code);
     }
 
     pub async fn list_accounts(&self) -> Vec<XaiAccount> {
@@ -397,63 +407,6 @@ impl XaiOAuthManager {
             default_account_id: default,
             username,
         }
-    }
-
-    pub async fn get_valid_token(&self, account_id: Option<&str>) -> Result<String, XaiOAuthError> {
-        let id = self.resolve_account_id(account_id).await.ok_or_else(|| {
-            XaiOAuthError::AccountNotFound("No xAI account is available".to_string())
-        })?;
-        if let Some(token) = self.cached_token(&id).await {
-            return Ok(token);
-        }
-        let lock = self.refresh_lock(&id).await;
-        let _guard = lock.lock().await;
-        if let Some(token) = self.cached_token(&id).await {
-            return Ok(token);
-        }
-        let account = self
-            .accounts
-            .read()
-            .await
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| XaiOAuthError::AccountNotFound(id.clone()))?;
-        if account.requires_reauth {
-            return Err(XaiOAuthError::ReauthRequired(id));
-        }
-        let refresh_token = account
-            .refresh_token
-            .or_else(|| keyring_get(&account.id).ok().flatten())
-            .ok_or_else(|| XaiOAuthError::AccountNotFound(account.id.clone()))?;
-        let tokens = self.refresh_token(&refresh_token).await.map_err(|error| {
-            if matches!(error, XaiOAuthError::RefreshTokenInvalid) {
-                XaiOAuthError::ReauthRequired(account.id.clone())
-            } else {
-                error
-            }
-        })?;
-        let next_refresh = tokens
-            .refresh_token
-            .clone()
-            .filter(|value| !value.trim().is_empty());
-        if let Some(next_refresh) = next_refresh {
-            if next_refresh != refresh_token {
-                let stored = keyring_set(&account.id, &next_refresh).is_ok();
-                if let Some(item) = self.accounts.write().await.get_mut(&account.id) {
-                    item.refresh_token = (!stored).then_some(next_refresh);
-                }
-                self.save_to_disk().await?;
-            }
-        }
-        let token = tokens.access_token;
-        self.access_tokens.write().await.insert(
-            account.id,
-            CachedToken {
-                value: token.clone(),
-                expires_at_ms: expires_at(tokens.expires_in),
-            },
-        );
-        Ok(token)
     }
 
     pub async fn fetch_models(
@@ -495,8 +448,18 @@ impl XaiOAuthManager {
     }
 
     pub async fn set_default_account(&self, account_id: &str) -> Result<(), XaiOAuthError> {
+        let _guard = self.mutation_lock.lock().await;
         if !self.accounts.read().await.contains_key(account_id) {
             return Err(XaiOAuthError::AccountNotFound(account_id.to_string()));
+        }
+        if self
+            .accounts
+            .read()
+            .await
+            .get(account_id)
+            .is_some_and(|account| account.requires_reauth)
+        {
+            return Err(XaiOAuthError::ReauthRequired(account_id.to_string()));
         }
         *self.default_account_id.write().await = Some(account_id.to_string());
         self.save_to_disk().await
@@ -580,19 +543,23 @@ impl XaiOAuthManager {
             ])
             .send()
             .await?;
-        let status = response.status();
-        let value = read_json_response(response).await?;
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || value.get("error").and_then(Value::as_str) == Some("invalid_grant")
-        {
-            return Err(XaiOAuthError::RefreshTokenInvalid);
-        }
-        if !status.is_success() {
-            return Err(XaiOAuthError::TokenFetchFailed(format_http_error(
-                status, &value,
-            )));
-        }
-        serde_json::from_value(value).map_err(|error| XaiOAuthError::Parse(error.to_string()))
+        use crate::shared::oauth_response::{read_refresh_response, RefreshResponseError};
+        let value = read_refresh_response(response)
+            .await
+            .map_err(|error| match error {
+                RefreshResponseError::ReauthRequired => XaiOAuthError::RefreshTokenInvalid,
+                RefreshResponseError::Rejected(status) => {
+                    XaiOAuthError::TokenFetchFailed(format!("Token refresh returned HTTP {status}"))
+                }
+                RefreshResponseError::InvalidPayload => {
+                    XaiOAuthError::Parse("Invalid OAuth refresh response".into())
+                }
+                RefreshResponseError::Transport => {
+                    XaiOAuthError::Network("Unable to read OAuth refresh response".into())
+                }
+            })?;
+        serde_json::from_value(value)
+            .map_err(|_| XaiOAuthError::Parse("Invalid OAuth token fields".into()))
     }
 
     async fn add_account(
@@ -601,8 +568,18 @@ impl XaiOAuthManager {
         login: String,
         refresh_token: String,
         cached_token: Option<CachedToken>,
+        device_code: &str,
     ) -> Result<XaiAccount, XaiOAuthError> {
         let _guard = self.mutation_lock.lock().await;
+        if self
+            .pending
+            .read()
+            .await
+            .get(device_code)
+            .is_none_or(|flow| flow.expires_at_ms <= chrono::Utc::now().timestamp_millis())
+        {
+            return Err(XaiOAuthError::ExpiredToken);
+        }
         let stored_in_keyring = keyring_set(&id, &refresh_token).is_ok();
         let data = AccountData {
             id: id.clone(),
@@ -610,6 +587,7 @@ impl XaiOAuthManager {
             refresh_token: (!stored_in_keyring).then_some(refresh_token),
             authenticated_at: chrono::Utc::now().timestamp(),
             requires_reauth: false,
+            revision: new_revision(),
         };
         let account = XaiAccount {
             id: id.clone(),
@@ -617,6 +595,7 @@ impl XaiOAuthManager {
             authenticated_at: data.authenticated_at,
             requires_reauth: false,
         };
+        self.access_tokens.write().await.remove(&id);
         self.accounts.write().await.insert(id.clone(), data);
         if self.default_account_id.read().await.is_none() {
             *self.default_account_id.write().await = Some(id.clone());
@@ -625,6 +604,7 @@ impl XaiOAuthManager {
         if let Some(cached_token) = cached_token {
             self.access_tokens.write().await.insert(id, cached_token);
         }
+        self.pending.write().await.remove(device_code);
         Ok(account)
     }
 
@@ -756,6 +736,10 @@ fn token_identity(tokens: &TokenPayload) -> Option<(String, String)> {
         .or(claims.name)
         .unwrap_or_else(|| format!("xAI ({})", id.chars().take(12).collect::<String>()));
     Some((id, login))
+}
+
+fn new_revision() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 fn keyring_entry(account_id: &str) -> Result<keyring::Entry, XaiOAuthError> {

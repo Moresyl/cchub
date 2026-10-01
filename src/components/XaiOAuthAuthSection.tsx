@@ -116,6 +116,16 @@ export default memo(function XaiOAuthAuthSection({ localeText }: Props) {
     },
     [load],
   );
+
+  const cancelLogin = useCallback(async () => {
+    if (!deviceCode) return;
+    setDeviceCode(null);
+    try {
+      await invoke("xai_oauth_cancel_device_flow", { deviceCode: deviceCode.deviceCode });
+    } catch (error) {
+      setMessage(String(error));
+    }
+  }, [deviceCode]);
   const remove = useCallback(
     async (accountId: string) => {
       const confirmed = await appDialog.confirm({
@@ -247,7 +257,7 @@ export default memo(function XaiOAuthAuthSection({ localeText }: Props) {
               <ExternalLink size={13} />
               {localeText("打开验证页", "Open", "開く")}
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setDeviceCode(null)}>
+            <button className="btn btn-ghost btn-sm" onClick={() => void cancelLogin()}>
               {localeText("取消", "Cancel", "キャンセル")}
             </button>
           </div>

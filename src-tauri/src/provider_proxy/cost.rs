@@ -110,10 +110,7 @@ pub(super) fn calculate_proxy_total_cost(
     insights: &ProxyRequestInsights,
     usage: &ProxyUsageMetrics,
 ) -> f64 {
-    let model_id = usage
-        .response_model
-        .as_deref()
-        .or(insights.request_model.as_deref());
+    let model_id = insights.pricing_model(usage.response_model.as_deref());
     let Some(pricing) = lookup_model_pricing(conn, model_id) else {
         return 0.0;
     };

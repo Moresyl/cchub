@@ -705,8 +705,26 @@ pub(super) fn build_upstream_request_url(
     };
 
     if let Some(query) = query.filter(|value| !value.is_empty()) {
-        url.push('?');
-        url.push_str(query);
+        if let Some((_, existing)) = url.split_once('?') {
+            let keys: std::collections::HashSet<_> =
+                url::form_urlencoded::parse(existing.as_bytes())
+                    .map(|(key, _)| key.into_owned())
+                    .collect();
+            let mut extra = url::form_urlencoded::Serializer::new(String::new());
+            for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+                if !keys.contains(key.as_ref()) {
+                    extra.append_pair(&key, &value);
+                }
+            }
+            let extra = extra.finish();
+            if !extra.is_empty() {
+                url.push('&');
+                url.push_str(&extra);
+            }
+        } else {
+            url.push('?');
+            url.push_str(query);
+        }
     }
 
     Ok(url)

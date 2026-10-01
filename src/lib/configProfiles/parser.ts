@@ -23,6 +23,7 @@ import {
 } from "./helpers";
 import { normalizeModelCatalog } from "../modelCatalog";
 import { defaultOpenCodeNpm } from "./opencode";
+import { parseModelAliases } from "./modelAliases";
 
 function stringifyOverrideObject(value: unknown, headers = false): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
@@ -45,6 +46,7 @@ export function parseStructuredConfig(toolId: string, content: string): Structur
       parsed.customEndpoints ?? parsed.custom_endpoints ?? metadata.customEndpoints,
     );
     const transportFields = {
+      ...parseModelAliases(metadata.localProxyModelAliases),
       modelCatalog: normalizeModelCatalog(metadata.modelCatalog),
       customUserAgent: normalizeCustomUserAgent(
         metadata.customUserAgent ?? metadata.custom_user_agent ?? parsed.customUserAgent ?? parsed.custom_user_agent,

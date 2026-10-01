@@ -16,8 +16,23 @@ fn extract_gemini_model_from_path(relative_path: &str) -> Option<String> {
     if model.is_empty() {
         None
     } else {
-        Some(model.to_string())
+        decode_model_component(model)
     }
+}
+
+fn decode_model_component(model: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(model.len());
+    let mut chars = model.bytes();
+    while let Some(byte) = chars.next() {
+        if byte == b'%' {
+            let high = char::from(chars.next()?).to_digit(16)?;
+            let low = char::from(chars.next()?).to_digit(16)?;
+            bytes.push((high * 16 + low) as u8);
+        } else {
+            bytes.push(byte);
+        }
+    }
+    String::from_utf8(bytes).ok()
 }
 
 pub(crate) fn extract_request_insights(
@@ -33,7 +48,10 @@ pub(crate) fn extract_request_insights(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(|| {
-            if tool_id == "gemini" {
+            if tool_id == "gemini"
+                || relative_path.contains("GenerateContent")
+                || relative_path.ends_with(":generateContent")
+            {
                 extract_gemini_model_from_path(relative_path)
             } else {
                 None
@@ -49,6 +67,7 @@ pub(crate) fn extract_request_insights(
 
     ProxyRequestInsights {
         request_model,
+        upstream_model: None,
         is_streaming,
     }
 }

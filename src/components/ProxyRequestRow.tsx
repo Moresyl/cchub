@@ -12,6 +12,7 @@ interface ProxyRequestRowProps {
   success: boolean;
   toolLabel: string;
   modelLabel: string;
+  responseModelLabel?: string;
   costLabel: string;
   tokenLabel: string;
   latencyLabel: string;
@@ -24,6 +25,7 @@ function ProxyRequestRowComponent({
   success,
   toolLabel,
   modelLabel,
+  responseModelLabel,
   costLabel,
   tokenLabel,
   latencyLabel,
@@ -37,7 +39,10 @@ function ProxyRequestRowComponent({
       tabIndex={onSelect ? 0 : undefined}
       onClick={onSelect}
       onKeyDown={(event) => {
-        if (onSelect && (event.key === "Enter" || event.key === " ")) onSelect();
+        if (onSelect && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onSelect();
+        }
       }}
       style={{
         padding: "10px 12px",
@@ -49,16 +54,18 @@ function ProxyRequestRowComponent({
         cursor: onSelect ? "pointer" : undefined,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+      <div
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 260px" }}>
           <span className={`dot ${success ? "dot-active" : "dot-error"}`} />
-          <span className="badge badge-muted" style={{ fontSize: 10 }}>
+          <span className="badge badge-muted" style={{ fontSize: 11 }}>
             {toolLabel}
           </span>
           <span
             style={{
-              fontSize: 13,
-              fontWeight: 500,
+              fontSize: 14,
+              fontWeight: 510,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -78,24 +85,46 @@ function ProxyRequestRowComponent({
             {modelLabel}
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: 12,
+            marginLeft: "auto",
+          }}
+        >
           <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>{costLabel}</span>
           <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>{tokenLabel}</span>
           <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
             {latencyLabel}
           </span>
-          <span className={`badge ${success ? "badge-success" : "badge-danger"}`} style={{ fontSize: 10 }}>
+          <span className={`badge ${success ? "badge-success" : "badge-danger"}`} style={{ fontSize: 11 }}>
             {item.status_code}
           </span>
         </div>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-code)" }}>
+        <span
+          title={item.request_id}
+          style={{
+            fontSize: 11,
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-code)",
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           {item.request_id}
         </span>
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{createdAtLabel}</span>
+        <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>{createdAtLabel}</span>
       </div>
+
+      {responseModelLabel && <div className="break-all text-[11px] text-muted-foreground">{responseModelLabel}</div>}
 
       {item.error_message && (
         <div style={{ fontSize: 11, color: "var(--danger)", lineHeight: 1.5 }}>{item.error_message}</div>

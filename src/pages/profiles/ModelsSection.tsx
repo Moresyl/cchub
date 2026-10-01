@@ -7,6 +7,7 @@ import { discoveredModelFields, selectProfileModel } from "../../lib/configProfi
 import type { StructuredDraftFields } from "../../lib/configProfiles";
 import type { ModelInfo } from "../../lib/modelCatalog";
 import { supportsModelFetch } from "./helpers";
+import { ModelAliasesSection } from "./ModelAliasesSection";
 
 interface ProfileModelsSectionProps {
   locale: string;
@@ -168,6 +169,13 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
           </>
         )}
       </div>
+      {draftTool !== "pi" && (
+        <ModelAliasesSection
+          fields={fields}
+          localeText={localeText}
+          onChange={(next) => onDraftChange(draftTool, next)}
+        />
+      )}
       {hasCapabilities && (
         <div className="profile-model-capabilities">
           <div className="profile-model-capabilities-header">

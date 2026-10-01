@@ -64,8 +64,8 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         Some(ClaudeApiFormat::GeminiNative) => boxed(create_anthropic_sse_stream_from_gemini(
             observed,
             insights
-                .request_model
-                .clone()
+                .sent_model()
+                .map(str::to_owned)
                 .unwrap_or_else(|| "gemini-3.6-flash".to_string()),
         )),
         _ => match Protocol::for_path(relative_path) {

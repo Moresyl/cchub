@@ -28,6 +28,10 @@ export function mergeSharedDraftFields(
     next.requestHeaders = Object.keys(parsed.requestHeaders).length ? parsed.requestHeaders : next.requestHeaders;
     next.requestHeaderOverrides = parsed.requestHeaderOverrides || next.requestHeaderOverrides;
     next.requestBodyOverrides = parsed.requestBodyOverrides || next.requestBodyOverrides;
+    if (parsed.localProxyModelAliases !== undefined || parsed.localProxyModelAliasesRaw !== undefined) {
+      next.localProxyModelAliases = parsed.localProxyModelAliases;
+      next.localProxyModelAliasesRaw = parsed.localProxyModelAliasesRaw;
+    }
     next.costMultiplier = parsed.costMultiplier || next.costMultiplier;
     next.requiresOAuth = parsed.requiresOAuth || next.requiresOAuth;
     next.providerType = parsed.providerType || next.providerType;
@@ -92,6 +96,12 @@ export function mergeDraftFields(
     if (value !== undefined) {
       (merged as unknown as Record<string, unknown>)[key] = value;
     }
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(next, "localProxyModelAliasesRaw") &&
+    next.localProxyModelAliasesRaw === undefined
+  ) {
+    delete merged.localProxyModelAliasesRaw;
   }
   const connectionFields = [
     "baseUrl",

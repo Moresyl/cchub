@@ -253,6 +253,8 @@ export function applyPresetToFields(
       requestHeaders: current?.requestHeaders || {},
       requestHeaderOverrides: current?.requestHeaderOverrides || "",
       requestBodyOverrides: current?.requestBodyOverrides || "",
+      localProxyModelAliases: current?.localProxyModelAliases,
+      localProxyModelAliasesRaw: current?.localProxyModelAliasesRaw,
       costMultiplier: current?.costMultiplier || "",
       templateValues: current?.templateValues || "",
       requiresOAuth: current?.requiresOAuth || false,

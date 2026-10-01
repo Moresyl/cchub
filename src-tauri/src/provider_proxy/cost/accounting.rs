@@ -94,11 +94,11 @@ pub(super) fn persist_request(
         "INSERT INTO proxy_request_logs (
             request_id,tool_id,profile_id,provider_name,request_model,response_model,
             input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,total_cost_usd,
-            latency_ms,status_code,is_streaming,error_message,created_at
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+            latency_ms,status_code,is_streaming,error_message,created_at,upstream_model
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
         ON CONFLICT(request_id) DO UPDATE SET
             profile_id=excluded.profile_id,provider_name=excluded.provider_name,
-            request_model=excluded.request_model,response_model=excluded.response_model,
+            request_model=excluded.request_model,response_model=excluded.response_model,upstream_model=excluded.upstream_model,
             input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,
             cache_read_tokens=excluded.cache_read_tokens,cache_creation_tokens=excluded.cache_creation_tokens,
             total_cost_usd=excluded.total_cost_usd,latency_ms=excluded.latency_ms,
@@ -107,7 +107,7 @@ pub(super) fn persist_request(
             record.request_id,record.tool_id,record.upstream.profile_id,record.upstream.profile_name,
             record.insights.request_model,record.usage.response_model,next.input,next.output,next.cache_read,
             next.cache_creation,format!("{:.6}", next.cost),next.latency,record.status_code,
-            record.insights.is_streaming,record.error_message,created_at,
+            record.insights.is_streaming,record.error_message,created_at,record.insights.upstream_model,
         ],
     )?;
     if present {

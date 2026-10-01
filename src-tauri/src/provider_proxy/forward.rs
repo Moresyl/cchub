@@ -180,6 +180,10 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             Ok(snapshot) => snapshot.unwrap_or_else(|| candidate.snapshot.clone()),
             Err(error) => return build_proxy_error(StatusCode::CONFLICT, error),
         };
+        let model_aliases = match super::model_aliases::ModelAliases::from_snapshot(&snapshot) {
+            Ok(aliases) => aliases,
+            Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+        };
         let mut upstream = match extract_upstream_target(
             &app_handle,
             &tool_id,
@@ -298,6 +302,15 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             &effective_relative_path,
             effective_body_bytes.as_ref(),
         );
+        let (effective_relative_path, effective_body_bytes, request_insights) = match model_aliases
+            .apply(
+                effective_relative_path,
+                effective_body_bytes,
+                request_insights,
+            ) {
+            Ok(request) => request,
+            Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+        };
         let log_attempt =
             |usage: Option<&super::ProxyUsageMetrics>, status: u16, error: Option<&str>| {
                 log_proxy_request(
@@ -337,8 +350,17 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             let mut rectifier_attempts = 0usize;
 
             loop {
-                let upstream_url = match build_upstream_request_url(
+                let aliased_base_url = match super::model_aliases::alias_base_url(
                     base_url,
+                    upstream.use_full_url,
+                    &effective_relative_path,
+                    &request_insights,
+                ) {
+                    Ok(url) => url,
+                    Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+                };
+                let upstream_url = match build_upstream_request_url(
+                    &aliased_base_url,
                     &effective_relative_path,
                     effective_request_query.as_deref(),
                     upstream.use_full_url,
@@ -533,7 +555,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                 api_format,
                                                 status,
                                                 parsed,
-                                                request_insights.request_model.as_deref(),
+                                                request_insights.sent_model(),
                                             ) {
                                                 Ok(value) => Some(value),
                                                 Err(error) => {

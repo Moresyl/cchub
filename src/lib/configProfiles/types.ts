@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { SavedModelCatalog } from "../modelCatalog";
+import type { ProxyModelAlias } from "./modelAliases";
 export type StructuredConfigTool =
   | "claude"
   | "codex"
@@ -151,4 +152,8 @@ export interface StructuredDraftFields {
   openCodeSource?: Record<string, unknown>;
   /** Provider-local discovery snapshot, invalidated when its connection changes. */
   modelCatalog?: SavedModelCatalog;
+  /** Provider-local wire names used only by the local proxy. */
+  localProxyModelAliases?: ProxyModelAlias[];
+  /** Preserve malformed imported rules until the user explicitly replaces them. */
+  localProxyModelAliasesRaw?: unknown;
 }

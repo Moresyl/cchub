@@ -21,6 +21,7 @@ use circuits::{CircuitState, EndpointCircuitState};
 mod desktop;
 mod forward;
 mod managed_auth;
+pub(crate) mod model_aliases;
 mod optimizer;
 mod profiles;
 mod rewriters;
@@ -272,7 +273,26 @@ pub(super) struct ProfileCandidate {
 #[derive(Debug, Clone, Default)]
 pub(super) struct ProxyRequestInsights {
     pub(super) request_model: Option<String>,
+    pub(super) upstream_model: Option<String>,
     pub(super) is_streaming: bool,
+}
+
+impl ProxyRequestInsights {
+    pub(super) fn sent_model(&self) -> Option<&str> {
+        self.upstream_model
+            .as_deref()
+            .or(self.request_model.as_deref())
+    }
+
+    pub(super) fn pricing_model<'a>(&'a self, response_model: Option<&'a str>) -> Option<&'a str> {
+        if self.upstream_model.is_some()
+            && (response_model.is_none() || response_model == self.sent_model())
+        {
+            self.request_model.as_deref()
+        } else {
+            response_model.or(self.request_model.as_deref())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -54,6 +54,7 @@ import {
   useProfilesKeyboardShortcuts,
 } from "./profiles/hooks";
 import { useModelDiscovery } from "./profiles/modelDiscovery";
+import { modelAliasSaveError } from "./profiles/modelAliasValidation";
 import ProfilesConfirmDialogs from "./profiles/Dialogs";
 import ProfileEditorView from "./profiles/EditorView";
 import ProfilesListView from "./profiles/ListView";
@@ -310,6 +311,11 @@ export default function Profiles() {
   );
   const handleSaveModal = useCallback(async () => {
     if (!draftName.trim() || saving) return;
+    const aliasError = modelAliasSaveError(draftContent, localeText);
+    if (aliasError) {
+      showToast("error", aliasError);
+      return;
+    }
     setSaving(true);
     try {
       if (

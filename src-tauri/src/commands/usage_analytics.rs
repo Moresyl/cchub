@@ -151,10 +151,8 @@ fn clean_filter(value: Option<String>) -> Option<String> {
 }
 
 fn sample_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestSample> {
-    let request_model: Option<String> = row.get(3)?;
-    let response_model: Option<String> = row.get(4)?;
-    let model = response_model
-        .or(request_model)
+    let model = row
+        .get::<_, Option<String>>(12)?
         .unwrap_or_else(|| "(unknown)".to_string());
     Ok(RequestSample {
         date: row.get(0)?,
@@ -234,15 +232,23 @@ pub fn get_usage_analytics(
     let conn = db.0.lock().map_err(|error| error.to_string())?;
     let mut statement = conn
         .prepare(
-            "SELECT substr(created_at, 1, 10), tool_id, provider_name, request_model,
+            "WITH samples AS (
+                SELECT *, CASE
+                    WHEN upstream_model IS NOT NULL AND request_model IS NOT NULL
+                        AND (response_model IS NULL OR response_model = upstream_model)
+                    THEN request_model ELSE COALESCE(response_model, request_model)
+                    END AS accounting_model
+                FROM proxy_request_logs
+             )
+             SELECT substr(created_at, 1, 10), tool_id, provider_name, request_model,
                     response_model, input_tokens, output_tokens, cache_read_tokens,
-                    cache_creation_tokens, total_cost_usd, latency_ms, status_code
-             FROM proxy_request_logs
+                    cache_creation_tokens, total_cost_usd, latency_ms, status_code, accounting_model
+             FROM samples
              WHERE created_at >= ?1
                AND created_at < ?2
                AND (?3 IS NULL OR LOWER(tool_id) = ?3)
                AND (?4 IS NULL OR LOWER(provider_name) = ?4)
-               AND (?5 IS NULL OR LOWER(COALESCE(response_model, request_model, '')) = ?5)",
+               AND (?5 IS NULL OR LOWER(COALESCE(accounting_model, '')) = ?5)",
         )
         .map_err(|error| error.to_string())?;
     let rows = statement

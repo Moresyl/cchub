@@ -30,6 +30,8 @@ mod gemini_usage_tests;
 mod managed_auth_tests;
 #[path = "message_id_tests.rs"]
 mod message_id_tests;
+#[path = "model_alias_tests.rs"]
+mod model_alias_tests;
 #[path = "passthrough_tests.rs"]
 mod passthrough_tests;
 #[path = "responses_reasoning_tests.rs"]

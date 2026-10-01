@@ -710,7 +710,12 @@ export default function Logs() {
                     item={item}
                     success={item.status_code >= 200 && item.status_code < 300}
                     toolLabel={TOOL_LABELS[item.tool_id] || item.tool_id}
-                    modelLabel={item.response_model || item.request_model || "--"}
+                    modelLabel={item.request_model || item.response_model || "--"}
+                    responseModelLabel={
+                      item.request_model && item.response_model && item.response_model !== item.request_model
+                        ? `${uiText("回复模型", "Response model", "応答モデル")}: ${item.response_model}`
+                        : undefined
+                    }
                     costLabel={formatUsd(item.total_cost_usd)}
                     tokenLabel={
                       totalTokens > 0

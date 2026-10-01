@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS proxy_request_logs (
     provider_name TEXT NOT NULL,
     request_model TEXT,
     response_model TEXT,
+    upstream_model TEXT,
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     cache_read_tokens INTEGER DEFAULT 0,
@@ -278,6 +279,17 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN latest_sha256 TEXT;");
     let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN last_checked_at INTEGER;");
 
+    let has_upstream_model = {
+        let mut statement = conn.prepare("PRAGMA table_info(proxy_request_logs)")?;
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        columns.iter().any(|column| column == "upstream_model")
+    };
+    if !has_upstream_model {
+        conn.execute_batch("ALTER TABLE proxy_request_logs ADD COLUMN upstream_model TEXT;")?;
+    }
+
     seed_builtin_model_pricing(conn)?;
 
     Ok(())
@@ -359,6 +371,21 @@ mod tests {
     }
 
     #[test]
+    fn model_alias_column_migrates_old_logs_without_rewriting_their_identity() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&get_schema_sql().replace("    upstream_model TEXT,\n", ""))
+            .unwrap();
+        conn.execute("INSERT INTO proxy_request_logs(request_id,tool_id,profile_id,provider_name,request_model,response_model,total_cost_usd,created_at) VALUES('old','claude','p1','Provider','core','actual','2.500000','2026-10-01')",[]).unwrap();
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        let row:(String,String,String,Option<String>)=conn.query_row("SELECT request_model,response_model,total_cost_usd,upstream_model FROM proxy_request_logs WHERE request_id='old'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(
+            row,
+            ("core".into(), "actual".into(), "2.500000".into(), None)
+        );
+    }
+
+    #[test]
     fn run_migrations_is_idempotent() {
         let conn = Connection::open_in_memory().unwrap();
 
@@ -370,6 +397,7 @@ mod tests {
         assert!(table_exists(&conn, "config_profiles"));
         assert!(table_exists(&conn, "project_profiles"));
         assert!(table_exists(&conn, "proxy_request_logs"));
+        assert!(column_exists(&conn, "proxy_request_logs", "upstream_model"));
         assert!(table_exists(&conn, "session_usage_dedup"));
         assert!(column_exists(&conn, "mcp_servers", "config_path"));
         assert!(column_exists(&conn, "config_profiles", "source_type"));

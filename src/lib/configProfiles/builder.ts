@@ -2,6 +2,7 @@
 import type { StructuredDraftFields } from "./types";
 import { buildOpenCodeProvider } from "./opencode";
 import { normalizeModelCatalog } from "../modelCatalog";
+import { serializeModelAliases } from "./modelAliases";
 import {
   normalizeCustomUserAgent,
   normalizeEndpointList,
@@ -23,6 +24,7 @@ export function buildStructuredConfig(toolId: string, fields: StructuredDraftFie
     body: requestBodyOverrides && Object.keys(requestBodyOverrides).length ? requestBodyOverrides : undefined,
   };
   const transportMetadata = {
+    localProxyModelAliases: serializeModelAliases(fields.localProxyModelAliases, fields.localProxyModelAliasesRaw),
     modelCatalog: fields.modelCatalog?.toolId === toolId ? normalizeModelCatalog(fields.modelCatalog) : undefined,
     customUserAgent: customUserAgent || undefined,
     requestHeaders: Object.keys(requestHeaders).length ? requestHeaders : undefined,

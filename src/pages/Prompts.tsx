@@ -235,7 +235,7 @@ export default function Prompts() {
           )}
         </div>
       </div>
-      <Card className="flex min-w-0 flex-wrap items-center gap-3 p-3">
+      <Card className="grid min-w-0 items-center gap-3 p-3 sm:grid-cols-[148px_minmax(0,1fr)] lg:grid-cols-[148px_minmax(0,1fr)_auto]">
         <SimpleSelect
           value={app}
           options={APP_OPTIONS.filter((entry) => visibleApps.includes(entry.id))
@@ -260,7 +260,7 @@ export default function Prompts() {
           <p className="break-all text-muted-foreground">{option.file}</p>
           <p className="mt-1 break-words font-[510]">{liveStatus}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-1">
           <Button
             variant="ghost"
             disabled={snapshot.live?.content === null || !snapshot.live}

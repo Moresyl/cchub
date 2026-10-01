@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { Archive, CheckCircle, History, RefreshCw } from "lucide-react";
 import ConfirmDialog from "./ConfirmDialog";
+import SettingsCodexHistoryRestore from "./SettingsCodexHistoryRestore";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 
@@ -31,6 +32,7 @@ export default function SettingsCodexHistorySection() {
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<CodexHistoryMigrationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const busy = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function SettingsCodexHistorySection() {
   }, []);
 
   const check = async () => {
-    if (busy.current) return;
+    if (busy.current || restoring) return;
     busy.current = true;
     setPhase("checking");
     setPreview(null);
@@ -59,7 +61,7 @@ export default function SettingsCodexHistorySection() {
   };
 
   const migrate = async () => {
-    if (busy.current || !preview) return;
+    if (busy.current || restoring || !preview) return;
     busy.current = true;
     setPhase("migrating");
     setResult(null);
@@ -102,12 +104,12 @@ export default function SettingsCodexHistorySection() {
         Codex 客户端；最近仍在更新的会话会停止迁移。
       </p>
       <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" onClick={() => void check()} disabled={running || confirming}>
+        <Button variant="secondary" onClick={() => void check()} disabled={running || confirming || restoring}>
           <RefreshCw size={14} className={running ? "spin" : ""} aria-hidden="true" />
           {phase === "checking" ? "检查中…" : "检查历史"}
         </Button>
         {hasChanges && (
-          <Button onClick={() => setConfirming(true)} disabled={running || confirming}>
+          <Button onClick={() => setConfirming(true)} disabled={running || confirming || restoring}>
             迁移已检查的历史
           </Button>
         )}
@@ -163,6 +165,14 @@ export default function SettingsCodexHistorySection() {
         busy={phase === "migrating"}
         onConfirm={() => void migrate()}
         onCancel={() => setConfirming(false)}
+      />
+      <SettingsCodexHistoryRestore
+        disabled={running || confirming}
+        onBusyChange={setRestoring}
+        onRestored={() => {
+          setPreview(null);
+          setResult(null);
+        }}
       />
     </section>
   );

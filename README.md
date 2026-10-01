@@ -69,6 +69,14 @@ Codex history migration in Integration settings previews source/target buckets, 
 
 Original logs, consistent state-database snapshots including WAL data and a migration journal are retained before writes. Failures roll back changes still owned by this operation and preserve newer external edits; incomplete rollback reports the original-copy path. This is not a process-crash or power-loss transaction, nor proof that full backup recovery covers all client data.
 
+Integration settings can also preview and selectively reverse a history migration. Backups are bound to the current configuration directory. Sessions are grouped with their logs and state rows; conflicts and already-restored sessions cannot be selected. Recovery changes only the proven provider field, retaining later messages, latest titles and unrelated database rows. Both existing plain/compressed copies are updated, and packing a log after migration is supported. A stale preview requires another check, and safety copies are retained before recovery writes. Missing or damaged backup evidence stops recovery; this workflow does not restore deleted sessions or replace complete databases from old SQL exports.
+
+集成设置支持预览并选择恢复历史迁移前的配置归属。备份必须属于当前配置目录；同一会话的日志和状态记录一起选择，冲突与已恢复项不能选择。恢复只修改经原始备份验证的分桶标识，保留后续消息、最新标题和无关记录，支持现存普通与压缩副本，以及迁移后压缩的日志。预览失效后必须重新检查，写入前保留安全副本。此流程不替代已删除会话恢复，也不会用旧 SQL 导出的整个数据库覆盖现有状态。
+
+![CCHub history migration recovery in a narrow light-theme window](screenshots/history-restore.png)
+
+This screenshot shows the actual settings components with isolated demonstration data; it is not a native desktop acceptance result.
+
 ![CCHub recently deleted sessions and recovery](screenshots/session-recovery.png)
 
 This screenshot shows the actual page component with isolated demonstration data.

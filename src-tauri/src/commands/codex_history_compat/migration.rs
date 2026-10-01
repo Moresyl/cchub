@@ -1,6 +1,8 @@
 use std::collections::HashSet;
-use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::fs;
+#[cfg(test)]
+use std::fs::OpenOptions;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -13,8 +15,9 @@ use super::{
 };
 use crate::shared::session_archive as archive;
 
-const MAX_PLAN_BYTES: usize = 256 * 1024 * 1024;
-const MAX_STATE_ROWS: usize = 50_000;
+pub(super) const MAX_PLAN_BYTES: usize = 256 * 1024 * 1024;
+pub(super) const MAX_STATE_ROWS: usize = 50_000;
+pub(super) const MAX_STATE_DATABASES: usize = 128;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,11 +30,7 @@ pub struct MigrationPreview {
     pub state_rows: usize,
 }
 
-struct LogChange {
-    path: PathBuf,
-    original: Vec<u8>,
-    replacement: Vec<u8>,
-}
+use super::mutation::LogChange;
 
 struct StateChange {
     path: PathBuf,
@@ -47,7 +46,7 @@ pub(super) struct MigrationPlan {
     revision: String,
 }
 
-fn hash(bytes: &[u8]) -> String {
+pub(super) fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
@@ -106,7 +105,7 @@ fn collect(
     Ok(())
 }
 
-fn rewrite(
+pub(super) fn rewrite(
     path: &Path,
     original: &[u8],
     sources: &[String],
@@ -115,14 +114,8 @@ fn rewrite(
     rewrite_limited(path, original, sources, target, MAX_SESSION_FILE_BYTES)
 }
 
-fn rewrite_limited(
-    path: &Path,
-    original: &[u8],
-    sources: &[String],
-    target: &str,
-    limit: u64,
-) -> Result<Option<Vec<u8>>, String> {
-    let decoded = if archive::compressed(path) {
+pub(super) fn decode(path: &Path, original: &[u8], limit: u64) -> Result<Vec<u8>, String> {
+    if archive::compressed(path) {
         let mut decoder =
             zstd::stream::read::Decoder::new(original).map_err(|_| "压缩历史文件损坏")?;
         decoder
@@ -136,10 +129,23 @@ fn rewrite_limited(
         if bytes.len() as u64 > limit {
             return Err("解压历史文件超过读取限制".into());
         }
-        bytes
+        Ok(bytes)
     } else {
-        original.to_vec()
-    };
+        if original.len() as u64 > limit {
+            return Err("历史文件超过读取限制".into());
+        }
+        Ok(original.to_vec())
+    }
+}
+
+fn rewrite_limited(
+    path: &Path,
+    original: &[u8],
+    sources: &[String],
+    target: &str,
+    limit: u64,
+) -> Result<Option<Vec<u8>>, String> {
+    let decoded = decode(path, original, limit)?;
     let content = std::str::from_utf8(&decoded).map_err(|_| "历史文件不是有效 UTF-8")?;
     let source_ids: HashSet<_> = sources.iter().collect();
     let mut rewritten = String::with_capacity(content.len());
@@ -187,10 +193,26 @@ fn rewrite_limited(
     Ok(Some(replacement))
 }
 
-fn open_state(path: &Path, writable: bool) -> Result<Connection, String> {
+pub(super) fn open_state(path: &Path, writable: bool) -> Result<Connection, String> {
     let meta = fs::symlink_metadata(path).map_err(|_| "无法检查历史状态数据库")?;
     if !meta.is_file() || archive::is_link(&meta) || meta.len() > MAX_SESSION_FILE_BYTES {
         return Err("历史状态数据库不是普通文件或超过读取限制".into());
+    }
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut sidecar = path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        match fs::symlink_metadata(Path::new(&sidecar)) {
+            Ok(meta)
+                if !meta.is_file()
+                    || archive::is_link(&meta)
+                    || meta.len() > MAX_SESSION_FILE_BYTES =>
+            {
+                return Err("历史数据库附属文件包含链接、类型无效或超过限制".into());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("无法检查历史数据库附属文件".into()),
+        }
     }
     let conn = Connection::open_with_flags(
         path,
@@ -316,6 +338,7 @@ impl MigrationPlan {
             }
         }
         let mut states = Vec::new();
+        let mut state_rows = 0usize;
         for path in if sources.is_empty() {
             Vec::new()
         } else {
@@ -325,7 +348,14 @@ impl MigrationPlan {
                 return Err("历史状态数据库不在配置目录内".into());
             }
             let rows = selected_rows(&open_state(&path, false)?, &sources)?;
+            state_rows = state_rows.saturating_add(rows.len());
+            if state_rows > MAX_STATE_ROWS {
+                return Err("本次迁移状态记录超过 50000 条，请分批处理".into());
+            }
             if !rows.is_empty() {
+                if states.len() >= MAX_STATE_DATABASES {
+                    return Err("本次迁移状态数据库超过 128 个，请分批处理".into());
+                }
                 states.push(StateChange { path, rows });
             }
         }
@@ -400,148 +430,30 @@ impl MigrationPlan {
                 skipped_reason: Some("nothing_to_migrate".into()),
             });
         }
-        fs::create_dir_all(backups).map_err(|_| "无法创建历史备份目录")?;
-        let backup_parent = backups.canonicalize().map_err(|_| "无法确定历史备份目录")?;
-        if backup_parent.starts_with(
-            self.root
-                .canonicalize()
-                .map_err(|_| "无法确定历史配置目录")?,
-        ) {
-            return Err("历史备份目录必须位于会话目录之外".into());
-        }
-        let backup =
-            backup_parent.join(format!("codex-history-migration-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&backup).map_err(|_| "无法创建迁移原始副本目录")?;
-        let mut connections = Vec::new();
-        let mut touched = Vec::new();
-        let mut committed = 0usize;
-        let operation: Result<(), String> = (|| {
-            for state in &self.states {
-                if !archive::confined(&state.path, &self.root) {
-                    return Err("历史数据库路径在检查后变化".into());
-                }
-                let conn = open_state(&state.path, true)?;
-                conn.execute_batch("BEGIN IMMEDIATE")
-                    .map_err(|_| "历史数据库正在使用，请稍后重试")?;
-                if selected_rows(&conn, &self.sources)? != state.rows {
-                    return Err("历史状态在检查后变化，请重新检查".into());
-                }
-                let source = open_state(&state.path, false)?;
-                let pages: u64 = source
-                    .query_row("PRAGMA page_count", [], |r| r.get(0))
-                    .map_err(|_| "无法检查状态备份大小")?;
-                let size: u64 = source
-                    .query_row("PRAGMA page_size", [], |r| r.get(0))
-                    .map_err(|_| "无法检查状态备份大小")?;
-                if pages.saturating_mul(size) > MAX_SESSION_FILE_BYTES {
-                    return Err("历史状态备份超过读取限制".into());
-                }
-                let saved = backup.join("state").join(
-                    state
-                        .path
-                        .strip_prefix(&self.root)
-                        .map_err(|_| "状态备份路径无效")?,
-                );
-                fs::create_dir_all(saved.parent().ok_or("状态备份路径无效")?)
-                    .map_err(|_| "无法创建状态备份目录")?;
-                let mut destination = Connection::open(&saved).map_err(|_| "无法创建状态备份")?;
-                let task = rusqlite::backup::Backup::new(&source, &mut destination)
-                    .map_err(|_| "无法创建状态备份")?;
-                if !matches!(
-                    task.step(-1).map_err(|_| "状态数据库备份失败")?,
-                    rusqlite::backup::StepResult::Done
-                ) {
-                    return Err("状态数据库备份繁忙，请稍后重试".into());
-                }
-                drop(task);
-                drop(destination);
-                OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(&saved)
-                    .and_then(|f| f.sync_all())
-                    .map_err(|_| "无法保存状态备份")?;
-                connections.push(conn);
-            }
-            for log in &self.logs {
-                let relative = log
-                    .path
-                    .strip_prefix(&self.root)
-                    .map_err(|_| "会话备份路径无效")?;
-                let saved = backup.join("jsonl").join(relative);
-                fs::create_dir_all(saved.parent().ok_or("会话备份路径无效")?)
-                    .map_err(|_| "无法创建会话备份目录")?;
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(saved)
-                    .map_err(|_| "无法保存原始会话")?;
-                file.write_all(&log.original)
-                    .and_then(|()| file.sync_all())
-                    .map_err(|_| "无法保存原始会话")?;
-            }
-            let journal = serde_json::json!({"version":1,"root":self.root,"sourceProviderIds":self.sources,"targetProviderId":self.target,"revision":self.revision,
-                "logs":self.logs.iter().map(|log| serde_json::json!({"path":log.path,"originalHash":hash(&log.original),"migratedHash":hash(&log.replacement)})).collect::<Vec<_>>(),
-                "states":self.states.iter().map(|state| serde_json::json!({"path":state.path,"rows":state.rows})).collect::<Vec<_>>()});
-            crate::utils::atomic_write(
-                &backup.join("migration.json"),
-                &serde_json::to_vec_pretty(&journal).map_err(|_| "无法创建迁移账本")?,
-            )
-            .map_err(|_| "无法保存迁移账本")?;
-            for log in &self.logs {
-                self.verify_log(log)?;
-            }
-            for (index, log) in self.logs.iter().enumerate() {
-                self.verify_log(log)?;
-                touched.push(index);
-                write(&log.path, &log.replacement)?;
-            }
-            for (state, conn) in self.states.iter().zip(&connections) {
-                for (id, provider) in &state.rows {
-                    if conn.execute("UPDATE threads SET model_provider=?1 WHERE id=?2 AND model_provider=?3", rusqlite::params![self.target, id, provider]).map_err(|_| "无法迁移历史状态")? != 1 { return Err("历史状态在迁移期间变化".into()); }
-                }
-            }
-            for conn in &connections {
-                conn.execute_batch("COMMIT")
-                    .map_err(|_| "无法提交历史迁移")?;
-                committed += 1;
-            }
-            Ok(())
-        })();
-        if let Err(error) = operation {
-            for conn in connections.iter().skip(committed) {
-                let _ = conn.execute_batch("ROLLBACK");
-            }
-            let mut rollback_failed = false;
-            for (state, conn) in self.states.iter().zip(&connections).take(committed) {
-                rollback_failed |= restore_rows(conn, &state.rows, &self.target).is_err();
-            }
-            for index in touched.into_iter().rev() {
-                let log = &self.logs[index];
-                let current = if archive::confined(&log.path, &self.root) {
-                    read_file(&log.path, MAX_SESSION_FILE_BYTES)
-                } else {
-                    Err("会话路径已变化".into())
-                };
-                match current {
-                    Ok(bytes) if bytes == log.original => {}
-                    Ok(bytes) if bytes == log.replacement => {
-                        rollback_failed |=
-                            crate::utils::atomic_write(&log.path, &log.original).is_err();
-                    }
-                    _ => rollback_failed = true,
-                }
-            }
-            return Err(format!(
-                "{error}；{}，原始副本保留在 {}",
-                if rollback_failed {
-                    "部分内容未能回滚"
-                } else {
-                    "已回滚本次修改"
-                },
-                backup.display()
-            ));
-        }
+        let journal = serde_json::json!({"version":1,"root":self.root,"sourceProviderIds":self.sources,"targetProviderId":self.target,"revision":self.revision,
+            "logs":self.logs.iter().map(|log| serde_json::json!({"path":log.path,"originalHash":hash(&log.original),"migratedHash":hash(&log.replacement)})).collect::<Vec<_>>(),
+            "states":self.states.iter().map(|state| serde_json::json!({"path":state.path,"rows":state.rows})).collect::<Vec<_>>()});
+        let mutation = super::mutation::MutationPlan {
+            root: self.root,
+            logs: self.logs,
+            states: self
+                .states
+                .into_iter()
+                .map(|state| super::mutation::StateChange {
+                    path: state.path,
+                    rows: state
+                        .rows
+                        .into_iter()
+                        .map(|(id, original)| super::mutation::RowChange {
+                            id,
+                            original,
+                            replacement: self.target.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        };
+        let backup = mutation.execute_with(backups, "migration", journal, &mut write)?;
         Ok(CodexHistoryMigrationResult {
             source_provider_ids: self.sources,
             target_provider_id: self.target,
@@ -551,49 +463,6 @@ impl MigrationPlan {
             skipped_reason: None,
         })
     }
-
-    fn verify_log(&self, log: &LogChange) -> Result<(), String> {
-        if !archive::confined(&log.path, &self.root)
-            || read_file(&log.path, MAX_SESSION_FILE_BYTES)? != log.original
-        {
-            return Err("会话在检查后发生变化，请重新检查".into());
-        }
-        let modified = fs::metadata(&log.path)
-            .and_then(|m| m.modified())
-            .map_err(|_| "无法检查会话更新时间")?;
-        if modified
-            .elapsed()
-            .map_or(true, |age| age < Duration::from_secs(60))
-        {
-            return Err("会话最近仍在更新，请关闭客户端并重新检查".into());
-        }
-        Ok(())
-    }
-}
-
-fn restore_rows(conn: &Connection, rows: &[(String, String)], target: &str) -> Result<(), String> {
-    conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(|_| "无法回滚历史状态")?;
-    let result = (|| {
-        for (id, original) in rows {
-            if conn
-                .execute(
-                    "UPDATE threads SET model_provider=?1 WHERE id=?2 AND model_provider=?3",
-                    rusqlite::params![original, id, target],
-                )
-                .map_err(|_| "无法回滚历史状态")?
-                != 1
-            {
-                return Err("历史状态已变化，保留原始备份".into());
-            }
-        }
-        conn.execute_batch("COMMIT")
-            .map_err(|_| "无法提交历史状态回滚".to_string())
-    })();
-    if result.is_err() {
-        let _ = conn.execute_batch("ROLLBACK");
-    }
-    result
 }
 
 #[cfg(test)]

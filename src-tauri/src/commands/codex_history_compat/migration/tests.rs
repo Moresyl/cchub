@@ -3,6 +3,33 @@ use std::time::UNIX_EPOCH;
 
 mod ipc_tests;
 
+#[test]
+fn database_count_limit_matches_the_recovery_catalog_before_any_write() {
+    let root = tempfile::tempdir().unwrap();
+    for index in 0..=MAX_STATE_DATABASES {
+        let conn = Connection::open(root.path().join(format!("state_{index}.sqlite"))).unwrap();
+        conn.execute_batch("CREATE TABLE threads(id TEXT PRIMARY KEY,model_provider TEXT); INSERT INTO threads VALUES('session','legacy');").unwrap();
+        if index + 1 == MAX_STATE_DATABASES {
+            assert_eq!(plan(root.path()).preview().state_rows, MAX_STATE_DATABASES);
+        }
+    }
+    let error = MigrationPlan::prepare(root.path().into(), vec!["legacy".into()], "custom".into())
+        .err()
+        .unwrap();
+    assert!(error.contains("数据库超过 128"));
+    let conn = Connection::open(root.path().join("state_0.sqlite")).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT model_provider FROM threads", [], |row| row
+            .get::<_, String>(0))
+            .unwrap(),
+        "legacy"
+    );
+    assert_eq!(
+        fs::read_dir(root.path()).unwrap().count(),
+        MAX_STATE_DATABASES + 1
+    );
+}
+
 fn log(root: &Path, name: &str) -> PathBuf {
     let dir = root.join("sessions");
     fs::create_dir_all(&dir).unwrap();

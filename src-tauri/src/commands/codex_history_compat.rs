@@ -10,6 +10,8 @@ use crate::commands::extra_commands::session_file_tasks;
 use crate::db::DbState;
 
 mod migration;
+mod mutation;
+mod recovery;
 
 const MAX_BACKUP_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
@@ -256,6 +258,68 @@ fn prepare_migration(
         None => infer_history_provider_ids(&root, &target)?,
     };
     migration::MigrationPlan::prepare(root, sources, target)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn list_codex_history_migration_backups(
+    db: State<'_, DbState>,
+) -> Result<Vec<recovery::BackupSummary>, String> {
+    let permit = session_file_tasks::mutation_permit().await;
+    let root = {
+        let conn = db.0.lock().map_err(|_| "配置数据库当前不可用")?;
+        crate::commands::extra_commands::resolve_tool_config_dir(&conn, "codex")?
+    };
+    session_file_tasks::mutate(permit, move || {
+        recovery::list(
+            &root,
+            &crate::commands::extra_commands::managed_backups_dir()?,
+        )
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn preview_codex_history_restore(
+    backup_key: String,
+    db: State<'_, DbState>,
+) -> Result<recovery::RestorePreview, String> {
+    let permit = session_file_tasks::mutation_permit().await;
+    let root = {
+        let conn = db.0.lock().map_err(|_| "配置数据库当前不可用")?;
+        crate::commands::extra_commands::resolve_tool_config_dir(&conn, "codex")?
+    };
+    session_file_tasks::mutate(permit, move || {
+        Ok(recovery::RestorePlan::prepare(
+            root,
+            &crate::commands::extra_commands::managed_backups_dir()?,
+            backup_key,
+        )?
+        .preview())
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn restore_codex_history_migration(
+    backup_key: String,
+    expected_revision: String,
+    selected_keys: Vec<String>,
+    db: State<'_, DbState>,
+) -> Result<recovery::RestoreResult, String> {
+    let permit = session_file_tasks::mutation_permit().await;
+    let root = {
+        let conn = db.0.lock().map_err(|_| "配置数据库当前不可用")?;
+        crate::commands::extra_commands::resolve_tool_config_dir(&conn, "codex")?
+    };
+    session_file_tasks::mutate(permit, move || {
+        let backups = crate::commands::extra_commands::managed_backups_dir()?;
+        recovery::RestorePlan::prepare(root, &backups, backup_key)?.execute(
+            &backups,
+            &expected_revision,
+            selected_keys,
+        )
+    })
+    .await
 }
 
 fn normalize_provider_id(value: &str) -> Result<String, String> {

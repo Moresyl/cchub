@@ -24,6 +24,8 @@ mod context;
 mod model_request;
 #[path = "forward/quota.rs"]
 mod quota;
+#[path = "forward/responses_history.rs"]
+mod responses_history;
 #[path = "forward/streaming.rs"]
 mod streaming;
 #[path = "forward/streaming_errors.rs"]

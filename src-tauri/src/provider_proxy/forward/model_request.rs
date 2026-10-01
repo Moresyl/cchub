@@ -76,6 +76,7 @@ pub(super) fn prepare(input: Input<'_>) -> Result<Prepared, Response<Body>> {
         .aliases
         .apply(path, optimized.body, insights)
         .map_err(|error| build_proxy_error(StatusCode::BAD_REQUEST, error))?;
+    let body = super::responses_history::repair(&path, body);
     Ok(Prepared {
         path,
         query,

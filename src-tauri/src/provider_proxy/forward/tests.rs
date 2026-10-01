@@ -34,6 +34,8 @@ mod message_id_tests;
 mod model_alias_tests;
 #[path = "passthrough_tests.rs"]
 mod passthrough_tests;
+#[path = "responses_history_tests.rs"]
+mod responses_history_tests;
 #[path = "responses_reasoning_tests.rs"]
 mod responses_reasoning_tests;
 #[path = "routing_tests.rs"]

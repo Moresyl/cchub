@@ -441,12 +441,18 @@ pub fn read_claude_config_toggles_from_conn(
     conn: &rusqlite::Connection,
 ) -> Result<ClaudeConfigToggles, String> {
     let path = resolve_claude_settings_local_path(conn)?;
-    let settings = read_json_file_or_default(&path)?;
-    let env = settings
-        .get("env")
-        .and_then(|value| value.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let settings = match std::fs::read_to_string(&path) {
+        Ok(source) => crate::json_config::parse_json_object(&source)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(format!("Cannot read Claude local settings: {error}")),
+    };
+    let env = match settings.get("env") {
+        None | Some(serde_json::Value::Null) => serde_json::Map::new(),
+        Some(value) => value
+            .as_object()
+            .cloned()
+            .ok_or("Claude settings.local env must be an object")?,
+    };
 
     let truthy = |key: &str| {
         env.get(key)
@@ -479,70 +485,41 @@ pub fn write_claude_config_toggle_to_conn(
     key: &str,
     enabled: bool,
 ) -> Result<ClaudeConfigToggles, String> {
+    let (name, value) = match key {
+        "hideAttribution" => ("ANTHROPIC_HIDE_ATTRIBUTION", "true"),
+        "enableTeammates" => ("CLAUDE_CODE_ENABLE_TEAMMATES", "true"),
+        "maxThinkingTokens" => ("CLAUDE_CODE_MAX_THINKING_TOKENS", "32000"),
+        "enableToolSearch" => ("ENABLE_TOOL_SEARCH", "true"),
+        _ => return Err("Unknown Claude config toggle".into()),
+    };
     let path = resolve_claude_settings_local_path(conn)?;
-    let mut settings = read_json_file_or_default(&path)?;
-
-    if !settings.is_object() {
-        settings = serde_json::json!({});
-    }
-    if settings.get("env").is_none() || !settings.get("env").is_some_and(|value| value.is_object())
-    {
-        settings["env"] = serde_json::json!({});
-    }
-
-    let env = settings
-        .get_mut("env")
-        .and_then(|value| value.as_object_mut())
-        .ok_or_else(|| "Claude settings.local env must be an object".to_string())?;
-
-    match key {
-        "hideAttribution" => {
-            if enabled {
-                env.insert(
-                    "ANTHROPIC_HIDE_ATTRIBUTION".to_string(),
-                    serde_json::json!("true"),
-                );
-            } else {
-                env.remove("ANTHROPIC_HIDE_ATTRIBUTION");
-            }
+    crate::json_config::update_json_file(&path, |settings| {
+        match settings.get("env") {
+            None | Some(serde_json::Value::Null) if !enabled => return Ok(()),
+            None | Some(serde_json::Value::Null) => settings["env"] = serde_json::json!({}),
+            Some(value) if value.is_object() => {}
+            Some(_) => return Err("Claude settings.local env must be an object".into()),
         }
-        "enableTeammates" => {
-            if enabled {
-                env.insert(
-                    "CLAUDE_CODE_ENABLE_TEAMMATES".to_string(),
-                    serde_json::json!("true"),
-                );
-            } else {
-                env.remove("CLAUDE_CODE_ENABLE_TEAMMATES");
-            }
+        let env = settings
+            .get_mut("env")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or("Claude settings.local env must be an object")?;
+        if !enabled && !env.contains_key(name) {
+            return Ok(());
         }
-        "maxThinkingTokens" => {
-            if enabled {
-                env.insert(
-                    "CLAUDE_CODE_MAX_THINKING_TOKENS".to_string(),
-                    serde_json::json!("32000"),
-                );
-            } else {
-                env.remove("CLAUDE_CODE_MAX_THINKING_TOKENS");
-            }
+        if enabled {
+            env.insert(name.into(), serde_json::json!(value));
+        } else {
+            env.remove(name);
         }
-        "enableToolSearch" => {
-            if enabled {
-                env.insert("ENABLE_TOOL_SEARCH".to_string(), serde_json::json!("true"));
-            } else {
-                env.remove("ENABLE_TOOL_SEARCH");
-            }
+        if env.is_empty() {
+            settings
+                .as_object_mut()
+                .ok_or("Claude local settings must be an object")?
+                .remove("env");
         }
-        _ => {
-            return Err(format!("Unknown Claude config toggle: {key}"));
-        }
-    }
-
-    if env.is_empty() {
-        settings.as_object_mut().map(|value| value.remove("env"));
-    }
-
-    write_json_file_pretty(&path, &settings)?;
+        Ok(())
+    })?;
     read_claude_config_toggles_from_conn(conn)
 }
 
@@ -572,3 +549,6 @@ pub fn resolve_codex_structured_paths(
         .ok_or_else(|| "Invalid Codex config.toml path".to_string())?;
     Ok((config_path.clone(), dir.join("auth.json")))
 }
+
+#[cfg(test)]
+mod tests;

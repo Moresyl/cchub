@@ -189,51 +189,29 @@ pub fn write_tool_config(
 pub fn read_codex_toml_structured(
     path: Option<String>,
     db: State<'_, DbState>,
-) -> Result<CodexTomlStructuredConfig, String> {
+) -> Result<CodexTomlStructuredRead, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let (config_path, auth_path) = resolve_codex_structured_paths(&conn, path)?;
-    let content = if config_path.exists() {
-        std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?
-    } else {
-        String::new()
-    };
-    let auth = read_json_file_or_default(&auth_path)?;
-    let api_key = auth
-        .get("OPENAI_API_KEY")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
-    Ok(read_codex_structured_config_from_content(&content, api_key))
+    read_codex_structured_files(&config_path, &auth_path)
 }
 
 #[tauri::command]
 pub fn write_codex_toml_structured(
     path: Option<String>,
     raw_toml: String,
-    config: CodexTomlStructuredConfig,
+    api_key: String,
+    expected_revision: String,
     db: State<'_, DbState>,
-) -> Result<String, String> {
+) -> Result<CodexTomlStructuredWrite, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let (config_path, auth_path) = resolve_codex_structured_paths(&conn, path)?;
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    let written_toml = write_codex_structured_config_to_text(&raw_toml, &config);
-    crate::utils::atomic_write_string(&config_path, &written_toml).map_err(|e| e.to_string())?;
-
-    let mut auth = read_json_file_or_default(&auth_path)?;
-    if !auth.is_object() {
-        auth = serde_json::json!({});
-    }
-    if let Some(api_key) = normalized_non_empty(&config.api_key) {
-        auth["OPENAI_API_KEY"] = serde_json::json!(api_key);
-    } else if let Some(auth_obj) = auth.as_object_mut() {
-        auth_obj.remove("OPENAI_API_KEY");
-    }
-    write_json_file_pretty(&auth_path, &auth)?;
-
-    Ok(written_toml)
+    write_codex_structured_files(
+        &config_path,
+        &auth_path,
+        &raw_toml,
+        &api_key,
+        &expected_revision,
+    )
 }
 
 #[tauri::command]

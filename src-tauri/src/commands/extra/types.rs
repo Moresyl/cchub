@@ -260,6 +260,22 @@ pub struct CodexTomlStructuredConfig {
     pub malformed_mcp_servers: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexTomlStructuredRead {
+    #[serde(flatten)]
+    pub config: CodexTomlStructuredConfig,
+    pub content: String,
+    pub file_revision: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexTomlStructuredWrite {
+    pub content: String,
+    pub file_revision: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenClawDailyMemoryEntry {
     pub path: String,

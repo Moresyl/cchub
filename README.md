@@ -59,6 +59,8 @@ Model discovery follows the selected API protocol and retains provider-reported 
 
 ### Local proxy and failover
 
+The Codex file editor counts API-key-only edits as unsaved changes. It saves the raw TOML draft together with a field-level authentication update, checking the exact loaded revision of both files before writing. Malformed authentication and invalid TOML stop the complete save. A reported write failure rolls back changes still owned by this save; newer external edits are preserved, and incomplete recovery retains original files with a recovery path. This is not a power-loss transaction. Late file reads and save acknowledgements cannot replace another file or newer drafts. Editor actions and file navigation use the shared controls.
+
 Claude local option switches preserve JSONC comments, formatting and unrelated settings. Empty, malformed, duplicate-key or non-object configurations and invalid `env` values stop the edit with an error. Switching an already-disabled absent option off leaves the file untouched, including when the file does not exist.
 
 Native Responses and compaction forwarding repair legacy tool-search item IDs with incorrect prefixes. The repair preserves `call_id` links, encrypted reasoning and all other history bytes; valid IDs remain unchanged, and renamed IDs avoid collisions with existing history. This does not make encrypted history portable between providers.

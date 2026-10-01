@@ -12,6 +12,7 @@ import {
 import type { FolderNode } from "../types/skills";
 import EmptyState from "./states/EmptyState";
 import LoadingState from "./states/LoadingState";
+import { Button } from "./ui/button";
 
 type EditorLanguage = "json" | "markdown" | "yaml" | "toml" | "text";
 
@@ -69,8 +70,9 @@ function ConfigFilesTreePanelComponent({
     if (node.is_dir) {
       return (
         <div key={node.path}>
-          <button
-            className="btn btn-ghost"
+          <Button
+            variant="ghost"
+            aria-expanded={isExpanded}
             onClick={() => onToggleExpand(node.path)}
             style={{
               width: "100%",
@@ -85,7 +87,7 @@ function ConfigFilesTreePanelComponent({
             {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             {isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />}
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
-          </button>
+          </Button>
           {isExpanded && node.children.map((child) => renderNode(child, depth + 1))}
         </div>
       );
@@ -93,9 +95,10 @@ function ConfigFilesTreePanelComponent({
 
     const Icon = fileIcon(node.path);
     return (
-      <button
+      <Button
         key={node.path}
-        className="btn btn-ghost"
+        variant="ghost"
+        aria-pressed={isSelected}
         onClick={() => onOpenFile(node.path)}
         style={{
           width: "100%",
@@ -112,7 +115,7 @@ function ConfigFilesTreePanelComponent({
       >
         <Icon size={14} />
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.name}</span>
-      </button>
+      </Button>
     );
   };
 

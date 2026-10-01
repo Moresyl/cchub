@@ -506,10 +506,10 @@ pub fn refresh_tray_provider_menu(app_handle: tauri::AppHandle) -> Result<(), St
 pub fn parse_toml_assignment(content: &str, key: &str) -> Option<String> {
     content.lines().find_map(|line| {
         let trimmed = line.trim();
-        if !trimmed.starts_with(key) {
+        let (name, raw_value) = trimmed.split_once('=')?;
+        if name.trim() != key {
             return None;
         }
-        let (_, raw_value) = trimmed.split_once('=')?;
         let value = raw_value.trim().trim_matches('"').trim_matches('\'');
         if value.is_empty() {
             None
@@ -517,25 +517,4 @@ pub fn parse_toml_assignment(content: &str, key: &str) -> Option<String> {
             Some(value.to_string())
         }
     })
-}
-
-pub fn parse_toml_section_assignment(content: &str, section: &str, key: &str) -> Option<String> {
-    let mut in_section = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_section = trimmed.trim_matches(['[', ']']) == section;
-            continue;
-        }
-        if !in_section || !trimmed.starts_with(key) {
-            continue;
-        }
-        let (_, raw_value) = trimmed.split_once('=')?;
-        let value = raw_value.trim().trim_matches('"').trim_matches('\'');
-        if value.is_empty() {
-            return None;
-        }
-        return Some(value.to_string());
-    }
-    None
 }

@@ -10,6 +10,12 @@ use std::sync::Mutex;
 // checked again immediately before replacement; they do not participate in this lock.
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
+pub(crate) fn write_lock() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    WRITE_LOCK
+        .lock()
+        .map_err(|_| "Configuration write lock is unavailable".into())
+}
+
 fn options() -> ParseOptions {
     ParseOptions {
         allow_comments: true,
@@ -144,22 +150,17 @@ pub(crate) fn update_json_file(
     path: &Path,
     edit: impl FnOnce(&mut Value) -> Result<(), String>,
 ) -> Result<(), String> {
-    let _guard = WRITE_LOCK
-        .lock()
-        .map_err(|_| "Configuration write lock is unavailable")?;
+    let _guard = write_lock()?;
     let original = match std::fs::read_to_string(path) {
         Ok(source) => Some(source),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(format!("Cannot read configuration: {error}")),
     };
     let source = original.as_deref().unwrap_or("{}\n");
-    let (root, before) = parse(source)?;
-    let mut desired = before.clone();
-    edit(&mut desired)?;
-    if before == desired {
+    let output = edit_json_text(source, edit)?;
+    if output == source {
         return Ok(());
     }
-    let output = render(source, &root, &before, &desired)?;
     let current = match std::fs::read_to_string(path) {
         Ok(source) => Some(source),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -169,6 +170,21 @@ pub(crate) fn update_json_file(
         return Err("Configuration changed externally; reload it and try again".into());
     }
     crate::utils::atomic_write_string(path, &output).map_err(|error| error.to_string())
+}
+
+/// Prepare an edit without writing, so a multi-file operation can preflight
+/// every member before replacing any file.
+pub(crate) fn edit_json_text(
+    source: &str,
+    edit: impl FnOnce(&mut Value) -> Result<(), String>,
+) -> Result<String, String> {
+    let (root, before) = parse(source)?;
+    let mut desired = before.clone();
+    edit(&mut desired)?;
+    if before == desired {
+        return Ok(source.to_string());
+    }
+    render(source, &root, &before, &desired)
 }
 
 #[cfg(test)]

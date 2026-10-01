@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import { useCallback, useEffect, useMemo, useState, lazy, Suspense, startTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, startTransition } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Eye, EyeOff, FileText, RefreshCw, RotateCcw, Save } from "lucide-react";
 import ConfigFilesRootTabs from "../components/ConfigFilesRootTabs";
@@ -14,6 +14,7 @@ import { fetchVisibleApps, type ManagedAppId } from "../lib/appPreferences";
 import { Checkbox } from "../components/ui/checkbox";
 import { CheckboxField } from "../components/ui/checkbox-field";
 import { Input } from "../components/ui/input";
+import { Button } from "../components/ui/button";
 import { SimpleSelect } from "../components/ui/simple-select";
 import { useConfigFiles } from "../hooks/queries";
 import {
@@ -43,6 +44,8 @@ interface ClaudeConfigToggles {
 }
 
 interface CodexStructuredBackendConfig {
+  content: string;
+  fileRevision: string;
   modelProvider: string;
   providerLabel: string;
   baseUrl: string;
@@ -94,6 +97,10 @@ export default function ConfigFiles() {
     "hermes",
   ]);
   const [codexApiKey, setCodexApiKey] = useState("");
+  const [originalCodexApiKey, setOriginalCodexApiKey] = useState("");
+  const [codexFileRevision, setCodexFileRevision] = useState<string | null>(null);
+  const fileGeneration = useRef(0);
+  const saveInFlight = useRef(false);
   const [showCodexApiKey, setShowCodexApiKey] = useState(false);
   const [claudeToggles, setClaudeToggles] = useState<ClaudeConfigToggles | null>(null);
   const [loadingClaudeToggles, setLoadingClaudeToggles] = useState(false);
@@ -105,7 +112,8 @@ export default function ConfigFiles() {
     refetch: refetchTree,
   } = useConfigFiles(activeRoot, Boolean(activeRoot));
 
-  const hasChanges = content !== originalContent;
+  const hasChanges =
+    content !== originalContent || (isCodexConfigToml(activeRoot, activeFile) && codexApiKey !== originalCodexApiKey);
   const visibleRoots = useMemo(
     () => roots.filter((root) => visibleApps.includes(root.id as ManagedAppId)),
     [roots, visibleApps],
@@ -131,36 +139,50 @@ export default function ConfigFiles() {
 
   const openFile = useCallback(
     async (path: string) => {
+      const generation = ++fileGeneration.current;
       setLoadingFile(true);
       setActiveFile(path);
+      setContent("");
+      setOriginalContent("");
+      setCodexApiKey("");
+      setOriginalCodexApiKey("");
+      setCodexFileRevision(null);
       try {
         const nextStructuredCodex = isCodexConfigToml(activeRoot, path);
         const nextClaudeQuickToggleFile = activeRoot === "claude" && /[\\/]settings\.local\.json$/i.test(path);
         setLoadingClaudeToggles(nextClaudeQuickToggleFile);
         const [nextContent, nextCodexStructured, nextClaudeToggles] = await Promise.all([
-          invoke<string>("read_config_file_content", { path }),
+          nextStructuredCodex ? Promise.resolve("") : invoke<string>("read_config_file_content", { path }),
           nextStructuredCodex
             ? invoke<CodexStructuredBackendConfig>("read_codex_toml_structured", { path })
             : Promise.resolve(null),
           nextClaudeQuickToggleFile ? invoke<ClaudeConfigToggles>("read_claude_config_toggles") : Promise.resolve(null),
         ]);
+        if (fileGeneration.current !== generation) return;
         startTransition(() => {
-          setContent(nextContent);
-          setOriginalContent(nextContent);
+          const source = nextCodexStructured?.content ?? nextContent;
+          setContent(source);
+          setOriginalContent(source);
           setCodexApiKey(nextCodexStructured?.apiKey || "");
+          setOriginalCodexApiKey(nextCodexStructured?.apiKey || "");
+          setCodexFileRevision(nextCodexStructured?.fileRevision ?? null);
           setShowCodexApiKey(false);
           setClaudeToggles(nextClaudeToggles);
         });
       } catch (error) {
+        if (fileGeneration.current !== generation) return;
         console.error(error);
         showToast("error", String(error));
         setContent("");
         setOriginalContent("");
         setCodexApiKey("");
         setClaudeToggles(null);
+        setActiveFile(null);
       } finally {
-        setLoadingFile(false);
-        setLoadingClaudeToggles(false);
+        if (fileGeneration.current === generation) {
+          setLoadingFile(false);
+          setLoadingClaudeToggles(false);
+        }
       }
     },
     [activeRoot],
@@ -197,17 +219,28 @@ export default function ConfigFiles() {
   }, []);
   useEffect(() => {
     if (visibleRoots.length === 0) return;
+    if (hasChanges) return;
     if (!visibleRoots.some((root) => root.id === activeRoot && root.exists)) {
       const firstExisting = visibleRoots.find((root) => root.exists);
       setActiveRoot(firstExisting?.id || visibleRoots[0].id);
     }
-  }, [activeRoot, visibleRoots]);
+  }, [activeRoot, visibleRoots, hasChanges]);
 
   useEffect(() => {
+    return () => {
+      fileGeneration.current++;
+    };
+  }, []);
+  useEffect(() => {
+    fileGeneration.current++;
     setActiveFile(null);
     setContent("");
     setOriginalContent("");
     setCodexApiKey("");
+    setOriginalCodexApiKey("");
+    setCodexFileRevision(null);
+    setLoadingFile(false);
+    setWritingClaudeToggleKey(null);
     setShowCodexApiKey(false);
     setClaudeToggles(null);
   }, [activeRoot]);
@@ -245,7 +278,7 @@ export default function ConfigFiles() {
         (root) => root.id === activeRoot && root.exists && nextVisibleApps.includes(root.id as ManagedAppId),
       );
       const firstExisting = result.find((root) => root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
-      setActiveRoot(currentRoot?.id || firstExisting?.id || "");
+      if (!hasChanges) setActiveRoot(currentRoot?.id || firstExisting?.id || "");
     } catch (error) {
       console.error(error);
       showToast("error", String(error));
@@ -255,30 +288,36 @@ export default function ConfigFiles() {
   }
 
   async function saveFile() {
-    if (!activeFile) return;
+    if (!activeFile || loadingFile || saveInFlight.current) return;
+    const generation = fileGeneration.current;
+    saveInFlight.current = true;
     setSaving(true);
     try {
       if (structuredCodexFile) {
-        const nextStructured = parseCodexStructuredConfig(content);
-        const writtenToml = await invoke<string>("write_codex_toml_structured", {
+        if (!codexFileRevision) throw new Error(zh ? "请重新加载配置后保存" : "Reload the configuration before saving");
+        const written = await invoke<{ content: string; fileRevision: string }>("write_codex_toml_structured", {
           path: activeFile,
           rawToml: content,
-          config: {
-            ...nextStructured,
-            apiKey: codexApiKey,
-          },
+          expectedRevision: codexFileRevision,
+          apiKey: codexApiKey,
         });
-        setContent(writtenToml);
-        setOriginalContent(writtenToml);
+        if (fileGeneration.current !== generation) return;
+        setContent((current) => (current === content ? written.content : current));
+        setOriginalContent(written.content);
+        setOriginalCodexApiKey(codexApiKey);
+        setCodexFileRevision(written.fileRevision);
       } else {
         await invoke("write_config_file_content", { path: activeFile, content });
+        if (fileGeneration.current !== generation) return;
         setOriginalContent(content);
       }
       showToast("success", zh ? "已保存" : "Saved");
     } catch (error) {
+      if (fileGeneration.current !== generation) return;
       console.error(error);
       showToast("error", String(error));
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
   }
@@ -314,20 +353,23 @@ export default function ConfigFiles() {
     }
 
     setWritingClaudeToggleKey(key);
+    const generation = fileGeneration.current;
     try {
       const nextToggles = await invoke<ClaudeConfigToggles>("write_claude_config_toggle", { key, enabled });
       const nextContent = await invoke<string>("read_config_file_content", { path: activeFile });
+      if (fileGeneration.current !== generation) return;
       startTransition(() => {
         setClaudeToggles(nextToggles);
-        setContent(nextContent);
+        setContent((current) => (current === content ? nextContent : current));
         setOriginalContent(nextContent);
       });
       showToast("success", zh ? "Claude 快捷开关已更新" : "Claude quick toggle updated");
     } catch (error) {
+      if (fileGeneration.current !== generation) return;
       console.error(error);
       showToast("error", String(error));
     } finally {
-      setWritingClaudeToggleKey(null);
+      if (fileGeneration.current === generation) setWritingClaudeToggleKey(null);
     }
   }
 
@@ -359,8 +401,8 @@ export default function ConfigFiles() {
           <p className="page-subtitle">{i.configFiles.subtitle}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-secondary btn-sm"
+          <Button
+            variant="secondary"
             onClick={() => {
               void loadRoots();
               void refetchTree();
@@ -368,11 +410,11 @@ export default function ConfigFiles() {
           >
             <RefreshCw size={14} />
             {i.common.refresh}
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={saveFile} disabled={!activeFile || !hasChanges || saving}>
+          </Button>
+          <Button onClick={saveFile} disabled={!activeFile || !hasChanges || saving || loadingFile}>
             <Save size={14} />
             {i.common.save}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -436,14 +478,17 @@ export default function ConfigFiles() {
               </div>
             </div>
             {activeFile && (
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => setContent(originalContent)}
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setContent(originalContent);
+                  setCodexApiKey(originalCodexApiKey);
+                }}
                 disabled={!hasChanges}
               >
                 <RotateCcw size={14} />
                 {i.configFiles.revert}
-              </button>
+              </Button>
             )}
           </div>
 
@@ -487,10 +532,10 @@ export default function ConfigFiles() {
                           : "Field edits write back into the TOML below, while preserving raw editing for advanced cases."}
                       </div>
                     </div>
-                    <button className="btn btn-secondary btn-sm" onClick={repairCodexConfig} style={{ gap: 6 }}>
+                    <Button variant="secondary" onClick={repairCodexConfig} style={{ gap: 6 }}>
                       <RefreshCw size={14} />
                       {zh ? "修复 MCP 表" : "Repair MCP Table"}
-                    </button>
+                    </Button>
                   </div>
 
                   {codexValidation && (codexValidation.errors.length > 0 || codexValidation.warnings.length > 0) && (
@@ -562,23 +607,36 @@ export default function ConfigFiles() {
                       />
                     </div>
                     <div>
-                      <label className="field-label">{zh ? "API Key" : "API Key"}</label>
+                      <label className="field-label" htmlFor="config-file-api-key">
+                        API Key
+                      </label>
                       <div style={{ position: "relative" }}>
                         <Input
+                          id="config-file-api-key"
                           type={showCodexApiKey ? "text" : "password"}
                           value={codexApiKey}
                           onChange={(event) => setCodexApiKey(event.target.value)}
                           placeholder="sk-..."
                           style={{ paddingRight: 40 }}
                         />
-                        <button
-                          className="btn btn-ghost btn-icon-sm"
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={
+                            showCodexApiKey
+                              ? zh
+                                ? "隐藏 API Key"
+                                : "Hide API key"
+                              : zh
+                                ? "显示 API Key"
+                                : "Show API key"
+                          }
                           type="button"
                           onClick={() => setShowCodexApiKey((current) => !current)}
                           style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}
                         >
                           {showCodexApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                     <div>

@@ -6,6 +6,7 @@ mod cloud_sync;
 mod cloud_transfer;
 mod codex_oauth;
 mod commands;
+mod config_write;
 mod copilot_auth;
 mod db;
 mod deeplink;

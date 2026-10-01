@@ -7,54 +7,47 @@ pub fn read_codex_structured_config_from_content(
     content: &str,
     api_key: String,
 ) -> CodexTomlStructuredConfig {
-    let model_provider =
-        parse_toml_assignment(content, "model_provider").unwrap_or_else(|| "custom".to_string());
-    let provider_section = format!("model_providers.{model_provider}");
-
-    let mcp_servers = content
+    let doc = content
         .parse::<toml_edit::DocumentMut>()
-        .ok()
-        .and_then(|doc| {
-            doc.get("mcp_servers")
-                .and_then(|item| item.as_table())
-                .map(|table| {
-                    table
-                        .iter()
-                        .map(|(key, _)| key.to_string())
-                        .collect::<Vec<_>>()
-                })
-        })
         .unwrap_or_default();
-
-    let malformed_mcp_servers = content
-        .parse::<toml_edit::DocumentMut>()
-        .ok()
-        .and_then(|doc| doc.get("mcp_servers").map(|item| !item.is_table()))
-        .unwrap_or(false);
+    let scalar = |item: Option<&toml_edit::Item>| {
+        item.and_then(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .or_else(|| item.as_integer().map(|value| value.to_string()))
+                .or_else(|| item.as_bool().map(|value| value.to_string()))
+        })
+    };
+    let model_provider = scalar(doc.get("model_provider"))
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "custom".to_string());
+    let provider = doc
+        .get("model_providers")
+        .and_then(|item| item.get(&model_provider));
+    let provider_field = |key: &str| scalar(provider.and_then(|item| item.get(key)));
+    let mcp = doc.get("mcp_servers");
+    let mcp_servers = mcp
+        .and_then(toml_edit::Item::as_table_like)
+        .map(|table| table.iter().map(|(key, _)| key.to_string()).collect())
+        .unwrap_or_default();
+    let malformed_mcp_servers = mcp.is_some_and(|item| !item.is_table_like());
 
     CodexTomlStructuredConfig {
         model_provider: model_provider.clone(),
-        provider_label: parse_toml_section_assignment(content, &provider_section, "name")
-            .unwrap_or_else(|| model_provider.clone()),
-        base_url: parse_toml_section_assignment(content, &provider_section, "base_url")
-            .unwrap_or_default(),
-        wire_api: parse_toml_section_assignment(content, &provider_section, "wire_api")
-            .unwrap_or_else(|| "responses".to_string()),
-        model: parse_toml_assignment(content, "model").unwrap_or_default(),
-        reasoning_effort: parse_toml_assignment(content, "model_reasoning_effort")
+        provider_label: provider_field("name").unwrap_or_else(|| model_provider.clone()),
+        base_url: provider_field("base_url").unwrap_or_default(),
+        wire_api: provider_field("wire_api").unwrap_or_else(|| "responses".to_string()),
+        model: scalar(doc.get("model")).unwrap_or_default(),
+        reasoning_effort: scalar(doc.get("model_reasoning_effort"))
             .unwrap_or_else(|| "medium".to_string()),
-        personality: parse_toml_assignment(content, "personality")
-            .unwrap_or_else(|| "pragmatic".to_string()),
-        disable_response_storage: parse_toml_assignment(content, "disable_response_storage")
-            .map(|value| value.eq_ignore_ascii_case("true"))
+        personality: scalar(doc.get("personality")).unwrap_or_else(|| "pragmatic".to_string()),
+        disable_response_storage: doc
+            .get("disable_response_storage")
+            .and_then(toml_edit::Item::as_bool)
             .unwrap_or(false),
-        model_context_window: parse_toml_assignment(content, "model_context_window")
+        model_context_window: scalar(doc.get("model_context_window")).unwrap_or_default(),
+        model_auto_compact_token_limit: scalar(doc.get("model_auto_compact_token_limit"))
             .unwrap_or_default(),
-        model_auto_compact_token_limit: parse_toml_assignment(
-            content,
-            "model_auto_compact_token_limit",
-        )
-        .unwrap_or_default(),
         api_key,
         mcp_servers,
         malformed_mcp_servers,
@@ -80,33 +73,54 @@ pub fn write_codex_structured_config_to_text(
     let personality =
         normalized_non_empty(&config.personality).unwrap_or_else(|| "pragmatic".to_string());
 
-    doc["model_provider"] = toml_edit::value(provider_name.clone());
-    doc["model"] = toml_edit::value(config.model.trim());
-    doc["model_reasoning_effort"] = toml_edit::value(reasoning_effort);
-    doc["personality"] = toml_edit::value(personality);
-    doc["disable_response_storage"] = toml_edit::value(config.disable_response_storage);
+    set_scalar(
+        &mut doc["model_provider"],
+        toml_edit::value(provider_name.clone()),
+    );
+    set_scalar(&mut doc["model"], toml_edit::value(config.model.trim()));
+    set_scalar(
+        &mut doc["model_reasoning_effort"],
+        toml_edit::value(reasoning_effort),
+    );
+    set_scalar(&mut doc["personality"], toml_edit::value(personality));
+    set_scalar(
+        &mut doc["disable_response_storage"],
+        toml_edit::value(config.disable_response_storage),
+    );
 
     if let Some(context_window) = normalize_integer_like(&config.model_context_window) {
-        doc["model_context_window"] = toml_edit::value(context_window);
+        set_scalar(
+            &mut doc["model_context_window"],
+            toml_edit::value(context_window),
+        );
     } else {
         doc.as_table_mut().remove("model_context_window");
     }
 
     if let Some(compact_limit) = normalize_integer_like(&config.model_auto_compact_token_limit) {
-        doc["model_auto_compact_token_limit"] = toml_edit::value(compact_limit);
+        set_scalar(
+            &mut doc["model_auto_compact_token_limit"],
+            toml_edit::value(compact_limit),
+        );
     } else {
         doc.as_table_mut().remove("model_auto_compact_token_limit");
     }
 
-    doc["model_providers"][provider_name.as_str()]["name"] = toml_edit::value(provider_label);
-    doc["model_providers"][provider_name.as_str()]["base_url"] =
-        toml_edit::value(config.base_url.trim());
-    doc["model_providers"][provider_name.as_str()]["wire_api"] = toml_edit::value(wire_api);
-    doc["model_providers"][provider_name.as_str()]["requires_openai_auth"] = toml_edit::value(true);
+    let provider = &mut doc["model_providers"][provider_name.as_str()];
+    set_scalar(&mut provider["name"], toml_edit::value(provider_label));
+    set_scalar(
+        &mut provider["base_url"],
+        toml_edit::value(config.base_url.trim()),
+    );
+    set_scalar(&mut provider["wire_api"], toml_edit::value(wire_api));
+    set_scalar(
+        &mut provider["requires_openai_auth"],
+        toml_edit::value(true),
+    );
 
     let malformed_mcp_servers = doc
         .get("mcp_servers")
-        .map(|item| !item.is_table())
+        .map(|item| !item.is_table_like())
         .unwrap_or(false);
     if malformed_mcp_servers {
         doc.as_table_mut().remove("mcp_servers");
@@ -116,6 +130,28 @@ pub fn write_codex_structured_config_to_text(
     }
 
     doc.to_string()
+}
+
+fn set_scalar(item: &mut toml_edit::Item, mut desired: toml_edit::Item) {
+    let unchanged = match (item.as_value(), desired.as_value()) {
+        (Some(toml_edit::Value::String(left)), Some(toml_edit::Value::String(right))) => {
+            left.value() == right.value()
+        }
+        (Some(toml_edit::Value::Boolean(left)), Some(toml_edit::Value::Boolean(right))) => {
+            left.value() == right.value()
+        }
+        (Some(toml_edit::Value::Integer(left)), Some(toml_edit::Value::Integer(right))) => {
+            left.value() == right.value()
+        }
+        _ => false,
+    };
+    if unchanged {
+        return;
+    }
+    if let (Some(before), Some(next)) = (item.as_value(), desired.as_value_mut()) {
+        *next.decor_mut() = before.decor().clone();
+    }
+    *item = desired;
 }
 
 fn apply_common_config_to_claude_snapshot(

@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Bot, Code2, FolderOpen, Globe, Monitor, Sparkles, Terminal, type LucideIcon } from "lucide-react";
+import { Button } from "./ui/button";
 
 interface ConfigRootTabItem {
   id: string;
@@ -30,9 +31,10 @@ function ConfigFilesRootTabsComponent({ roots, activeRoot, onSelectRoot }: Confi
       {roots.map((root) => {
         const Icon = ROOT_ICONS[root.id] || FolderOpen;
         return (
-          <button
+          <Button
             key={root.id}
-            className={`btn btn-sm ${activeRoot === root.id ? "btn-primary" : "btn-secondary"}`}
+            variant={activeRoot === root.id ? "default" : "secondary"}
+            aria-pressed={activeRoot === root.id}
             disabled={!root.exists}
             onClick={() => onSelectRoot(root.id)}
             style={{ opacity: root.exists ? 1 : 0.45 }}
@@ -40,7 +42,7 @@ function ConfigFilesRootTabsComponent({ roots, activeRoot, onSelectRoot }: Confi
           >
             <Icon size={14} />
             {root.name}
-          </button>
+          </Button>
         );
       })}
     </div>

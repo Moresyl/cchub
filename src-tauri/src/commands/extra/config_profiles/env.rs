@@ -418,25 +418,6 @@ fn resolve_claude_settings_local_path(conn: &rusqlite::Connection) -> Result<Pat
     Ok(parent.join("settings.local.json"))
 }
 
-pub fn read_json_file_or_default(path: &std::path::Path) -> Result<serde_json::Value, String> {
-    if !path.exists() {
-        return Ok(serde_json::json!({}));
-    }
-    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&content).map_err(|e| e.to_string())
-}
-
-pub fn write_json_file_pretty(
-    path: &std::path::Path,
-    value: &serde_json::Value,
-) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let content = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
-    crate::utils::atomic_write_string(path, &content).map_err(|e| e.to_string())
-}
-
 pub fn read_claude_config_toggles_from_conn(
     conn: &rusqlite::Connection,
 ) -> Result<ClaudeConfigToggles, String> {

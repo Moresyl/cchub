@@ -656,6 +656,7 @@ pub fn run() {
             compat_commands::ensure_codex_official_provider,
             compat_commands::clear_current_profile,
             commands::prompt_library::get_prompts,
+            commands::prompt_library::get_prompt_library_snapshot,
             commands::prompt_library::upsert_prompt,
             commands::prompt_library::delete_prompt,
             commands::prompt_library::enable_prompt,

@@ -33,7 +33,27 @@ pub(crate) fn commit(updates: Vec<FileUpdate>) -> Result<(), String> {
 
 fn commit_with(
     updates: Vec<FileUpdate>,
+    write: impl FnMut(usize, &Path, &[u8]) -> std::io::Result<()>,
+) -> Result<(), String> {
+    commit_with_finalizer(updates, write, || Ok(()))
+}
+
+// Keep recovery files until the associated database transaction also commits.
+pub(crate) fn commit_then(
+    updates: Vec<FileUpdate>,
+    finalize: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    commit_with_finalizer(
+        updates,
+        |_, path, bytes| crate::utils::atomic_write(path, bytes),
+        finalize,
+    )
+}
+
+fn commit_with_finalizer(
+    updates: Vec<FileUpdate>,
     mut write: impl FnMut(usize, &Path, &[u8]) -> std::io::Result<()>,
+    finalize: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
     let mut saved = Vec::new();
     let mut paths = std::collections::HashSet::new();
@@ -63,7 +83,7 @@ fn commit_with(
         .iter()
         .all(|file| file.update.original.as_deref() == Some(&file.update.desired))
     {
-        return Ok(());
+        return finalize();
     }
     let storage = tempfile::Builder::new()
         .prefix("cchub-config-recovery-")
@@ -108,7 +128,7 @@ fn commit_with(
                 return Err("Configuration changed while saving; reload it and try again".into());
             }
         }
-        Ok(())
+        finalize()
     })();
     let Err(error) = result else {
         return Ok(());

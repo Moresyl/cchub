@@ -24,15 +24,17 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
->(({ className, children, hideClose = false, ...props }, ref) => (
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean; fullscreenOnMobile?: boolean }
+>(({ className, children, hideClose = false, fullscreenOnMobile = true, ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
       data-slot="dialog-content"
       className={cn(
-        "fixed left-1/2 top-[48%] z-[2001] flex max-h-[min(460px,calc(100dvh-40px))] w-[calc(100vw-32px)] max-w-[450px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-[var(--border-strong)] bg-card text-card-foreground shadow-[var(--shadow-lg)] outline-none data-[state=closed]:animate-[dialog-out_120ms_ease-in] data-[state=open]:animate-[dialog-in_160ms_cubic-bezier(0.22,1,0.36,1)] max-md:inset-0 max-md:max-h-none max-md:w-full max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none",
+        "fixed left-1/2 top-[48%] z-[2001] flex max-h-[min(460px,calc(100dvh-40px))] w-[calc(100vw-32px)] max-w-[450px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-[var(--border-strong)] bg-card text-card-foreground shadow-[var(--shadow-lg)] outline-none data-[state=closed]:animate-[dialog-out_120ms_ease-in] data-[state=open]:animate-[dialog-in_160ms_cubic-bezier(0.22,1,0.36,1)]",
+        fullscreenOnMobile &&
+          "max-md:inset-0 max-md:max-h-none max-md:w-full max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none",
         className,
       )}
       {...props}

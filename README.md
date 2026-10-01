@@ -57,6 +57,12 @@ Model discovery follows the selected API protocol and retains provider-reported 
 | **Native Configs**   | OpenCode switching preserves JSONC comments, MCP, plugins, and other providers                 |
 | **Sessions & Usage** | Browse native sessions and import output, reasoning, and cache usage without duplicate billing |
 
+### Prompt library
+
+Manage instruction versions for Claude, Codex, Gemini, OpenCode, OpenClaw, Hermes and Pi with Markdown editing, preview and search. Importing retains the file's exact contents; replacing live instructions retains the previous contents as another library entry. Deleting an entry preserves the tool's live file. The page reports file-read errors and mismatches instead of treating unreadable content as an empty file or claiming a mismatched version is active.
+
+Saves check the loaded library and file revisions. Conflicts retain the draft until you reload and review the current file or stored version. Writes are serialized, and late responses cannot replace another tool's state. Reported database commit failures roll back file writes still owned by the save; newer external edits are preserved. This recovery does not cover a crash or power loss.
+
 ### Local proxy and failover
 
 The Codex file editor counts API-key-only edits as unsaved changes. It saves the raw TOML draft together with a field-level authentication update, checking the exact loaded revision of both files before writing. Malformed authentication and invalid TOML stop the complete save. A reported write failure rolls back changes still owned by this save; newer external edits are preserved, and incomplete recovery retains original files with a recovery path. This is not a power-loss transaction. Late file reads and save acknowledgements cannot replace another file or newer drafts. Editor actions and file navigation use the shared controls.

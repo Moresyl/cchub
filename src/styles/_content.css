@@ -13,19 +13,19 @@
 .markdown-preview h3,
 .markdown-preview h4 {
   color: var(--text-primary);
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   margin: 16px 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border-subtle);
 }
 .markdown-preview h1 {
-  font-size: 18px;
+  font-size: 20px;
 }
 .markdown-preview h2 {
   font-size: 16px;
 }
 .markdown-preview h3 {
-  font-size: 15px;
+  font-size: 14px;
 }
 .markdown-preview h4 {
   font-size: 14px;
@@ -90,7 +90,7 @@
 }
 .markdown-preview th {
   background: var(--bg-input);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 .markdown-preview a {
   color: var(--accent);
@@ -101,6 +101,7 @@
 }
 .markdown-preview strong {
   color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
 }
 
 /* ═══ Tabs ═══ */

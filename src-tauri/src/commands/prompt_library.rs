@@ -7,6 +7,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tauri::State;
 
+mod snapshot;
+mod storage;
+use snapshot::{check_library, read_live, LibrarySnapshot};
+
 const MAX_PROMPT_BYTES: usize = 1024 * 1024;
 const SUPPORTED_APPS: &[&str] = &[
     "claude", "codex", "gemini", "opencode", "openclaw", "hermes", "pi",
@@ -82,20 +86,6 @@ fn prompt_path_for_home(home: &Path, app: &str) -> Result<PathBuf, String> {
 fn prompt_path(app: &str) -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "Cannot determine home directory".to_string())?;
     prompt_path_for_home(&home, app)
-}
-
-fn write_live_prompt(app: &str, content: &str) -> Result<(), String> {
-    let path = prompt_path(app)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "Failed to create prompt directory {}: {error}",
-                parent.display()
-            )
-        })?;
-    }
-    crate::utils::atomic_write_string(&path, content)
-        .map_err(|error| format!("Failed to write prompt file {}: {error}", path.display()))
 }
 
 fn row_to_prompt(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptRecord> {
@@ -210,6 +200,7 @@ fn migrate_legacy_presets(conn: &Connection, app: &str) -> Result<(), String> {
     transaction.commit().map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
 fn save_prompt(
     conn: &mut Connection,
     app: &str,
@@ -217,82 +208,20 @@ fn save_prompt(
     prompt: PromptInput,
     sync_live: bool,
 ) -> Result<PromptRecord, String> {
-    validate_prompt(id, &prompt)?;
-    if prompt.enabled && sync_live {
-        write_live_prompt(app, &prompt.content)?;
-    }
-
-    let now = chrono::Utc::now().timestamp_millis();
-    let transaction = conn.transaction().map_err(|error| error.to_string())?;
-    if prompt.enabled {
-        transaction
-            .execute(
-                "UPDATE prompt_library SET enabled = 0, updated_at = ?2 WHERE app_id = ?1 AND enabled = 1",
-                params![app, now],
-            )
-            .map_err(|error| error.to_string())?;
-    }
-    transaction
-        .execute(
-            "INSERT INTO prompt_library
-             (app_id, id, name, content, description, enabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
-             ON CONFLICT(app_id, id) DO UPDATE SET
-               name = excluded.name,
-               content = excluded.content,
-               description = excluded.description,
-               enabled = excluded.enabled,
-               updated_at = excluded.updated_at",
-            params![
-                app,
-                id,
-                prompt.name.trim(),
-                prompt.content,
-                prompt
-                    .description
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty()),
-                i64::from(prompt.enabled),
-                now,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())?;
-
-    load_prompts(conn, app)?
-        .remove(id)
-        .ok_or_else(|| "Prompt was saved but could not be reloaded".to_string())
+    assert!(!sync_live, "Tests must supply isolated paths");
+    storage::save_at(conn, app, id, prompt, None, None, None)
 }
 
-fn set_enabled(conn: &mut Connection, app: &str, id: &str, sync_live: bool) -> Result<(), String> {
-    let content: Option<String> = conn
-        .query_row(
-            "SELECT content FROM prompt_library WHERE app_id = ?1 AND id = ?2",
-            params![app, id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    let content = content.ok_or_else(|| "Prompt not found".to_string())?;
-    if sync_live {
-        write_live_prompt(app, &content)?;
-    }
-
-    let now = chrono::Utc::now().timestamp_millis();
-    let transaction = conn.transaction().map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "UPDATE prompt_library SET enabled = 0, updated_at = ?2 WHERE app_id = ?1 AND enabled = 1",
-            params![app, now],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            "UPDATE prompt_library SET enabled = 1, updated_at = ?3 WHERE app_id = ?1 AND id = ?2",
-            params![app, id, now],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())
+#[tauri::command]
+pub fn get_prompt_library_snapshot(
+    app: String,
+    db: State<'_, DbState>,
+) -> Result<LibrarySnapshot, String> {
+    let app = normalize_app(&app)?;
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    let _guard = crate::json_config::write_lock()?;
+    migrate_legacy_presets(&conn, &app)?;
+    snapshot::snapshot_at(&conn, &app, &prompt_path(&app)?)
 }
 
 #[tauri::command]
@@ -311,18 +240,38 @@ pub fn upsert_prompt(
     app: String,
     id: String,
     prompt: PromptInput,
+    expected_library_revision: Option<String>,
+    expected_live_revision: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<PromptRecord, String> {
     let app = normalize_app(&app)?;
     let mut conn = db.0.lock().map_err(|error| error.to_string())?;
-    save_prompt(&mut conn, &app, id.trim(), prompt, true)
+    let path = prompt.enabled.then(|| prompt_path(&app)).transpose()?;
+    storage::save_at(
+        &mut conn,
+        &app,
+        id.trim(),
+        prompt,
+        path.as_deref(),
+        expected_library_revision.as_deref(),
+        expected_live_revision.as_deref(),
+    )
 }
 
 #[tauri::command]
-pub fn delete_prompt(app: String, id: String, db: State<'_, DbState>) -> Result<(), String> {
+pub fn delete_prompt(
+    app: String,
+    id: String,
+    expected_library_revision: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
     let app = normalize_app(&app)?;
-    let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let changed = conn
+    let mut conn = db.0.lock().map_err(|error| error.to_string())?;
+    let transaction = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    check_library(&transaction, &app, expected_library_revision.as_deref())?;
+    let changed = transaction
         .execute(
             "DELETE FROM prompt_library WHERE app_id = ?1 AND id = ?2",
             params![app, id.trim()],
@@ -331,99 +280,53 @@ pub fn delete_prompt(app: String, id: String, db: State<'_, DbState>) -> Result<
     if changed == 0 {
         return Err("Prompt not found".to_string());
     }
-    Ok(())
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn enable_prompt(app: String, id: String, db: State<'_, DbState>) -> Result<(), String> {
+pub fn enable_prompt(
+    app: String,
+    id: String,
+    expected_library_revision: Option<String>,
+    expected_live_revision: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
     let app = normalize_app(&app)?;
     let mut conn = db.0.lock().map_err(|error| error.to_string())?;
-    set_enabled(&mut conn, &app, id.trim(), true)
+    storage::enable_at(
+        &mut conn,
+        &app,
+        id.trim(),
+        Some(&prompt_path(&app)?),
+        expected_library_revision.as_deref(),
+        expected_live_revision.as_deref(),
+    )
 }
 
 #[tauri::command]
 pub fn get_current_prompt_file_content(app: String) -> Result<Option<String>, String> {
     let app = normalize_app(&app)?;
-    let path = prompt_path(&app)?;
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
-    if metadata.len() > MAX_PROMPT_BYTES as u64 {
-        return Err("Prompt file is too large".to_string());
-    }
-    std::fs::read_to_string(&path)
-        .map(Some)
-        .map_err(|error| format!("Failed to read prompt file {}: {error}", path.display()))
+    let _guard = crate::json_config::write_lock()?;
+    read_live(&prompt_path(&app)?).map(|live| live.content)
 }
 
 #[tauri::command]
-pub fn import_prompt_from_file(app: String, db: State<'_, DbState>) -> Result<String, String> {
+pub fn import_prompt_from_file(
+    app: String,
+    expected_library_revision: Option<String>,
+    expected_live_revision: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
     let app = normalize_app(&app)?;
     let path = prompt_path(&app)?;
-    let metadata = std::fs::metadata(&path)
-        .map_err(|error| format!("Prompt file does not exist at {}: {error}", path.display()))?;
-    if metadata.len() > MAX_PROMPT_BYTES as u64 {
-        return Err("Prompt file is too large".to_string());
-    }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|error| format!("Failed to read prompt file {}: {error}", path.display()))?;
     let mut conn = db.0.lock().map_err(|error| error.to_string())?;
-    if let Some(existing_id) = conn
-        .query_row(
-            "SELECT id FROM prompt_library WHERE app_id = ?1 AND content = ?2 LIMIT 1",
-            params![app, content],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?
-    {
-        set_enabled(&mut conn, &app, &existing_id, false)?;
-        return Ok(existing_id);
-    }
-
-    let id = uuid::Uuid::new_v4().to_string();
-    let display_name = match app.as_str() {
-        "openclaw" => "OpenClaw",
-        "opencode" => "OpenCode",
-        "pi" => "Pi",
-        _ => {
-            let mut chars = app.chars();
-            return save_prompt(
-                &mut conn,
-                &app,
-                &id,
-                PromptInput {
-                    name: format!(
-                        "Imported {} instructions",
-                        chars
-                            .next()
-                            .map(|first| first.to_ascii_uppercase().to_string())
-                            .unwrap_or_default()
-                            + chars.as_str()
-                    ),
-                    content,
-                    description: Some(format!("Imported from {}", path.display())),
-                    enabled: true,
-                },
-                false,
-            )
-            .map(|_| id);
-        }
-    };
-    save_prompt(
+    storage::import_at(
         &mut conn,
         &app,
-        &id,
-        PromptInput {
-            name: format!("Imported {display_name} instructions"),
-            content,
-            description: Some(format!("Imported from {}", path.display())),
-            enabled: true,
-        },
-        false,
-    )?;
-    Ok(id)
+        &path,
+        expected_library_revision.as_deref(),
+        expected_live_revision.as_deref(),
+    )
 }
 
 #[cfg(test)]

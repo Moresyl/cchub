@@ -1,5 +1,84 @@
 use super::*;
 
+#[test]
+fn a_failed_database_finalizer_restores_each_original_and_runs_after_verified_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("new/nested/second");
+    std::fs::write(&first, b"original").unwrap();
+    let result = commit_then(
+        vec![update(&first, b"new"), update(&second, b"created")],
+        || {
+            assert_eq!(read(&first).unwrap().unwrap(), b"new");
+            assert_eq!(read(&second).unwrap().unwrap(), b"created");
+            Err("database commit fixture failed".into())
+        },
+    );
+    assert!(result.unwrap_err().contains("database commit"));
+    assert_eq!(read(&first).unwrap().unwrap(), b"original");
+    assert!(!second.exists());
+    assert!(!dir.path().join("new").exists());
+}
+
+#[test]
+fn no_op_files_still_run_the_database_finalizer_once_without_changing_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file");
+    std::fs::write(&path, b"original").unwrap();
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let mut called = 0;
+    assert!(commit_then(vec![update(&path, b"original")], || {
+        called += 1;
+        Err("fixture".into())
+    })
+    .is_err());
+    assert_eq!(called, 1);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        modified
+    );
+    assert_eq!(read(&path).unwrap().unwrap(), b"original");
+}
+
+#[test]
+fn database_failure_with_a_newer_external_edit_keeps_the_edit_and_recovery_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file");
+    std::fs::write(&path, b"original").unwrap();
+    let error = commit_then(vec![update(&path, b"ours")], || {
+        std::fs::write(&path, b"external").unwrap();
+        Err("database commit fixture failed".into())
+    })
+    .unwrap_err();
+    assert_eq!(read(&path).unwrap().unwrap(), b"external");
+    let recovery = PathBuf::from(error.split("Original files: ").nth(1).unwrap());
+    assert!(recovery
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with("cchub-config-recovery-"));
+    assert_eq!(std::fs::read(recovery.join("0")).unwrap(), b"original");
+    std::fs::remove_dir_all(recovery).unwrap();
+}
+
+#[test]
+fn a_file_save_failure_does_not_attempt_the_database_finalizer() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file");
+    let mut called = false;
+    assert!(commit_with_finalizer(
+        vec![update(&path, b"new")],
+        |_, _, _| { Err(std::io::Error::other("fixture")) },
+        || {
+            called = true;
+            Ok(())
+        }
+    )
+    .is_err());
+    assert!(!called);
+    assert!(!path.exists());
+}
+
 fn update(path: &Path, desired: &[u8]) -> FileUpdate {
     FileUpdate {
         path: path.into(),

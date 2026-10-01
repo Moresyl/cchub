@@ -1,15 +1,7 @@
 import { memo } from "react";
 import { AlertTriangle, Info } from "lucide-react";
 import { Button } from "./ui/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -39,8 +31,8 @@ function ConfirmDialogComponent({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent hideClose className="max-w-[420px]">
-        <DialogHeader>
+      <DialogContent hideClose fullscreenOnMobile={false} className="max-w-[420px]">
+        <DialogHeader className="min-h-0 shrink overflow-y-auto pr-5">
           <div
             className="grid size-9 shrink-0 place-items-center rounded-[7px]"
             style={{ background: iconBg, color: iconColor }}
@@ -48,16 +40,15 @@ function ConfirmDialogComponent({
             <Icon size={17} aria-hidden="true" />
           </div>
           <div className="min-w-0">
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription className="whitespace-pre-line">{message}</DialogDescription>
+            <DialogTitle className="break-words">{title}</DialogTitle>
+            <DialogDescription className="whitespace-pre-line break-words">{message}</DialogDescription>
           </div>
         </DialogHeader>
-        <DialogBody className="hidden" />
-        <DialogFooter>
-          <Button variant="secondary" size="sm" onClick={onCancel}>
+        <DialogFooter className="flex-wrap">
+          <Button variant="secondary" onClick={onCancel}>
             {cancelText || "取消"}
           </Button>
-          <Button variant={isDestructive ? "destructive" : "default"} size="sm" onClick={onConfirm}>
+          <Button variant={isDestructive ? "destructive" : "default"} onClick={onConfirm}>
             {confirmText || "确认"}
           </Button>
         </DialogFooter>

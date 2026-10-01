@@ -22,6 +22,8 @@ mod deadline_tests;
 mod gemini_usage_tests;
 #[path = "passthrough_tests.rs"]
 mod passthrough_tests;
+#[path = "routing_tests.rs"]
+mod routing_tests;
 #[path = "streaming_tests.rs"]
 mod streaming_tests;
 #[path = "terminal_drop_tests.rs"]

@@ -39,6 +39,7 @@ pub mod prompt_library;
 pub mod provider_compat;
 pub mod provider_health_commands;
 pub mod provider_models;
+pub mod routing_commands;
 pub mod s3_sync_commands;
 pub mod security_commands;
 pub mod session_usage_compat;

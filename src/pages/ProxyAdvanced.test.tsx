@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import ProxyAdvanced from "./ProxyAdvanced";
 import { setLocale } from "../lib/i18n";
 
@@ -8,6 +9,12 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("../components/Toast", () => ({ showToast: vi.fn() }));
 vi.mock("../components/CircuitBreakerPanel", () => ({ default: () => null }));
 vi.mock("../components/FailoverQueueManager", () => ({ default: () => null }));
+vi.mock("../components/ProviderRoutingPanel", () => ({
+  default: function MockRoutingPanel({ appType }: { appType?: string }) {
+    const [initialTool] = useState(appType ?? "all");
+    return <span data-testid="routing-tool-instance">{initialTool}</span>;
+  },
+}));
 vi.mock("../hooks/mutations", () => ({ useSaveProxyAdvancedConfigMutation: () => ({ mutateAsync: save }) }));
 
 function config(enabled = true) {
@@ -45,6 +52,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ProxyAdvanced settings", () => {
+  it("creates a fresh routing editor when the host switches tool modes", async () => {
+    const view = render(<ProxyAdvanced mode="claude" />);
+    await screen.findByRole("spinbutton", { name: "普通响应总超时 (秒)" });
+    expect(screen.getByTestId("routing-tool-instance").textContent).toBe("claude");
+    view.rerender(<ProxyAdvanced mode="codex" />);
+    expect(screen.getByTestId("routing-tool-instance").textContent).toBe("codex");
+    view.rerender(<ProxyAdvanced mode="all" />);
+    expect(screen.getByTestId("routing-tool-instance").textContent).toBe("all");
+  });
+
   it.each(["all", "claude", "codex"] as const)("provides and saves request deadlines in %s mode", async (mode) => {
     render(<ProxyAdvanced mode={mode} />);
     const input = await screen.findByRole("spinbutton", { name: "普通响应总超时 (秒)" });

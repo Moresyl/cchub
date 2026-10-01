@@ -22,6 +22,7 @@ mod forward;
 mod optimizer;
 mod profiles;
 mod rewriters;
+pub(crate) mod routing;
 mod upstream;
 mod usage;
 use forward::forward_proxy_request;
@@ -93,6 +94,7 @@ pub(super) struct LocalProviderProxyRuntimeInner {
     pub(super) profile_circuits: HashMap<String, EndpointCircuitState>,
     pub(super) optimizer_config: Option<crate::proxy_optimizer::OptimizerConfig>,
     pub(super) rectifier_config: Option<crate::proxy_optimizer::config::RectifierConfig>,
+    pub(super) routing_rotations: std::collections::VecDeque<(String, u64)>,
 }
 
 pub(crate) struct LocalProviderProxyRuntime(pub(super) Arc<Mutex<LocalProviderProxyRuntimeInner>>);

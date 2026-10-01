@@ -158,6 +158,20 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
         }
     };
 
+    let (profile_candidates, routed) = if is_desktop {
+        (profile_candidates, false)
+    } else {
+        match super::routing::apply(
+            &app_handle,
+            &tool_id,
+            &original_relative_path,
+            &body_bytes,
+            profile_candidates,
+        ) {
+            Ok(plan) => plan,
+            Err(error) => return build_proxy_error(StatusCode::BAD_GATEWAY, error),
+        }
+    };
     let request_id = next_proxy_request_id();
     let started_at = Instant::now();
     let mut last_error: Option<String> = None;
@@ -575,7 +589,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                 &tool_id,
                                                 &upstream,
                                                 base_url,
-                                                profile_index > 0,
+                                                profile_index > 0 && !routed,
                                             );
                                         }
                                     }
@@ -655,7 +669,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                     &route_tool,
                                     &route_target,
                                     &route_base,
-                                    profile_index > 0,
+                                    profile_index > 0 && !routed,
                                 )
                             };
                             let desktop_model = if is_desktop
@@ -735,7 +749,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                             &tool_id,
                                             &upstream,
                                             base_url,
-                                            profile_index > 0,
+                                            profile_index > 0 && !routed,
                                         );
                                     }
                                 }

@@ -6,6 +6,7 @@ import { showToast } from "../components/Toast";
 import LoadingState from "../components/states/LoadingState";
 import CircuitBreakerPanel from "../components/CircuitBreakerPanel";
 import FailoverQueueManager from "../components/FailoverQueueManager";
+import ProviderRoutingPanel from "../components/ProviderRoutingPanel";
 import { useSaveProxyAdvancedConfigMutation } from "../hooks/mutations";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -551,6 +552,10 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
         )}
 
         {mode !== "codex" && <CircuitBreakerPanel />}
+        <ProviderRoutingPanel
+          key={mode}
+          appType={mode === "claude" ? "claude" : mode === "codex" ? "codex" : undefined}
+        />
         <FailoverQueueManager appType={mode === "claude" ? "claude" : mode === "codex" ? "codex" : undefined} />
 
         {/* Failover */}

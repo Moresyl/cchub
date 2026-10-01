@@ -121,7 +121,7 @@ fn web_search_result_content(item: &Value) -> Value {
     json!(results)
 }
 
-pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 'static>(
+pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + Sync + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {

@@ -20,6 +20,7 @@ pub use sse_chat::create_anthropic_sse_stream;
 pub use sse_gemini::create_anthropic_sse_stream_from_gemini;
 pub use sse_responses::create_anthropic_sse_stream_from_responses;
 pub(crate) use stream_decode::normalize_sse_stream;
+pub(crate) use stream_errors::stream_failure_message;
 
 use serde_json::{json, Value};
 

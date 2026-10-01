@@ -7,7 +7,7 @@ pub(crate) fn normalize_sse_stream<S, E>(
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
-    E: std::error::Error + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
 {
     async_stream::stream! {
         let mut pending = Vec::new();
@@ -16,7 +16,7 @@ where
         while let Some(chunk) = stream.next().await {
             let chunk = match chunk {
                 Ok(chunk) => chunk,
-                Err(error) => { yield Err(std::io::Error::other(error.to_string())); return; }
+                Err(error) => { yield Err(std::io::Error::other(error)); return; }
             };
             pending.extend_from_slice(&chunk);
             let valid = match std::str::from_utf8(&pending) {

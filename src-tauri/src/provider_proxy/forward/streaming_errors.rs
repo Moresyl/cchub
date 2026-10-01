@@ -27,8 +27,11 @@ impl Protocol {
     }
 }
 
-fn failure_event(protocol: Protocol, provider: &str) -> Bytes {
-    let message = format!("{provider}: upstream stream was interrupted before completion");
+fn failure_event(protocol: Protocol, provider: &str, error: &std::io::Error) -> Bytes {
+    let message = format!(
+        "{provider}: {}",
+        crate::provider_proxy_transform::stream_failure_message(error)
+    );
     let (name, value) = match protocol {
         Protocol::Messages => (
             Some("error"),
@@ -67,8 +70,8 @@ where
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => yield Ok(bytes),
-                Err(_) => {
-                    yield Ok(failure_event(protocol, &provider));
+                Err(error) => {
+                    yield Ok(failure_event(protocol, &provider, &error));
                     return;
                 }
             }

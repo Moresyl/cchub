@@ -52,6 +52,8 @@ mod streaming_tests;
 mod strict_tools_tests;
 #[path = "terminal_drop_tests.rs"]
 mod terminal_drop_tests;
+#[path = "transport_cut_tests.rs"]
+mod transport_cut_tests;
 
 struct Upstream {
     url: String,

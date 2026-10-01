@@ -36,7 +36,7 @@ impl std::error::Error for FrameError {}
 pub(crate) fn frames<S, E>(stream: S) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
-    E: std::error::Error + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
 {
     async_stream::stream! {
         let mut pending = Vec::new();
@@ -45,7 +45,7 @@ where
         while let Some(chunk) = stream.next().await {
             let chunk = match chunk {
                 Ok(chunk) => chunk,
-                Err(error) => { yield Err(std::io::Error::other(error.to_string())); return; }
+                Err(error) => { yield Err(std::io::Error::other(error)); return; }
             };
             for byte in chunk {
                 if previous_cr {

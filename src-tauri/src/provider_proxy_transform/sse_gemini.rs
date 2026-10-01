@@ -16,7 +16,7 @@ fn anthropic_usage(usage: &GeminiUsage) -> Value {
 }
 
 /// Converts Gemini SSE stream (`streamGenerateContent?alt=sse`) to Anthropic SSE format.
-pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'static>(
+pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + Sync + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
     model: String,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {

@@ -20,9 +20,9 @@ use crate::proxy_optimizer::OptimizerConfig;
 fn boxed<S, E>(stream: S) -> ResponseStream
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
-    E: std::error::Error + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
 {
-    Box::pin(stream.map(|chunk| chunk.map_err(|error| std::io::Error::other(error.to_string()))))
+    Box::pin(stream.map(|chunk| chunk.map_err(std::io::Error::other)))
 }
 
 #[allow(clippy::too_many_arguments)]

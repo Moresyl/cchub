@@ -102,7 +102,7 @@ pub(super) fn observe<S, E>(
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
-    E: std::error::Error + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
 {
     async_stream::stream! {
         let mut inspector = frame::Inspector::default();
@@ -115,7 +115,7 @@ where
                     for byte in bytes { inspector.push(*byte, &health); }
                 }
             }
-            yield chunk.map_err(|error| std::io::Error::other(error.to_string()));
+            yield chunk.map_err(std::io::Error::other);
         }
         inspector.finish_eof(&health);
         if health.incomplete() {

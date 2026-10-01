@@ -22,6 +22,7 @@ async fn each_protocol_gets_one_native_error_without_echoing_transport_secrets()
         assert!(failure.starts_with("\n\n"));
         assert!(failure.contains(error_type));
         assert!(failure.contains("Provider one"));
+        assert!(failure.contains("connection lost"));
         assert!(!failure.contains("private.invalid"));
         assert!(!failure.contains("secret"));
         assert!(!failure.contains("message_stop"));

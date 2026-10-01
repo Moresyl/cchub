@@ -66,6 +66,7 @@ async fn native_protocol_short_streams_emit_errors_and_preserve_partial_usage_on
         assert!(text.starts_with(start), "{path}: {text}");
         assert!(text.contains(marker), "{path}: {text}");
         assert!(text.contains("p1:"));
+        assert!(text.contains("connection lost"));
         assert!(!text.contains("event: message_stop"));
         assert!(!text.contains("event: response.completed"));
         assert_eq!(endpoint(&app, "p1", &upstream.url).consecutive_failures, 1);
@@ -156,6 +157,7 @@ async fn actual_transport_cut_after_received_usage_returns_one_error_and_no_succ
     .unwrap();
     let text = String::from_utf8(bytes).unwrap();
     assert_eq!(text.matches("event: error").count(), 1);
+    assert!(text.contains("connection lost"));
     assert!(!text.contains("private transport secret"));
     assert!(!text.contains("message_stop"));
     assert_eq!(endpoint(&app, "p1", &upstream.url).consecutive_failures, 1);

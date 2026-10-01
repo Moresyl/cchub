@@ -105,7 +105,7 @@ fn fallback_tool_id(index: usize, claimed: &mut HashSet<String>) -> String {
     candidate
 }
 
-pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
+pub fn create_anthropic_sse_stream<E: std::error::Error + Send + Sync + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {

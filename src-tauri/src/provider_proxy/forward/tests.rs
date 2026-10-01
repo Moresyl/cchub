@@ -20,6 +20,8 @@ use tokio::sync::Notify;
 mod deadline_tests;
 #[path = "gemini_usage_tests.rs"]
 mod gemini_usage_tests;
+#[path = "managed_auth_tests.rs"]
+mod managed_auth_tests;
 #[path = "passthrough_tests.rs"]
 mod passthrough_tests;
 #[path = "routing_tests.rs"]

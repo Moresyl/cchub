@@ -17,6 +17,7 @@ fn write(
         use_full_url: false,
         candidate_base_urls: vec![],
         headers: vec![],
+        managed_principal: None,
         request_header_overrides: vec![],
         request_body_override: None,
         claude_api_format: None,

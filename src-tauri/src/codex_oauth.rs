@@ -21,6 +21,9 @@ const KEYRING_SERVICE: &str = "CCHub Codex OAuth";
 mod refresh;
 mod resource;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 #[derive(Debug, thiserror::Error)]
 pub enum CodexOAuthError {
     #[error("OAuth authorization is pending")]

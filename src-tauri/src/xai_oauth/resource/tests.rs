@@ -1,5 +1,30 @@
 use super::*;
+use crate::xai_oauth::test_support::seeded;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[tokio::test]
+async fn revision_matching_is_scoped_and_rejects_changed_reauth_removed_or_locked_accounts() {
+    let (_dir, manager) = seeded().await;
+    let lease = manager.lease(Some("one")).await.unwrap();
+    assert!(manager.matches_account_revision(&lease.account_id, &lease.revision));
+    assert!(!manager.matches_account_revision("two", &lease.revision));
+    assert!(!manager.matches_account_revision("one", "old-revision"));
+    assert!(manager.with_account_revision("one", &lease.revision, || {
+        assert!(
+            manager.accounts.try_write().is_err(),
+            "the commit must hold account ownership"
+        );
+    }));
+    assert!(!manager.with_account_revision("one", "old-revision", || panic!("stale commit")));
+    {
+        let mut accounts = manager.accounts.write().await;
+        assert!(!manager.matches_account_revision("one", &lease.revision));
+        accounts.get_mut("one").unwrap().requires_reauth = true;
+    }
+    assert!(!manager.matches_account_revision("one", &lease.revision));
+    manager.accounts.write().await.remove("one");
+    assert!(!manager.matches_account_revision("one", &lease.revision));
+}
 
 #[tokio::test]
 async fn actual_resource_pipeline_keeps_original_account_after_default_changes() {
@@ -47,32 +72,6 @@ async fn actual_resource_pipeline_keeps_original_account_after_default_changes()
     );
     assert!(!manager.accounts.read().await["one"].requires_reauth);
     assert!(!manager.storage_path.exists());
-}
-
-async fn seeded() -> (tempfile::TempDir, Arc<XaiOAuthManager>) {
-    let dir = tempfile::tempdir().unwrap();
-    let manager = Arc::new(XaiOAuthManager::new(dir.path().join("auth.json"), None));
-    for id in ["one", "two"] {
-        manager.accounts.write().await.insert(
-            id.into(),
-            AccountData {
-                id: id.into(),
-                login: id.into(),
-                refresh_token: Some("refresh".into()),
-                authenticated_at: 1,
-                requires_reauth: false,
-                revision: new_revision(),
-            },
-        );
-        manager.access_tokens.write().await.insert(
-            id.into(),
-            CachedToken {
-                value: format!("{id}-access"),
-                expires_at_ms: expires_at(Some(3600)),
-            },
-        );
-    }
-    (dir, manager)
 }
 
 #[tokio::test]

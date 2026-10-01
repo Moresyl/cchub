@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
@@ -15,6 +14,12 @@ const COPILOT_TOKEN_URL: &str = "https://api.github.com/copilot_internal/v2/toke
 const COPILOT_USAGE_URL: &str = "https://api.github.com/copilot_internal/user";
 const COPILOT_MODELS_URL: &str = "https://api.githubcopilot.com/models";
 const TOKEN_REFRESH_BUFFER_SECONDS: i64 = 60;
+
+mod storage;
+mod tokens;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub const COPILOT_EDITOR_VERSION: &str = "vscode/1.96.0";
 pub const COPILOT_PLUGIN_VERSION: &str = "copilot-chat/0.26.7";
@@ -34,6 +39,8 @@ pub enum CopilotAuthError {
     NoCopilotSubscription,
     #[error("GitHub account not found: {0}")]
     AccountNotFound(String),
+    #[error("GitHub account changed during the request; retry with the current account")]
+    AccountChanged,
     #[error("Network error: {0}")]
     Network(String),
     #[error("Parse error: {0}")]
@@ -163,6 +170,12 @@ struct GitHubAccountData {
     github_token: String,
     user: GitHubUser,
     authenticated_at: i64,
+    #[serde(default = "new_account_revision")]
+    revision: String,
+}
+
+fn new_account_revision() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -180,6 +193,7 @@ pub struct CopilotAuthManager {
     default_account_id: RwLock<Option<String>>,
     copilot_tokens: RwLock<HashMap<String, CopilotToken>>,
     refresh_locks: RwLock<HashMap<String, Arc<Mutex<()>>>>,
+    mutation_lock: Mutex<()>,
     http_client: reqwest::Client,
     storage_path: PathBuf,
 }
@@ -204,6 +218,7 @@ impl CopilotAuthManager {
             default_account_id: RwLock::new(None),
             copilot_tokens: RwLock::new(HashMap::new()),
             refresh_locks: RwLock::new(HashMap::new()),
+            mutation_lock: Mutex::new(()),
             http_client: crate::shared::http_client::build_http_client(
                 proxy_url.as_deref(),
                 Some(COPILOT_USER_AGENT),
@@ -297,64 +312,61 @@ impl CopilotAuthManager {
             .access_token
             .ok_or_else(|| CopilotAuthError::Parse("Missing GitHub access token".to_string()))?;
         let user = self.fetch_user_info_with_token(&access_token).await?;
-        let account_id = user.id.to_string();
-        self.fetch_copilot_token_with_github_token(&access_token, &account_id)
+        let token = self
+            .fetch_copilot_token_with_github_token(&access_token)
             .await?;
-        self.add_account_internal(access_token, user)
+        self.add_account_internal(access_token, user, token)
             .await
             .map(Some)
     }
 
     pub async fn remove_account(&self, account_id: &str) -> Result<(), CopilotAuthError> {
-        {
-            let mut accounts = self.accounts.write().await;
-            if accounts.remove(account_id).is_none() {
-                return Err(CopilotAuthError::AccountNotFound(account_id.to_string()));
-            }
+        let _guard = self.mutation_lock.lock().await;
+        let mut next = self.accounts.read().await.clone();
+        if next.remove(account_id).is_none() {
+            return Err(CopilotAuthError::AccountNotFound(account_id.to_string()));
         }
-        {
-            let mut tokens = self.copilot_tokens.write().await;
-            tokens.remove(account_id);
+        let mut default = self.default_account_id.read().await.clone();
+        if default.as_deref() == Some(account_id) {
+            default = Self::fallback_default_account_id(&next);
         }
-        {
-            let mut locks = self.refresh_locks.write().await;
-            locks.remove(account_id);
-        }
-        {
-            let accounts = self.accounts.read().await;
-            let mut default_account_id = self.default_account_id.write().await;
-            if default_account_id.as_deref() == Some(account_id) {
-                *default_account_id = Self::fallback_default_account_id(&accounts);
-            }
-        }
-        self.save_to_disk().await
+        self.persist_accounts(&next, default.clone())?;
+        let mut accounts = self.accounts.write().await;
+        self.copilot_tokens.write().await.remove(account_id);
+        self.refresh_locks.write().await.remove(account_id);
+        *self.default_account_id.write().await = default;
+        *accounts = next;
+        Ok(())
     }
 
     pub async fn clear_auth(&self) -> Result<(), CopilotAuthError> {
-        self.accounts.write().await.clear();
+        let _guard = self.mutation_lock.lock().await;
+        match fs::remove_file(&self.storage_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let mut accounts = self.accounts.write().await;
         self.copilot_tokens.write().await.clear();
         self.refresh_locks.write().await.clear();
         *self.default_account_id.write().await = None;
-        if self.storage_path.exists() {
-            fs::remove_file(&self.storage_path)?;
-        }
+        accounts.clear();
         Ok(())
     }
 
     pub async fn set_default_account(&self, account_id: &str) -> Result<(), CopilotAuthError> {
-        {
-            let accounts = self.accounts.read().await;
-            if !accounts.contains_key(account_id) {
-                return Err(CopilotAuthError::AccountNotFound(account_id.to_string()));
-            }
+        let _guard = self.mutation_lock.lock().await;
+        let accounts = self.accounts.read().await;
+        if !accounts.contains_key(account_id) {
+            return Err(CopilotAuthError::AccountNotFound(account_id.to_string()));
         }
-        let mut default_account_id = self.default_account_id.write().await;
-        *default_account_id = Some(account_id.to_string());
-        drop(default_account_id);
-        self.save_to_disk().await
+        self.persist_accounts(&accounts, Some(account_id.to_string()))?;
+        *self.default_account_id.write().await = Some(account_id.to_string());
+        Ok(())
     }
 
     pub async fn get_status(&self) -> CopilotAuthStatus {
+        let _guard = self.mutation_lock.lock().await;
         let accounts = self.accounts.read().await.clone();
         let default_account_id = self.resolve_default_account_id().await;
         let tokens = self.copilot_tokens.read().await.clone();
@@ -452,78 +464,38 @@ impl CopilotAuthManager {
             .collect())
     }
 
-    pub async fn get_valid_token_for_account(
-        &self,
-        account_id: Option<&str>,
-    ) -> Result<String, CopilotAuthError> {
-        let resolved_account_id = self
-            .resolve_account_id(account_id)
-            .await
-            .ok_or(CopilotAuthError::GitHubTokenInvalid)?;
-
-        {
-            let tokens = self.copilot_tokens.read().await;
-            if let Some(token) = tokens.get(&resolved_account_id) {
-                if !token.is_expiring_soon() {
-                    return Ok(token.token.clone());
-                }
-            }
-        }
-
-        let refresh_lock = self.get_refresh_lock(&resolved_account_id).await;
-        let _guard = refresh_lock.lock().await;
-
-        {
-            let tokens = self.copilot_tokens.read().await;
-            if let Some(token) = tokens.get(&resolved_account_id) {
-                if !token.is_expiring_soon() {
-                    return Ok(token.token.clone());
-                }
-            }
-        }
-
-        let github_token = {
-            let accounts = self.accounts.read().await;
-            accounts
-                .get(&resolved_account_id)
-                .map(|account| account.github_token.clone())
-                .ok_or_else(|| CopilotAuthError::AccountNotFound(resolved_account_id.clone()))?
-        };
-
-        self.fetch_copilot_token_with_github_token(&github_token, &resolved_account_id)
-            .await?;
-
-        let tokens = self.copilot_tokens.read().await;
-        tokens
-            .get(&resolved_account_id)
-            .map(|token| token.token.clone())
-            .ok_or_else(|| CopilotAuthError::Token("Refreshed token is missing".to_string()))
-    }
-
     async fn add_account_internal(
         &self,
         github_token: String,
         user: GitHubUser,
+        token: CopilotToken,
     ) -> Result<GitHubAccount, CopilotAuthError> {
+        let _guard = self.mutation_lock.lock().await;
         let now = chrono::Utc::now().timestamp();
         let account_id = user.id.to_string();
         let account_data = GitHubAccountData {
             github_token,
             user: user.clone(),
             authenticated_at: now,
+            revision: new_account_revision(),
         };
 
-        {
-            let mut accounts = self.accounts.write().await;
-            accounts.insert(account_id.clone(), account_data);
-        }
-        {
-            let mut default_account_id = self.default_account_id.write().await;
-            if default_account_id.is_none() {
-                *default_account_id = Some(account_id.clone());
-            }
-        }
-        self.save_to_disk().await?;
+        let mut next = self.accounts.read().await.clone();
+        next.insert(account_id.clone(), account_data);
+        let default = self
+            .default_account_id
+            .read()
+            .await
+            .clone()
+            .or_else(|| Some(account_id.clone()));
+        self.persist_accounts(&next, default.clone())?;
+        let mut accounts = self.accounts.write().await;
+        self.copilot_tokens
+            .write()
+            .await
+            .insert(account_id.clone(), token);
+        *self.default_account_id.write().await = default;
+        *accounts = next;
 
         Ok(GitHubAccount {
             id: account_id,
@@ -595,48 +567,6 @@ impl CopilotAuthManager {
             .map_err(|error| CopilotAuthError::Parse(error.to_string()))
     }
 
-    async fn fetch_copilot_token_with_github_token(
-        &self,
-        github_token: &str,
-        account_id: &str,
-    ) -> Result<(), CopilotAuthError> {
-        let response = self
-            .http_client
-            .get(COPILOT_TOKEN_URL)
-            .header("Authorization", format!("token {github_token}"))
-            .header("User-Agent", COPILOT_USER_AGENT)
-            .header("Editor-Version", COPILOT_EDITOR_VERSION)
-            .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
-            .send()
-            .await?;
-
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(CopilotAuthError::GitHubTokenInvalid);
-        }
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
-            return Err(CopilotAuthError::NoCopilotSubscription);
-        }
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
-            return Err(CopilotAuthError::Token(format!("{status}: {text}")));
-        }
-
-        let token_response: CopilotTokenResponse = response
-            .json()
-            .await
-            .map_err(|error| CopilotAuthError::Parse(error.to_string()))?;
-        let mut tokens = self.copilot_tokens.write().await;
-        tokens.insert(
-            account_id.to_string(),
-            CopilotToken {
-                token: token_response.token,
-                expires_at: token_response.expires_at,
-            },
-        );
-        Ok(())
-    }
-
     fn sorted_accounts(
         accounts: &HashMap<String, GitHubAccountData>,
         default_account_id: Option<&str>,
@@ -682,72 +612,6 @@ impl CopilotAuthManager {
         if let Ok(mut default_account_id) = self.default_account_id.try_write() {
             *default_account_id = store.default_account_id;
         }
-        Ok(())
-    }
-
-    async fn save_to_disk(&self) -> Result<(), CopilotAuthError> {
-        let accounts = self.accounts.read().await.clone();
-        let default_account_id = self.resolve_default_account_id().await;
-        let store = CopilotAuthStore {
-            version: 1,
-            accounts,
-            default_account_id,
-        };
-        let content = serde_json::to_string_pretty(&store)
-            .map_err(|error| CopilotAuthError::Parse(error.to_string()))?;
-        self.write_store_atomic(&content)
-    }
-
-    fn write_store_atomic(&self, content: &str) -> Result<(), CopilotAuthError> {
-        if let Some(parent) = self.storage_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let parent = self
-            .storage_path
-            .parent()
-            .ok_or_else(|| CopilotAuthError::Io("Invalid Copilot auth storage path".to_string()))?;
-        let file_name = self
-            .storage_path
-            .file_name()
-            .ok_or_else(|| CopilotAuthError::Io("Invalid Copilot auth file name".to_string()))?
-            .to_string_lossy()
-            .to_string();
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let tmp_path = parent.join(format!("{file_name}.tmp.{ts}"));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-            let mut file = fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .mode(0o600)
-                .open(&tmp_path)?;
-            file.write_all(content.as_bytes())?;
-            file.flush()?;
-            fs::rename(&tmp_path, &self.storage_path)?;
-            fs::set_permissions(&self.storage_path, fs::Permissions::from_mode(0o600))?;
-        }
-
-        #[cfg(windows)]
-        {
-            let mut file = fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&tmp_path)?;
-            file.write_all(content.as_bytes())?;
-            file.flush()?;
-            if self.storage_path.exists() {
-                let _ = fs::remove_file(&self.storage_path);
-            }
-            fs::rename(&tmp_path, &self.storage_path)?;
-        }
-
         Ok(())
     }
 }

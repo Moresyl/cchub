@@ -117,7 +117,7 @@ where
     .map_err(|_| P::Error::from(ResourceError::Timeout))?
 }
 
-async fn read_json(mut response: reqwest::Response) -> Result<Value, ResourceError> {
+pub(crate) async fn read_json(mut response: reqwest::Response) -> Result<Value, ResourceError> {
     if !response.status().is_success() {
         // Error bodies may contain credentials or proxy challenge HTML.
         return Err(ResourceError::Http(response.status().as_u16()));

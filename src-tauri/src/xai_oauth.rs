@@ -18,6 +18,9 @@ mod refresh;
 mod resource;
 mod storage;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 const XAI_ISSUER: &str = "https://auth.x.ai";
 const XAI_DISCOVERY_URL: &str = "https://auth.x.ai/.well-known/openid-configuration";
 const XAI_CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";

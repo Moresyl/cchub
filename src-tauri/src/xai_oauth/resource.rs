@@ -2,6 +2,31 @@ use super::*;
 use crate::shared::oauth_request::{self, ResourceError, TokenLease, TokenProvider};
 
 impl XaiOAuthManager {
+    #[cfg(test)]
+    pub(crate) fn matches_account_revision(&self, id: &str, revision: &str) -> bool {
+        self.with_account_revision(id, revision, || {})
+    }
+
+    pub(crate) fn with_account_revision(
+        &self,
+        id: &str,
+        revision: &str,
+        action: impl FnOnce(),
+    ) -> bool {
+        let Ok(accounts) = self.accounts.try_read() else {
+            return false;
+        };
+        if accounts
+            .get(id)
+            .is_some_and(|account| account.revision == revision && !account.requires_reauth)
+        {
+            action();
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) async fn resource_json<F>(
         &self,
         account_id: Option<&str>,

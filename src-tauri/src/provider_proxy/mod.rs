@@ -19,6 +19,7 @@ mod cost;
 use circuits::{CircuitState, EndpointCircuitState};
 mod desktop;
 mod forward;
+mod managed_auth;
 mod optimizer;
 mod profiles;
 mod rewriters;
@@ -249,6 +250,7 @@ pub(super) struct UpstreamTarget {
     pub(super) use_full_url: bool,
     pub(super) candidate_base_urls: Vec<String>,
     pub(super) headers: Vec<(String, String)>,
+    pub(in crate::provider_proxy) managed_principal: Option<managed_auth::ManagedPrincipal>,
     pub(super) request_header_overrides: Vec<(String, String)>,
     pub(super) request_body_override: Option<serde_json::Value>,
     pub(super) claude_api_format: Option<ClaudeApiFormat>,

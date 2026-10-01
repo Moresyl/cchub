@@ -4,19 +4,15 @@ use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use uuid::Uuid;
 
-use crate::codex_oauth::CodexOAuthState;
-use crate::copilot_auth::{self, CopilotAuthState};
 use crate::provider_proxy_transform::{anthropic_to_openai, anthropic_to_responses};
-use crate::xai_oauth::XaiOAuthState;
 
 use super::profiles::{
     default_base_url_for_claude, default_base_url_for_codex, default_base_url_for_gemini,
-    extract_bound_account_id, extract_copilot_account_id, extract_cost_multiplier,
-    extract_metadata_endpoint_candidates, extract_provider_type, extract_use_full_url,
-    filter_endpoint_candidates,
+    extract_cost_multiplier, extract_metadata_endpoint_candidates, extract_provider_type,
+    extract_use_full_url, filter_endpoint_candidates,
 };
 use super::{ClaudeApiFormat, UpstreamTarget};
 #[path = "request_insights.rs"]
@@ -46,6 +42,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
     let use_full_url = extract_use_full_url(&parsed);
     let transport_headers = extract_transport_headers(&parsed);
     let (request_header_overrides, request_body_override) = extract_local_proxy_overrides(&parsed);
+    let mut managed_principal = None;
 
     let target = match tool_id {
         "claude" | "claude-desktop" => {
@@ -68,43 +65,17 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 .ok_or_else(|| {
                     format!("Provider {profile_name} does not define a Claude upstream base URL")
                 })?;
-            let headers = if is_github_copilot {
-                let account_id = extract_copilot_account_id(&parsed);
-                let manager = app_handle.state::<CopilotAuthState>().0.clone();
-                let token = manager
-                    .get_valid_token_for_account(account_id.as_deref())
-                    .await
-                    .map_err(|error| {
-                        format!(
-                            "GitHub Copilot auth is not ready for provider {profile_name}: {error}"
-                        )
-                    })?;
-                copilot_auth::copilot_request_headers(&token)
-            } else if is_codex_oauth {
-                let account_id = extract_bound_account_id(&parsed, "codex_oauth");
-                let manager = app_handle.state::<CodexOAuthState>().0.clone();
-                let token = manager
-                    .get_valid_token(account_id.as_deref())
-                    .await
-                    .map_err(|error| {
-                        format!("Codex OAuth is not ready for provider {profile_name}: {error}")
-                    })?;
-                let mut headers = vec![("authorization".to_string(), format!("Bearer {token}"))];
-                if let Some(account_id) = account_id {
-                    headers.push(("chatgpt-account-id".to_string(), account_id));
-                }
-                headers.push(("originator".to_string(), "cchub".to_string()));
+            let headers = if let Some(credentials) = super::managed_auth::resolve(
+                app_handle,
+                provider_type.as_deref(),
+                &parsed,
+                &profile_name,
+            )
+            .await?
+            {
+                let (headers, principal) = credentials.into_parts();
+                managed_principal = Some(principal);
                 headers
-            } else if is_xai_oauth {
-                let account_id = extract_bound_account_id(&parsed, "xai_oauth");
-                let manager = app_handle.state::<XaiOAuthState>().0.clone();
-                let token = manager
-                    .get_valid_token(account_id.as_deref())
-                    .await
-                    .map_err(|error| {
-                        format!("xAI OAuth is not ready for provider {profile_name}: {error}")
-                    })?;
-                vec![("authorization".to_string(), format!("Bearer {token}"))]
             } else {
                 let token = env
                     .get("ANTHROPIC_AUTH_TOKEN")
@@ -138,6 +109,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 claude_api_format: Some(claude_api_format),
                 is_github_copilot,
                 is_codex_oauth,
+                managed_principal: None,
                 cost_multiplier,
             })
         }
@@ -169,6 +141,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 claude_api_format: None,
                 is_github_copilot: false,
                 is_codex_oauth: false,
+                managed_principal: None,
                 cost_multiplier,
             })
         }
@@ -207,17 +180,20 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 .filter(|value| !value.is_empty())
                 .unwrap_or("https://api.x.ai/v1")
                 .to_string();
-            let token = if is_xai_oauth {
-                let account_id = extract_bound_account_id(&parsed, "xai_oauth");
-                let manager = app_handle.state::<XaiOAuthState>().0.clone();
-                manager
-                    .get_valid_token(account_id.as_deref())
-                    .await
-                    .map_err(|error| {
-                        format!("xAI OAuth is not ready for provider {profile_name}: {error}")
-                    })?
+            let headers = if is_xai_oauth {
+                let credentials = super::managed_auth::resolve(
+                    app_handle,
+                    provider_type.as_deref(),
+                    &parsed,
+                    &profile_name,
+                )
+                .await?
+                .ok_or("Managed xAI credentials are unavailable")?;
+                let (headers, principal) = credentials.into_parts();
+                managed_principal = Some(principal);
+                headers
             } else {
-                selected
+                let token = selected
                     .and_then(|value| value.get("api_key"))
                     .and_then(toml::Value::as_str)
                     .or_else(|| {
@@ -250,7 +226,8 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                     })
                     .ok_or_else(|| {
                         format!("Provider {profile_name} does not define a Grok Build API key")
-                    })?
+                    })?;
+                vec![("authorization".to_string(), format!("Bearer {token}"))]
             };
             Ok(UpstreamTarget {
                 profile_id,
@@ -258,12 +235,13 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 candidate_base_urls: filter_endpoint_candidates(&base_url, metadata_candidates),
                 base_url,
                 use_full_url,
-                headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                headers,
                 request_header_overrides: Vec::new(),
                 request_body_override: None,
                 claude_api_format: None,
                 is_github_copilot: false,
                 is_codex_oauth: false,
+                managed_principal: None,
                 cost_multiplier,
             })
         }
@@ -301,6 +279,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 claude_api_format: None,
                 is_github_copilot: false,
                 is_codex_oauth: false,
+                managed_principal: None,
                 cost_multiplier,
             })
         }
@@ -346,6 +325,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 claude_api_format: None,
                 is_github_copilot: false,
                 is_codex_oauth: false,
+                managed_principal: None,
                 cost_multiplier,
             })
         }
@@ -422,6 +402,7 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 claude_api_format: None,
                 is_github_copilot: false,
                 is_codex_oauth: false,
+                managed_principal: None,
                 cost_multiplier,
             })
         }
@@ -480,12 +461,14 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
                 claude_api_format: None,
                 is_github_copilot: false,
                 is_codex_oauth: false,
+                managed_principal: None,
                 cost_multiplier,
             })
         }
         _ => Err(format!("Unsupported proxy tool: {tool_id}")),
     };
     target.map(|mut target| {
+        target.managed_principal = managed_principal;
         target.headers.extend(transport_headers);
         target.request_header_overrides = request_header_overrides;
         target.request_body_override = request_body_override;

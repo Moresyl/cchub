@@ -402,6 +402,22 @@ pub(super) fn route_succeeded<R: tauri::Runtime>(
     base_url: &str,
     switched_profile: bool,
 ) {
+    let promote = || promote_route(app_handle, tool_id, upstream, base_url, switched_profile);
+    if let Some(principal) = &upstream.managed_principal {
+        // Hold the account revision read guard through the routing-state update.
+        principal.if_current(app_handle, promote);
+    } else {
+        promote();
+    }
+}
+
+fn promote_route<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+    tool_id: &str,
+    upstream: &UpstreamTarget,
+    base_url: &str,
+    switched_profile: bool,
+) {
     remember_preferred_upstream_base_url(
         app_handle,
         &upstream.profile_id,

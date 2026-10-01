@@ -41,7 +41,7 @@ impl CodexOAuthManager {
         .await
     }
 
-    async fn lease_revision(
+    pub(super) async fn lease_revision(
         &self,
         id: &str,
         revision: &str,

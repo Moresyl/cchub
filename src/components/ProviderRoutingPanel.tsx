@@ -222,6 +222,23 @@ export default function ProviderRoutingPanel({ appType }: { appType?: RoutingToo
               {text("管理分组与规则", "Manage groups and rules")}
             </summary>
             <div className="space-y-2">
+              <label className="flex items-center justify-between gap-3 text-xs">
+                <span>{text("跳过额度已耗尽的账号", "Skip accounts with exhausted quota")}</span>
+                <Switch
+                  aria-label={text("跳过额度已耗尽的账号", "Skip accounts with exhausted quota")}
+                  checked={policy.quotaAware ?? false}
+                  disabled={busy}
+                  onCheckedChange={(quotaAware) => change({ ...policy, quotaAware })}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {text(
+                  "先在账号设置刷新 Codex 或 Copilot 用量。启用高级路由后，仅跳过 5 分钟内已确认额度耗尽的账号；Copilot 免费模型不受高级请求额度影响。未知或过期用量仍可尝试，固定配置不会改选其他成员。",
+                  "Refresh Codex or Copilot usage in account settings first. Advanced routing skips only quota confirmed exhausted within 5 minutes; Copilot free models are unaffected by premium quota. Unknown or stale usage remains eligible, and fixed selections never choose another member.",
+                )}
+              </p>
+            </div>
+            <div className="space-y-2">
               <p className="text-xs text-muted-foreground">{text("会话路由", "Conversation routing")}</p>
               <SimpleSelect
                 ariaLabel={text("会话路由", "Conversation routing")}
@@ -401,6 +418,14 @@ export default function ProviderRoutingPanel({ appType }: { appType?: RoutingToo
                   "Local preview only: no model request, save or rotation advance. Rotating groups show their initial order.",
                 )}
               </p>
+              {policy.quotaAware && (
+                <p className="text-xs text-muted-foreground">
+                  {text(
+                    "此处展示规则的候选顺序。额度筛选会在实际请求时结合账号、最终模型与最新查询结果执行。",
+                    "This shows rule candidate order. Quota filtering runs on actual requests using the account, final model and latest usage observation.",
+                  )}
+                </p>
+              )}
               {preview && (
                 <div role="status" className="space-y-1 text-xs">
                   <p>

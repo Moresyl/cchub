@@ -12,6 +12,7 @@ pub(crate) use storage::{load, preview, save};
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct RoutingPolicy {
     pub enabled: bool,
+    pub quota_aware: bool,
     pub affinity: AffinityMode,
     pub default_group_id: Option<String>,
     pub groups: Vec<RoutingGroup>,

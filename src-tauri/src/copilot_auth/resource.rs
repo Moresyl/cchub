@@ -31,6 +31,19 @@ struct OwnedAccount<'a> {
 }
 
 impl CopilotAuthManager {
+    pub(crate) fn quota_blocked(
+        &self,
+        id: &str,
+        revision: &str,
+        model: Option<&str>,
+    ) -> Option<u64> {
+        let mut blocked = None;
+        self.with_account_revision(id, revision, || {
+            blocked = self.quota_cache.blocked(id, revision, model);
+        });
+        blocked
+    }
+
     async fn owned_account(
         &self,
         requested: Option<&str>,
@@ -88,7 +101,7 @@ impl CopilotAuthManager {
         .await
     }
 
-    async fn resources_at(
+    pub(super) async fn resources_at(
         &self,
         account_id: &str,
         expected_revision: &str,
@@ -146,6 +159,11 @@ impl OwnedAccount<'_> {
         url: &str,
         deadline: Instant,
     ) -> Result<CopilotUsage, CopilotAuthError> {
+        let query = self.manager.quota_cache.begin(
+            &self.account.id,
+            &self.account.revision,
+            crate::shared::quota::Resource::CopilotUsage,
+        );
         let result = tokio::time::timeout_at(deadline, async {
             let response = self
                 .manager
@@ -162,17 +180,26 @@ impl OwnedAccount<'_> {
             let response = response.map_err(|_| ResourceError::Transport)?;
             let value = oauth_request::read_json(response).await?;
             let usage: CopilotUsage =
-                serde_json::from_value(value).map_err(|_| ResourceError::InvalidPayload)?;
+                serde_json::from_value(value.clone()).map_err(|_| ResourceError::InvalidPayload)?;
             if usage.copilot_plan.trim().is_empty() {
                 return Err(ResourceError::InvalidPayload.into());
             }
-            Ok(usage)
+            Ok((usage, value))
         })
         .await
         .map_err(|_| CopilotAuthError::QueryTimeout)
         .and_then(|value| value);
-        self.validate_account().await?;
-        result
+        let accounts = self.manager.accounts.read().await;
+        if accounts
+            .get(&self.account.id)
+            .is_none_or(|data| data.revision != self.account.revision)
+        {
+            return Err(CopilotAuthError::AccountChanged);
+        }
+        self.manager
+            .quota_cache
+            .complete(query, result.as_ref().ok().map(|(_, value)| value));
+        result.map(|(usage, _)| usage)
     }
 
     async fn models_at(
@@ -180,6 +207,11 @@ impl OwnedAccount<'_> {
         url: &str,
         deadline: Instant,
     ) -> Result<Vec<CopilotModel>, CopilotAuthError> {
+        let query = self.manager.quota_cache.begin(
+            &self.account.id,
+            &self.account.revision,
+            crate::shared::quota::Resource::CopilotModels,
+        );
         let result = tokio::time::timeout_at(deadline, async {
             let value = oauth_request::get_json(self, Some(&self.account.id), |lease| {
                 let mut request = self.manager.http_client.get(url);
@@ -190,11 +222,11 @@ impl OwnedAccount<'_> {
             })
             .await?;
             let payload: CopilotModelsResponse =
-                serde_json::from_value(value).map_err(|_| ResourceError::InvalidPayload)?;
+                serde_json::from_value(value.clone()).map_err(|_| ResourceError::InvalidPayload)?;
             if payload.data.iter().any(|model| model.id.trim().is_empty()) {
                 return Err(ResourceError::InvalidPayload.into());
             }
-            Ok(payload
+            let models = payload
                 .data
                 .into_iter()
                 .filter(|model| model.model_picker_enabled)
@@ -203,13 +235,23 @@ impl OwnedAccount<'_> {
                     name: model.name,
                     vendor: model.vendor,
                 })
-                .collect())
+                .collect();
+            Ok((models, value))
         })
         .await
         .map_err(|_| CopilotAuthError::QueryTimeout)
         .and_then(|value| value);
-        self.validate_account().await?;
-        result
+        let accounts = self.manager.accounts.read().await;
+        if accounts
+            .get(&self.account.id)
+            .is_none_or(|data| data.revision != self.account.revision)
+        {
+            return Err(CopilotAuthError::AccountChanged);
+        }
+        self.manager
+            .quota_cache
+            .complete(query, result.as_ref().ok().map(|(_, value)| value));
+        result.map(|(models, _)| models)
     }
 
     async fn invalidate_token(&self, lease: &TokenLease) -> Result<(), CopilotAuthError> {

@@ -204,6 +204,7 @@ pub struct CopilotAuthManager {
     copilot_tokens: RwLock<HashMap<String, CopilotToken>>,
     refresh_locks: RwLock<HashMap<String, Arc<Mutex<()>>>>,
     mutation_lock: Mutex<()>,
+    quota_cache: crate::shared::quota::QuotaCache,
     http_client: reqwest::Client,
     storage_path: PathBuf,
 }
@@ -230,6 +231,7 @@ impl CopilotAuthManager {
             copilot_tokens: RwLock::new(HashMap::new()),
             refresh_locks: RwLock::new(HashMap::new()),
             mutation_lock: Mutex::new(()),
+            quota_cache: Default::default(),
             http_client: crate::shared::oauth_request::client(
                 proxy_url.as_deref(),
                 COPILOT_USER_AGENT,

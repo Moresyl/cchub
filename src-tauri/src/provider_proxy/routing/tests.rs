@@ -20,11 +20,27 @@ fn group(id: &str, members: &[&str]) -> RoutingGroup {
 fn policy() -> RoutingPolicy {
     RoutingPolicy {
         enabled: true,
+        quota_aware: false,
         affinity: AffinityMode::Off,
         default_group_id: Some("g".into()),
         groups: vec![group("g", &["p2", "p1"])],
         rules: vec![],
     }
+}
+
+#[test]
+fn quota_only_selection_can_keep_existing_order_and_old_documents_default_off() {
+    let mut policy: RoutingPolicy = serde_json::from_value(json!({"enabled":true})).unwrap();
+    assert!(!policy.quota_aware);
+    assert!(validation::validate(&policy).is_err());
+    policy.quota_aware = true;
+    assert!(validation::validate(&policy).is_ok());
+    assert_eq!(
+        resolve(policy, json!({"model":"fixture"}))
+            .unwrap()
+            .profile_ids,
+        vec!["p1", "p2", "p3"]
+    );
 }
 
 fn resolve(policy: RoutingPolicy, body: serde_json::Value) -> Result<RoutingPreview, String> {

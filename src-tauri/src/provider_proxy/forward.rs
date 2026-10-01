@@ -20,6 +20,10 @@ use super::desktop;
 mod body;
 #[path = "forward/context.rs"]
 mod context;
+#[path = "forward/model_request.rs"]
+mod model_request;
+#[path = "forward/quota.rs"]
+mod quota;
 #[path = "forward/streaming.rs"]
 mod streaming;
 #[path = "forward/streaming_errors.rs"]
@@ -28,21 +32,19 @@ mod streaming_errors;
 pub(super) mod streaming_health;
 #[path = "forward/timeouts.rs"]
 mod timeouts;
-use super::optimizer::{apply_proxy_optimizers, read_optimizer_config, read_rectifier_config};
+use super::optimizer::{read_optimizer_config, read_rectifier_config};
 use super::profiles::{
     endpoint_circuit_key, is_claude_messages_path, ordered_upstream_base_urls, profile_circuit_key,
-    read_profile_candidates_for_tool, rewrite_claude_request_target, route_succeeded,
-    should_strip_claude_transform_header,
+    read_profile_candidates_for_tool, route_succeeded, should_strip_claude_transform_header,
 };
 use super::usage::parse_usage_metrics_from_response;
 use super::{
     build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
-    build_upstream_request_url, extract_request_insights, extract_upstream_target,
-    is_hop_by_hop_header, is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes,
-    reqwest_client, transform_claude_request_body, ClaudeApiFormat, LocalProviderProxyRuntime,
-    MAX_PROXY_BODY_BYTES, MAX_PROXY_RESPONSE_BODY_BYTES,
+    build_upstream_request_url, extract_upstream_target, is_hop_by_hop_header,
+    is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes, reqwest_client,
+    ClaudeApiFormat, LocalProviderProxyRuntime, MAX_PROXY_BODY_BYTES,
+    MAX_PROXY_RESPONSE_BODY_BYTES,
 };
-use body::apply_local_proxy_body_override;
 use timeouts::{read_response_body_limited, AttemptBudget};
 
 pub(super) async fn forward_proxy_request<R: tauri::Runtime>(
@@ -155,17 +157,28 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     } else {
         1
     };
+    let quota_aware = routing
+        .as_ref()
+        .is_some_and(|(document, _)| document.policy.quota_aware);
     let profile_candidates: Vec<_> = profile_candidates
         .into_iter()
-        .take(profile_budget)
+        .take(if quota_aware {
+            usize::MAX
+        } else {
+            profile_budget
+        })
         .collect();
     let profile_candidate_count = profile_candidates.len();
+    let mut attempts = quota::Attempts::new(profile_budget);
     let profile_ids: Vec<String> = profile_candidates
         .iter()
         .map(|candidate| candidate.profile_id.clone())
         .collect();
 
     'profiles: for (profile_index, candidate) in profile_candidates.into_iter().enumerate() {
+        if !attempts.reserve() {
+            break;
+        }
         if !profile_available(
             &runtime,
             &profile_circuit_key(&tool_id, &candidate.profile_id),
@@ -196,7 +209,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             Ok(target) => target,
             Err(error) => {
                 last_error = Some(error.clone());
-                if profile_index + 1 < profile_candidate_count {
+                if attempts.can_continue(profile_index, profile_candidate_count) {
                     crate::utils::append_runtime_log(
                         "warn",
                         "provider_proxy",
@@ -241,76 +254,39 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             .iter()
             .any(|(name, _)| name.as_str().eq_ignore_ascii_case("accept-encoding"));
 
-        let profile_body_bytes = if is_desktop && is_claude_messages_path(&original_relative_path) {
-            match desktop::rewrite_model(&body_bytes, &candidate.snapshot) {
-                Ok(body) => Bytes::from(body),
-                Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
-            }
-        } else {
-            body_bytes.clone()
+        let model_request::Prepared {
+            path: effective_relative_path,
+            query: effective_request_query,
+            body: effective_body_bytes,
+            extra_headers: optimizer_extra_headers,
+            insights: request_insights,
+        } = match model_request::prepare(model_request::Input {
+            tool: &tool_id,
+            desktop: is_desktop,
+            path: &original_relative_path,
+            query: &request_query,
+            body: &body_bytes,
+            headers: &original_headers,
+            optimizer: &optimizer_config,
+            upstream: &upstream,
+            snapshot: &candidate.snapshot,
+            aliases: &model_aliases,
+        }) {
+            Ok(prepared) => prepared,
+            Err(response) => return response,
         };
-
-        let (effective_relative_path, effective_request_query, effective_body_bytes) =
-            match upstream.claude_api_format {
-                Some(api_format)
-                    if api_format.needs_transform()
-                        && is_claude_messages_path(&original_relative_path) =>
-                {
-                    let (rewritten_path, rewritten_query) = rewrite_claude_request_target(
-                        &original_relative_path,
-                        request_query.as_deref(),
-                        api_format,
-                        upstream.is_github_copilot,
-                        upstream.is_codex_oauth,
-                        Some(profile_body_bytes.as_ref()),
-                    );
-                    let transformed_body = match transform_claude_request_body(
-                        api_format,
-                        profile_body_bytes.as_ref(),
-                        upstream.is_codex_oauth,
-                    ) {
-                        Ok(body) => body,
-                        Err(error) => {
-                            return body::conversion_error_response(StatusCode::BAD_REQUEST, &error)
-                        }
-                    };
-                    (rewritten_path, rewritten_query, transformed_body)
-                }
-                _ => (
-                    original_relative_path.clone(),
-                    request_query.clone(),
-                    profile_body_bytes.clone(),
-                ),
-            };
-
-        let effective_body_bytes = apply_local_proxy_body_override(
-            effective_body_bytes,
-            upstream.request_body_override.as_ref(),
-        );
-        let optimizer_result = apply_proxy_optimizers(
-            if is_desktop { "claude" } else { &tool_id },
-            upstream.is_codex_oauth,
-            effective_body_bytes,
-            &original_headers,
-            &optimizer_config,
-        );
-        let effective_body_bytes = optimizer_result.body;
-        let optimizer_extra_headers = optimizer_result.extra_headers;
-
-        let request_insights = extract_request_insights(
-            &tool_id,
-            &effective_relative_path,
-            effective_body_bytes.as_ref(),
-        );
-        let (effective_relative_path, effective_body_bytes, request_insights) = match model_aliases
-            .apply(
-                effective_relative_path,
-                effective_body_bytes,
-                request_insights,
+        if quota_aware {
+            if let Some(retry) = quota::blocked(
+                &app_handle,
+                &upstream,
+                &method,
+                &effective_relative_path,
+                request_insights.sent_model(),
             ) {
-            Ok(request) => request,
-            Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
-        };
+                attempts.skip_quota(retry);
+                continue;
+            }
+        }
         let log_attempt =
             |usage: Option<&super::ProxyUsageMetrics>, status: u16, error: Option<&str>| {
                 log_proxy_request(
@@ -397,7 +373,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             endpoint_lease.failure();
                             endpoint_failed = true;
                             if index + 1 < attempt_count
-                                || profile_index + 1 < profile_candidate_count
+                                || attempts.can_continue(profile_index, profile_candidate_count)
                             {
                                 // Preserve the last vendor reply if all later candidates become blocked.
                                 match read_response_body_limited(
@@ -615,7 +591,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                 &tool_id,
                                                 &upstream,
                                                 base_url,
-                                                profile_index > 0 && !routed,
+                                                profile_index > 0 && !routed && !quota_aware,
                                             );
                                         }
                                     }
@@ -697,7 +673,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                     &route_tool,
                                     &route_target,
                                     &route_base,
-                                    profile_index > 0 && !routed,
+                                    profile_index > 0 && !routed && !quota_aware,
                                 )
                             };
                             let desktop_model = if is_desktop
@@ -777,7 +753,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                             &tool_id,
                                             &upstream,
                                             base_url,
-                                            profile_index > 0 && !routed,
+                                            profile_index > 0 && !routed && !quota_aware,
                                         );
                                     }
                                 }
@@ -813,7 +789,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             continue 'endpoints;
                         }
                         profile_lease.failure();
-                        if profile_index + 1 < profile_candidate_count {
+                        if attempts.can_continue(profile_index, profile_candidate_count) {
                             crate::utils::append_runtime_log(
                                 "warn",
                                 "provider_proxy",
@@ -844,6 +820,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
 
     if let Some(response) = last_response {
         return response.finish(&app_handle, &request_id, &tool_id, started_at);
+    }
+    if let Some(response) = attempts.exhausted_response(profile_candidate_count) {
+        return response;
     }
     let unavailable = last_error.is_none();
     let mut response = build_proxy_error(

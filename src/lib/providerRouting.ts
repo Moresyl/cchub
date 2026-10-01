@@ -19,6 +19,7 @@ export interface RoutingRule {
 }
 export interface RoutingPolicy {
   enabled: boolean;
+  quotaAware?: boolean;
   affinity?: "off" | "auto" | "session" | "turn";
   defaultGroupId: string | null;
   groups: RoutingGroup[];

@@ -79,6 +79,25 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("provider routing editor", () => {
+  it("keeps quota routing opt-in and saves its draft with the exact revision", async () => {
+    render(<ProviderRoutingPanel />);
+    const toggle = await screen.findByRole("switch", { name: "跳过额度已耗尽的账号" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    expect(invoke.mock.calls.some(([command]) => command === "set_provider_routing")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "保存路由" }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("set_provider_routing", {
+        appType: "claude",
+        expectedRevision: "saved-revision",
+        policy: { ...document().policy, quotaAware: true },
+      }),
+    );
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "撤销修改" }));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
   it("saves conversation routing with the exact revision and retains it after a conflict", async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === "get_provider_routing") return document();

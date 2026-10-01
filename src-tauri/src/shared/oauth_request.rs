@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::future::Future;
 use std::time::Duration;
 
+#[derive(Clone)]
 pub(crate) struct TokenLease {
     pub(crate) account_id: String,
     pub(crate) revision: String,
@@ -82,7 +83,7 @@ where
     .await
 }
 
-async fn get_json_before<P, F>(
+pub(crate) async fn get_json_before<P, F>(
     provider: &P,
     account_id: Option<&str>,
     request: F,

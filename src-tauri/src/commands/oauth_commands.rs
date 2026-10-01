@@ -497,7 +497,7 @@ pub async fn get_codex_oauth_quota(
     };
     let value = match state
         .0
-        .resource_json(account_id.as_deref(), |id, token| {
+        .quota_json(account_id.as_deref(), |id, token| {
             client
                 .get(CODEX_USAGE_URL)
                 .bearer_auth(token)

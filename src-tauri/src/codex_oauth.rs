@@ -18,6 +18,7 @@ const TOKEN_REFRESH_BUFFER_MS: i64 = 60_000;
 const DEFAULT_DEVICE_EXPIRY_SECS: u64 = 900;
 const KEYRING_SERVICE: &str = "CCHub Codex OAuth";
 
+mod quota;
 mod refresh;
 mod resource;
 
@@ -184,6 +185,7 @@ pub struct CodexOAuthManager {
     refresh_locks: RwLock<HashMap<String, Arc<Mutex<()>>>>,
     pending: RwLock<HashMap<String, PendingDeviceCode>>,
     mutation_lock: Mutex<()>,
+    quota_cache: crate::shared::quota::QuotaCache,
     http_client: reqwest::Client,
     storage_path: PathBuf,
 }
@@ -199,6 +201,7 @@ impl CodexOAuthManager {
             refresh_locks: RwLock::new(HashMap::new()),
             pending: RwLock::new(HashMap::new()),
             mutation_lock: Mutex::new(()),
+            quota_cache: Default::default(),
             http_client: crate::shared::http_client::build_http_client(
                 proxy_url.as_deref(),
                 Some("CCHub OAuth"),

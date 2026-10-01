@@ -6,6 +6,8 @@ use axum::http::HeaderMap;
 
 #[path = "affinity_auth_tests.rs"]
 mod affinity_auth_tests;
+#[path = "quota_tests.rs"]
+mod quota_tests;
 
 enum AccountManager {
     Codex(Arc<CodexOAuthManager>),

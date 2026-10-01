@@ -1,5 +1,23 @@
 use super::*;
 
+pub(crate) async fn query_resources(
+    manager: &CopilotAuthManager,
+    id: &str,
+    usage_url: &str,
+    models_url: &str,
+) -> Result<CopilotAccountResources, CopilotAuthError> {
+    let revision = manager.accounts.read().await[id].revision.clone();
+    manager
+        .resources_at(
+            id,
+            &revision,
+            usage_url,
+            models_url,
+            tokio::time::Instant::now() + std::time::Duration::from_secs(3),
+        )
+        .await
+}
+
 pub(crate) async fn seeded() -> (tempfile::TempDir, Arc<CopilotAuthManager>) {
     let dir = tempfile::tempdir().unwrap();
     let manager = Arc::new(CopilotAuthManager::new(dir.path().join("auth.json"), None));

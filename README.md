@@ -46,15 +46,15 @@ Model discovery follows the selected API protocol and retains provider-reported 
 
 ## Features
 
-| Feature              | Description                                                             |
-| -------------------- | ----------------------------------------------------------------------- |
-| **Config Profiles**  | Save and apply configurations for Claude Code, Codex, Gemini, and more  |
-| **Providers**        | Tool filters, search, presets, ping, stream checks, and shared profiles |
-| **Config Files**     | View and edit managed tool configuration files                          |
-| **MCP Servers**      | Scan, edit, and sync MCP configurations across tools                    |
-| **Skills & Plugins** | Browse, edit, and sync Skills across tools                              |
-| **Quick Switch**     | `Ctrl+K` to find/apply profiles or navigate to configuration pages      |
-| **Native Configs**   | OpenCode switching preserves JSONC comments, MCP, plugins, and other providers |
+| Feature              | Description                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| **Config Profiles**  | Save and apply configurations for Claude Code, Codex, Gemini, and more                         |
+| **Providers**        | Tool filters, search, presets, ping, stream checks, and shared profiles                        |
+| **Config Files**     | View and edit managed tool configuration files                                                 |
+| **MCP Servers**      | Scan, edit, and sync MCP configurations across tools                                           |
+| **Skills & Plugins** | Browse, edit, and sync Skills across tools                                                     |
+| **Quick Switch**     | `Ctrl+K` to find/apply profiles or navigate to configuration pages                             |
+| **Native Configs**   | OpenCode switching preserves JSONC comments, MCP, plugins, and other providers                 |
 | **Sessions & Usage** | Browse native sessions and import output, reasoning, and cache usage without duplicate billing |
 
 ### Local proxy and failover
@@ -66,6 +66,8 @@ Advanced proxy settings support separate routing policies for Claude, Codex, Gem
 Preview draft rules locally, including a simulated byte size, without sending model requests, saving settings or advancing rotation. Saving checks the exact loaded revision; conflicts retain the draft and never retry an overwrite. Routing stays within the selected group and still respects retry budgets and circuit breakers. A deleted selected member stops routing with an error instead of silently choosing a profile outside the group.
 
 Conversation routing defaults to off, with automatic, session and tool-turn modes available. Only explicit client session identifiers are used; identical prompts do not merge conversations. Tools, credentials, models, reasoning settings and routing policies are isolated. Automatic mode retains tool continuations or a successful response reporting at least 1024 cached input tokens for five minutes; session mode retains bindings for up to 24 hours. Only successful replies update bindings, and streams must deliver their completion event. Managed accounts stay pinned through default-account changes, while invalid logins, configuration changes and circuit breakers still apply. Bindings live in bounded memory without changing profile files; this does not guarantee encrypted reasoning history can be replayed across providers.
+
+Quota-aware selection is an explicit advanced-routing option, off by default. Query account usage first: fresh observations from the same login can skip confirmed exhausted Codex or Copilot quota for up to five minutes. Copilot premium quota only applies to models whose account catalog reports premium billing with a positive multiplier; free and unknown models remain eligible. Unknown, stale or failed observations do not block requests, and reported unlimited quota, overage permission or usable credits prevent a false skip. Filtering uses the final model after profile aliases, stays inside selected or fixed groups, consumes no failure retry and does not change the active profile. When every selected candidate is confirmed exhausted, the proxy returns HTTP 429 with a bounded retry delay; no usage or circuit failure is fabricated. Rule previews show candidate order and do not query quotas. Other providers retain their existing routing behavior.
 
 Alternate endpoints are attempted in order. A profile records one failure after its available endpoints are exhausted. Disabling cross-profile failover or exhausting its retry budget preserves the vendor's HTTP status, error body, and `Retry-After`. Open circuits are not bypassed; when every candidate is blocked, the proxy returns HTTP 503 with a retry delay.
 

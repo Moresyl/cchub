@@ -64,8 +64,14 @@ pub(super) fn validate(policy: &RoutingPolicy) -> Result<(), String> {
     for group in &policy.groups {
         walk(policy, &group.id, &mut Vec::new(), &mut visits)?;
     }
-    if policy.enabled && policy.default_group_id.is_none() && policy.rules.is_empty() {
-        return Err("Enabled routing needs a default group or at least one rule".into());
+    if policy.enabled
+        && !policy.quota_aware
+        && policy.default_group_id.is_none()
+        && policy.rules.is_empty()
+    {
+        return Err(
+            "Enabled routing needs a default group, a rule or quota-aware selection".into(),
+        );
     }
     Ok(())
 }

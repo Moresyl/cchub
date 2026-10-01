@@ -19,6 +19,7 @@ pub struct UsageAnalyticsSummary {
     pub success_rate: f64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub total_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_creation_tokens: u64,
     pub total_cost_usd: String,
@@ -74,6 +75,7 @@ struct RequestSample {
     model: String,
     input_tokens: u64,
     output_tokens: u64,
+    total_tokens: u64,
     cache_read_tokens: u64,
     cache_creation_tokens: u64,
     cost: f64,
@@ -87,6 +89,7 @@ struct Aggregate {
     success_requests: u64,
     input_tokens: u64,
     output_tokens: u64,
+    total_tokens: u64,
     cache_read_tokens: u64,
     cache_creation_tokens: u64,
     total_cost: f64,
@@ -101,6 +104,7 @@ impl Aggregate {
         }
         self.input_tokens = self.input_tokens.saturating_add(row.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(row.output_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(row.total_tokens);
         self.cache_read_tokens = self.cache_read_tokens.saturating_add(row.cache_read_tokens);
         self.cache_creation_tokens = self
             .cache_creation_tokens
@@ -118,10 +122,7 @@ impl Aggregate {
     }
 
     fn total_tokens(&self) -> u64 {
-        self.input_tokens
-            .saturating_add(self.output_tokens)
-            .saturating_add(self.cache_read_tokens)
-            .saturating_add(self.cache_creation_tokens)
+        self.total_tokens
     }
 
     fn avg_latency_ms(&self) -> u64 {
@@ -154,15 +155,29 @@ fn sample_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestSample> {
     let model = row
         .get::<_, Option<String>>(12)?
         .unwrap_or_else(|| "(unknown)".to_string());
+    let input_tokens = row.get::<_, i64>(5)?.max(0) as u64;
+    let output_tokens = row.get::<_, i64>(6)?.max(0) as u64;
+    let cache_read_tokens = row.get::<_, i64>(7)?.max(0) as u64;
+    let cache_creation_tokens = row.get::<_, i64>(8)?.max(0) as u64;
+    // Preserve the existing interpretation of unmarked historical/import rows.
+    // New proxy rows already include cache in input; don't add it again.
+    let basis = if row.get::<_, bool>(13)? {
+        crate::shared::token_usage::InputTokenBasis::IncludesCache
+    } else {
+        crate::shared::token_usage::InputTokenBasis::ExcludesCache
+    };
     Ok(RequestSample {
         date: row.get(0)?,
         app_id: row.get(1)?,
         provider_name: row.get(2)?,
         model,
-        input_tokens: row.get::<_, i64>(5)?.max(0) as u64,
-        output_tokens: row.get::<_, i64>(6)?.max(0) as u64,
-        cache_read_tokens: row.get::<_, i64>(7)?.max(0) as u64,
-        cache_creation_tokens: row.get::<_, i64>(8)?.max(0) as u64,
+        input_tokens,
+        output_tokens,
+        total_tokens: basis
+            .total(input_tokens, cache_read_tokens, cache_creation_tokens)
+            .saturating_add(output_tokens),
+        cache_read_tokens,
+        cache_creation_tokens,
         cost: row
             .get::<_, String>(9)?
             .parse::<f64>()
@@ -242,7 +257,7 @@ pub fn get_usage_analytics(
              )
              SELECT substr(created_at, 1, 10), tool_id, provider_name, request_model,
                     response_model, input_tokens, output_tokens, cache_read_tokens,
-                    cache_creation_tokens, total_cost_usd, latency_ms, status_code, accounting_model
+                    cache_creation_tokens, total_cost_usd, latency_ms, status_code, accounting_model,input_tokens_is_total
              FROM samples
              WHERE created_at >= ?1
                AND created_at < ?2
@@ -284,6 +299,7 @@ pub fn get_usage_analytics(
         success_rate: summary.success_rate(),
         input_tokens: summary.input_tokens,
         output_tokens: summary.output_tokens,
+        total_tokens: summary.total_tokens(),
         cache_read_tokens: summary.cache_read_tokens,
         cache_creation_tokens: summary.cache_creation_tokens,
         total_cost_usd: format_cost(summary.total_cost),

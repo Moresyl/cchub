@@ -1,10 +1,10 @@
 use super::*;
 
-async fn split_server(frame: &'static str) -> Upstream {
+pub(super) async fn split_server(frame: &'static str) -> Upstream {
     split_server_with_pending(frame, false).await
 }
 
-async fn split_server_with_pending(frame: &'static str, pending: bool) -> Upstream {
+pub(super) async fn split_server_with_pending(frame: &'static str, pending: bool) -> Upstream {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let hits = Arc::new(AtomicUsize::new(0));
@@ -87,21 +87,24 @@ fn partial_usage_events_merge_without_losing_input_or_counting_duplicates() {
         &mut buffer,
         start,
         &mut usage,
-        &mut gemini
+        &mut gemini,
+        crate::shared::token_usage::InputTokenBasis::ExcludesCache,
     ));
     for _ in 0..2 {
         assert!(scan_stream_usage_buffer(
             &mut buffer,
             delta,
             &mut usage,
-            &mut gemini
+            &mut gemini,
+            crate::shared::token_usage::InputTokenBasis::ExcludesCache,
         ));
     }
     assert!(!scan_stream_usage_buffer(
         &mut buffer,
         "data: {\"model\":\"ignored\",\"usage\":{}}\n\n",
         &mut usage,
-        &mut gemini
+        &mut gemini,
+        crate::shared::token_usage::InputTokenBasis::ExcludesCache,
     ));
     assert_eq!(usage.response_model.as_deref(), Some("模型🦀"));
     assert_eq!(usage.input_tokens, 7);

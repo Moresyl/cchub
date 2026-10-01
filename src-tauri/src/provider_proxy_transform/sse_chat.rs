@@ -1,7 +1,8 @@
+use crate::shared::token_usage::{InputTokenBasis, TokenUsage};
 use bytes::Bytes;
 use futures_util::stream::{Stream, StreamExt};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 use super::stream_limits::{allocate, BLOCK_LIMIT, MAX_ID_BYTES, MAX_PENDING_ARGS};
@@ -10,10 +11,11 @@ use super::stream_limits::{allocate, BLOCK_LIMIT, MAX_ID_BYTES, MAX_PENDING_ARGS
 struct OpenAIStreamChunk {
     #[serde(default)]
     id: String,
+    #[serde(default)]
     model: String,
     choices: Vec<StreamChoice>,
     #[serde(default)]
-    usage: Option<Usage>,
+    usage: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,26 +52,6 @@ struct DeltaFunction {
     name: Option<String>,
     #[serde(default)]
     arguments: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Usage {
-    #[serde(default)]
-    prompt_tokens: u32,
-    #[serde(default)]
-    completion_tokens: u32,
-    #[serde(default)]
-    prompt_tokens_details: Option<PromptTokensDetails>,
-    #[serde(default)]
-    cache_read_input_tokens: Option<u32>,
-    #[serde(default)]
-    cache_creation_input_tokens: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PromptTokensDetails {
-    #[serde(default)]
-    cached_tokens: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +116,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
         let mut next_content_index: u32 = 0;
         let mut has_sent_message_start = false;
         let mut has_finish_reason = false;
+        let mut usage_state = TokenUsage::default();
         let mut current_non_tool_block_type: Option<&'static str> = None;
         let mut current_non_tool_block_index: Option<u32> = None;
         let mut tool_blocks_by_index: HashMap<usize, ToolBlockState> = HashMap::new();
@@ -169,25 +152,19 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                     }
                                 }
                                 if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
+                                    let reading = chunk.usage.as_ref().and_then(TokenUsage::parse);
+                                    if let Some(reading) = &reading { usage_state.merge(reading); }
                                     if message_id.is_none() {
                                         message_id = Some(super::anthropic_message_id(Some(&chunk.id)));
                                     }
-                                    if current_model.is_none() {
+                                    if current_model.is_none() && !chunk.model.is_empty() {
                                         current_model = Some(chunk.model.clone());
                                     }
 
                                     if let Some(choice) = chunk.choices.first() {
                                         if !has_sent_message_start {
-                                            let mut start_usage = json!({"input_tokens": 0, "output_tokens": 0});
-                                            if let Some(u) = &chunk.usage {
-                                                start_usage["input_tokens"] = json!(u.prompt_tokens);
-                                                if let Some(cached) = extract_cache_read_tokens(u) {
-                                                    start_usage["cache_read_input_tokens"] = json!(cached);
-                                                }
-                                                if let Some(created) = u.cache_creation_input_tokens {
-                                                    start_usage["cache_creation_input_tokens"] = json!(created);
-                                                }
-                                            }
+                                            let mut start_usage = usage_state.anthropic(InputTokenBasis::IncludesCache);
+                                            start_usage["output_tokens"] = json!(0);
                                             let event = json!({
                                                 "type": "message_start",
                                                 "message": {
@@ -415,16 +392,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                 open_tool_block_indices.clear();
                                             }
 
-                                            let usage_json = chunk.usage.as_ref().map(|u| {
-                                                let mut uj = json!({"input_tokens": u.prompt_tokens, "output_tokens": u.completion_tokens});
-                                                if let Some(cached) = extract_cache_read_tokens(u) {
-                                                    uj["cache_read_input_tokens"] = json!(cached);
-                                                }
-                                                if let Some(created) = u.cache_creation_input_tokens {
-                                                    uj["cache_creation_input_tokens"] = json!(created);
-                                                }
-                                                uj
-                                            });
+                                            let usage_json = Some(usage_state.anthropic(InputTokenBasis::IncludesCache));
                                             let event = json!({
                                                 "type": "message_delta",
                                                 "delta": {
@@ -435,6 +403,12 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             });
                                             yield Ok(Bytes::from(format!("event: message_delta\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_default())));
                                         }
+                                    }
+                                    // Chat commonly reports usage in a final choices:[] chunk.
+                                    // Preserve it after finish_reason, before message_stop.
+                                    if chunk.choices.is_empty() && has_sent_message_start && has_finish_reason && reading.is_some() {
+                                        let event = json!({"type":"message_delta","delta":{},"usage":usage_state.anthropic(InputTokenBasis::IncludesCache)});
+                                        yield Ok(Bytes::from(format!("event: message_delta\ndata: {event}\n\n")));
                                     }
                                 }
                         }
@@ -452,17 +426,6 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
             yield Ok(super::stream_errors::interrupted_event());
         }
     }
-}
-
-fn extract_cache_read_tokens(usage: &Usage) -> Option<u32> {
-    if let Some(v) = usage.cache_read_input_tokens {
-        return Some(v);
-    }
-    usage
-        .prompt_tokens_details
-        .as_ref()
-        .map(|d| d.cached_tokens)
-        .filter(|&v| v > 0)
 }
 
 fn map_stop_reason(finish_reason: Option<&str>) -> Option<String> {

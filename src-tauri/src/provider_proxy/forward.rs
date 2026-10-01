@@ -43,7 +43,7 @@ use super::profiles::{
     endpoint_circuit_key, is_claude_messages_path, ordered_upstream_base_urls, profile_circuit_key,
     read_profile_candidates_for_tool, route_succeeded, should_strip_claude_transform_header,
 };
-use super::usage::parse_usage_metrics_from_response;
+use super::usage::{parse_usage_metrics_with_basis, source_input_basis};
 use super::{
     build_forward_response_from_parts, build_json_response_from_value, build_proxy_error,
     build_upstream_request_url, extract_upstream_target, is_hop_by_hop_header,
@@ -529,8 +529,15 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         }
                                     }
 
-                                    let transform_usage =
-                                        parsed.as_ref().and_then(parse_usage_metrics_from_response);
+                                    let transform_usage = parsed.as_ref().and_then(|body| {
+                                        parse_usage_metrics_with_basis(
+                                            body,
+                                            source_input_basis(
+                                                &original_relative_path,
+                                                claude_transform,
+                                            ),
+                                        )
+                                    });
                                     let transformed_body = match (claude_transform, parsed) {
                                         (Some(api_format), Some(parsed)) => {
                                             match transform_claude_response_body(
@@ -602,9 +609,12 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         }
                                     }
                                     let usage = transform_usage.or_else(|| {
-                                        transformed_body
-                                            .as_ref()
-                                            .and_then(parse_usage_metrics_from_response)
+                                        transformed_body.as_ref().and_then(|body| {
+                                            parse_usage_metrics_with_basis(
+                                                body,
+                                                source_input_basis(&original_relative_path, None),
+                                            )
+                                        })
                                     });
                                     let error_message = if status.is_success() {
                                         None

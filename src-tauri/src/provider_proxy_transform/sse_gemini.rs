@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 fn anthropic_usage(usage: &GeminiUsage) -> Value {
     let mut value = json!({
-        "input_tokens": usage.input.unwrap_or(0),
+        "input_tokens": usage.input.unwrap_or(0).saturating_sub(usage.cached.unwrap_or(0)),
         "output_tokens": usage.output()
     });
     if let Some(cached) = usage.cached {

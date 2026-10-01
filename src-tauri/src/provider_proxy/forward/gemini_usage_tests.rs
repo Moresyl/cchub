@@ -90,6 +90,7 @@ async fn independent_gemini_readings_survive_native_and_translated_success_or_in
             if translated && completed {
                 assert!(output.contains("\"output_tokens\":8"));
                 assert!(output.contains("\"cache_read_input_tokens\":2"));
+                assert!(output.contains("\"input_tokens\":5"));
                 assert_eq!(output.matches("event: message_stop").count(), 1);
             }
             if !completed {

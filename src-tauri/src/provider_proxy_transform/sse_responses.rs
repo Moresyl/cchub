@@ -3,10 +3,11 @@ use futures_util::stream::{Stream, StreamExt};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
-use super::responses::{build_anthropic_usage_from_responses, map_responses_stop_reason};
+use super::responses::map_responses_stop_reason;
 use super::responses_reasoning::ReasoningBlocks;
 use super::stream_limits::{allocate, BLOCK_LIMIT};
 use super::strip_sse_field;
+use crate::shared::token_usage::{InputTokenBasis, TokenUsage};
 
 #[inline]
 fn response_object_from_event(data: &Value) -> &Value {
@@ -129,6 +130,8 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
         let mut message_id = super::anthropic_message_id(None);
         let mut current_model: Option<String> = None;
         let mut has_sent_message_start = false;
+        let mut usage_state = TokenUsage::default();
+        let mut has_usage = false;
         let mut has_tool_use = false;
         let mut next_content_index: u32 = 0;
         let mut index_by_key: HashMap<String, u32> = HashMap::new();
@@ -176,6 +179,10 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                         }
                         let event_name = event_type.as_deref().filter(|event| !event.is_empty())
                             .or_else(|| data.get("type").and_then(Value::as_str)).unwrap_or("");
+                        if let Some(reading) = response_object_from_event(&data).get("usage").and_then(TokenUsage::parse) {
+                            usage_state.merge(&reading);
+                            has_usage = true;
+                        }
 
                         if let Some(error) = super::stream_errors::error_event(&data, Some(event_name)) {
                             yield Ok(error);
@@ -194,9 +201,8 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                     current_model = Some(model.to_string());
                                 }
                             }
-                            let usage = if event_name == "response.created" {
-                                build_anthropic_usage_from_responses(response_object_from_event(&data).get("usage"))
-                            } else { json!({"input_tokens": 0, "output_tokens": 0}) };
+                            let mut usage = usage_state.anthropic(InputTokenBasis::IncludesCache);
+                            usage["output_tokens"] = json!(0);
                             let start = json!({"type":"message_start", "message":{
                                 "id":message_id.clone(), "type":"message", "role":"assistant",
                                 "model":current_model.clone().unwrap_or_default(), "usage":usage
@@ -490,7 +496,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                         open_indices.remove(&index);
                                     }
                                 }
-                                let usage_json = response_obj.get("usage").map(|u| build_anthropic_usage_from_responses(Some(u)));
+                                let usage_json = has_usage.then(|| usage_state.anthropic(InputTokenBasis::IncludesCache));
                                 let delta_event = json!({
                                     "type": "message_delta",
                                     "delta": {

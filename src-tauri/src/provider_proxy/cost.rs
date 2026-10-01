@@ -74,7 +74,22 @@ fn normalize_model_pricing_id(model_id: &str) -> String {
 }
 
 pub(super) fn parse_cost_text(value: &str) -> f64 {
-    value.trim().parse::<f64>().unwrap_or(0.0).max(0.0)
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(0.0)
+}
+
+#[cfg(test)]
+#[test]
+fn cache_usage_pricing_ignores_nonfinite_negative_and_invalid_rates() {
+    for value in ["NaN", "inf", "-inf", "1e999", "-1", "invalid", ""] {
+        assert_eq!(parse_cost_text(value), 0.0);
+    }
+    assert_eq!(parse_cost_text(" 0.5 "), 0.5);
+    assert_eq!(parse_cost_text("0"), 0.0);
 }
 
 fn lookup_model_pricing(conn: &Connection, model_id: Option<&str>) -> Option<ModelPricingEntry> {
@@ -115,10 +130,11 @@ pub(super) fn calculate_proxy_total_cost(
         return 0.0;
     };
 
-    let regular_input_tokens = usage
-        .input_tokens
-        .saturating_sub(usage.cache_read_tokens)
-        .saturating_sub(usage.cache_creation_tokens);
+    let regular_input_tokens = usage.input_basis.ordinary(
+        usage.input_tokens,
+        usage.cache_read_tokens,
+        usage.cache_creation_tokens,
+    );
     let mut total_cost = 0.0;
     total_cost += regular_input_tokens as f64 * pricing.input_cost_per_million / 1_000_000.0;
     total_cost += usage.output_tokens as f64 * pricing.output_cost_per_million / 1_000_000.0;

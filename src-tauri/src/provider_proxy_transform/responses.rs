@@ -231,45 +231,10 @@ fn map_tool_choice_to_responses(tool_choice: &Value) -> Value {
 }
 
 pub fn build_anthropic_usage_from_responses(usage: Option<&Value>) -> Value {
-    let u = match usage {
-        Some(v) if !v.is_null() => v,
-        _ => {
-            return json!({
-                "input_tokens": 0,
-                "output_tokens": 0
-            })
-        }
-    };
-
-    let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let mut result = json!({
-        "input_tokens": input,
-        "output_tokens": output
-    });
-
-    if let Some(cached) = u
-        .pointer("/input_tokens_details/cached_tokens")
-        .and_then(|v| v.as_u64())
-    {
-        result["cache_read_input_tokens"] = json!(cached);
-    }
-    if let Some(cached) = u
-        .pointer("/prompt_tokens_details/cached_tokens")
-        .and_then(|v| v.as_u64())
-    {
-        if result.get("cache_read_input_tokens").is_none() {
-            result["cache_read_input_tokens"] = json!(cached);
-        }
-    }
-    if let Some(v) = u.get("cache_read_input_tokens") {
-        result["cache_read_input_tokens"] = v.clone();
-    }
-    if let Some(v) = u.get("cache_creation_input_tokens") {
-        result["cache_creation_input_tokens"] = v.clone();
-    }
-
-    result
+    usage
+        .and_then(crate::shared::token_usage::TokenUsage::parse)
+        .unwrap_or_default()
+        .anthropic(crate::shared::token_usage::InputTokenBasis::IncludesCache)
 }
 
 pub(super) fn map_responses_stop_reason(

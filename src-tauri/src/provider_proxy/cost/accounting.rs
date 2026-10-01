@@ -82,7 +82,7 @@ pub(super) fn persist_request(
     )?;
     let next = Contribution {
         success: i64::from((200..300).contains(&record.status_code)),
-        input: counter(record.usage.input_tokens),
+        input: counter(record.usage.total_input_tokens()),
         output: counter(record.usage.output_tokens),
         cache_read: counter(record.usage.cache_read_tokens),
         cache_creation: counter(record.usage.cache_creation_tokens),
@@ -94,12 +94,13 @@ pub(super) fn persist_request(
         "INSERT INTO proxy_request_logs (
             request_id,tool_id,profile_id,provider_name,request_model,response_model,
             input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,total_cost_usd,
-            latency_ms,status_code,is_streaming,error_message,created_at,upstream_model
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+            latency_ms,status_code,is_streaming,error_message,created_at,upstream_model,input_tokens_is_total
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,1)
         ON CONFLICT(request_id) DO UPDATE SET
             profile_id=excluded.profile_id,provider_name=excluded.provider_name,
             request_model=excluded.request_model,response_model=excluded.response_model,upstream_model=excluded.upstream_model,
             input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,
+            input_tokens_is_total=excluded.input_tokens_is_total,
             cache_read_tokens=excluded.cache_read_tokens,cache_creation_tokens=excluded.cache_creation_tokens,
             total_cost_usd=excluded.total_cost_usd,latency_ms=excluded.latency_ms,
             status_code=excluded.status_code,is_streaming=excluded.is_streaming,error_message=excluded.error_message",

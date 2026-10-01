@@ -141,12 +141,13 @@ async fn gemini_tool_whole_and_streamed_replies_continue_with_exact_ids_and_func
             let output = std::str::from_utf8(&bytes).unwrap();
             assert!(output.contains("\"output_tokens\":5"));
             assert!(output.contains("\"cache_read_input_tokens\":1"));
+            assert!(output.contains("\"input_tokens\":6"));
             streamed_tools(&bytes)
         } else {
             let body: Value = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(
                 body["usage"],
-                json!({"input_tokens":7,"output_tokens":5,"cache_read_input_tokens":1})
+                json!({"input_tokens":6,"output_tokens":5,"cache_read_input_tokens":1})
             );
             body["content"].as_array().unwrap().clone()
         };

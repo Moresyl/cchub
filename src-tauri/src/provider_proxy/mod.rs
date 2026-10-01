@@ -298,6 +298,7 @@ impl ProxyRequestInsights {
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct ProxyUsageMetrics {
+    pub(super) input_basis: crate::shared::token_usage::InputTokenBasis,
     pub(super) response_model: Option<String>,
     pub(super) input_tokens: u64,
     pub(super) output_tokens: u64,

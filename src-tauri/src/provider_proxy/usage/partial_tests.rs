@@ -35,14 +35,16 @@ fn whole_gemini_usage_matches_stream_readings_without_requiring_total() {
             "requested-model",
         ).unwrap();
         let normalized = parse_usage_metrics_from_response(&converted).unwrap();
+        // Without a Gemini prompt count, the translated Messages buckets can
+        // express only the known cached-input lower bound, not a missing total.
         assert_eq!(
             (
-                whole.input_tokens,
+                whole.input_tokens.max(whole.cache_read_tokens),
                 whole.output_tokens,
                 whole.cache_read_tokens
             ),
             (
-                normalized.input_tokens,
+                normalized.total_input_tokens(),
                 normalized.output_tokens,
                 normalized.cache_read_tokens
             ),
@@ -89,6 +91,7 @@ fn scanner_retains_independent_gemini_counters_across_byte_boundaries() {
                 std::str::from_utf8(std::slice::from_ref(byte)).unwrap(),
                 &mut usage,
                 &mut gemini,
+                InputTokenBasis::IncludesCache,
             );
         }
     }
@@ -155,4 +158,82 @@ fn partial_gemini_total_does_not_invent_output_and_invalid_counters_are_ignored(
         extract_stream_usage_metrics_from_event(&json!({"usageMetadata":{"promptTokenCount":0}}))
             .unwrap();
     assert_eq!(zero.input_tokens, 0);
+}
+
+#[test]
+fn cache_usage_scanner_retains_partial_buckets_and_basis_in_any_order() {
+    for basis in [
+        InputTokenBasis::IncludesCache,
+        InputTokenBasis::ExcludesCache,
+    ] {
+        for reversed in [false, true] {
+            let raw = if basis == InputTokenBasis::IncludesCache {
+                1000
+            } else {
+                100
+            };
+            let mut events = vec![
+                serde_json::json!({"usage":{"input_tokens":raw}}),
+                serde_json::json!({"usage":{"cache_read_input_tokens":800}}),
+                serde_json::json!({"usage":{"input_tokens_details":{"cache_write_tokens":100}}}),
+                serde_json::json!({"usage":{"output_tokens":5}}),
+            ];
+            if reversed {
+                events.reverse();
+            }
+            let mut buffer = String::new();
+            let mut usage = ProxyUsageMetrics::default();
+            let mut gemini = GeminiUsage::default();
+            for event in events.iter().chain(events.iter()) {
+                let frame = format!("data: {event}\n\n");
+                for byte in frame.as_bytes() {
+                    scan_stream_usage_buffer(
+                        &mut buffer,
+                        std::str::from_utf8(std::slice::from_ref(byte)).unwrap(),
+                        &mut usage,
+                        &mut gemini,
+                        basis,
+                    );
+                }
+            }
+            assert_eq!(usage.input_basis, basis);
+            assert_eq!(
+                (
+                    usage.total_input_tokens(),
+                    usage.output_tokens,
+                    usage.cache_read_tokens,
+                    usage.cache_creation_tokens
+                ),
+                (1000, 5, 800, 100)
+            );
+        }
+    }
+}
+
+#[test]
+fn cache_usage_basis_uses_actual_endpoint_and_transform() {
+    assert_eq!(
+        source_input_basis("v1/messages", None),
+        InputTokenBasis::ExcludesCache
+    );
+    for path in [
+        "v1/responses",
+        "v1/chat/completions",
+        "v1beta/models/m:streamGenerateContent",
+    ] {
+        assert_eq!(
+            source_input_basis(path, None),
+            InputTokenBasis::IncludesCache
+        );
+    }
+    for format in [
+        ClaudeApiFormat::OpenAiChat,
+        ClaudeApiFormat::OpenAiResponses,
+        ClaudeApiFormat::GeminiNative,
+    ] {
+        assert_eq!(
+            source_input_basis("v1/messages", Some(format)),
+            InputTokenBasis::IncludesCache
+        );
+    }
 }

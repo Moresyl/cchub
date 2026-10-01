@@ -6,4 +6,5 @@ pub(crate) mod model_billing;
 pub(crate) mod oauth_request;
 pub(crate) mod oauth_response;
 pub(crate) mod quota;
+pub(crate) mod token_usage;
 pub mod usage_http;

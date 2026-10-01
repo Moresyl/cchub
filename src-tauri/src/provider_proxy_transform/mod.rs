@@ -650,31 +650,9 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, String> {
         .or(if has_tool_use { Some("tool_use") } else { None });
 
     let usage = body.get("usage").cloned().unwrap_or(json!({}));
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let output_tokens = usage
-        .get("completion_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-
-    let mut usage_json = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens
-    });
-    if let Some(cached) = usage
-        .pointer("/prompt_tokens_details/cached_tokens")
-        .and_then(|v| v.as_u64())
-    {
-        usage_json["cache_read_input_tokens"] = json!(cached);
-    }
-    if let Some(v) = usage.get("cache_read_input_tokens") {
-        usage_json["cache_read_input_tokens"] = v.clone();
-    }
-    if let Some(v) = usage.get("cache_creation_input_tokens") {
-        usage_json["cache_creation_input_tokens"] = v.clone();
-    }
+    let usage_json = crate::shared::token_usage::TokenUsage::parse(&usage)
+        .unwrap_or_default()
+        .anthropic(crate::shared::token_usage::InputTokenBasis::IncludesCache);
 
     Ok(json!({
         "id": anthropic_message_id(body.get("id").and_then(Value::as_str)),

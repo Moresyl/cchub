@@ -1,56 +1,77 @@
 // 解析单次响应/流式响应里的 input/output/cache token 用量，并落库为整体合计 + 当日 rollup。
 use crate::shared::gemini_usage::GeminiUsage;
+use crate::shared::token_usage::{InputTokenBasis, TokenUsage};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
 use tauri::AppHandle;
 
-use super::{ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
+use super::{ClaudeApiFormat, ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
 
+pub(super) fn source_input_basis(
+    path: &str,
+    transform: Option<ClaudeApiFormat>,
+) -> InputTokenBasis {
+    if matches!(
+        transform,
+        Some(
+            ClaudeApiFormat::OpenAiChat
+                | ClaudeApiFormat::OpenAiResponses
+                | ClaudeApiFormat::GeminiNative
+        )
+    ) {
+        return InputTokenBasis::IncludesCache;
+    }
+    let path = path.trim_matches('/');
+    if path == "messages" || path.ends_with("/messages") {
+        InputTokenBasis::ExcludesCache
+    } else {
+        InputTokenBasis::IncludesCache
+    }
+}
+
+impl ProxyUsageMetrics {
+    pub(super) fn total_input_tokens(&self) -> u64 {
+        self.input_basis.total(
+            self.input_tokens,
+            self.cache_read_tokens,
+            self.cache_creation_tokens,
+        )
+    }
+}
+
+#[cfg(test)]
 pub(super) fn parse_usage_metrics_from_response(body: &Value) -> Option<ProxyUsageMetrics> {
+    let basis = if body.get("type").and_then(Value::as_str) == Some("message") {
+        InputTokenBasis::ExcludesCache
+    } else {
+        InputTokenBasis::IncludesCache
+    };
+    parse_usage_metrics_with_basis(body, basis)
+}
+
+pub(super) fn parse_usage_metrics_with_basis(
+    body: &Value,
+    basis: InputTokenBasis,
+) -> Option<ProxyUsageMetrics> {
     if body.get("usageMetadata").is_some() {
         return parse_gemini_usage(body, &mut GeminiUsage::default());
     }
 
     let usage = body.get("usage")?;
-    let input_tokens = usage
-        .get("input_tokens")
-        .or_else(|| usage.get("prompt_tokens"))
-        .and_then(|value| value.as_u64())?;
-    let output_tokens = usage
-        .get("output_tokens")
-        .or_else(|| usage.get("completion_tokens"))
-        .and_then(|value| value.as_u64())?;
-    let cache_read_tokens = usage
-        .get("cache_read_input_tokens")
-        .and_then(|value| value.as_u64())
-        .or_else(|| {
-            usage
-                .get("input_tokens_details")
-                .and_then(|value| value.get("cached_tokens"))
-                .and_then(|value| value.as_u64())
-        })
-        .or_else(|| {
-            usage
-                .get("prompt_tokens_details")
-                .and_then(|value| value.get("cached_tokens"))
-                .and_then(|value| value.as_u64())
-        })
-        .unwrap_or(0);
+    let counts = TokenUsage::parse(usage)?;
 
     Some(ProxyUsageMetrics {
+        input_basis: basis,
         response_model: body
             .get("model")
             .or_else(|| body.get("modelVersion"))
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_creation_tokens: usage
-            .get("cache_creation_input_tokens")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0),
+        input_tokens: counts.input.unwrap_or(0),
+        output_tokens: counts.output.unwrap_or(0),
+        cache_read_tokens: counts.cache_read.unwrap_or(0),
+        cache_creation_tokens: counts.cache_write.unwrap_or(0),
     })
 }
 
@@ -59,6 +80,7 @@ fn parse_gemini_usage(body: &Value, gemini: &mut GeminiUsage) -> Option<ProxyUsa
         return None;
     }
     Some(ProxyUsageMetrics {
+        input_basis: InputTokenBasis::IncludesCache,
         response_model: body
             .get("modelVersion")
             .and_then(Value::as_str)
@@ -71,6 +93,7 @@ fn parse_gemini_usage(body: &Value, gemini: &mut GeminiUsage) -> Option<ProxyUsa
 }
 
 pub(super) fn merge_proxy_usage_metrics(current: &mut ProxyUsageMetrics, next: &ProxyUsageMetrics) {
+    current.input_basis = next.input_basis;
     if next
         .response_model
         .as_deref()
@@ -89,48 +112,27 @@ pub(super) fn merge_proxy_usage_metrics(current: &mut ProxyUsageMetrics, next: &
 fn parse_partial_stream_usage(
     usage: &Value,
     response_model: Option<String>,
+    basis: InputTokenBasis,
 ) -> Option<ProxyUsageMetrics> {
-    let has_counter = [
-        "input_tokens",
-        "prompt_tokens",
-        "output_tokens",
-        "completion_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-    ]
-    .iter()
-    .any(|key| usage.get(key).and_then(Value::as_u64).is_some())
-        || usage
-            .pointer("/input_tokens_details/cached_tokens")
-            .and_then(Value::as_u64)
-            .is_some()
-        || usage
-            .pointer("/prompt_tokens_details/cached_tokens")
-            .and_then(Value::as_u64)
-            .is_some();
-    if !has_counter {
-        return None;
-    }
-    let mut usage = usage.as_object()?.clone();
-    if !usage.contains_key("input_tokens") && !usage.contains_key("prompt_tokens") {
-        usage.insert("input_tokens".into(), Value::from(0));
-    }
-    if !usage.contains_key("output_tokens") && !usage.contains_key("completion_tokens") {
-        usage.insert("output_tokens".into(), Value::from(0));
-    }
-    parse_usage_metrics_from_response(
+    parse_usage_metrics_with_basis(
         &serde_json::json!({ "model": response_model, "usage": usage }),
+        basis,
     )
 }
 
 #[cfg(test)]
 pub(super) fn extract_stream_usage_metrics_from_event(body: &Value) -> Option<ProxyUsageMetrics> {
-    extract_stream_usage_with_gemini(body, &mut GeminiUsage::default())
+    extract_stream_usage_with_gemini(
+        body,
+        &mut GeminiUsage::default(),
+        InputTokenBasis::IncludesCache,
+    )
 }
 
 fn extract_stream_usage_with_gemini(
     body: &Value,
     gemini: &mut GeminiUsage,
+    basis: InputTokenBasis,
 ) -> Option<ProxyUsageMetrics> {
     let response_model = body
         .pointer("/message/model")
@@ -140,15 +142,15 @@ fn extract_stream_usage_with_gemini(
         .map(|value| value.to_string());
 
     if let Some(usage) = body.pointer("/message/usage") {
-        return parse_partial_stream_usage(usage, response_model);
+        return parse_partial_stream_usage(usage, response_model, basis);
     }
 
     if let Some(usage) = body.pointer("/response/usage") {
-        return parse_partial_stream_usage(usage, response_model);
+        return parse_partial_stream_usage(usage, response_model, basis);
     }
 
     if let Some(usage) = body.get("usage") {
-        return parse_partial_stream_usage(usage, response_model);
+        return parse_partial_stream_usage(usage, response_model, basis);
     }
 
     if body.get("usageMetadata").is_some() {
@@ -156,10 +158,10 @@ fn extract_stream_usage_with_gemini(
     }
 
     if let Some(response) = body.get("response") {
-        return parse_usage_metrics_from_response(response);
+        return parse_usage_metrics_with_basis(response, basis);
     }
 
-    parse_usage_metrics_from_response(body)
+    parse_usage_metrics_with_basis(body, basis)
 }
 
 pub(super) fn scan_stream_usage_buffer(
@@ -167,6 +169,7 @@ pub(super) fn scan_stream_usage_buffer(
     text: &str,
     usage: &mut ProxyUsageMetrics,
     gemini: &mut GeminiUsage,
+    basis: InputTokenBasis,
 ) -> bool {
     buffer.push_str(text);
     let mut changed = false;
@@ -196,7 +199,7 @@ pub(super) fn scan_stream_usage_buffer(
         let Ok(parsed) = serde_json::from_str::<Value>(&payload) else {
             continue;
         };
-        if let Some(metrics) = extract_stream_usage_with_gemini(&parsed, gemini) {
+        if let Some(metrics) = extract_stream_usage_with_gemini(&parsed, gemini, basis) {
             merge_proxy_usage_metrics(usage, &metrics);
             changed = true;
         }

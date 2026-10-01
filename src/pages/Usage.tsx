@@ -15,6 +15,7 @@ interface UsageSummary {
   success_rate: number;
   input_tokens: number;
   output_tokens: number;
+  total_tokens?: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
   total_cost_usd: string;
@@ -293,10 +294,11 @@ export default function Usage() {
           icon={<Database size={15} />}
           label={uiText("总 Tokens", "Total tokens", "合計 Tokens")}
           value={number(
-            (summary?.input_tokens ?? 0) +
-              (summary?.output_tokens ?? 0) +
-              (summary?.cache_read_tokens ?? 0) +
-              (summary?.cache_creation_tokens ?? 0),
+            summary?.total_tokens ??
+              (summary?.input_tokens ?? 0) +
+                (summary?.output_tokens ?? 0) +
+                (summary?.cache_read_tokens ?? 0) +
+                (summary?.cache_creation_tokens ?? 0),
           )}
         />
         <Metric

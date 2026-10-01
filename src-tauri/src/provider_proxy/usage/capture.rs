@@ -6,6 +6,7 @@ use futures_util::{Stream, StreamExt};
 use super::scan_stream_usage_buffer;
 use crate::provider_proxy::ProxyUsageMetrics;
 use crate::shared::gemini_usage::GeminiUsage;
+use crate::shared::token_usage::InputTokenBasis;
 
 #[derive(Clone, Default)]
 pub(in crate::provider_proxy) struct UsageCapture(Arc<Mutex<ProxyUsageMetrics>>);
@@ -28,6 +29,7 @@ impl UsageCapture {
 pub(in crate::provider_proxy) fn capture_stream_usage<S, E>(
     stream: S,
     capture: UsageCapture,
+    basis: InputTokenBasis,
 ) -> impl Stream<Item = Result<Bytes, E>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
@@ -41,7 +43,7 @@ where
         while let Some(chunk) = stream.next().await {
             if let Ok(bytes) = &chunk {
                 let normalized = String::from_utf8_lossy(bytes).replace("\r\n", "\n");
-                if scan_stream_usage_buffer(&mut buffer, &normalized, &mut usage, &mut gemini) {
+                if scan_stream_usage_buffer(&mut buffer, &normalized, &mut usage, &mut gemini, basis) {
                     capture.update(&usage);
                 }
                 if buffer.len() > 1024 * 1024 { buffer.clear(); }
@@ -49,7 +51,7 @@ where
             yield chunk;
         }
         if !buffer.trim().is_empty()
-            && scan_stream_usage_buffer(&mut buffer, "\n\n", &mut usage, &mut gemini) {
+            && scan_stream_usage_buffer(&mut buffer, "\n\n", &mut usage, &mut gemini, basis) {
             capture.update(&usage);
         }
     }
@@ -71,7 +73,7 @@ mod tests {
             )),
         ]);
         let capture = UsageCapture::default();
-        let output = capture_stream_usage(source, capture.clone())
+        let output = capture_stream_usage(source, capture.clone(), InputTokenBasis::IncludesCache)
             .collect::<Vec<_>>()
             .await;
         assert_eq!(output[0].as_ref().unwrap().as_ref(), frame.as_bytes());
@@ -101,9 +103,10 @@ mod tests {
         let normalized = crate::provider_proxy_transform::normalize_sse_stream(
             futures_util::stream::iter(chunks),
         );
-        let output = capture_stream_usage(normalized, capture.clone())
-            .collect::<Vec<_>>()
-            .await;
+        let output =
+            capture_stream_usage(normalized, capture.clone(), InputTokenBasis::IncludesCache)
+                .collect::<Vec<_>>()
+                .await;
         assert!(output.iter().all(Result::is_ok));
         assert_eq!(capture.snapshot().response_model.as_deref(), Some("模型🦀"));
         assert_eq!(capture.snapshot().input_tokens, 7);

@@ -162,7 +162,7 @@ pub fn gemini_to_anthropic(gemini_response: Value, model: &str) -> Result<Value,
         usage.observe(metadata);
     }
     let mut normalized_usage = json!({
-        "input_tokens": usage.input.unwrap_or(0),
+        "input_tokens": usage.input.unwrap_or(0).saturating_sub(usage.cached.unwrap_or(0)),
         "output_tokens": usage.output()
     });
     if let Some(cached) = usage.cached {

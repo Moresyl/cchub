@@ -8,7 +8,7 @@ use super::streaming_health::{observe, observe_delivery, StreamHealth};
 use super::timeouts::{prepare_raw_stream, Deadline, ResponseStream};
 use crate::provider_proxy::desktop;
 use crate::provider_proxy::usage::{
-    capture_stream_usage, create_usage_tracking_stream, UsageCapture,
+    capture_stream_usage, create_usage_tracking_stream, source_input_basis, UsageCapture,
 };
 use crate::provider_proxy::{ClaudeApiFormat, ProxyRequestInsights, UpstreamTarget};
 use crate::provider_proxy_transform::{
@@ -58,7 +58,11 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         raw
     };
     let capture = UsageCapture::default();
-    let observed = capture_stream_usage(observe(source, health.clone()), capture.clone());
+    let observed = capture_stream_usage(
+        observe(source, health.clone()),
+        capture.clone(),
+        source_input_basis(relative_path, transform),
+    );
     let stream = match transform {
         Some(ClaudeApiFormat::OpenAiChat) => boxed(create_anthropic_sse_stream(observed)),
         Some(ClaudeApiFormat::OpenAiResponses) => {

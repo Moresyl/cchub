@@ -32,6 +32,52 @@ beforeEach(() => {
 });
 
 describe("Usage filters", () => {
+  it("preserves the legacy category fallback when a backend omits total tokens", async () => {
+    invoke.mockResolvedValue({
+      days: 7,
+      start_date: "2026-09-18",
+      end_date: "2026-09-24",
+      summary: {
+        total_requests: 1,
+        success_requests: 1,
+        success_rate: 100,
+        input_tokens: 100,
+        output_tokens: 5,
+        cache_read_tokens: 800,
+        cache_creation_tokens: 100,
+        total_cost_usd: "0.001015",
+      },
+      trends: [],
+      providers: [],
+      models: [],
+    });
+    render(<Usage />);
+    expect(await screen.findByText("1,005")).toBeTruthy();
+  });
+  it("uses the reported total without adding cached input a second time", async () => {
+    invoke.mockResolvedValue({
+      days: 7,
+      start_date: "2026-09-18",
+      end_date: "2026-09-24",
+      summary: {
+        total_requests: 1,
+        success_requests: 1,
+        success_rate: 100,
+        input_tokens: 1000,
+        output_tokens: 5,
+        cache_read_tokens: 800,
+        cache_creation_tokens: 100,
+        total_tokens: 1005,
+        total_cost_usd: "0.001015",
+      },
+      trends: [],
+      providers: [],
+      models: [],
+    });
+    render(<Usage />);
+    expect(await screen.findByText("1,005")).toBeTruthy();
+    expect(screen.queryByText("1,905")).toBeNull();
+  });
   it("shows distinct date-range controls and updates the query", async () => {
     render(<Usage />);
     await screen.findByRole("group", { name: "时间范围" });

@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS proxy_request_logs (
     response_model TEXT,
     upstream_model TEXT,
     input_tokens INTEGER DEFAULT 0,
+    input_tokens_is_total INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     cache_read_tokens INTEGER DEFAULT 0,
     cache_creation_tokens INTEGER DEFAULT 0,
@@ -279,15 +280,21 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN latest_sha256 TEXT;");
     let _ = conn.execute_batch("ALTER TABLE skills ADD COLUMN last_checked_at INTEGER;");
 
-    let has_upstream_model = {
+    let log_columns = {
         let mut statement = conn.prepare("PRAGMA table_info(proxy_request_logs)")?;
         let columns = statement
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<Result<Vec<_>, _>>()?;
-        columns.iter().any(|column| column == "upstream_model")
+        columns
     };
-    if !has_upstream_model {
+    if !log_columns.iter().any(|column| column == "upstream_model") {
         conn.execute_batch("ALTER TABLE proxy_request_logs ADD COLUMN upstream_model TEXT;")?;
+    }
+    if !log_columns
+        .iter()
+        .any(|column| column == "input_tokens_is_total")
+    {
+        conn.execute_batch("ALTER TABLE proxy_request_logs ADD COLUMN input_tokens_is_total INTEGER NOT NULL DEFAULT 0;")?;
     }
 
     seed_builtin_model_pricing(conn)?;
@@ -383,6 +390,21 @@ mod tests {
             row,
             ("core".into(), "actual".into(), "2.500000".into(), None)
         );
+    }
+
+    #[test]
+    fn cache_usage_marker_migrates_without_reinterpreting_old_counts_or_charges() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&get_schema_sql().replace(
+            "    input_tokens_is_total INTEGER NOT NULL DEFAULT 0,\n",
+            "",
+        ))
+        .unwrap();
+        conn.execute("INSERT INTO proxy_request_logs(request_id,tool_id,profile_id,provider_name,input_tokens,cache_read_tokens,cache_creation_tokens,total_cost_usd,created_at) VALUES('old','claude','p1','Provider',100,800,100,'2.500000','2026-10-01')",[]).unwrap();
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        let row: (i64,i64,i64,i64,String) = conn.query_row("SELECT input_tokens,cache_read_tokens,cache_creation_tokens,input_tokens_is_total,total_cost_usd FROM proxy_request_logs WHERE request_id='old'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap();
+        assert_eq!(row, (100, 800, 100, 0, "2.500000".into()));
     }
 
     #[test]

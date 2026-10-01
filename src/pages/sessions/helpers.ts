@@ -63,8 +63,35 @@ export const TOOL_ORDER: ManagedAppId[] = [
   "mcode",
 ];
 
-export function sessionSelectionKey(session: Pick<SessionSummary, "tool_id" | "id" | "source_path">) {
-  return `${session.tool_id}::${session.id}::${session.source_path}`;
+type SessionIdentity = Pick<SessionSummary, "tool_id" | "id" | "source_path" | "source_backend">;
+
+export function sessionSelectionKey(session: SessionIdentity) {
+  return JSON.stringify([session.tool_id, session.id, session.source_path, session.source_backend]);
+}
+
+export function sameSession(left: SessionIdentity | null | undefined, right: SessionIdentity | null | undefined) {
+  return Boolean(left && right && sessionSelectionKey(left) === sessionSelectionKey(right));
+}
+
+export function sessionDetailArgs(session: SessionSummary) {
+  return {
+    toolId: session.tool_id,
+    sessionId: session.id,
+    sourcePath: session.source_path,
+    sourceKind: session.source_kind,
+    sourceBackend: session.source_backend,
+    cwd: session.cwd,
+    title: session.title,
+    preview: session.preview,
+    createdAt: session.created_at,
+    updatedAt: session.updated_at,
+    messageCount: session.message_count,
+    inputTokens: session.input_tokens,
+    outputTokens: session.output_tokens,
+    tokensUsed: session.tokens_used,
+    canResume: session.can_resume,
+    canDelete: session.can_delete,
+  };
 }
 
 export function buildSessionDeleteTarget(
@@ -87,6 +114,7 @@ export function countSessionHits(session: SessionSummary, query: string) {
   if (!normalized) return 0;
 
   return [
+    session.id,
     session.title,
     session.preview,
     session.cwd ?? "",

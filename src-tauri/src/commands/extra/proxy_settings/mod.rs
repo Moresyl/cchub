@@ -1,4 +1,5 @@
 // Proxy + visible apps + preferences + session scanners/parsers + tauri command handlers.
+mod codex_titles;
 mod commands;
 mod native_sessions;
 mod opencode_sessions;

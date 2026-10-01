@@ -1,19 +1,21 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Copy, FolderOpen, History, RefreshCw, Search, SquareCheckBig, Trash2, X } from "lucide-react";
+import { Copy, FolderOpen, History, RefreshCw, Search, SquareCheckBig, Trash2 } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { type ManagedAppId } from "../lib/appPreferences";
 import { showToast } from "../components/Toast";
 import ConfirmDialog from "../components/ConfirmDialog";
-import HighlightedText from "../components/HighlightedText";
 import SessionListItem from "../components/SessionListItem";
 import SessionUsageActions from "../components/SessionUsageActions";
 import LoadingState from "../components/states/LoadingState";
+import ErrorState from "../components/states/ErrorState";
 import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { useDeleteSessionMutation, useDeleteSessionsMutation } from "../hooks/mutations";
-import { fetchSessionsPageData, fetchVisibleAppsQuery, queryKeys } from "../hooks/queries";
+import { fetchVisibleAppsQuery, queryKeys } from "../hooks/queries";
 
 import {
   buildResumeCommand,
@@ -21,14 +23,16 @@ import {
   buildSessionDeleteTarget,
   buildSessionListLabels,
   countSessionHits,
-  formatTokenCount,
   matchesEntry,
-  type SessionDetail,
   type SessionSummary,
+  sameSession,
   sessionSelectionKey,
   TOOL_ORDER,
 } from "./sessions/helpers";
 import SessionEntries from "./sessions/Entries";
+import { useSessionData } from "./sessions/useSessionData";
+import RefreshError from "./sessions/RefreshError";
+import DetailsHeader from "./sessions/DetailsHeader";
 
 export default function Sessions() {
   const queryClient = useQueryClient();
@@ -36,15 +40,22 @@ export default function Sessions() {
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(cachedVisibleApps ?? TOOL_ORDER);
   const [filterTool, setFilterTool] = useState<ManagedAppId | "all">("all");
   const [query, setQuery] = useState("");
-  const [allSessions, setAllSessions] = useState<SessionSummary[]>(
-    queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions(null)) ?? [],
-  );
-  const [loading, setLoading] = useState(!queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions(null)));
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailQuery, setDetailQuery] = useState("");
+  const {
+    allSessions,
+    loading,
+    refreshing,
+    loadError,
+    selectedSession,
+    detail,
+    detailLoading,
+    detailError,
+    detailQuery,
+    setDetailQuery,
+    loadSessions,
+    openSession,
+    closeSession,
+    removeSessions,
+  } = useSessionData(filterTool);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [checkedSessionKeys, setCheckedSessionKeys] = useState<string[]>([]);
@@ -52,10 +63,6 @@ export default function Sessions() {
   const [pendingBulkDelete, setPendingBulkDelete] = useState<SessionSummary[]>([]);
   const locale = getLocale();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const sessionsRequestIdRef = useRef(0);
-  const detailRequestIdRef = useRef(0);
-  const selectedSessionRef = useRef<SessionSummary | null>(null);
-  const detailRef = useRef<SessionDetail | null>(null);
   const deleteSessionMutation = useDeleteSessionMutation();
   const deleteSessionsMutation = useDeleteSessionsMutation();
   const deferredQuery = useDeferredValue(query);
@@ -73,28 +80,7 @@ export default function Sessions() {
       })
       .then(setVisibleApps)
       .catch(() => setVisibleApps(TOOL_ORDER));
-    void loadSessions(true);
   }, [queryClient]);
-
-  useEffect(() => {
-    selectedSessionRef.current = selectedSession;
-  }, [selectedSession]);
-
-  useEffect(() => {
-    detailRef.current = detail;
-  }, [detail]);
-
-  const filterToolMountRef = useRef(true);
-  useEffect(() => {
-    if (filterToolMountRef.current) {
-      filterToolMountRef.current = false;
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void loadSessions(false);
-    }, 180);
-    return () => window.clearTimeout(timer);
-  }, [filterTool]);
 
   useEffect(() => {
     const handleSearch = () => {
@@ -115,8 +101,7 @@ export default function Sessions() {
         return;
       }
       if (selectedSession) {
-        setSelectedSession(null);
-        setDetail(null);
+        closeSession();
       }
     };
     window.addEventListener("cchub-shortcut-search", handleSearch);
@@ -125,123 +110,11 @@ export default function Sessions() {
       window.removeEventListener("cchub-shortcut-search", handleSearch);
       window.removeEventListener("cchub-shortcut-escape", handleEscape);
     };
-  }, [detailQuery, pendingBulkDelete.length, pendingDelete, selectedSession]);
-
-  async function loadSessions(showLoading: boolean) {
-    const requestId = sessionsRequestIdRef.current + 1;
-    sessionsRequestIdRef.current = requestId;
-    const toolId = filterTool === "all" ? null : filterTool;
-
-    if (showLoading) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
-    try {
-      const nextSessions = await queryClient.fetchQuery({
-        queryKey: queryKeys.sessions(toolId),
-        queryFn: () => fetchSessionsPageData(toolId),
-        staleTime: showLoading ? 30_000 : 0,
-      });
-      if (requestId !== sessionsRequestIdRef.current) {
-        return;
-      }
-      setAllSessions(nextSessions);
-
-      const currentSelected = selectedSessionRef.current;
-      if (currentSelected) {
-        const nextSelected =
-          nextSessions.find((item) => item.id === currentSelected.id && item.tool_id === currentSelected.tool_id) ??
-          null;
-        setSelectedSession(nextSelected);
-        if (nextSelected) {
-          const currentDetail = detailRef.current;
-          const isSameDetail =
-            currentDetail?.session.id === nextSelected.id && currentDetail.session.tool_id === nextSelected.tool_id;
-
-          if (isSameDetail) {
-            setDetail((current) =>
-              current
-                ? {
-                    ...current,
-                    session: {
-                      ...current.session,
-                      ...nextSelected,
-                    },
-                  }
-                : current,
-            );
-          } else {
-            void openSession(nextSelected, false);
-          }
-        } else {
-          detailRequestIdRef.current += 1;
-          setDetailLoading(false);
-          setDetail(null);
-        }
-      }
-    } catch (error) {
-      if (requestId !== sessionsRequestIdRef.current) {
-        return;
-      }
-      showToast("error", String(error));
-      setAllSessions([]);
-    } finally {
-      if (requestId === sessionsRequestIdRef.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }
-
-  const openSession = useCallback(async (session: SessionSummary, updateSelection = true) => {
-    const requestId = detailRequestIdRef.current + 1;
-    detailRequestIdRef.current = requestId;
-
-    if (updateSelection) {
-      setSelectedSession(session);
-    }
-    setDetailLoading(true);
-    try {
-      const nextDetail = await invoke<SessionDetail>("get_session_detail", {
-        toolId: session.tool_id,
-        sessionId: session.id,
-        sourcePath: session.source_path,
-        sourceKind: session.source_kind,
-        sourceBackend: session.source_backend,
-        cwd: session.cwd,
-        title: session.title,
-        preview: session.preview,
-        createdAt: session.created_at,
-        updatedAt: session.updated_at,
-        messageCount: session.message_count,
-        inputTokens: session.input_tokens,
-        outputTokens: session.output_tokens,
-        tokensUsed: session.tokens_used,
-        canResume: session.can_resume,
-        canDelete: session.can_delete,
-      });
-      if (requestId !== detailRequestIdRef.current) {
-        return;
-      }
-      setDetail(nextDetail);
-      setDetailQuery("");
-    } catch (error) {
-      if (requestId !== detailRequestIdRef.current) {
-        return;
-      }
-      showToast("error", String(error));
-      setDetail(null);
-    } finally {
-      if (requestId === detailRequestIdRef.current) {
-        setDetailLoading(false);
-      }
-    }
-  }, []);
+  }, [closeSession, detailQuery, pendingBulkDelete.length, pendingDelete, selectedSession, setDetailQuery]);
 
   const deleteSingleSession = useCallback(
     async (session: SessionSummary) => {
-      setDeletingId(session.id);
+      setDeletingId(sessionSelectionKey(session));
       try {
         await deleteSessionMutation.mutateAsync({
           toolId: session.tool_id,
@@ -249,10 +122,7 @@ export default function Sessions() {
           sourcePath: session.source_path,
           sourceBackend: session.source_backend,
         });
-        if (selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id) {
-          setSelectedSession(null);
-          setDetail(null);
-        }
+        removeSessions([session]);
         setCheckedSessionKeys((current) => current.filter((key) => key !== sessionSelectionKey(session)));
         await loadSessions(false);
         showToast("success", uiText("会话已删除", "Session deleted", "会話を削除しました"));
@@ -262,7 +132,7 @@ export default function Sessions() {
         setDeletingId(null);
       }
     },
-    [deleteSessionMutation, selectedSession],
+    [deleteSessionMutation, loadSessions, removeSessions],
   );
 
   const confirmDeleteSession = useCallback(async () => {
@@ -280,10 +150,7 @@ export default function Sessions() {
       await deleteSessionsMutation.mutateAsync({
         sessions: pendingBulkDelete.map(buildSessionDeleteTarget),
       });
-      if (selectedSession && deletingKeys.has(sessionSelectionKey(selectedSession))) {
-        setSelectedSession(null);
-        setDetail(null);
-      }
+      removeSessions(pendingBulkDelete);
       setCheckedSessionKeys((current) => current.filter((key) => !deletingKeys.has(key)));
       setPendingBulkDelete([]);
       await loadSessions(false);
@@ -293,7 +160,7 @@ export default function Sessions() {
     } finally {
       setBulkDeleting(false);
     }
-  }, [deleteSessionsMutation, pendingBulkDelete, selectedSession]);
+  }, [deleteSessionsMutation, loadSessions, pendingBulkDelete, removeSessions]);
 
   const handleOpenSession = useCallback(
     (session: SessionSummary) => {
@@ -308,6 +175,12 @@ export default function Sessions() {
         .writeText(command)
         .then(() =>
           showToast("success", uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました")),
+        )
+        .catch(() =>
+          showToast(
+            "error",
+            uiText("复制失败，请重试", "Copy failed; please retry", "コピーに失敗しました。再試行してください"),
+          ),
         );
     },
     [uiText],
@@ -385,11 +258,21 @@ export default function Sessions() {
   if (loading) {
     return <LoadingState label={uiText("加载会话中...", "Loading sessions...", "会話を読み込み中...")} />;
   }
+  if (loadError && allSessions.length === 0) {
+    return (
+      <ErrorState
+        title={uiText("无法加载会话", "Unable to load sessions", "会話を読み込めません")}
+        message={loadError}
+        retryLabel={uiText("重试", "Retry", "再試行")}
+        onRetry={() => void loadSessions(true)}
+      />
+    );
+  }
 
   return (
     <>
       <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-        <div className="page-header">
+        <div className="page-header" style={{ marginBottom: 0 }}>
           <div>
             <h2 className="page-title">{uiText("会话管理器", "Sessions", "セッション")}</h2>
             <p className="page-subtitle">
@@ -409,13 +292,22 @@ export default function Sessions() {
           </div>
         </div>
 
-        <div className="section-card" style={{ padding: 16 }}>
+        <Card className="section-card" style={{ padding: 16 }}>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ flex: "1 1 320px", minWidth: 240, position: "relative" }}>
-              <Search size={14} style={{ position: "absolute", top: 11, left: 12, color: "var(--text-muted)" }} />
-              <input
+              <Search
+                size={14}
+                style={{
+                  position: "absolute",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  left: 12,
+                  color: "var(--text-muted)",
+                }}
+              />
+              <Input
                 ref={searchInputRef}
-                className="input"
+                aria-label={uiText("搜索会话", "Search sessions", "会話を検索")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={uiText(
@@ -427,19 +319,23 @@ export default function Sessions() {
               />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {toolFilters.map((option) => (
-                <button
-                  key={option.id}
-                  className={`btn btn-sm ${filterTool === option.id ? "btn-primary" : "btn-secondary"}`}
-                  onClick={() => setFilterTool(option.id)}
-                >
-                  {option.label}
-                </button>
-              ))}
+              <Select value={filterTool} onValueChange={(value) => setFilterTool(value as ManagedAppId | "all")}>
+                <SelectTrigger aria-label={uiText("筛选 App", "Filter app", "App を絞り込む")} style={{ width: 160 }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {toolFilters.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                className="btn btn-secondary btn-sm"
+              <Button
+                type="button"
+                variant="secondary"
                 onClick={handleToggleAllVisibleSessions}
                 disabled={!sessions.some((session) => session.can_delete)}
               >
@@ -448,9 +344,10 @@ export default function Sessions() {
                 checkedSessions.length > 0
                   ? uiText("清空当前选择", "Clear visible selection", "現在の選択を解除")
                   : uiText("全选当前结果", "Select visible results", "現在の結果を全選択")}
-              </button>
-              <button
-                className="btn btn-danger btn-sm"
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
                 onClick={handleRequestBulkDelete}
                 disabled={checkedSessions.length === 0 || bulkDeleting}
               >
@@ -460,13 +357,26 @@ export default function Sessions() {
                   `Delete selected (${checkedSessions.length})`,
                   `選択を削除 (${checkedSessions.length})`,
                 )}
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Card>
+
+        {loadError && (
+          <RefreshError
+            title={uiText(
+              "刷新失败，已保留当前会话",
+              "Refresh failed; current sessions were kept",
+              "更新に失敗しました。現在の会話を保持しています",
+            )}
+            message={loadError}
+            retryLabel={uiText("重试", "Retry", "再試行")}
+            onRetry={() => void loadSessions(false)}
+          />
+        )}
 
         <div className={`sessions-workspace ${selectedSession ? "sessions-detail-open" : ""}`}>
-          <div
+          <Card
             className="section-card sessions-list-card"
             style={{ display: "flex", flexDirection: "column", minHeight: 0 }}
           >
@@ -476,7 +386,7 @@ export default function Sessions() {
                 <span
                   style={{
                     fontSize: 12,
-                    fontWeight: 700,
+                    fontWeight: 590,
                     color: "var(--text-muted)",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
@@ -487,7 +397,7 @@ export default function Sessions() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {checkedSessions.length > 0 && (
-                  <span className="badge badge-accent" style={{ fontSize: 10 }}>
+                  <span className="badge badge-accent" style={{ fontSize: 11 }}>
                     {uiText(
                       `已选 ${checkedSessions.length}`,
                       `${checkedSessions.length} selected`,
@@ -495,7 +405,7 @@ export default function Sessions() {
                     )}
                   </span>
                 )}
-                <span className="badge badge-muted" style={{ fontSize: 10 }}>
+                <span className="badge badge-muted" style={{ fontSize: 11 }}>
                   {sessions.length}
                 </span>
               </div>
@@ -510,7 +420,7 @@ export default function Sessions() {
                     justifyContent: "center",
                     flex: 1,
                     color: "var(--text-muted)",
-                    fontSize: 13,
+                    fontSize: 14,
                   }}
                 >
                   {uiText(
@@ -522,12 +432,12 @@ export default function Sessions() {
               ) : (
                 sessions.map((session) => (
                   <SessionListItem
-                    key={`${session.tool_id}-${session.id}-${session.source_path}`}
+                    key={sessionSelectionKey(session)}
                     session={session}
-                    selected={selectedSession?.id === session.id && selectedSession.tool_id === session.tool_id}
+                    selected={sameSession(selectedSession, session)}
                     query={query}
                     resumeCommand={buildResumeCommand(session.tool_id, session.id)}
-                    deleting={deletingId === session.id}
+                    deleting={deletingId === sessionSelectionKey(session)}
                     checked={checkedSessionKeySet.has(sessionSelectionKey(session))}
                     copyLabel={sessionListLabels.copyLabel}
                     copyTitle={sessionListLabels.copyTitle}
@@ -546,12 +456,22 @@ export default function Sessions() {
                 ))
               )}
             </div>
-          </div>
+          </Card>
 
-          <div
+          <Card
             className="section-card sessions-detail-card"
             style={{ display: "flex", flexDirection: "column", minHeight: 0 }}
           >
+            {selectedSession && (
+              <DetailsHeader
+                session={selectedSession}
+                query={detailQuery}
+                locale={locale}
+                deleting={deletingId === sessionSelectionKey(selectedSession)}
+                onDelete={() => setPendingDelete(selectedSession)}
+                onClose={closeSession}
+              />
+            )}
             {!selectedSession ? (
               <div
                 style={{
@@ -560,7 +480,7 @@ export default function Sessions() {
                   alignItems: "center",
                   justifyContent: "center",
                   color: "var(--text-muted)",
-                  fontSize: 13,
+                  fontSize: 14,
                 }}
               >
                 {uiText(
@@ -573,96 +493,15 @@ export default function Sessions() {
               <LoadingState
                 label={uiText("正在读取会话详情...", "Loading session detail...", "会話の詳細を読み込み中...")}
               />
+            ) : detailError ? (
+              <ErrorState
+                title={uiText("无法读取会话详情", "Unable to load session details", "会話の詳細を読み込めません")}
+                message={detailError}
+                retryLabel={uiText("重试", "Retry", "再試行")}
+                onRetry={() => void openSession(selectedSession, false)}
+              />
             ) : detail ? (
               <>
-                {/* Header: badges + title + delete */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    marginBottom: 12,
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                      <span className="badge badge-accent" style={{ fontSize: 10 }}>
-                        {detail.session.tool_name}
-                      </span>
-                      <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                        {detail.session.source_kind}
-                      </span>
-                      {detail.session.created_at && (
-                        <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                          {detail.session.created_at}
-                        </span>
-                      )}
-                      {detail.session.tokens_used != null && (
-                        <span className="badge badge-accent" style={{ fontSize: 10 }}>
-                          {uiText(
-                            `总 ${formatTokenCount(detail.session.tokens_used)} tokens`,
-                            `Total ${formatTokenCount(detail.session.tokens_used)} tokens`,
-                            `合計 ${formatTokenCount(detail.session.tokens_used)} tokens`,
-                          )}
-                        </span>
-                      )}
-                      {detail.session.input_tokens != null && (
-                        <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                          {uiText(
-                            `输入 ${formatTokenCount(detail.session.input_tokens)}`,
-                            `Input ${formatTokenCount(detail.session.input_tokens)}`,
-                            `入力 ${formatTokenCount(detail.session.input_tokens)}`,
-                          )}
-                        </span>
-                      )}
-                      {detail.session.output_tokens != null && (
-                        <span className="badge badge-muted" style={{ fontSize: 10 }}>
-                          {uiText(
-                            `输出 ${formatTokenCount(detail.session.output_tokens)}`,
-                            `Output ${formatTokenCount(detail.session.output_tokens)}`,
-                            `出力 ${formatTokenCount(detail.session.output_tokens)}`,
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    <h3
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        lineHeight: 1.35,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
-                      }}
-                    >
-                      <HighlightedText text={detail.session.title} query={detailQuery} />
-                    </h3>
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                    <button
-                      className="btn btn-danger btn-xs"
-                      onClick={() => setPendingDelete(detail.session)}
-                      disabled={!detail.session.can_delete || deletingId === detail.session.id}
-                    >
-                      <Trash2 size={12} />
-                      {uiText("删除", "Delete", "削除")}
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-icon-sm"
-                      onClick={() => {
-                        setSelectedSession(null);
-                        setDetail(null);
-                      }}
-                      title={uiText("关闭详情", "Close details", "詳細を閉じる")}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                </div>
-
                 {/* Resume command & directory — compact single bar */}
                 <div
                   style={{
@@ -695,23 +534,16 @@ export default function Sessions() {
                       >
                         {buildResumeCommand(detail.session.tool_id, detail.session.id)}
                       </code>
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => {
-                          const cmd = buildResumeCommand(detail.session.tool_id, detail.session.id)!;
-                          void navigator.clipboard
-                            .writeText(cmd)
-                            .then(() =>
-                              showToast(
-                                "success",
-                                uiText("已复制恢复命令", "Resume command copied", "復元コマンドをコピーしました"),
-                              ),
-                            );
-                        }}
-                        style={{ padding: "2px 5px", flexShrink: 0 }}
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={sessionListLabels.copyLabel}
+                        onClick={() =>
+                          handleCopyResumeCommand(buildResumeCommand(detail.session.tool_id, detail.session.id)!)
+                        }
                       >
-                        <Copy size={11} />
-                      </button>
+                        <Copy size={12} />
+                      </Button>
                     </div>
                   )}
                   {detail.session.cwd && (
@@ -730,8 +562,10 @@ export default function Sessions() {
                       >
                         {detail.session.cwd}
                       </span>
-                      <button
-                        className="btn btn-ghost btn-xs"
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={uiText("复制目录路径", "Copy directory path", "ディレクトリパスをコピー")}
                         onClick={() => {
                           void navigator.clipboard
                             .writeText(detail.session.cwd!)
@@ -740,12 +574,21 @@ export default function Sessions() {
                                 "success",
                                 uiText("已复制目录路径", "Directory path copied", "ディレクトリパスをコピーしました"),
                               ),
+                            )
+                            .catch(() =>
+                              showToast(
+                                "error",
+                                uiText(
+                                  "复制失败，请重试",
+                                  "Copy failed; please retry",
+                                  "コピーに失敗しました。再試行してください",
+                                ),
+                              ),
                             );
                         }}
-                        style={{ padding: "2px 5px", flexShrink: 0 }}
                       >
-                        <Copy size={11} />
-                      </button>
+                        <Copy size={12} />
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -753,16 +596,25 @@ export default function Sessions() {
                 {/* Search bar */}
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
                   <div style={{ flex: 1, position: "relative" }}>
-                    <Search size={13} style={{ position: "absolute", top: 10, left: 10, color: "var(--text-muted)" }} />
-                    <input
-                      className="input"
+                    <Search
+                      size={14}
+                      style={{
+                        position: "absolute",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        left: 10,
+                        color: "var(--text-muted)",
+                      }}
+                    />
+                    <Input
+                      aria-label={uiText("会话内搜索", "Search within session", "会話内を検索")}
                       value={detailQuery}
                       onChange={(event) => setDetailQuery(event.target.value)}
                       placeholder={uiText("会话内搜索...", "Search within this session...", "この会話内を検索...")}
-                      style={{ paddingLeft: 30, height: 34, fontSize: 12 }}
+                      style={{ paddingLeft: 30 }}
                     />
                   </div>
-                  <span className="badge badge-muted" style={{ fontSize: 10, flexShrink: 0 }}>
+                  <span className="badge badge-muted" style={{ fontSize: 11, flexShrink: 0 }}>
                     {filteredEntries.length}
                   </span>
                 </div>
@@ -781,7 +633,7 @@ export default function Sessions() {
                   alignItems: "center",
                   justifyContent: "center",
                   color: "var(--text-muted)",
-                  fontSize: 13,
+                  fontSize: 14,
                 }}
               >
                 {uiText(
@@ -791,7 +643,7 @@ export default function Sessions() {
                 )}
               </div>
             )}
-          </div>
+          </Card>
         </div>
       </div>
 

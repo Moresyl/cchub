@@ -439,6 +439,18 @@ pub fn is_session_candidate_path(
     if !path.is_file() {
         return false;
     }
+    if tool_id == "codex"
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.eq_ignore_ascii_case("session_index.jsonl")
+                    || name.eq_ignore_ascii_case("history.jsonl")
+            })
+    {
+        // These indexes are shared metadata, not resumable/deletable sessions.
+        return false;
+    }
 
     let extension = path
         .extension()

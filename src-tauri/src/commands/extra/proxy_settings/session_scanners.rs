@@ -86,6 +86,7 @@ pub fn scan_codex_sessions_from_plan(
     let history_index = load_codex_history_index(root);
     let mut sessions: Vec<SessionSummary> = Vec::new();
     let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut first_messages = HashMap::new();
 
     for db_path in db_files {
         let external = match rusqlite::Connection::open_with_flags(
@@ -145,16 +146,7 @@ pub fn scan_codex_sessions_from_plan(
                 })
                 .unwrap_or_else(|| id.clone());
             let preview = truncate_session_text(&preview_source, 180);
-            let search_values = vec![
-                title.clone(),
-                preview.clone(),
-                cwd.clone(),
-                first_user_message.clone(),
-            ];
-            let search_hit_count = count_query_hits(query, &search_values);
-            if !query.is_empty() && search_hit_count == 0 {
-                continue;
-            }
+            first_messages.insert(id.clone(), first_user_message.clone());
             sessions.push(SessionSummary {
                 id: id.clone(),
                 tool_id: "codex".to_string(),
@@ -180,19 +172,19 @@ pub fn scan_codex_sessions_from_plan(
                 input_tokens: token_totals.input_option(),
                 output_tokens: token_totals.output_option(),
                 tokens_used: token_totals.total_option(),
-                search_hit_count,
+                search_hit_count: 0,
                 can_resume: tool_supports_session_resume("codex"),
                 can_delete: true,
             });
         }
     }
 
-    if !sessions.is_empty() {
-        return sessions;
+    if sessions.is_empty() {
+        // Choose the backend before filtering. A query with no native match
+        // must not resurrect generic rows or filter out a newly renamed title.
+        sessions = scan_generic_tool_sessions_from_roots("codex", generic_roots, "");
     }
-
-    // sqlite 未命中 → 走 generic 兜底（用预先收集好的 roots，不再访问主 db）
-    scan_generic_tool_sessions_from_roots("codex", generic_roots, query)
+    super::codex_titles::finish(root, generic_roots, sessions, &first_messages, query)
 }
 
 /// 并行版 generic 扫描：roots 已在 db lock 内备好，本函数只做文件遍历 + 解析。

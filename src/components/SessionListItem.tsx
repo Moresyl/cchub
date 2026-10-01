@@ -1,6 +1,9 @@
 import { memo } from "react";
-import { CheckSquare, Clock3, Copy, FileText, FolderOpen, Hash, Trash2 } from "lucide-react";
+import { Clock3, Copy, FileText, FolderOpen, Hash, Trash2 } from "lucide-react";
 import HighlightedText from "./HighlightedText";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import { Card } from "./ui/card";
 
 export interface SessionListItemSession {
   id: string;
@@ -67,7 +70,7 @@ function SessionListItemComponent({
   onDelete,
 }: SessionListItemProps) {
   return (
-    <div
+    <Card
       className="card card-interactive cv-auto"
       role="button"
       tabIndex={0}
@@ -91,25 +94,22 @@ function SessionListItemComponent({
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-            <button
-              className={`btn btn-ghost btn-icon-sm ${checked ? "selected" : ""}`}
+            <Checkbox
+              checked={checked}
               disabled={!session.can_delete}
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggleChecked(session);
-              }}
+              onClick={(event) => event.stopPropagation()}
+              onCheckedChange={() => onToggleChecked(session)}
+              aria-label={`${selectLabel}: ${session.title}`}
               title={selectLabel}
-            >
-              <CheckSquare size={14} style={{ color: checked ? "var(--accent)" : undefined }} />
-            </button>
-            <span className="badge badge-accent" style={{ fontSize: 10 }}>
+            />
+            <span className="badge badge-accent" style={{ fontSize: 11 }}>
               {session.tool_name}
             </span>
-            <span className="badge badge-muted" style={{ fontSize: 10 }}>
+            <span className="badge badge-muted" style={{ fontSize: 11 }}>
               {session.source_backend}
             </span>
             {session.search_hit_count > 0 && query.trim() && (
-              <span className="badge badge-success" style={{ fontSize: 10 }}>
+              <span className="badge badge-success" style={{ fontSize: 11 }}>
                 {matchLabel(session.search_hit_count)}
               </span>
             )}
@@ -123,7 +123,7 @@ function SessionListItemComponent({
               overflow: "hidden",
               overflowWrap: "anywhere",
               fontSize: 14,
-              fontWeight: 700,
+              fontWeight: 590,
               color: "var(--text-primary)",
               lineHeight: 1.35,
             }}
@@ -182,8 +182,10 @@ function SessionListItemComponent({
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
           {resumeCommand && (
-            <button
-              className="btn btn-secondary btn-xs"
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon-xs"
               onClick={(event) => {
                 event.stopPropagation();
                 onCopyResume(resumeCommand);
@@ -194,10 +196,13 @@ function SessionListItemComponent({
               <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0, 0, 0, 0)" }}>
                 {copyLabel}
               </span>
-            </button>
+            </Button>
           )}
-          <button
-            className="btn btn-danger btn-xs"
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            style={{ color: "var(--danger)" }}
             onClick={(event) => {
               event.stopPropagation();
               onDelete(session);
@@ -209,10 +214,10 @@ function SessionListItemComponent({
             <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0, 0, 0, 0)" }}>
               {deleteLabel}
             </span>
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 

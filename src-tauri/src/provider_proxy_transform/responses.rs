@@ -173,6 +173,7 @@ pub fn anthropic_to_responses(body: Value, is_codex_oauth: bool) -> Result<Value
                     "type": "function",
                     "name": tool.get("name").and_then(Value::as_str).unwrap_or(""),
                     "description": tool.get("description"),
+                    "strict": tool.get("strict").and_then(Value::as_bool).unwrap_or(false),
                     "parameters": clean_schema(tool.get("input_schema").cloned().unwrap_or(json!({})))
                 }));
             }

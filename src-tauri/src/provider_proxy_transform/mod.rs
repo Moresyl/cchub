@@ -6,6 +6,8 @@ mod sse_gemini;
 mod sse_responses;
 mod stream_decode;
 mod stream_errors;
+#[cfg(test)]
+mod tool_strict_tests;
 pub(crate) use message_id::anthropic_message_id;
 pub use responses::{anthropic_to_responses, responses_to_anthropic};
 pub use sse_chat::create_anthropic_sse_stream;
@@ -381,6 +383,9 @@ pub fn anthropic_to_openai(body: Value) -> Result<Value, String> {
                         "parameters": clean_schema(t.get("input_schema").cloned().unwrap_or(json!({})))
                     }
                 });
+                if let Some(strict) = t.get("strict").and_then(Value::as_bool) {
+                    tool["function"]["strict"] = json!(strict);
+                }
                 if let Some(cc) = t.get("cache_control") {
                     tool["cache_control"] = cc.clone();
                 }

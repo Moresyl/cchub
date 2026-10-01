@@ -97,6 +97,8 @@ Whole and streamed Gemini replies share usage parsing rules, preserving valid in
 
 Responses conversion also supports standard reasoning summary/text events and data-only event types. Reasoning parts keep separate block identities, close before text or tools, and avoid replaying completed snapshots. Final-only parts are recovered when deltas are absent. Reasoning tracking has part and identity limits; adapter errors count as failed requests even when the vendor completed its reply. These limits apply to reasoning state, not the entire stream parser.
 
+Ordinary tools converted to Responses explicitly keep non-strict behavior. Client-provided `strict: true/false` is preserved in both Responses and Chat Completions conversion, without turning optional parameters into required ones. Hosted web search does not receive the function-only `strict` field. Native protocol tool definitions remain unchanged.
+
 ### OAuth account status
 
 Claude proxy requests using Codex OAuth, xAI OAuth or GitHub Copilot carry the resolved account and sign-in revision. Unbound profiles follow the default account; explicitly bound profiles retain their chosen account. Codex request account headers use that resolved account too. After account removal or a new sign-in, old requests cannot promote endpoint preferences or emit profile-failover notifications. Grok Build's xAI OAuth proxy uses the same account checks.

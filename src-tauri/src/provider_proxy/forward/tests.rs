@@ -34,6 +34,8 @@ mod responses_reasoning_tests;
 mod routing_tests;
 #[path = "streaming_tests.rs"]
 mod streaming_tests;
+#[path = "strict_tools_tests.rs"]
+mod strict_tools_tests;
 #[path = "terminal_drop_tests.rs"]
 mod terminal_drop_tests;
 

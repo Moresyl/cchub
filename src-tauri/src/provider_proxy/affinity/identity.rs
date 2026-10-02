@@ -103,8 +103,26 @@ pub(super) fn turn(body: &Value) -> Turn {
         for message in messages {
             let role = message.get("role").and_then(Value::as_str);
             let blocks = message.get("content").or_else(|| message.get("parts"));
+            let kind = message.get("type").and_then(Value::as_str);
+            let output = matches!(
+                kind,
+                Some("function_call_output" | "custom_tool_call_output" | "tool_search_output")
+            );
+            // Partial native histories can refer to calls in a previous response.
+            // A meaningful call_id links a result; an unlinked function/custom
+            // output is independent input, not a continuation of the old turn.
+            let linked = output
+                && message
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !id.trim().is_empty() && !id.chars().any(char::is_control));
+            let standalone = !linked
+                && matches!(
+                    kind,
+                    Some("function_call_output" | "custom_tool_call_output")
+                );
             let tools = role == Some("tool")
-                || message.get("type").and_then(Value::as_str) == Some("function_call_output")
+                || linked
                 || blocks.and_then(Value::as_array).is_some_and(|blocks| {
                     blocks.iter().any(|block| {
                         block.get("type").and_then(Value::as_str) == Some("tool_result")
@@ -113,13 +131,16 @@ pub(super) fn turn(body: &Value) -> Turn {
                 });
             if tools {
                 result.within = true;
-            } else if role == Some("user") {
+            } else if role == Some("user") || standalone {
                 count += 1;
                 result.within = false;
                 result.marker = Some(hash(
-                    serde_json::to_string(&(count, blocks))
-                        .unwrap_or_default()
-                        .as_bytes(),
+                    serde_json::to_string(&(
+                        count,
+                        if standalone { Some(message) } else { blocks },
+                    ))
+                    .unwrap_or_default()
+                    .as_bytes(),
                 ));
             }
         }

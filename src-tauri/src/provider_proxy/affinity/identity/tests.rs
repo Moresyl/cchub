@@ -164,3 +164,50 @@ fn tool_results_keep_the_turn_while_new_user_prompts_change_it() {
             .within
     );
 }
+
+#[test]
+fn native_results_link_partial_histories_but_notifications_begin_another_turn() {
+    let prompt =
+        json!({"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]});
+    let initial = turn(&json!({"input":[prompt]}));
+    for kind in [
+        "function_call_output",
+        "custom_tool_call_output",
+        "tool_search_output",
+    ] {
+        let result = json!({"type":kind,"call_id":"call","output":"ok","tools":[]});
+        let continued = turn(&json!({"input":[prompt, result]}));
+        assert!(continued.within, "{kind}");
+        assert_eq!(continued.marker, initial.marker);
+        let partial = turn(&json!({"previous_response_id":"resp_old","input":[result]}));
+        assert!(partial.within, "{kind}");
+        assert_eq!(partial.marker, None);
+        let next = turn(&json!({"input":[prompt,result,prompt]}));
+        assert!(!next.within);
+        assert_ne!(next.marker, initial.marker);
+    }
+    for kind in ["function_call_output", "custom_tool_call_output"] {
+        for call_id in [
+            Value::Null,
+            json!(""),
+            json!("  "),
+            json!(12),
+            json!("bad\ncall"),
+        ] {
+            let notice = json!({"type":kind,"call_id":call_id,"output":"independent notification"});
+            let next = turn(&json!({"input":[prompt,
+                {"type":"custom_tool_call_output","call_id":"call","output":"paired"},notice]}));
+            assert!(!next.within, "{notice}");
+            assert_ne!(next.marker, initial.marker);
+            assert!(next.marker.is_some());
+        }
+        let next = turn(&json!({"input":[{"type":kind,"output":"notice"}]}));
+        assert!(!next.within);
+        assert!(next.marker.is_some());
+    }
+    // Hosted search is internal history, not a client result or a notification.
+    let hosted =
+        json!({"type":"tool_search_output","execution":"server","call_id":null,"tools":[]});
+    assert_eq!(turn(&json!({"input":[prompt,hosted]})), initial);
+    assert_eq!(turn(&json!({"input":[hosted]})), Turn::default());
+}

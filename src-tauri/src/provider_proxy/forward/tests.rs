@@ -48,6 +48,8 @@ mod model_alias_tests;
 mod passthrough_tests;
 #[path = "preflight_tests.rs"]
 mod preflight_tests;
+#[path = "responses_affinity_tests.rs"]
+mod responses_affinity_tests;
 #[path = "responses_history_tests.rs"]
 mod responses_history_tests;
 #[path = "responses_reasoning_tests.rs"]

@@ -2,13 +2,17 @@ use super::*;
 use serde_json::Value;
 
 pub(super) fn configure(app: &App<MockRuntime>, affinity: &str, members: &[&str]) {
+    configure_tool(app, "claude", affinity, members);
+}
+
+pub(super) fn configure_tool(app: &App<MockRuntime>, tool: &str, affinity: &str, members: &[&str]) {
     let db = app.state::<DbState>();
     let conn = db.0.lock().unwrap();
-    let old = crate::provider_proxy::routing::load(&conn, "claude").unwrap();
+    let old = crate::provider_proxy::routing::load(&conn, tool).unwrap();
     let policy = serde_json::from_value(json!({"enabled":true,"affinity":affinity,"defaultGroupId":"g","groups":[{
         "id":"g","name":"Fixture","mode":"roundRobin","members":members.iter().map(|id| json!({"kind":"profile","profileId":id})).collect::<Vec<_>>()
     }]})).unwrap();
-    crate::provider_proxy::routing::save(&conn, "claude", old.revision.as_deref(), policy).unwrap();
+    crate::provider_proxy::routing::save(&conn, tool, old.revision.as_deref(), policy).unwrap();
 }
 
 pub(super) async fn send(

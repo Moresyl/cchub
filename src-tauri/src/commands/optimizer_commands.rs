@@ -5,20 +5,39 @@ use crate::proxy_optimizer::config::{
     OptimizerConfig, RectifierConfig, OPTIMIZER_CONFIG_SETTINGS_KEY, RECTIFIER_CONFIG_SETTINGS_KEY,
 };
 
+mod settings;
+pub use settings::ProxyAdvancedSettings;
+
+#[tauri::command]
+pub fn get_proxy_advanced_config(db: State<'_, DbState>) -> Result<ProxyAdvancedSettings, String> {
+    let conn =
+        db.0.lock()
+            .map_err(|_| "Cannot read saved proxy settings")?;
+    settings::read(&conn)
+}
+
+#[tauri::command]
+pub fn set_proxy_advanced_config<R: tauri::Runtime>(
+    app_handle: AppHandle<R>,
+    db: State<'_, DbState>,
+    config: OptimizerConfig,
+    rectifier_config: RectifierConfig,
+    expected_revision: String,
+) -> Result<String, String> {
+    let mut conn = db.0.lock().map_err(|_| "Cannot save proxy settings")?;
+    let saved = settings::save(&mut conn, config, rectifier_config, &expected_revision)?;
+    crate::provider_proxy::update_advanced_config_cache(
+        &app_handle,
+        saved.config,
+        saved.rectifier_config,
+    );
+    Ok(saved.revision)
+}
+
 #[tauri::command]
 pub fn get_optimizer_config(db: State<'_, DbState>) -> Result<OptimizerConfig, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let raw: Option<String> = conn
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = ?1",
-            rusqlite::params![OPTIMIZER_CONFIG_SETTINGS_KEY],
-            |row| row.get(0),
-        )
-        .ok();
-
-    Ok(raw
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_default())
+    settings::read_optimizer(&conn)
 }
 
 #[tauri::command]
@@ -56,17 +75,7 @@ pub fn set_copilot_optimizer_config(
 #[tauri::command]
 pub fn get_rectifier_config(db: State<'_, DbState>) -> Result<RectifierConfig, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let raw: Option<String> = conn
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = ?1",
-            rusqlite::params![RECTIFIER_CONFIG_SETTINGS_KEY],
-            |row| row.get(0),
-        )
-        .ok();
-
-    Ok(raw
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_default())
+    settings::read_rectifier(&conn)
 }
 
 #[tauri::command]

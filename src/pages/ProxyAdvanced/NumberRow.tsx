@@ -24,24 +24,16 @@ export default function NumberRow({ label, description, value, onChange, min, ma
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-      <div style={{ minWidth: 0 }}>
-        <label
-          htmlFor={id}
-          style={{ fontSize: 14, fontWeight: "var(--font-weight-medium)", color: "var(--text-primary)" }}
-        >
-          {label}
-        </label>
-        <div id={`${id}-description`} style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
-          {description}
-        </div>
-      </div>
+    <div className="grid grid-cols-[minmax(0,1fr)_96px] items-start gap-x-4 gap-y-1">
+      <label htmlFor={id} className="min-w-0 self-center text-sm font-medium text-[var(--text-primary)]">
+        {label}
+      </label>
       <Input
         id={id}
         type="number"
         inputMode="numeric"
         step={1}
-        style={{ width: 96, textAlign: "right", flexShrink: 0 }}
+        className="row-span-2 w-24 self-center text-right max-[480px]:row-span-1"
         value={draft}
         min={min}
         max={max}
@@ -63,6 +55,9 @@ export default function NumberRow({ label, description, value, onChange, min, ma
           }
         }}
       />
+      <div id={`${id}-description`} className="col-start-1 text-xs text-[var(--text-secondary)] max-[480px]:col-span-2">
+        {description}
+      </div>
     </div>
   );
 }

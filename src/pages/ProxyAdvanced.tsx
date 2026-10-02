@@ -1,58 +1,20 @@
-import { useEffect, useId, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useId, useState } from "react";
 import { ArrowRight, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import LoadingState from "../components/states/LoadingState";
+import ErrorState from "../components/states/ErrorState";
 import CircuitBreakerPanel from "../components/CircuitBreakerPanel";
 import FailoverQueueManager from "../components/FailoverQueueManager";
 import ProviderRoutingPanel from "../components/ProviderRoutingPanel";
-import { useSaveProxyAdvancedConfigMutation } from "../hooks/mutations";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import NumberRow from "./ProxyAdvanced/NumberRow";
 import { SimpleSelect } from "../components/ui/simple-select";
 import { Switch } from "../components/ui/switch";
-
-interface MappingRule {
-  from: string;
-  to: string;
-  matchMode: "contains" | "exact";
-}
-
-interface OptimizerConfig {
-  enabled: boolean;
-  thinkingOptimizer: boolean;
-  cacheInjection: boolean;
-  cacheTtl: string;
-  bodyFilter: boolean;
-  bodyFilterWhitelist: string[];
-  modelMapper: boolean;
-  modelMapperDefault: string;
-  modelMapperRules: MappingRule[];
-  copilotOptimizer: boolean;
-  copilotMergeToolResults: boolean;
-  copilotSanitizeOrphans: boolean;
-  copilotStripThinking: boolean;
-  copilotCompactDetection: boolean;
-  copilotSubagentDetection: boolean;
-  copilotModelNormalization: boolean;
-  codexFieldStripping: boolean;
-  circuitFailureThreshold: number;
-  circuitSuccessThreshold: number;
-  circuitTimeoutSecs: number;
-  failoverEnabled: boolean;
-  maxProfileRetries: number;
-  streamingFirstByteTimeout: number;
-  streamingIdleTimeout: number;
-  nonStreamingTimeout: number;
-}
-
-interface RectifierConfig {
-  enabled: boolean;
-  thinkingSignature: boolean;
-  thinkingBudget: boolean;
-}
+import useSettings from "./ProxyAdvanced/useSettings";
+import type { OptimizerConfig } from "./ProxyAdvanced/types";
+import SettingsNotice from "./ProxyAdvanced/SettingsNotice";
 
 interface ProxyAdvancedProps {
   embedded?: boolean;
@@ -61,76 +23,29 @@ interface ProxyAdvancedProps {
 
 function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = {}) {
   const i = t();
-  const [config, setConfig] = useState<OptimizerConfig | null>(null);
-  const [rectConfig, setRectConfig] = useState<RectifierConfig | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { config, setConfig, rectConfig, setRectConfig, loading, loadError, saveError, saving, load, save } =
+    useSettings();
   const [newWhitelist, setNewWhitelist] = useState("");
-  const saveProxyAdvancedConfigMutation = useSaveProxyAdvancedConfigMutation();
-
-  useEffect(() => {
-    void loadConfig();
-    void loadRectConfig();
-  }, []);
-
-  async function loadConfig() {
-    try {
-      const data = await invoke<OptimizerConfig>("get_optimizer_config");
-      setConfig({ ...data, nonStreamingTimeout: data.nonStreamingTimeout ?? 600 });
-    } catch {
-      setConfig({
-        enabled: false,
-        thinkingOptimizer: false,
-        cacheInjection: false,
-        cacheTtl: "5m",
-        bodyFilter: false,
-        bodyFilterWhitelist: [],
-        modelMapper: false,
-        modelMapperDefault: "",
-        modelMapperRules: [],
-        copilotOptimizer: false,
-        copilotMergeToolResults: true,
-        copilotSanitizeOrphans: true,
-        copilotStripThinking: true,
-        copilotCompactDetection: true,
-        copilotSubagentDetection: true,
-        copilotModelNormalization: true,
-        codexFieldStripping: false,
-        circuitFailureThreshold: 3,
-        circuitSuccessThreshold: 2,
-        circuitTimeoutSecs: 60,
-        failoverEnabled: true,
-        maxProfileRetries: 3,
-        streamingFirstByteTimeout: 60,
-        streamingIdleTimeout: 120,
-        nonStreamingTimeout: 600,
-      });
-    }
-  }
-
-  async function loadRectConfig() {
-    try {
-      const data = await invoke<RectifierConfig>("get_rectifier_config");
-      setRectConfig(data);
-    } catch {
-      setRectConfig({ enabled: true, thinkingSignature: true, thinkingBudget: true });
-    }
-  }
 
   async function handleSave() {
-    if (!config) return;
-    setSaving(true);
     try {
-      await saveProxyAdvancedConfigMutation.mutateAsync({ config, rectifierConfig: rectConfig });
-      showToast("success", i.proxyAdvanced.saveSuccess);
-    } catch (e) {
-      showToast("error", `${i.proxyAdvanced.saveFailed}: ${e}`);
-    } finally {
-      setSaving(false);
+      if (await save()) showToast("success", i.proxyAdvanced.saveSuccess);
+    } catch {
+      showToast("error", i.proxyAdvanced.saveFailed);
     }
   }
 
   if (!config) {
-    return <LoadingState />;
+    return loadError ? (
+      <ErrorState
+        title={i.proxyAdvanced.readFailed}
+        message={i.proxyAdvanced.readFailedDesc}
+        retryLabel={i.proxyAdvanced.reload}
+        onRetry={() => void load()}
+      />
+    ) : (
+      <LoadingState />
+    );
   }
 
   function update(patch: Partial<OptimizerConfig>) {
@@ -156,8 +71,23 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
         </div>
       )}
 
-      <div
+      {(loadError || saveError) && (
+        <SettingsNotice
+          title={loadError ? i.proxyAdvanced.readFailed : i.proxyAdvanced.saveFailed}
+          message={loadError ? i.proxyAdvanced.readFailedDesc : i.proxyAdvanced.saveFailedDesc}
+          reloadLabel={i.proxyAdvanced.reload}
+          loading={loading}
+          reload={() => void load()}
+        />
+      )}
+      <fieldset
+        disabled={saving || loading || loadError || saveError}
+        aria-busy={loading || saving}
+        aria-label={i.proxyAdvanced.title}
         style={{
+          border: 0,
+          margin: 0,
+          minWidth: 0,
           flex: 1,
           overflow: "auto",
           padding: embedded ? 0 : "16px 20px",
@@ -185,15 +115,18 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
               checked={rectConfig.enabled}
               onChange={(v) => setRectConfig((p) => (p ? { ...p, enabled: v } : p))}
             />
-            <div
+            <fieldset
+              disabled={!rectConfig.enabled}
               style={{
+                border: 0,
+                margin: 0,
+                padding: 0,
                 marginTop: 8,
                 paddingLeft: 28,
                 display: "flex",
                 flexDirection: "column",
                 gap: 10,
                 opacity: rectConfig.enabled ? 1 : 0.5,
-                pointerEvents: rectConfig.enabled ? "auto" : "none",
               }}
             >
               <ToggleRow
@@ -208,7 +141,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
                 checked={rectConfig.thinkingBudget}
                 onChange={(v) => setRectConfig((p) => (p ? { ...p, thinkingBudget: v } : p))}
               />
-            </div>
+            </fieldset>
           </div>
         )}
 
@@ -658,7 +591,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             />
           </div>
         )}
-      </div>
+      </fieldset>
 
       {/* Footer */}
       <div
@@ -670,7 +603,7 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
           marginTop: embedded ? 12 : 0,
         }}
       >
-        <Button onClick={() => void handleSave()} disabled={saving}>
+        <Button onClick={() => void handleSave()} disabled={saving || loading || loadError || saveError}>
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           {i.proxyAdvanced.save}
         </Button>

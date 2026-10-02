@@ -31,7 +31,9 @@ pub(crate) mod routing;
 mod upstream;
 mod usage;
 use forward::forward_proxy_request;
-pub(crate) use optimizer::{update_optimizer_config_cache, update_rectifier_config_cache};
+pub(crate) use optimizer::{
+    update_advanced_config_cache, update_optimizer_config_cache, update_rectifier_config_cache,
+};
 use profiles::profile_circuit_key;
 use rewriters::{
     rewrite_claude_snapshot, rewrite_codex_snapshot, rewrite_gemini_snapshot,

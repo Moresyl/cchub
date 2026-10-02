@@ -121,6 +121,19 @@ pub(crate) fn update_optimizer_config_cache<R: tauri::Runtime>(
     }
 }
 
+pub(crate) fn update_advanced_config_cache<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+    config: crate::proxy_optimizer::OptimizerConfig,
+    rectifier: crate::proxy_optimizer::config::RectifierConfig,
+) {
+    if let Some(runtime_state) = app_handle.try_state::<LocalProviderProxyRuntime>() {
+        if let Ok(mut runtime) = runtime_state.0.lock() {
+            runtime.optimizer_config = Some(config);
+            runtime.rectifier_config = Some(rectifier);
+        }
+    }
+}
+
 pub(crate) fn update_rectifier_config_cache<R: tauri::Runtime>(
     app_handle: &AppHandle<R>,
     config: crate::proxy_optimizer::config::RectifierConfig,

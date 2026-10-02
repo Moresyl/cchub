@@ -26,6 +26,8 @@ CCHub opens directly into configuration switching. Filter and search saved provi
 
 Workspace switching validates the target and commits the active selection in one transaction. A missing target or failed activation preserves the previously selected workspace and its directory bindings.
 
+Proxy advanced settings are read and saved as a complete pair. Saving checks the version that was loaded, so a stale editor cannot overwrite newer settings; both groups remain unchanged if either write fails. Unknown saved fields are preserved. Read failures do not display invented defaults. Failed-save drafts remain visible until you explicitly reload the saved settings, and editing is disabled while saving or awaiting that reload. Narrow windows give numeric setting descriptions their own full-width row.
+
 The compact neutral light/dark workspace uses a unified frameless desktop title bar, native window actions, a collapsible sidebar, and `Ctrl+K` quick switching. New profiles start from an official default or a blank custom template; existing saved profiles remain compatible. Configuration files, MCP servers, and Skills are secondary destinations. The Runtime sidebar view provides proxy management, usage analytics, and session browsing. Former standalone pages such as Autopilot, Marketplace, and security audit are no longer product entry points. Upgrading does not delete existing configuration data.
 
 ---

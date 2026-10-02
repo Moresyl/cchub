@@ -4,7 +4,8 @@ import { queryKeys } from "../queries";
 
 export interface SaveProxyAdvancedConfigInput {
   config: unknown;
-  rectifierConfig: unknown | null;
+  rectifierConfig: unknown;
+  expectedRevision: string;
 }
 
 function invalidateProxyAdvanced(queryClient: QueryClient) {
@@ -16,10 +17,11 @@ export function useSaveProxyAdvancedConfigMutation() {
 
   return useMutation({
     mutationFn: async (input: SaveProxyAdvancedConfigInput) => {
-      await invoke("set_optimizer_config", { config: input.config });
-      if (input.rectifierConfig) {
-        await invoke("set_rectifier_config", { config: input.rectifierConfig });
-      }
+      return invoke<string>("set_proxy_advanced_config", {
+        config: input.config,
+        rectifierConfig: input.rectifierConfig,
+        expectedRevision: input.expectedRevision,
+      });
     },
     onSuccess: () => invalidateProxyAdvanced(queryClient),
   });

@@ -328,6 +328,11 @@ export const en: I18n = {
     save: "Save",
     saveSuccess: "Saved successfully",
     saveFailed: "Save failed",
+    readFailed: "Cannot read proxy settings",
+    readFailedDesc: "Saved settings could not be confirmed. Reload them before editing or saving.",
+    saveFailedDesc:
+      "Your unsaved changes remain on this page. Reload the saved settings and review them before editing again.",
+    reload: "Reload settings",
     masterSwitch: "Enable Proxy Optimizer",
     masterSwitchDesc: "Master switch — disables all optimization modules when off",
     thinkingOptimizer: "Thinking Optimizer",

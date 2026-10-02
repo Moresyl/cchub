@@ -821,6 +821,8 @@ pub fn run() {
             commands::autopilot_commands::delete_autopilot_log,
             commands::autopilot_commands::clear_autopilot_logs,
             commands::optimizer_commands::get_optimizer_config,
+            commands::optimizer_commands::get_proxy_advanced_config,
+            commands::optimizer_commands::set_proxy_advanced_config,
             commands::routing_commands::get_provider_routing,
             commands::routing_commands::set_provider_routing,
             commands::routing_commands::preview_provider_routing,

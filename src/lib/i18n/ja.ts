@@ -244,6 +244,11 @@ export const ja: I18n = {
     save: "保存",
     saveSuccess: "保存しました",
     saveFailed: "保存失敗",
+    readFailed: "プロキシ設定を読み込めません",
+    readFailedDesc: "保存済みの設定を確認できませんでした。再読み込みしてから編集・保存してください。",
+    saveFailedDesc:
+      "未保存の変更はこの画面に残っています。保存済みの設定を再読み込みし、確認してから編集してください。",
+    reload: "設定を再読み込み",
     masterSwitch: "プロキシ最適化を有効化",
     masterSwitchDesc: "マスタースイッチ — オフにするとすべてのモジュールが無効",
     thinkingOptimizer: "Thinking オプティマイザ",

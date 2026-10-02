@@ -6,6 +6,75 @@ use std::path::PathBuf;
 
 use super::{config, env, providers};
 
+fn edit_snapshot_config(source: &str, incoming: &Value) -> Result<String, String> {
+    let incoming_root = incoming
+        .as_mapping()
+        .ok_or("Hermes snapshot config must be an object")?;
+    crate::yaml_config::edit_yaml_text(source, |root| {
+        if let Some(incoming_model) = incoming_root.get(Value::String("model".into())) {
+            let incoming_model = incoming_model
+                .as_mapping()
+                .ok_or("Hermes snapshot model must be an object")?;
+            let mut changes = Mapping::new();
+            for key in ["provider", "base_url", "default"] {
+                if let Some(value) = incoming_model.get(Value::String(key.into())) {
+                    if !value.is_string() {
+                        return Err("Hermes model fields must contain strings".into());
+                    }
+                    changes.insert(Value::String(key.into()), value.clone());
+                }
+            }
+            if changes.is_empty() {
+                return Ok(());
+            }
+            let model_key = Value::String("model".into());
+            let mut effective = Value::Mapping(root.clone());
+            effective
+                .apply_merge()
+                .map_err(|_| "Invalid Hermes YAML merge configuration")?;
+            if let Some(inherited) = effective.get("model") {
+                let inherited = inherited
+                    .as_mapping()
+                    .ok_or("Existing Hermes model must be an object")?;
+                if changes
+                    .iter()
+                    .all(|(key, value)| inherited.get(key) == Some(value))
+                {
+                    return Ok(());
+                }
+                // A root merge may provide the entire model mapping. Adding a
+                // partial explicit model would hide all its inherited options.
+                if !root.contains_key(&model_key) {
+                    root.insert(model_key, Value::Mapping(inherited.clone()));
+                }
+            }
+            let next_model = mapping_entry_mut(root, "model")
+                .as_mapping_mut()
+                .ok_or("Existing Hermes model must be an object")?;
+            next_model.extend(changes);
+        }
+        Ok(())
+    })
+}
+
+fn add_target(
+    plan: &mut crate::config_write::FilePlan,
+    path: PathBuf,
+    original: Option<Vec<u8>>,
+    desired: Vec<u8>,
+    unchanged: bool,
+) {
+    if unchanged {
+        plan.guards.push((path, original));
+    } else {
+        plan.updates.push(crate::config_write::FileUpdate {
+            path,
+            original,
+            desired,
+        });
+    }
+}
+
 fn json_to_yaml_value(value: &serde_json::Value) -> Result<Value, String> {
     serde_yaml::to_value(value).map_err(|e| e.to_string())
 }
@@ -80,40 +149,28 @@ pub(crate) fn prepare_snapshot(
     let env_path = super::env_path(conn)?;
     let config_bytes = crate::config_write::read(&config_path)?;
     let env_bytes = crate::config_write::read(&env_path)?;
-    let mut next_config = match config_bytes.as_deref() {
-        Some(bytes) => serde_yaml::from_slice::<Value>(bytes)
-            .map_err(|_| "Invalid Hermes YAML configuration")?,
-        None => Value::Mapping(Mapping::new()),
-    };
-    if !next_config.is_mapping() {
-        return Err("Hermes configuration must be an object".into());
-    }
-    {
-        let next_root = config::top_level_mapping_mut(&mut next_config);
-        let incoming_root = incoming_config_value
-            .as_mapping()
-            .ok_or_else(|| "Hermes snapshot config must be an object".to_string())?;
+    let config_source = config_bytes
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| "Hermes configuration must be UTF-8")?
+        .unwrap_or("{}\n");
+    let config_text = edit_snapshot_config(config_source, &incoming_config_value)?;
+    let next_config: Value =
+        serde_yaml::from_str(config_text.strip_prefix('\u{feff}').unwrap_or(&config_text))
+            .map_err(|_| "Invalid Hermes YAML configuration")?;
 
-        if let Some(incoming_model) = incoming_root.get(Value::String("model".to_string())) {
-            let incoming_model = incoming_model
-                .as_mapping()
-                .ok_or("Hermes snapshot model must be an object")?;
-            let model_value = mapping_entry_mut(next_root, "model");
-            let next_model = model_value
-                .as_mapping_mut()
-                .ok_or("Existing Hermes model must be an object")?;
-            for key in ["provider", "base_url", "default"] {
-                if let Some(value) = incoming_model.get(Value::String(key.to_string())) {
-                    if !value.is_string() {
-                        return Err("Hermes model fields must contain strings".into());
-                    }
-                    next_model.insert(Value::String(key.to_string()), value.clone());
-                }
-            }
-        }
-    }
-
-    let mut next_env = env::read_env_map(conn)?;
+    // Derive both desired files from the bytes captured by this plan. A second
+    // read could combine an external edit with an older revision guard.
+    let original_env = env::parse_env_text(
+        env_bytes
+            .as_deref()
+            .map(std::str::from_utf8)
+            .transpose()
+            .map_err(|_| "Hermes environment must be UTF-8")?
+            .unwrap_or(""),
+    );
+    let mut next_env = original_env.clone();
     let provider = next_config
         .as_mapping()
         .and_then(|root| root.get(Value::String("model".to_string())))
@@ -151,7 +208,12 @@ pub(crate) fn prepare_snapshot(
     }
     let mut plan = crate::config_write::FilePlan::default();
     let mut backup_path = None;
-    if create_backup && config_bytes.is_some() && !config::has_existing_backup(&config_path) {
+    let config_unchanged = config_text == config_source;
+    if create_backup
+        && !config_unchanged
+        && config_bytes.is_some()
+        && !config::has_existing_backup(&config_path)
+    {
         let path = config::backup_path_for(&config_path);
         if crate::config_write::read(&path)?.is_some() {
             return Err("Hermes backup location already exists".into());
@@ -163,18 +225,23 @@ pub(crate) fn prepare_snapshot(
         });
         backup_path = Some(path);
     }
-    let config_text =
-        serde_yaml::to_string(&next_config).map_err(|_| "Cannot encode Hermes YAML")?;
     let env_text = env::render_env_map(&next_env)?;
-    plan.updates.push(crate::config_write::FileUpdate {
-        path: config_path,
-        original: config_bytes,
-        desired: config_text.into_bytes(),
-    });
-    plan.updates.push(crate::config_write::FileUpdate {
-        path: env_path,
-        original: env_bytes,
-        desired: env_text.into_bytes(),
-    });
+    add_target(
+        &mut plan,
+        config_path,
+        config_bytes,
+        config_text.into_bytes(),
+        config_unchanged,
+    );
+    add_target(
+        &mut plan,
+        env_path,
+        env_bytes,
+        env_text.into_bytes(),
+        next_env == original_env,
+    );
     Ok((plan, backup_path))
 }
+
+#[cfg(test)]
+mod tests;

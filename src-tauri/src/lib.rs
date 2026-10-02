@@ -42,6 +42,7 @@ mod window_preferences;
 mod window_runtime;
 mod workflows;
 mod xai_oauth;
+mod yaml_config;
 use commands::compat_commands;
 use commands::extra_commands;
 use commands::skill_commands;

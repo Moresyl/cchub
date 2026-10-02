@@ -10,6 +10,10 @@ pub fn read_env_map(conn: &Connection) -> Result<HashMap<String, String>, String
     }
 
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(parse_env_text(&content))
+}
+
+pub(super) fn parse_env_text(content: &str) -> HashMap<String, String> {
     let mut env_map = HashMap::new();
     for line in content.lines() {
         let trimmed = line.trim();
@@ -25,7 +29,7 @@ pub fn read_env_map(conn: &Connection) -> Result<HashMap<String, String>, String
         }
         env_map.insert(key.to_string(), value.trim().to_string());
     }
-    Ok(env_map)
+    env_map
 }
 
 pub(crate) fn render_env_map(env_map: &HashMap<String, String>) -> Result<String, String> {

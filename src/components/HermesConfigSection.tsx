@@ -1,188 +1,296 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Download, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Save } from "lucide-react";
 import { getLocale } from "../lib/i18n";
 import { showToast } from "./Toast";
+import CodeEditor from "./CodeEditor";
+import CollapsibleSection from "./CollapsibleSection";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Input } from "./ui/input";
 import { SimpleSelect } from "./ui/simple-select";
 import {
-  buildStructuredConfig,
   createDefaultStructuredFields,
   parseStructuredConfig,
   type StructuredDraftFields,
 } from "../lib/configProfiles";
 
 type HermesFieldKey = "baseUrl" | "apiKey" | "model" | "hermesProvider" | "hermesApiKeyEnv";
+const PROVIDERS = ["nous", "openrouter", "gemini", "zai", "kimi-coding", "anthropic", "custom"];
+
+function formContent(draft: StructuredDraftFields, maskKey = false, previousKey = ""): string {
+  const key = draft.hermesApiKeyEnv.trim();
+  const env = key ? { [key]: maskKey && draft.apiKey.trim() ? "••••••••" : draft.apiKey.trim() } : {};
+  if (previousKey && previousKey !== key) env[previousKey] = "";
+  return JSON.stringify(
+    {
+      config: {
+        model: {
+          provider: draft.hermesProvider.trim() || "custom",
+          base_url: draft.baseUrl.trim(),
+          default: draft.model.trim(),
+        },
+      },
+      env,
+      metadata: { hermesApiKeyEnv: key || undefined },
+    },
+    null,
+    2,
+  );
+}
+
+function readForm(content: string): StructuredDraftFields {
+  const invalid = () => new Error("Invalid Hermes configuration snapshot");
+  const object = (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === "object" && !Array.isArray(value);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw invalid();
+  }
+  if (!object(parsed) || !object(parsed.config) || !object(parsed.env)) throw invalid();
+  const model = parsed.config.model === undefined ? {} : parsed.config.model;
+  const metadata = parsed.metadata ?? {};
+  if (!object(model) || !object(metadata) || Object.values(parsed.env).some((value) => typeof value !== "string"))
+    throw invalid();
+  for (const name of ["provider", "base_url", "default"])
+    if (model[name] !== undefined && typeof model[name] !== "string") throw invalid();
+  for (const name of ["hermesApiKeyEnv", "hermesProvider"])
+    if (metadata[name] != null && typeof metadata[name] !== "string") throw invalid();
+  const envKey = typeof metadata.hermesApiKeyEnv === "string" ? metadata.hermesApiKeyEnv : "";
+  return {
+    ...parseStructuredConfig("hermes", content),
+    baseUrl: (model.base_url as string | undefined) ?? "",
+    model: (model.default as string | undefined) ?? "",
+    hermesProvider: (model.provider as string | undefined) ?? "",
+    hermesApiKeyEnv: envKey,
+    apiKey: (parsed.env[envKey] as string | undefined) ?? "",
+  };
+}
 
 function HermesConfigSectionComponent() {
   const locale = getLocale();
+  const fieldId = useId();
   const uiText = useCallback(
-    (zhText: string, enText: string, jaText?: string) =>
-      locale === "zh" ? zhText : locale === "ja" ? (jaText ?? enText) : enText,
+    (zh: string, en: string, ja?: string) => (locale === "zh" ? zh : locale === "ja" ? (ja ?? en) : en),
     [locale],
   );
   const [draft, setDraft] = useState<StructuredDraftFields>(() => createDefaultStructuredFields("hermes"));
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [phase, setPhase] = useState<"loading" | "ready" | "failed" | "saving">("loading");
+  const [error, setError] = useState("");
+  const [baseline, setBaseline] = useState<string | null>(null);
+  const [previousKey, setPreviousKey] = useState("");
   const [rootOverride, setRootOverride] = useState<string | null>(null);
+  const pending = useRef(false);
+  const mounted = useRef(false);
+  const disabled = phase !== "ready";
+  const content = useMemo(() => formContent(draft, false, previousKey), [draft, previousKey]);
+  const dirty = baseline !== null && content !== baseline;
+  const keyError =
+    (draft.apiKey.trim() && !draft.hermesApiKeyEnv.trim()) ||
+    (draft.hermesApiKeyEnv.trim() && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(draft.hermesApiKeyEnv.trim()))
+      ? uiText(
+          "请填写有效的密钥环境变量名，如 PROVIDER_API_KEY。",
+          "Enter a valid key variable name, such as PROVIDER_API_KEY.",
+        )
+      : "";
 
   const updateDraft = useCallback((field: HermesFieldKey, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
   }, []);
 
   const loadConfig = useCallback(async () => {
-    setLoading(true);
+    if (pending.current) return;
+    pending.current = true;
+    setPhase("loading");
+    setError("");
     try {
       const [content, override] = await Promise.all([
         invoke<string>("read_tool_config", { toolId: "hermes" }),
         invoke<string | null>("get_hermes_root_override"),
       ]);
-      setDraft(parseStructuredConfig("hermes", content));
+      if (!mounted.current) return;
+      const loaded = readForm(content);
+      setDraft(loaded);
+      setBaseline(formContent(loaded));
+      setPreviousKey(loaded.hermesApiKeyEnv.trim());
       setRootOverride(override);
-    } catch (error) {
-      setDraft(createDefaultStructuredFields("hermes"));
-      showToast("error", String(error));
+      setPhase("ready");
+    } catch (failure) {
+      if (!mounted.current) return;
+      setError(String(failure));
+      setPhase("failed");
     } finally {
-      setLoading(false);
+      pending.current = false;
     }
   }, []);
 
   const saveConfig = useCallback(async () => {
-    setSaving(true);
+    if (pending.current || phase !== "ready" || !dirty || keyError) return;
+    pending.current = true;
+    setPhase("saving");
+    setError("");
     try {
       await invoke("write_tool_config", {
         toolId: "hermes",
-        content: buildStructuredConfig("hermes", draft),
+        content,
       });
-      showToast(
-        "success",
-        uiText(
-          "Hermes 配置已保存。首次写入会自动备份原 config.yaml，YAML 注释会丢失。",
-          "Hermes config saved. The first write creates a backup of config.yaml and YAML comments will be lost.",
-        ),
-      );
-    } catch (error) {
-      showToast("error", String(error));
+      if (mounted.current) {
+        setPreviousKey(draft.hermesApiKeyEnv.trim());
+        setBaseline(formContent(draft));
+        showToast("success", uiText("Hermes 配置已保存", "Hermes configuration saved"));
+      }
+    } catch (failure) {
+      if (mounted.current) setError(String(failure));
     } finally {
-      setSaving(false);
+      pending.current = false;
+      if (mounted.current) setPhase("ready");
     }
-  }, [draft, uiText]);
+  }, [content, dirty, draft, keyError, phase, uiText]);
 
   useEffect(() => {
+    mounted.current = true;
     void loadConfig();
+    return () => {
+      mounted.current = false;
+    };
   }, [loadConfig]);
 
-  const preview = useMemo(() => buildStructuredConfig("hermes", draft), [draft]);
+  const preview = useMemo(() => formContent(draft, true, previousKey), [draft, previousKey]);
+  const providerOptions = useMemo(
+    () => [...new Set([...PROVIDERS, draft.hermesProvider].filter(Boolean))].map((value) => ({ value, label: value })),
+    [draft.hermesProvider],
+  );
+  const inputs: { key: HermesFieldKey; label: string; placeholder: string; password?: boolean }[] = [
+    { key: "hermesApiKeyEnv", label: uiText("密钥环境变量", "API key variable"), placeholder: "PROVIDER_API_KEY" },
+    { key: "baseUrl", label: uiText("API 地址", "API URL"), placeholder: "https://api.example.com/v1" },
+    { key: "model", label: uiText("默认模型", "Default model"), placeholder: "model-id" },
+    {
+      key: "apiKey",
+      label: uiText("API 密钥", "API key"),
+      placeholder: uiText("输入 API 密钥", "Enter API key"),
+      password: true,
+    },
+  ];
 
   return (
-    <div className="card" style={{ padding: "16px 18px", marginBottom: 16 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "center",
-          marginBottom: 14,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h4 style={{ fontSize: 13, fontWeight: 700 }}>{uiText("Hermes 配置面板", "Hermes Config Panel")}</h4>
-          <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-            {uiText(
-              "直接编辑 `config.yaml + .env` 的合并视图。Windows 请把根目录覆盖指向 WSL2 内的 `~/.hermes`。",
-              "Edit the merged `config.yaml + .env` view directly. On Windows, point the root override to the WSL2 `~/.hermes` path.",
+    <Card className="mb-4 min-w-0 shadow-none" aria-busy={phase === "loading" || phase === "saving"}>
+      <CardHeader className="gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-2">
+            <CardTitle>{uiText("Hermes 配置", "Hermes configuration")}</CardTitle>
+            <CardDescription>
+              {uiText(
+                "修改模型连接，保留已有 YAML 注释和其他设置。",
+                "Update the model connection while retaining YAML comments and other settings.",
+              )}
+            </CardDescription>
+            {rootOverride && (
+              <p className="break-all text-xs text-muted-foreground">
+                {uiText("根目录：", "Root: ")}
+                {rootOverride}
+              </p>
             )}
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void loadConfig()}
+              disabled={phase === "loading" || phase === "saving"}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              {uiText("重新读取", "Reload")}
+            </Button>
+            <Button type="button" onClick={() => void saveConfig()} disabled={disabled || !dirty || !!keyError}>
+              {phase === "saving" ? (
+                <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Save size={14} aria-hidden="true" />
+              )}
+              {uiText("保存配置", "Save configuration")}
+            </Button>
+          </div>
+        </div>
+        {phase === "loading" && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {uiText("正在读取配置…", "Reading configuration…")}
           </p>
-          {rootOverride && (
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Root Override: {rootOverride}</p>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => void loadConfig()}
-            disabled={loading}
-            style={{ gap: 6 }}
+        )}
+        {error && (
+          <div
+            role="alert"
+            className="rounded-md border border-[var(--danger)]/30 bg-[var(--danger-subtle)] p-3 text-xs text-[var(--danger)]"
           >
-            {loading ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={14} />}
-            {uiText("重新读取", "Reload")}
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => void saveConfig()}
-            disabled={saving}
-            style={{ gap: 6 }}
-          >
-            {saving ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <Download size={14} />}
-            {uiText("保存配置", "Save Config")}
-          </button>
+            <p>
+              {phase === "failed"
+                ? uiText("读取失败，请重新读取后再编辑。", "Reading failed. Reload before editing.")
+                : uiText("保存失败，已保留输入内容。", "Saving failed. Your draft has been retained.")}
+            </p>
+            <p className="mt-1 break-words">{error}</p>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-4">
+          <div className="min-w-0 space-y-1.5">
+            <label className="field-label" htmlFor={`${fieldId}-provider`}>
+              {uiText("供应商", "Provider")}
+            </label>
+            <SimpleSelect
+              id={`${fieldId}-provider`}
+              value={draft.hermesProvider}
+              onValueChange={(value) => updateDraft("hermesProvider", value)}
+              options={[{ value: "", label: uiText("未配置", "Not configured") }, ...providerOptions]}
+              ariaLabel={uiText("供应商", "Provider")}
+              disabled={disabled}
+            />
+          </div>
+          {inputs.map((field) => (
+            <div key={field.key} className={`min-w-0 space-y-1.5${field.password ? " col-span-full" : ""}`}>
+              <label className="field-label" htmlFor={`${fieldId}-${field.key}`}>
+                {field.label}
+              </label>
+              <Input
+                id={`${fieldId}-${field.key}`}
+                type={field.password ? "password" : "text"}
+                value={draft[field.key]}
+                onChange={(event) => updateDraft(field.key, event.target.value)}
+                placeholder={field.placeholder}
+                disabled={disabled}
+                autoComplete={field.password ? "new-password" : "off"}
+                spellCheck={false}
+                aria-invalid={field.key === "hermesApiKeyEnv" && !!keyError ? true : undefined}
+                aria-describedby={field.key === "hermesApiKeyEnv" && keyError ? `${fieldId}-key-error` : undefined}
+              />
+              {field.key === "hermesApiKeyEnv" && keyError && (
+                <p id={`${fieldId}-key-error`} className="text-xs text-[var(--danger)]">
+                  {keyError}
+                </p>
+              )}
+            </div>
+          ))}
         </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <label className="field-label">Provider</label>
-          <SimpleSelect
-            value={draft.hermesProvider}
-            onValueChange={(value) => updateDraft("hermesProvider", value)}
-            options={["nous", "openrouter", "gemini", "zai", "kimi-coding", "anthropic", "custom"].map((option) => ({
-              value: option,
-              label: option,
-            }))}
-            ariaLabel="Provider"
-          />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <label className="field-label">API Key Env</label>
-          <input
-            className="input"
-            value={draft.hermesApiKeyEnv}
-            onChange={(event) => updateDraft("hermesApiKeyEnv", event.target.value)}
-            placeholder="OPENROUTER_API_KEY"
-          />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <label className="field-label">Base URL</label>
-          <input
-            className="input"
-            value={draft.baseUrl}
-            onChange={(event) => updateDraft("baseUrl", event.target.value)}
-            placeholder="https://openrouter.ai/api/v1"
-          />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <label className="field-label">Model</label>
-          <input
-            className="input"
-            value={draft.model}
-            onChange={(event) => updateDraft("model", event.target.value)}
-            placeholder="anthropic/claude-sonnet-4.6"
-          />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: "1 / -1" }}>
-          <label className="field-label">API Key</label>
-          <input
-            className="input"
-            type="password"
-            value={draft.apiKey}
-            onChange={(event) => updateDraft("apiKey", event.target.value)}
-            placeholder="sk-..."
-          />
-        </div>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text-secondary)" }}>
-          {uiText("生成后的快照预览", "Generated Snapshot Preview")}
-        </div>
-        <pre
-          className="code-block"
-          style={{ margin: 0, whiteSpace: "pre-wrap", maxHeight: 260, overflow: "auto", fontSize: 11 }}
-        >
-          {preview}
-        </pre>
-      </div>
-    </div>
+        {phase !== "loading" && phase !== "failed" && (
+          <div className="border-t border-border pt-3">
+            <CollapsibleSection
+              title={uiText("配置预览", "Configuration preview")}
+              summary={uiText("JSON · 密钥已遮盖", "JSON · Key masked")}
+            >
+              <CodeEditor
+                value={preview}
+                language="json"
+                readOnly
+                minHeight={120}
+                maxHeight={260}
+                ariaLabel={uiText("配置预览", "Configuration preview")}
+              />
+            </CollapsibleSection>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

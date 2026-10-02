@@ -455,94 +455,13 @@ fn scan_grok_mcp_toml(path: &PathBuf, servers: &mut Vec<ScannedMcpServer>) {
 /// Write MCP server config to Codex config.toml
 pub fn write_mcp_to_codex(name: &str, config: &McpServerConfig) -> Result<(), String> {
     let path = get_codex_config_path().ok_or("Cannot find Codex config path")?;
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    let content = if path.exists() {
-        std::fs::read_to_string(&path).unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    let mut doc: DocumentMut = content
-        .parse()
-        .map_err(|e: toml_edit::TomlError| e.to_string())?;
-
-    if doc
-        .get("mcp_servers")
-        .is_none_or(|item| item.as_table_like().is_none())
-    {
-        doc["mcp_servers"] = toml_edit::table();
-    }
-    let servers = doc["mcp_servers"]
-        .as_table_like_mut()
-        .ok_or_else(|| "Codex mcp_servers must be a TOML table".to_string())?;
-    servers.insert(
-        name,
-        toml_edit::Item::Table(super::formats::codex_server_table(config)),
-    );
-
-    crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())?;
-    Ok(())
+    super::native_toml::update_at(&path, name, Some(config), super::native_toml::Format::Codex)
 }
 
 /// Write MCP server config to Grok Build `~/.grok/config.toml`.
 pub fn write_mcp_to_grokbuild(name: &str, config: &McpServerConfig) -> Result<(), String> {
     let path = crate::grok_config::get_grok_config_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let content = if path.exists() {
-        std::fs::read_to_string(&path).map_err(|e| e.to_string())?
-    } else {
-        String::new()
-    };
-    let mut doc: DocumentMut = content
-        .parse()
-        .map_err(|e: toml_edit::TomlError| e.to_string())?;
-    if doc
-        .get("mcp_servers")
-        .is_none_or(|item| item.as_table_like().is_none())
-    {
-        doc["mcp_servers"] = toml_edit::table();
-    }
-    let servers = doc["mcp_servers"]
-        .as_table_like_mut()
-        .ok_or_else(|| "Grok Build mcp_servers must be a TOML table".to_string())?;
-    let mut server = toml_edit::Table::new();
-    let remote = matches!(
-        config.transport_type.as_deref(),
-        Some("http" | "sse" | "streamable-http" | "remote")
-    ) || config.command.starts_with("http://")
-        || config.command.starts_with("https://");
-    if remote {
-        server["url"] = toml_edit::value(config.command.as_str());
-        if !config.env.is_empty() {
-            let mut headers = toml_edit::Table::new();
-            for (key, value) in &config.env {
-                headers[key.as_str()] = toml_edit::value(value.as_str());
-            }
-            server["headers"] = toml_edit::Item::Table(headers);
-        }
-    } else {
-        server["command"] = toml_edit::value(config.command.as_str());
-        let mut args = toml_edit::Array::new();
-        for arg in &config.args {
-            args.push(arg.as_str());
-        }
-        server["args"] = toml_edit::value(args);
-        if !config.env.is_empty() {
-            let mut env = toml_edit::Table::new();
-            for (key, value) in &config.env {
-                env[key.as_str()] = toml_edit::value(value.as_str());
-            }
-            server["env"] = toml_edit::Item::Table(env);
-        }
-    }
-    servers.insert(name, toml_edit::Item::Table(server));
-    crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())
+    super::native_toml::update_at(&path, name, Some(config), super::native_toml::Format::Grok)
 }
 
 /// Write MCP server config to Gemini settings.json
@@ -581,41 +500,14 @@ pub fn sync_mcp_to_tool(name: &str, config: &McpServerConfig, tool_id: &str) -> 
 
 /// Remove MCP server from Codex config.toml
 pub fn remove_mcp_from_codex(name: &str) -> Result<(), String> {
-    let path = match get_codex_config_path() {
-        Some(p) if p.exists() => p,
-        _ => return Ok(()),
-    };
-
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut doc: DocumentMut = content
-        .parse()
-        .map_err(|e: toml_edit::TomlError| e.to_string())?;
-
-    if let Some(mcp_servers) = doc.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
-        mcp_servers.remove(name);
-    }
-
-    crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())?;
-    Ok(())
+    let path = get_codex_config_path().ok_or("Cannot find Codex config path")?;
+    super::native_toml::update_at(&path, name, None, super::native_toml::Format::Codex)
 }
 
 /// Remove an MCP server from Grok Build `config.toml`.
 pub fn remove_mcp_from_grokbuild(name: &str) -> Result<(), String> {
     let path = crate::grok_config::get_grok_config_path();
-    if !path.exists() {
-        return Ok(());
-    }
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut doc: DocumentMut = content
-        .parse()
-        .map_err(|e: toml_edit::TomlError| e.to_string())?;
-    if let Some(servers) = doc
-        .get_mut("mcp_servers")
-        .and_then(toml_edit::Item::as_table_like_mut)
-    {
-        servers.remove(name);
-    }
-    crate::utils::atomic_write_string(&path, &doc.to_string()).map_err(|e| e.to_string())
+    super::native_toml::update_at(&path, name, None, super::native_toml::Format::Grok)
 }
 
 /// Remove MCP server from Gemini settings.json

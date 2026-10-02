@@ -2,5 +2,6 @@ pub mod config;
 mod formats;
 pub mod health;
 pub mod mcode;
+pub(crate) mod native_toml;
 pub mod process;
 pub mod registry;

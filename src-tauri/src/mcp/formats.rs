@@ -238,12 +238,8 @@ pub fn has_json_server(path: &Path, name: &str, format: JsonMcpFormat) -> bool {
 pub fn codex_server_table(config: &McpServerConfig) -> toml_edit::Table {
     let mut server = toml_edit::Table::new();
     if is_remote(config) {
-        let transport = if config.transport_type.as_deref() == Some("sse") {
-            "sse"
-        } else {
-            "http"
-        };
-        server["type"] = toml_edit::value(transport);
+        // Native TOML infers transport from command or URL. An explicit type
+        // belongs to our shared model and is not a supported Codex setting.
         server["url"] = toml_edit::value(config.command.as_str());
         if !config.env.is_empty() {
             let mut headers = toml_edit::Table::new();
@@ -253,7 +249,6 @@ pub fn codex_server_table(config: &McpServerConfig) -> toml_edit::Table {
             server["http_headers"] = toml_edit::Item::Table(headers);
         }
     } else {
-        server["type"] = toml_edit::value("stdio");
         server["command"] = toml_edit::value(config.command.as_str());
         let mut args = toml_edit::Array::new();
         for arg in &config.args {
@@ -361,10 +356,7 @@ mod tests {
     #[test]
     fn writes_codex_remote_headers_without_command_fields() {
         let table = codex_server_table(&remote_config());
-        assert_eq!(
-            table.get("type").and_then(toml_edit::Item::as_str),
-            Some("http")
-        );
+        assert!(table.get("type").is_none());
         assert_eq!(
             table.get("url").and_then(toml_edit::Item::as_str),
             Some("https://example.com/mcp")

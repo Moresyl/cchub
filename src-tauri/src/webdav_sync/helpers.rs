@@ -139,10 +139,11 @@ pub(super) async fn ensure_remote_directories(
 
     for depth in 1..=path_segments.len() {
         let target = build_remote_url(&settings.base_url, &path_segments[..depth], true)?;
-        let response = auth_request(client.request(mkcol.clone(), target), settings)
-            .send()
-            .await
-            .map_err(|error| format!("Failed to create remote WebDAV directory: {error}"))?;
+        let response = crate::cloud_http::send(
+            auth_request(client.request(mkcol.clone(), target), settings),
+            &super::credential_scope(settings),
+        )
+        .await?;
         let status = response.status();
         if !(status.is_success()
             || status == StatusCode::METHOD_NOT_ALLOWED
@@ -172,7 +173,7 @@ pub(super) async fn upload_bytes(
             .body(bytes),
         settings,
     );
-    crate::cloud_revision::send(request, condition).await
+    crate::cloud_revision::send(request, condition, &super::credential_scope(settings)).await
 }
 
 pub(super) async fn fetch_manifest_with_fallback(
@@ -204,13 +205,14 @@ pub(super) async fn fetch_manifest_for_layout(
     settings: &WebDavSyncSettings,
     layout: WebDavRemoteLayout,
 ) -> Result<Option<(WebDavManifest, crate::cloud_revision::ObservedRevision)>, String> {
-    let response = auth_request(
-        client.get(manifest_url_for_layout(settings, layout)?),
-        settings,
+    let response = crate::cloud_http::send(
+        auth_request(
+            client.get(manifest_url_for_layout(settings, layout)?),
+            settings,
+        ),
+        &super::credential_scope(settings),
     )
-    .send()
-    .await
-    .map_err(|error| format!("Failed to fetch WebDAV manifest: {error}"))?;
+    .await?;
 
     if response.status() == StatusCode::NOT_FOUND {
         return Ok(None);

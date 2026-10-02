@@ -547,6 +547,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "glob",
+ "httpdate",
  "jsonc-parser",
  "keyring",
  "reqwest 0.12.28",

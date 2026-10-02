@@ -241,7 +241,12 @@ async fn sends_atomic_creation_and_replacement_conditions() {
     ] {
         let (request, worker) = server(201).await;
         assert_eq!(
-            strong_etag(&send(request, &condition).await.unwrap()).as_deref(),
+            strong_etag(
+                &send(request, &condition, "revision-success-test")
+                    .await
+                    .unwrap()
+            )
+            .as_deref(),
             Some("\"new\"")
         );
         let wire = worker.join().unwrap();
@@ -254,7 +259,9 @@ async fn sends_atomic_creation_and_replacement_conditions() {
 async fn conflicts_and_unsupported_servers_fail_without_unconditional_retry() {
     for status in [409, 412, 428, 400, 405, 501, 403] {
         let (request, worker) = server(status).await;
-        let error = send(request, &WriteCondition::Absent).await.unwrap_err();
+        let error = send(request, &WriteCondition::Absent, "revision-conflict-test")
+            .await
+            .unwrap_err();
         if [409, 412, 428].contains(&status) {
             assert_eq!(error, CONFLICT);
         } else {

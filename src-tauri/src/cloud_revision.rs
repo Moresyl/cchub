@@ -157,11 +157,9 @@ pub(crate) fn apply(request: RequestBuilder, condition: &WriteCondition) -> Requ
 pub(crate) async fn send(
     request: RequestBuilder,
     condition: &WriteCondition,
+    scope: &str,
 ) -> Result<HeaderMap, String> {
-    let response = apply(request, condition)
-        .send()
-        .await
-        .map_err(|_| "条件上传请求失败，请检查连接并刷新远端状态".to_string())?;
+    let response = crate::cloud_http::send(apply(request, condition), scope).await?;
     match response.status() {
         StatusCode::CONFLICT
         | StatusCode::PRECONDITION_FAILED

@@ -346,6 +346,7 @@ pub async fn test_connection(
         || response.status() == reqwest::StatusCode::NOT_FOUND
         || response.status() == reqwest::StatusCode::NO_CONTENT
     {
+        crate::cloud_http::complete(&credential_scope(&settings));
         return Ok(());
     }
     Err(format!("S3 server returned {}", response.status()))
@@ -535,6 +536,7 @@ pub async fn upload(
     };
     let conn = db.0.lock().map_err(|error| error.to_string())?;
     update_upload_status(&conn, &settings, created_at)?;
+    crate::cloud_http::complete(&credential_scope(&settings));
     Ok(info)
 }
 
@@ -572,6 +574,7 @@ pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<
     let conn = db.0.lock().map_err(|error| error.to_string())?;
     update_upload_status(&conn, &settings, Utc::now().to_rfc3339())?;
     cloud_revision::accept(&KeyringStore, &backup_scope(&settings), &revision)?;
+    crate::cloud_http::complete(&credential_scope(&settings));
     Ok(message)
 }
 
@@ -600,6 +603,7 @@ fn update_upload_status(
 pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15 * 60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval.tick().await;
         loop {
             interval.tick().await;
@@ -608,7 +612,11 @@ pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
                 db.0.lock()
                     .ok()
                     .and_then(|conn| read_settings(&conn).ok())
-                    .is_some_and(|settings| settings.enabled && settings.auto_sync);
+                    .is_some_and(|settings| {
+                        settings.enabled
+                            && settings.auto_sync
+                            && crate::cloud_http::remaining(&credential_scope(&settings)).is_none()
+                    });
             if !enabled {
                 continue;
             }
@@ -622,6 +630,9 @@ pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
         }
     });
 }
+
+#[cfg(test)]
+mod rate_limit_tests;
 
 #[cfg(test)]
 mod tests {

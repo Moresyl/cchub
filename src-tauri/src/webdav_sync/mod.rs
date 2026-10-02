@@ -304,18 +304,20 @@ pub async fn test_connection(
     prepare_connection(&mut settings, existing.as_ref(), preserve_empty_password)?;
 
     let client = build_client(&settings)?;
-    let response = auth_request(
-        client
-            .request(method_propfind()?, normalize_base_url(&settings.base_url))
-            .header("Depth", "0"),
-        &settings,
+    let response = crate::cloud_http::send(
+        auth_request(
+            client
+                .request(method_propfind()?, normalize_base_url(&settings.base_url))
+                .header("Depth", "0"),
+            &settings,
+        ),
+        &credential_scope(&settings),
     )
-    .send()
-    .await
-    .map_err(|error| format!("WebDAV connection failed: {error}"))?;
+    .await?;
 
     let status = response.status();
     if status.is_success() || status.as_u16() == 207 {
+        crate::cloud_http::complete(&credential_scope(&settings));
         return Ok(());
     }
 
@@ -415,7 +417,10 @@ pub async fn upload(
         read_settings(&conn)?
     };
     match upload_inner(db, &settings, reviewed_revision).await {
-        Ok(info) => Ok(info),
+        Ok(info) => {
+            crate::cloud_http::complete(&credential_scope(&settings));
+            Ok(info)
+        }
         Err(error) => {
             if let Ok(conn) = db.0.lock() {
                 let _ = update_transfer_status(&conn, &settings, None, Some(error.clone()));
@@ -567,7 +572,10 @@ pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<
         read_settings(&conn)?
     };
     match download_inner(db, &settings, allow_plaintext).await {
-        Ok(message) => Ok(message),
+        Ok(message) => {
+            crate::cloud_http::complete(&credential_scope(&settings));
+            Ok(message)
+        }
         Err(error) => {
             if let Ok(conn) = db.0.lock() {
                 let _ = update_transfer_status(&conn, &settings, None, Some(error.clone()));
@@ -593,12 +601,13 @@ async fn download_inner(
     validate_manifest_compatibility(&manifest, layout)?;
 
     let snapshot_target = remote_file_url(&settings, layout, &manifest.snapshot_path)?;
-    let response = auth_request(client.get(snapshot_target), &settings)
-        .send()
-        .await
-        .map_err(|error| format!("Failed to download WebDAV snapshot: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("WebDAV snapshot download failed: {error}"))?;
+    let response = crate::cloud_http::send(
+        auth_request(client.get(snapshot_target), &settings),
+        &credential_scope(settings),
+    )
+    .await?
+    .error_for_status()
+    .map_err(|error| format!("WebDAV snapshot download failed: {error}"))?;
     let bytes = crate::cloud_transfer::read_bounded(response, MAX_WEBDAV_SYNC_BYTES).await?;
     crate::cloud_transfer::verify_snapshot(
         &bytes,
@@ -632,6 +641,7 @@ async fn download_inner(
 pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(AUTO_SYNC_INTERVAL_SECS));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval.tick().await;
         loop {
             interval.tick().await;
@@ -658,7 +668,9 @@ pub async fn run_auto_sync_if_enabled(
     let should_sync = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         let settings = read_settings(&conn)?;
-        settings.enabled && settings.auto_sync
+        settings.enabled
+            && settings.auto_sync
+            && crate::cloud_http::remaining(&credential_scope(&settings)).is_none()
     };
 
     if !should_sync {
@@ -692,6 +704,9 @@ mod transfer_tests;
 
 #[cfg(test)]
 mod revision_tests;
+
+#[cfg(test)]
+mod rate_limit_tests;
 
 #[cfg(test)]
 mod tests {

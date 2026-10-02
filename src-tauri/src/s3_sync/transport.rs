@@ -193,10 +193,7 @@ async fn request_object_with_client(
     body: Vec<u8>,
 ) -> Result<reqwest::Response, String> {
     let request = signed_request(client, settings, method, key, body, None)?;
-    request
-        .send()
-        .await
-        .map_err(|error| format!("S3 request failed: {error}"))
+    crate::cloud_http::send(request, &super::credential_scope(settings)).await
 }
 
 pub(super) async fn get_object(
@@ -264,5 +261,5 @@ pub(super) async fn put_object_using(
         body,
         Some(condition),
     )?;
-    crate::cloud_revision::send(request, condition).await
+    crate::cloud_revision::send(request, condition, &super::credential_scope(settings)).await
 }

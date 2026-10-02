@@ -12,6 +12,10 @@ use crate::commands::extra_commands::{
 };
 use crate::db::DbState;
 
+mod auto_sync;
+pub(crate) use auto_sync::auto_upload;
+pub use auto_sync::{run_auto_sync_if_enabled, spawn_auto_sync_loop};
+
 const WEBDAV_SYNC_SETTINGS_KEY: &str = "webdav_sync_settings";
 const WEBDAV_MANIFEST_FILE: &str = "manifest.json";
 const WEBDAV_FORMAT: &str = "cchub-webdav-sync";
@@ -416,14 +420,22 @@ pub async fn upload(
         let conn = db.0.lock().map_err(|error| error.to_string())?;
         read_settings(&conn)?
     };
-    match upload_inner(db, &settings, reviewed_revision).await {
+    upload_for_settings(db, &settings, reviewed_revision).await
+}
+
+async fn upload_for_settings(
+    db: &State<'_, DbState>,
+    settings: &WebDavSyncSettings,
+    reviewed_revision: Option<String>,
+) -> Result<WebDavRemoteInfo, String> {
+    match upload_inner(db, settings, reviewed_revision).await {
         Ok(info) => {
-            crate::cloud_http::complete(&credential_scope(&settings));
+            crate::cloud_http::complete(&credential_scope(settings));
             Ok(info)
         }
         Err(error) => {
             if let Ok(conn) = db.0.lock() {
-                let _ = update_transfer_status(&conn, &settings, None, Some(error.clone()));
+                let _ = update_transfer_status(&conn, settings, None, Some(error.clone()));
             }
             Err(error)
         }
@@ -636,61 +648,6 @@ async fn download_inner(
     cloud_revision::accept(&KeyringStore, &backup_scope(&settings), &revision)?;
 
     Ok(message)
-}
-
-pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(AUTO_SYNC_INTERVAL_SECS));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        interval.tick().await;
-        loop {
-            interval.tick().await;
-            let event = match run_auto_sync_if_enabled(&app_handle).await {
-                Ok(event) => event,
-                Err(error) => Some(WebDavSyncEvent {
-                    status: "error".to_string(),
-                    message: "Automatic WebDAV sync failed".to_string(),
-                    synced_at: None,
-                    error: Some(error),
-                }),
-            };
-            if let Some(payload) = event {
-                let _ = app_handle.emit("webdav-sync-status-updated", &payload);
-            }
-        }
-    });
-}
-
-pub async fn run_auto_sync_if_enabled(
-    app_handle: &AppHandle,
-) -> Result<Option<WebDavSyncEvent>, String> {
-    let db = app_handle.state::<DbState>();
-    let should_sync = {
-        let conn = db.0.lock().map_err(|error| error.to_string())?;
-        let settings = read_settings(&conn)?;
-        settings.enabled
-            && settings.auto_sync
-            && crate::cloud_http::remaining(&credential_scope(&settings)).is_none()
-    };
-
-    if !should_sync {
-        return Ok(None);
-    }
-
-    match upload(&db, None).await {
-        Ok(info) => Ok(Some(WebDavSyncEvent {
-            status: "success".to_string(),
-            message: "Automatic WebDAV sync completed".to_string(),
-            synced_at: info.updated_at,
-            error: None,
-        })),
-        Err(error) => Ok(Some(WebDavSyncEvent {
-            status: "error".to_string(),
-            message: "Automatic WebDAV sync failed".to_string(),
-            synced_at: None,
-            error: Some(error),
-        })),
-    }
 }
 
 mod helpers;

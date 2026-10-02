@@ -18,6 +18,10 @@ use crate::commands::extra_commands::{
 };
 use crate::db::DbState;
 
+mod auto_sync;
+pub(crate) use auto_sync::auto_upload;
+pub use auto_sync::spawn_auto_sync_loop;
+
 mod transport;
 use transport::*;
 mod status;
@@ -598,37 +602,6 @@ async fn download_inner(
     update_upload_status(&conn, settings, Utc::now().to_rfc3339())?;
     cloud_revision::accept(&KeyringStore, &backup_scope(settings), &revision)?;
     Ok(message)
-}
-
-pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(15 * 60));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        interval.tick().await;
-        loop {
-            interval.tick().await;
-            let db = app_handle.state::<DbState>();
-            let enabled =
-                db.0.lock()
-                    .ok()
-                    .and_then(|conn| read_settings(&conn).ok())
-                    .is_some_and(|settings| {
-                        settings.enabled
-                            && settings.auto_sync
-                            && crate::cloud_http::remaining(&credential_scope(&settings)).is_none()
-                    });
-            if !enabled {
-                continue;
-            }
-            let result = upload(&db, None).await;
-            let payload = serde_json::json!({
-                "status": if result.is_ok() { "success" } else { "error" },
-                "message": result.as_ref().map(|_| "S3 sync completed").unwrap_or("S3 sync failed"),
-                "error": result.err(),
-            });
-            let _ = app_handle.emit("s3-sync-status-updated", payload);
-        }
-    });
 }
 
 #[cfg(test)]

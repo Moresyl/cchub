@@ -7,6 +7,9 @@ pub(crate) fn workflow_lock() -> &'static tokio::sync::Mutex<()> {
 }
 
 #[cfg(test)]
+mod auto_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -22,8 +25,9 @@ mod tests {
         assert!(workflow_lock().try_lock().is_err());
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
-        let _guard = workflow_lock()
-            .try_lock()
-            .expect("cancelled transfer must release its lock");
+        let _guard =
+            tokio::time::timeout(std::time::Duration::from_secs(5), workflow_lock().lock())
+                .await
+                .expect("cancelled transfer must release its lock");
     }
 }

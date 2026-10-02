@@ -190,12 +190,6 @@ export interface ToolSettingsQueryResult {
   autoUpdateChannel: string;
   claudeModel: string;
   toolSearchEnabled: boolean;
-  codexSettings: {
-    approval_mode: string;
-    reasoning_effort: string;
-    disable_response_storage: boolean;
-    context_window_1m: boolean;
-  };
   visibleApps: ManagedAppId[];
 }
 
@@ -385,32 +379,19 @@ export async function fetchSkillsPageData() {
 }
 
 export async function fetchToolsPageData(): Promise<ToolSettingsQueryResult> {
-  const [permissionsLevel, autoUpdateChannel, claudeModel, toolSearchEnabled, codexSettings, visibleApps] =
-    await Promise.all([
-      invoke<number>("get_claude_permissions_level").catch(() => 0),
-      invoke<string>("get_claude_auto_update").catch(() => "latest"),
-      invoke<string>("get_claude_model").catch(() => ""),
-      invoke<boolean>("get_claude_tool_search").catch(() => false),
-      invoke<{
-        approval_mode: string;
-        reasoning_effort: string;
-        disable_response_storage: boolean;
-        context_window_1m: boolean;
-      }>("get_codex_settings").catch(() => ({
-        approval_mode: "suggest",
-        reasoning_effort: "",
-        disable_response_storage: false,
-        context_window_1m: false,
-      })),
-      fetchVisibleAppsQuery(),
-    ]);
+  const [permissionsLevel, autoUpdateChannel, claudeModel, toolSearchEnabled, visibleApps] = await Promise.all([
+    invoke<number>("get_claude_permissions_level").catch(() => 0),
+    invoke<string>("get_claude_auto_update").catch(() => "latest"),
+    invoke<string>("get_claude_model").catch(() => ""),
+    invoke<boolean>("get_claude_tool_search").catch(() => false),
+    fetchVisibleAppsQuery(),
+  ]);
 
   return {
     permissionsLevel,
     autoUpdateChannel,
     claudeModel,
     toolSearchEnabled,
-    codexSettings,
     visibleApps,
   };
 }

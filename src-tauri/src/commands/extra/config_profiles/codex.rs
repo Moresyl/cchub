@@ -137,7 +137,7 @@ pub(crate) fn set_codex_reasoning_effort(doc: &mut toml_edit::DocumentMut, value
     }
 }
 
-fn set_scalar(item: &mut toml_edit::Item, mut desired: toml_edit::Item) {
+pub(crate) fn set_scalar(item: &mut toml_edit::Item, mut desired: toml_edit::Item) {
     let unchanged = match (item.as_value(), desired.as_value()) {
         (Some(toml_edit::Value::String(left)), Some(toml_edit::Value::String(right))) => {
             left.value() == right.value()

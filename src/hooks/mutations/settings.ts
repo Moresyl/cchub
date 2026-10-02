@@ -46,6 +46,7 @@ export interface SetProxyInput {
 
 function invalidateSettings(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.toolsPage });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.toolSettings });
   void queryClient.invalidateQueries({ queryKey: queryKeys.detectTools });
   void queryClient.invalidateQueries({ queryKey: queryKeys.visibleApps });
   void queryClient.invalidateQueries({ queryKey: queryKeys.skillSyncMethod });

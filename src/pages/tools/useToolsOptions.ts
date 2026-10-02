@@ -50,14 +50,6 @@ export function useToolsOptions(uiText: UiText, tab: "claude" | "codex") {
     ],
     [uiText],
   );
-  const codexApprovalOptions = useMemo(
-    () => [
-      { value: "suggest", label: uiText("建议", "Suggest", "提案") },
-      { value: "auto-edit", label: uiText("自动编辑", "Auto Edit", "自動編集") },
-      { value: "full-auto", label: uiText("全自动", "Full Auto", "フルオート") },
-    ],
-    [uiText],
-  );
   const permLevelOptions = useMemo(
     () => PERM_LEVELS.map((level, index) => ({ value: index, label: permLevelLabels[index], color: level.color })),
     [permLevelLabels],
@@ -264,7 +256,6 @@ export function useToolsOptions(uiText: UiText, tab: "claude" | "codex") {
     hudLayoutOptions,
     hudPathLevelOptions,
     hudContextValueOptions,
-    codexApprovalOptions,
     permLevelOptions,
     hudGitStatusOptions,
     hudDisplayOptions,

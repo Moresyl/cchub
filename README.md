@@ -89,6 +89,10 @@ Saves check the loaded library and file revisions. Conflicts retain the draft un
 
 ### Local proxy and failover
 
+Tools > Codex reads the configured user settings file and checks its location and content revision before saving. Permission presets update `approval_policy` and `sandbox_mode`, preserving valid reply styles, comments and unrelated settings; granular or named permission policies remain custom until explicitly changed. A selected configuration profile keeps the global permissions control read-only. Failed reads do not invent defaults, and failed writes retain the last confirmed values until reload. The 1M toggle removes only a 1M override when disabled, preserving other context limits. The legacy response-storage field is retained for compatibility and does not guarantee that local or server records are disabled.
+
+工具 > Codex 使用设置中指定的用户配置文件，保存前核对路径与内容版本。权限预设正确更新 `approval_policy` 和 `sandbox_mode`，保留有效回复风格、注释与无关设置；细粒度或命名权限策略会保留为自定义配置，直到主动修改。选择了配置档案时，全局权限控件保持只读。读取失败不会伪造默认值，写入失败保留上次确认值并要求重新读取。关闭 1M 开关只移除 1M 覆盖值，保留其他上下文上限。旧版响应存储字段仅用于兼容，不能保证本地或服务端停止记录。
+
 Codex reasoning settings sit beside the selected model and use its reported levels. An explicit empty list offers no configurable level; missing capability information retains the usual choices and any saved custom value. Unsupported saved values stay visible with a warning until explicitly changed. Profile, configuration-file and tool-settings editors share a “Use model default” choice that omits `model_reasoning_effort`, while a literal `none` remains a distinct value. Startup proxy reapplication preserves an omitted effort; an explicit profile switch follows the selected profile instead. Configuration-file edits retain comments and unrelated MCP settings.
 
 Codex 配置页将推理强度放在模型选择旁，按当前模型报告的等级显示选项。明确为空时不提供额外等级；未报告能力时保留常用选项和已有自定义值。未被报告支持的原值会提示并保留，直到主动修改。配置管理、配置文件和工具设置共用“使用模型默认值”，保存时移除 `model_reasoning_effort`；字面值 `none` 与默认值区分。启动代理时保留已经清除的强度，主动切换配置则遵循所选配置。配置文件编辑保留注释和无关 MCP 设置。

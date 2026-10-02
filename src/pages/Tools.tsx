@@ -14,7 +14,6 @@ import {
   useSetClaudeHudConfigMutation,
   useSetClaudeSettingMutation,
   useSetClaudeStatuslineMutation,
-  useSetCodexSettingMutation,
   useSetHello2ccConfigMutation,
   useSetHello2ccEnabledMutation,
   useUpdateClaudeHudMutation,
@@ -58,14 +57,6 @@ export default function Tools() {
   const [autoUpdate, setAutoUpdate] = useState(cachedToolsPageData?.autoUpdateChannel ?? "latest");
   const [claudeModel, setClaudeModel] = useState(cachedToolsPageData?.claudeModel ?? "");
   const [toolSearch, setToolSearch] = useState(cachedToolsPageData?.toolSearchEnabled ?? false);
-  const [codexApproval, setCodexApproval] = useState(cachedToolsPageData?.codexSettings.approval_mode ?? "suggest");
-  const [codexReasoning, setCodexReasoning] = useState(cachedToolsPageData?.codexSettings.reasoning_effort ?? "");
-  const [codexDisableStorage, setCodexDisableStorage] = useState(
-    cachedToolsPageData?.codexSettings.disable_response_storage ?? false,
-  );
-  const [codexContextWindow1M, setCodexContextWindow1M] = useState(
-    cachedToolsPageData?.codexSettings.context_window_1m ?? false,
-  );
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
     cachedToolsPageData?.visibleApps ?? [
       "claude",
@@ -101,7 +92,6 @@ export default function Tools() {
   const setHudConfigMutation = useSetClaudeHudConfigMutation();
   const setHello2ccConfigMutation = useSetHello2ccConfigMutation();
   const setClaudeSettingMutation = useSetClaudeSettingMutation<unknown>();
-  const setCodexSettingMutation = useSetCodexSettingMutation();
   const setClaudeStatuslineMutation = useSetClaudeStatuslineMutation();
   const setHello2ccEnabledMutation = useSetHello2ccEnabledMutation();
   const updateClaudeHudMutation = useUpdateClaudeHudMutation();
@@ -147,10 +137,6 @@ export default function Tools() {
         setAutoUpdate(data.autoUpdateChannel);
         setClaudeModel(data.claudeModel);
         setToolSearch(data.toolSearchEnabled);
-        setCodexApproval(data.codexSettings.approval_mode);
-        setCodexReasoning(data.codexSettings.reasoning_effort);
-        setCodexDisableStorage(data.codexSettings.disable_response_storage);
-        setCodexContextWindow1M(data.codexSettings.context_window_1m);
         setVisibleApps(data.visibleApps);
       } catch (e) {
         console.error(e);
@@ -181,15 +167,6 @@ export default function Tools() {
     [queryClient],
   );
 
-  const patchCodexCache = useCallback(
-    (partial: Partial<ToolSettingsQueryResult["codexSettings"]>) => {
-      queryClient.setQueryData<ToolSettingsQueryResult>(queryKeys.toolsPage, (prev) =>
-        prev ? { ...prev, codexSettings: { ...prev.codexSettings, ...partial } } : prev,
-      );
-    },
-    [queryClient],
-  );
-
   const setClaudeSetting = useCallback(
     async <T,>(
       fn: string,
@@ -207,35 +184,6 @@ export default function Tools() {
       }
     },
     [setClaudeSettingMutation, uiText],
-  );
-
-  const setCodex = useCallback(
-    async (key: string, value: string) => {
-      try {
-        await setCodexSettingMutation.mutateAsync({ key, value });
-        // Keep the react-query cache in sync; otherwise remounting the page within
-        // staleTime (30s) seeds local state from the stale cache and the select
-        // visually reverts to the pre-save value.
-        switch (key) {
-          case "approval_mode":
-            patchCodexCache({ approval_mode: value });
-            break;
-          case "reasoning_effort":
-            patchCodexCache({ reasoning_effort: value });
-            break;
-          case "disable_response_storage":
-            patchCodexCache({ disable_response_storage: value === "true" });
-            break;
-          case "context_window_1m":
-            patchCodexCache({ context_window_1m: value === "true" });
-            break;
-        }
-        showToast("success", uiText("已更新", "Updated", "更新しました"));
-      } catch (e) {
-        showToast("error", `${e}`);
-      }
-    },
-    [patchCodexCache, setCodexSettingMutation, uiText],
   );
 
   const handleInstallHud = useCallback(async () => {
@@ -429,7 +377,6 @@ export default function Tools() {
     hudLayoutOptions,
     hudPathLevelOptions,
     hudContextValueOptions,
-    codexApprovalOptions,
     permLevelOptions,
     hudGitStatusOptions,
     hudDisplayOptions,
@@ -504,22 +451,6 @@ export default function Tools() {
     },
     [updateHudConfig],
   );
-  const handleSelectCodexApproval = useCallback(
-    (value: string | number) => {
-      const nextValue = String(value);
-      setCodexApproval(nextValue);
-      void setCodex("approval_mode", nextValue);
-    },
-    [setCodex],
-  );
-  const handleSelectCodexReasoning = useCallback(
-    (value: string | number) => {
-      const nextValue = String(value);
-      setCodexReasoning(nextValue);
-      void setCodex("reasoning_effort", nextValue);
-    },
-    [setCodex],
-  );
   const handleToggleBypassPermissions = useCallback(
     (enabled: boolean) => {
       const nextLevel = enabled ? 3 : 0;
@@ -583,20 +514,6 @@ export default function Tools() {
       updateHello2ccDraft("mirror_session_model", enabled);
     },
     [updateHello2ccDraft],
-  );
-  const handleToggleCodexDisableStorage = useCallback(
-    (enabled: boolean) => {
-      setCodexDisableStorage(enabled);
-      void setCodex("disable_response_storage", String(enabled));
-    },
-    [setCodex],
-  );
-  const handleToggleCodexContextWindow1M = useCallback(
-    (enabled: boolean) => {
-      setCodexContextWindow1M(enabled);
-      void setCodex("context_window_1m", String(enabled));
-    },
-    [setCodex],
   );
   const hello2ccConfigSource = hello2ccStatus?.config ?? DEFAULT_HELLO2CC_CONFIG;
   const handleInstallHello2ccClick = useCallback(() => {
@@ -869,20 +786,7 @@ export default function Tools() {
           />
         )}
 
-        {tab === "codex" && toolById.get("codex")?.installed && (
-          <CodexTab
-            uiText={uiText}
-            codexApproval={codexApproval}
-            codexApprovalOptions={codexApprovalOptions}
-            handleSelectCodexApproval={handleSelectCodexApproval}
-            codexReasoning={codexReasoning}
-            handleSelectCodexReasoning={handleSelectCodexReasoning}
-            codexDisableStorage={codexDisableStorage}
-            handleToggleCodexDisableStorage={handleToggleCodexDisableStorage}
-            codexContextWindow1M={codexContextWindow1M}
-            handleToggleCodexContextWindow1M={handleToggleCodexContextWindow1M}
-          />
-        )}
+        {tab === "codex" && toolById.get("codex")?.installed && <CodexTab uiText={uiText} />}
       </div>
     </div>
   );

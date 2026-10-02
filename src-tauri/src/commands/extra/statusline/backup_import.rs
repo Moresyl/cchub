@@ -46,6 +46,16 @@ fn install_database(
     Ok(())
 }
 
+fn install_restored_database(
+    source: &rusqlite::Connection,
+    target: &mut rusqlite::Connection,
+    files: &super::backup_file_rollback::FileRollback,
+) -> Result<(), String> {
+    let _guard = crate::json_config::write_lock()?;
+    files.verify()?;
+    install_database(source, target)
+}
+
 #[cfg(test)]
 fn import_into_connection(
     conn: &mut rusqlite::Connection,
@@ -108,7 +118,7 @@ fn import_into_connection_with_mode(
         set_json_app_setting(&prepared, "last_import_summary", &summary)?;
         // No placeholder connection, close/rename window, or fallback to an empty
         // database. SQLite commits the page copy while the application mutex stays held.
-        install_database(&prepared, conn)?;
+        install_restored_database(&prepared, conn, &rollback)?;
         crate::skills::tools::invalidate_detect_tools_cache();
         let mut message = format!("已恢复 {rows} 条数据记录, {configs} 个工具配置, {skills} 个技能文件, {files} 个附属文件。安全备份: {}", safety.display());
         if pending > 0 {

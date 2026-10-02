@@ -157,6 +157,7 @@ pub(crate) fn normalize_profile(snapshot: &str) -> Result<String, String> {
     serde_json::to_string_pretty(&profile).map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn apply_profile(path: &Path, snapshot: &str) -> Result<(), String> {
     let _guard = crate::json_config::write_lock()?;
     prepare_profile(path, snapshot)?.commit()

@@ -7,9 +7,7 @@ use super::*;
 type RestoreCounts = (usize, usize, usize, usize, usize);
 
 struct ToolConfig {
-    tool: String,
-    content: String,
-    targets: Vec<PathBuf>,
+    plan: crate::config_write::FilePlan,
 }
 struct FileContent {
     target: PathBuf,
@@ -56,12 +54,49 @@ fn tool_targets(conn: &rusqlite::Connection, tool: &str) -> Result<Vec<PathBuf>,
     paths.into_iter().map(checked_file).collect()
 }
 
+fn prepare_tool(
+    conn: &rusqlite::Connection,
+    tool: &str,
+    content: String,
+) -> Result<crate::config_write::FilePlan, String> {
+    let targets = tool_targets(conn, tool)?;
+    let mut plan = crate::config_write::FilePlan::default();
+    let claude_snapshot = tool == "claude"
+        && serde_json::from_str::<serde_json::Value>(&content)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .is_some_and(|object| {
+                object.contains_key("__claude_json_keys__")
+                    || object.contains_key("__settings_json_keys__")
+            });
+    if tool == "claude-settings" || (tool == "claude" && !claude_snapshot) {
+        // Raw legacy backups may contain comments or opaque bytes. Restore those
+        // bytes exactly; profile-snapshot interpretation is a separate format.
+        plan.replace(targets[0].clone(), content.into_bytes())?;
+    } else if tool == "hermes" {
+        let effective =
+            crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool, &content)?;
+        plan = crate::hermes::snapshot::prepare_snapshot(conn, &effective, false)?.0;
+    } else {
+        plan = prepare_tool_snapshot(conn, tool, &content, false)?;
+    }
+    for update in &mut plan.updates {
+        update.path = checked_file(update.path.clone())?;
+    }
+    for (target, _) in &mut plan.guards {
+        *target = checked_file(target.clone())?;
+    }
+    plan.check_targets()?;
+    Ok(plan)
+}
+
 pub(super) fn restore_artifacts_with_rollback(
     conn: &rusqlite::Connection,
     restored_count: usize,
     rollback: &mut FileRollback,
     defer_projects: bool,
 ) -> Result<RestoreCounts, String> {
+    let _guard = crate::json_config::write_lock()?;
     super::backup_paths::validate_artifact_paths(conn)?;
     let temp_rows: usize = conn.query_row("SELECT (SELECT COUNT(*) FROM _backup_meta) + (SELECT COUNT(*) FROM _tool_configs) + (SELECT COUNT(*) FROM _skill_files) + (SELECT COUNT(*) FROM _backup_files)", [], |row| row.get(0)).map_err(|_| "无法读取备份记录")?;
     let mut tools = Vec::new();
@@ -73,11 +108,9 @@ pub(super) fn restore_artifacts_with_rollback(
         .map_err(|_| "无法读取工具备份")?;
     for row in rows {
         let (tool, content) = row.map_err(|_| "工具备份记录无效")?;
-        let targets = tool_targets(conn, &tool)?;
         tools.push(ToolConfig {
-            tool,
-            content,
-            targets,
+            plan: prepare_tool(conn, &tool, content)
+                .map_err(|_| "工具配置恢复失败，请检查配置格式和目标目录")?,
         });
     }
     let mut skills = Vec::new();
@@ -144,47 +177,26 @@ pub(super) fn restore_artifacts_with_rollback(
     // Capture every destination before the first tool/file write.
     for target in tools
         .iter()
-        .flat_map(|tool| &tool.targets)
+        .flat_map(|tool| {
+            tool.plan
+                .updates
+                .iter()
+                .map(|update| &update.path)
+                .chain(tool.plan.guards.iter().map(|(target, _)| target))
+        })
         .chain(skills.iter().chain(&files).map(|file| &file.target))
     {
         rollback.capture(target)?;
     }
-    for tool in &tools {
-        rollback.before_write(&tool.targets)?;
-        let result = match tool.tool.as_str() {
-            "claude-settings" => crate::utils::atomic_write_string(&tool.targets[0], &tool.content)
-                .map_err(|_| "无法写入工具配置".to_string()),
-            "claude" => {
-                let parsed = serde_json::from_str::<serde_json::Value>(&tool.content).ok();
-                let snapshot = parsed
-                    .as_ref()
-                    .and_then(|value| value.as_object())
-                    .is_some_and(|obj| {
-                        obj.contains_key("__claude_json_keys__")
-                            || obj.contains_key("__settings_json_keys__")
-                    });
-                if snapshot {
-                    apply_tool_snapshot(conn, "claude", &tool.content)
-                } else {
-                    crate::utils::atomic_write_string(&tool.targets[0], &tool.content)
-                        .map_err(|_| "无法写入工具配置".to_string())
-                }
-            }
-            "hermes" => {
-                let snapshot = crate::provider_proxy::materialize_tool_snapshot_for_runtime(
-                    conn,
-                    "hermes",
-                    &tool.content,
-                )?;
-                crate::hermes::snapshot::apply_snapshot_without_backup(conn, &snapshot).map(|_| ())
-            }
-            _ => apply_tool_snapshot(conn, &tool.tool, &tool.content),
-        };
-        result.map_err(|_| "工具配置恢复失败，请检查配置格式和目标目录".to_string())?;
+    let tool_count = tools.len();
+    for tool in tools {
+        rollback
+            .apply_plan(tool.plan)
+            .map_err(|_| "工具配置恢复失败，请检查配置格式和目标目录")?;
     }
     for file in skills.iter().chain(&files) {
-        rollback.before_write(std::slice::from_ref(&file.target))?;
-        crate::utils::atomic_write(&file.target, &file.bytes)
+        rollback
+            .write(&file.target, &file.bytes)
             .map_err(|_| "附属文件恢复失败，请检查目标目录权限")?;
     }
     for file in &projects {
@@ -196,10 +208,11 @@ pub(super) fn restore_artifacts_with_rollback(
             projects.iter().map(|file| file.root.as_str()),
         )?;
     }
+    rollback.verify()?;
     conn.execute_batch("DROP TABLE _backup_meta; DROP TABLE _tool_configs; DROP TABLE _skill_files; DROP TABLE _backup_files;").map_err(|_| "无法完成备份记录整理")?;
     Ok((
         restored_count.saturating_sub(temp_rows),
-        tools.len(),
+        tool_count,
         skills.len(),
         files.len(),
         pending,

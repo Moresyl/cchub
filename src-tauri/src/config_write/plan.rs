@@ -31,6 +31,15 @@ impl FilePlan {
         Ok(())
     }
 
+    pub(crate) fn check_targets(&self) -> Result<(), String> {
+        check_distinct(
+            self.updates
+                .iter()
+                .map(|update| update.path.as_path())
+                .chain(self.guards.iter().map(|(path, _)| path.as_path())),
+        )
+    }
+
     pub(crate) fn commit(self) -> Result<(), String> {
         self.commit_then(|| Ok(()))
     }
@@ -39,12 +48,7 @@ impl FilePlan {
         self,
         finalize: impl FnOnce() -> Result<(), String>,
     ) -> Result<(), String> {
-        check_distinct(
-            self.updates
-                .iter()
-                .map(|update| update.path.as_path())
-                .chain(self.guards.iter().map(|(path, _)| path.as_path())),
-        )?;
+        self.check_targets()?;
         self.check_guards()?;
         let Self { updates, guards } = self;
         super::commit_then(updates, || {
@@ -62,7 +66,7 @@ impl FilePlan {
 
 // Existing ancestors can be user-configured links. Canonicalize them so two
 // spellings cannot schedule conflicting writes to the same native location.
-fn location(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn location(path: &Path) -> Result<PathBuf, String> {
     let mut ancestor = std::path::absolute(path).map_err(|_| "Invalid configuration location")?;
     let mut remaining = Vec::new();
     let mut resolved = loop {

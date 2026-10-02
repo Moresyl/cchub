@@ -48,24 +48,6 @@ pub fn read_snapshot(conn: &Connection) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
-pub(crate) fn apply_snapshot_without_backup(
-    conn: &Connection,
-    snapshot: &str,
-) -> Result<Option<PathBuf>, String> {
-    apply_snapshot_impl(conn, snapshot, false)
-}
-
-fn apply_snapshot_impl(
-    conn: &Connection,
-    snapshot: &str,
-    create_backup: bool,
-) -> Result<Option<PathBuf>, String> {
-    let _guard = crate::json_config::write_lock()?;
-    let (plan, backup) = prepare_snapshot(conn, snapshot, create_backup)?;
-    plan.commit()?;
-    Ok(backup)
-}
-
 pub(crate) fn prepare_snapshot(
     conn: &Connection,
     snapshot: &str,

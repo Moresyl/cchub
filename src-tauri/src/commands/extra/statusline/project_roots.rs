@@ -1,4 +1,7 @@
 #![allow(clippy::too_many_arguments)]
+#[cfg(test)]
+#[path = "project_roots/restore_tests.rs"]
+mod restore_tests;
 use std::path::PathBuf;
 
 use super::super::config_profiles::*;
@@ -20,6 +23,7 @@ fn project_restore_transaction(
     conn: &rusqlite::Connection,
     restore: impl FnOnce(&mut super::backup_file_rollback::FileRollback) -> Result<usize, String>,
 ) -> Result<usize, String> {
+    let _guard = crate::json_config::write_lock()?;
     let directory = conn
         .path()
         .and_then(|path| std::path::Path::new(path).parent())
@@ -31,6 +35,7 @@ fn project_restore_transaction(
     conn.execute_batch(&format!("SAVEPOINT {savepoint};"))
         .map_err(|_| "无法开始项目路径迁移")?;
     let result = restore(&mut rollback).and_then(|count| {
+        rollback.verify()?;
         conn.execute_batch(&format!("RELEASE {savepoint};"))
             .map_err(|_| "无法提交项目路径迁移")?;
         Ok(count)
@@ -100,11 +105,7 @@ fn restore_project_snapshot(
         rollback.capture(target)?;
     }
     for (target_path, bytes) in planned {
-        rollback.before_write(std::slice::from_ref(&target_path))?;
-        if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        crate::utils::atomic_write(&target_path, &bytes).map_err(|e| e.to_string())?;
+        rollback.write(&target_path, &bytes)?;
         restored += 1;
     }
 

@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 mod plan;
+pub(crate) use plan::location as target_key;
 pub(crate) use plan::FilePlan;
 
 pub(crate) struct FileUpdate {

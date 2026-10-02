@@ -44,7 +44,7 @@ pub(super) fn relative_path(value: &str, allow_empty: bool) -> Result<PathBuf, S
     Ok(path)
 }
 
-fn is_link(metadata: &std::fs::Metadata) -> bool {
+pub(super) fn is_link(metadata: &std::fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
     }

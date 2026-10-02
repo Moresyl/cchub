@@ -24,6 +24,75 @@ fn path_row(tool: &str, path: &Path) -> String {
 }
 
 #[test]
+fn full_file_and_skill_records_override_their_snapshots_and_commit_exact_bytes() {
+    use base64::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let mut conn = live(dir.path());
+    let tool = dir.path().join("codex");
+    std::fs::create_dir(&tool).unwrap();
+    let raw = b"# retained exact formatting\r\nmodel = 'full-file'\r\n";
+    let full = base64::engine::general_purpose::STANDARD.encode(raw);
+    let skill = base64::engine::general_purpose::STANDARD.encode("full skill\r\n");
+    let snapshot = serde_json::json!({"auth":{}, "config":"model = 'snapshot'"}).to_string();
+    let body = format!("{}INSERT INTO _tool_configs VALUES ('codex','','{}'); INSERT INTO _skill_files (tool_id,name,content) VALUES ('codex','SKILL.md','snapshot skill'); INSERT INTO _backup_files (root_key,relative_path,content_base64) VALUES ('tooldir:codex','config.toml','{full}'),('tooldir:codex','skills/SKILL.md','{skill}');", path_row("codex", &tool), snapshot.replace('\'', "''"));
+    import_into_connection(&mut conn, &dump(&body)).unwrap();
+    assert_eq!(std::fs::read(tool.join("config.toml")).unwrap(), raw);
+    assert_eq!(
+        std::fs::read(tool.join("skills/SKILL.md")).unwrap(),
+        b"full skill\r\n"
+    );
+    let summary: LastImportSummary = get_json_app_setting(&conn, "last_import_summary")
+        .unwrap()
+        .unwrap();
+    assert_eq!(summary.tool_configs_restored, 1);
+    assert_eq!(summary.skills_restored, 1);
+    assert_eq!(summary.full_files_restored, 2);
+}
+
+#[test]
+fn external_edit_after_artifacts_blocks_database_install_and_preserves_user_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut conn = live(dir.path());
+    let tool = dir.path().join("codex");
+    std::fs::create_dir(&tool).unwrap();
+    let target = tool.join("config.toml");
+    std::fs::write(&target, [0, 255, 1]).unwrap();
+    let snapshot = serde_json::json!({"auth":{}, "config":"model = 'restored'"}).to_string();
+    let body = format!("{}INSERT INTO app_settings VALUES ('restored','new'); INSERT INTO _tool_configs VALUES ('codex','','{}');", path_row("codex", &tool), snapshot.replace('\'', "''"));
+    let prepared = rusqlite::Connection::open_in_memory().unwrap();
+    configure_database_connection(&prepared, false).unwrap();
+    super::super::backup_sql::load_backup_sql(&prepared, &dump(&body)).unwrap();
+    let mut files = super::super::backup_file_rollback::FileRollback::new(dir.path()).unwrap();
+    super::super::backup_artifacts::restore_artifacts_with_rollback(
+        &prepared, 0, &mut files, false,
+    )
+    .unwrap();
+    std::fs::write(&target, "model = 'external'").unwrap();
+    let error = install_restored_database(&prepared, &mut conn, &files).unwrap_err();
+    assert!(files.rollback(error).contains("外部修改已保留"));
+    assert_eq!(std::fs::read(&target).unwrap(), b"model = 'external'");
+    assert!(!tool.join("auth.json").exists());
+    assert_eq!(
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key='sentinel'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "original"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM app_settings WHERE key='restored'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn successful_restore_keeps_the_connection_and_persists_summary_and_native_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut conn = live(dir.path());

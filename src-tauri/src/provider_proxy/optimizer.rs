@@ -1,5 +1,6 @@
 // proxy_optimizer 配置读取与 body 改写：Codex/Claude 各有不同的预处理。
 use bytes::Bytes;
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
@@ -9,25 +10,23 @@ use super::LocalProviderProxyRuntime;
 
 pub(super) fn read_optimizer_config<R: tauri::Runtime>(
     app_handle: &AppHandle<R>,
-) -> crate::proxy_optimizer::OptimizerConfig {
-    if let Some(config) = app_handle
-        .try_state::<LocalProviderProxyRuntime>()
-        .and_then(|runtime_state| {
-            runtime_state
-                .0
-                .lock()
-                .ok()
-                .and_then(|runtime| runtime.optimizer_config.clone())
-        })
-    {
-        return apply_auto_failover_override(app_handle, config);
+) -> Result<crate::proxy_optimizer::OptimizerConfig, &'static str> {
+    const ERROR: &str = "Cannot confirm saved proxy settings";
+    if let Some(state) = app_handle.try_state::<LocalProviderProxyRuntime>() {
+        let runtime = state.0.lock().map_err(|_| ERROR)?;
+        if let Some(config) = runtime.optimizer_config.clone() {
+            config.validate_timeouts().map_err(|_| ERROR)?;
+            runtime
+                .admission
+                .configure(config.admission.clone())
+                .map_err(|_| ERROR)?;
+            drop(runtime);
+            return Ok(apply_auto_failover_override(app_handle, config));
+        }
     }
 
     let db = app_handle.state::<DbState>();
-    let conn = match db.0.lock() {
-        Ok(conn) => conn,
-        Err(_) => return crate::proxy_optimizer::OptimizerConfig::default(),
-    };
+    let conn = db.0.lock().map_err(|_| ERROR)?;
 
     let raw: Option<String> = conn
         .query_row(
@@ -35,13 +34,16 @@ pub(super) fn read_optimizer_config<R: tauri::Runtime>(
             rusqlite::params![crate::proxy_optimizer::config::OPTIMIZER_CONFIG_SETTINGS_KEY],
             |row| row.get(0),
         )
-        .ok();
+        .optional()
+        .map_err(|_| ERROR)?;
 
-    let config: crate::proxy_optimizer::OptimizerConfig = raw
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_default();
+    let config: crate::proxy_optimizer::OptimizerConfig = match raw {
+        Some(value) => serde_json::from_str(&value).map_err(|_| ERROR)?,
+        None => crate::proxy_optimizer::OptimizerConfig::default(),
+    };
+    config.validate_timeouts().map_err(|_| ERROR)?;
     update_optimizer_config_cache(app_handle, config.clone());
-    apply_auto_failover_override_with_conn(&conn, config)
+    Ok(apply_auto_failover_override_with_conn(&conn, config))
 }
 
 fn apply_auto_failover_override<R: tauri::Runtime>(
@@ -116,6 +118,13 @@ pub(crate) fn update_optimizer_config_cache<R: tauri::Runtime>(
 ) {
     if let Some(runtime_state) = app_handle.try_state::<LocalProviderProxyRuntime>() {
         if let Ok(mut runtime) = runtime_state.0.lock() {
+            if runtime
+                .admission
+                .configure(config.admission.clone())
+                .is_err()
+            {
+                return;
+            }
             runtime.optimizer_config = Some(config);
         }
     }
@@ -128,6 +137,13 @@ pub(crate) fn update_advanced_config_cache<R: tauri::Runtime>(
 ) {
     if let Some(runtime_state) = app_handle.try_state::<LocalProviderProxyRuntime>() {
         if let Ok(mut runtime) = runtime_state.0.lock() {
+            if runtime
+                .admission
+                .configure(config.admission.clone())
+                .is_err()
+            {
+                return;
+            }
             runtime.optimizer_config = Some(config);
             runtime.rectifier_config = Some(rectifier);
         }

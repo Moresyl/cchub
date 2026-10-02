@@ -14,6 +14,7 @@ import { SimpleSelect } from "../components/ui/simple-select";
 import { Switch } from "../components/ui/switch";
 import useSettings from "./ProxyAdvanced/useSettings";
 import type { OptimizerConfig } from "./ProxyAdvanced/types";
+import AdmissionPanel from "./ProxyAdvanced/AdmissionPanel";
 import SettingsNotice from "./ProxyAdvanced/SettingsNotice";
 
 interface ProxyAdvancedProps {
@@ -564,6 +565,8 @@ function ProxyAdvanced({ embedded = false, mode = "all" }: ProxyAdvancedProps = 
             />
           </div>
         </div>
+
+        <AdmissionPanel config={config.admission} onChange={(admission) => update({ admission })} />
 
         {/* Codex OAuth */}
         {mode !== "claude" && (

@@ -13,7 +13,9 @@ use std::time::Instant;
 use tauri::{AppHandle, Manager, State as TauriState};
 use tokio::sync::oneshot;
 
+mod admission;
 mod affinity;
+pub use admission::Stats as AdmissionStats;
 mod alpha_search;
 mod chat_history;
 mod circuits;
@@ -95,6 +97,7 @@ pub struct LocalProviderProxyStatus {
 
 #[derive(Default)]
 pub(super) struct LocalProviderProxyRuntimeInner {
+    pub(in crate::provider_proxy) admission: admission::Store,
     pub(super) port: Option<u16>,
     pub(super) shutdown: Option<oneshot::Sender<()>>,
     pub(super) preferred_base_urls: HashMap<String, String>,
@@ -180,6 +183,21 @@ pub fn get_circuit_breaker_stats(app_handle: &AppHandle) -> Result<CircuitBreake
         open_count,
         half_open_count,
     })
+}
+
+pub fn get_admission_stats<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+) -> Result<AdmissionStats, String> {
+    let store = app_handle
+        .state::<LocalProviderProxyRuntime>()
+        .0
+        .lock()
+        .map_err(|_| "Local request admission is unavailable".to_string())?
+        .admission
+        .clone();
+    store
+        .stats()
+        .map_err(|_| "Local request admission is unavailable".to_string())
 }
 
 pub fn reset_circuit_breakers(app_handle: &AppHandle) -> Result<usize, String> {

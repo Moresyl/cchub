@@ -103,6 +103,13 @@ pub fn get_circuit_breaker_stats(
 }
 
 #[tauri::command]
+pub fn get_proxy_admission_stats<R: tauri::Runtime>(
+    app_handle: AppHandle<R>,
+) -> Result<crate::provider_proxy::AdmissionStats, String> {
+    crate::provider_proxy::get_admission_stats(&app_handle)
+}
+
+#[tauri::command]
 pub fn reset_circuit_breakers(app_handle: AppHandle) -> Result<usize, String> {
     crate::provider_proxy::reset_circuit_breakers(&app_handle)
 }

@@ -333,6 +333,31 @@ export const en: I18n = {
     saveFailedDesc:
       "Your unsaved changes remain on this page. Reload the saved settings and review them before editing again.",
     reload: "Reload settings",
+    admissionTitle: "Account concurrency and queues",
+    admissionDesc:
+      "The same API key at a service, or the same signed-in account, shares slots across profiles. Queued requests do not contact upstreams or trigger failover.",
+    admissionLimit: "Default concurrency per account",
+    admissionLimitDesc:
+      "0 removes the account limit. Running requests hold slots until the response finishes or is cancelled.",
+    admissionQueue: "Queue capacity per account",
+    admissionQueueDesc: "0 disables waiting and returns a local busy response when the concurrency limit is reached.",
+    admissionWait: "Maximum queue wait (seconds)",
+    admissionWaitDesc:
+      "An expired wait returns a local busy response. Cancellation releases its queue reservation immediately.",
+    admissionAccounts: "View account concurrency",
+    admissionAccountsDesc:
+      "Shows active accounts, accounts used in the past hour and saved overrides. After a request, set a separate account limit here, then click Save.",
+    admissionRefresh: "Refresh status",
+    admissionReadFailed: "Status could not be updated. Previous readings are for reference; refresh again.",
+    admissionLoading: "Reading account status…",
+    admissionUnknown: "Runtime status has not been confirmed",
+    admissionApplied: "Applied concurrency limit",
+    admissionUnlimited: "No account limit",
+    admissionActive: "Active",
+    admissionQueued: "Queued",
+    admissionSavedAccount: "Configured account",
+    admissionInherit: "Use default concurrency",
+    admissionInherited: "Using default concurrency",
     masterSwitch: "Enable Proxy Optimizer",
     masterSwitchDesc: "Master switch — disables all optimization modules when off",
     thinkingOptimizer: "Thinking Optimizer",

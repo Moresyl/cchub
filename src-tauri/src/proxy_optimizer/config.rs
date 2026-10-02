@@ -5,6 +5,8 @@ use super::model_mapper::ModelMappingRule;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OptimizerConfig {
+    #[serde(default)]
+    pub admission: super::admission::AdmissionConfig,
     pub enabled: bool,
     pub thinking_optimizer: bool,
     pub cache_injection: bool,
@@ -54,6 +56,7 @@ pub struct OptimizerConfig {
 
 impl OptimizerConfig {
     pub fn validate_timeouts(&self) -> Result<(), String> {
+        self.admission.validate()?;
         for (name, seconds) in [
             (
                 "streamingFirstByteTimeout",
@@ -74,6 +77,7 @@ impl OptimizerConfig {
 impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
+            admission: super::admission::AdmissionConfig::default(),
             enabled: false,
             thinking_optimizer: false,
             cache_injection: false,

@@ -15,6 +15,8 @@ use super::cost::{
     extract_error_message_from_response, log_proxy_request, transform_claude_response_body,
 };
 use super::desktop;
+#[path = "forward/admission.rs"]
+mod admission;
 #[path = "forward/body.rs"]
 mod body;
 #[path = "forward/context.rs"]
@@ -42,15 +44,15 @@ mod streaming_preflight;
 #[path = "forward/timeouts.rs"]
 mod timeouts;
 #[path = "forward/transport.rs"]
-mod transport;
+pub(in crate::provider_proxy) mod transport;
 use super::optimizer::{read_optimizer_config, read_rectifier_config};
 use super::profiles::{
     endpoint_circuit_key, is_claude_messages_path, ordered_upstream_base_urls, profile_circuit_key,
-    read_profile_candidates_for_tool, route_succeeded, should_strip_claude_transform_header,
+    read_profile_candidates_for_tool, route_succeeded,
 };
 use super::usage::{parse_usage_metrics_with_basis, source_input_basis};
 use super::{
-    build_proxy_error, build_upstream_request_url, extract_upstream_target, is_hop_by_hop_header,
+    build_proxy_error, build_upstream_request_url, extract_upstream_target,
     is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes, reqwest_client,
     LocalProviderProxyRuntime, MAX_PROXY_BODY_BYTES, MAX_PROXY_RESPONSE_BODY_BYTES,
 };
@@ -145,7 +147,10 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     let mut last_error: Option<String> = None;
     let mut last_response: Option<body::RetainedReply> = None;
     let rectifier_config = read_rectifier_config(&app_handle);
-    let optimizer_config = read_optimizer_config(&app_handle);
+    let optimizer_config = match read_optimizer_config(&app_handle) {
+        Ok(config) => config,
+        Err(error) => return build_proxy_error(StatusCode::INTERNAL_SERVER_ERROR, error.into()),
+    };
     if let Err(error) = optimizer_config.validate_timeouts() {
         return build_proxy_error(StatusCode::INTERNAL_SERVER_ERROR, error);
     }
@@ -240,25 +245,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             }
         }
 
-        let forwarded_headers: Vec<(axum::http::HeaderName, axum::http::HeaderValue)> =
-            original_headers
-                // Header filtering depends on the selected upstream profile and transform mode.
-                // Clone from the original request snapshot because the body has already been moved.
-                .iter()
-                .filter_map(|(name, value)| {
-                    if is_hop_by_hop_header(name.as_str())
-                        || should_strip_claude_transform_header(
-                            name.as_str(),
-                            upstream.claude_api_format,
-                            &original_relative_path,
-                        )
-                    {
-                        None
-                    } else {
-                        Some((name.clone(), value.clone()))
-                    }
-                })
-                .collect();
+        let forwarded_headers =
+            transport::forwarded_headers(&original_headers, &upstream, &original_relative_path);
         let has_accept_encoding_header = forwarded_headers
             .iter()
             .any(|(name, _)| name.as_str().eq_ignore_ascii_case("accept-encoding"));
@@ -284,6 +272,8 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             Ok(prepared) => prepared,
             Err(response) => return response,
         };
+        let effective_request_query =
+            transport::upstream_query(effective_request_query.as_deref(), &upstream);
         if quota_aware {
             if let Some(retry) = quota::blocked(
                 &app_handle,
@@ -313,6 +303,20 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             };
         let ordered_base_urls = ordered_upstream_base_urls(&app_handle, &upstream);
         let attempt_count = ordered_base_urls.len();
+        let (effective_headers, admission_permit) = match admission::prepare(
+            &app_handle,
+            &upstream,
+            &forwarded_headers,
+            &optimizer_extra_headers,
+            body_bytes.len().saturating_add(effective_body_bytes.len()),
+            &effective_relative_path,
+            effective_request_query.as_deref(),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
         let Some(mut profile_lease) = CircuitLease::acquire(
             runtime.clone(),
             CircuitScope::Profile,
@@ -370,9 +374,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                     &client,
                     &method,
                     &upstream_url,
-                    &forwarded_headers,
-                    &upstream,
-                    &optimizer_extra_headers,
+                    &effective_headers,
                     !request_insights.is_streaming && !has_accept_encoding_header,
                     &request_body_bytes,
                 );
@@ -746,13 +748,16 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             return body::stream_response(
                                 status,
                                 &headers,
-                                track_body(
-                                    body,
-                                    profile_lease,
-                                    endpoint_lease,
-                                    status.is_success(),
-                                    health,
-                                    on_success,
+                                super::admission::track_body(
+                                    track_body(
+                                        body,
+                                        profile_lease,
+                                        endpoint_lease,
+                                        status.is_success(),
+                                        health,
+                                        on_success,
+                                    ),
+                                    admission_permit,
                                 ),
                             );
                         }

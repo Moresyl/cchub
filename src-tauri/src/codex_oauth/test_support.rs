@@ -25,3 +25,13 @@ pub(crate) async fn seeded() -> (tempfile::TempDir, Arc<CodexOAuthManager>) {
     }
     (dir, manager)
 }
+
+pub(crate) async fn replace_cached_token(manager: &CodexOAuthManager, account: &str, token: &str) {
+    manager.tokens.write().await.insert(
+        account.into(),
+        CachedToken {
+            value: token.into(),
+            expires_at_ms: expires_at(Some(3600)),
+        },
+    );
+}

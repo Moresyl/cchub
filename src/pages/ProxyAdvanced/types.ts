@@ -5,6 +5,7 @@ export interface MappingRule {
 }
 
 export interface OptimizerConfig {
+  admission?: AdmissionConfig;
   enabled: boolean;
   thinkingOptimizer: boolean;
   cacheInjection: boolean;
@@ -30,6 +31,14 @@ export interface OptimizerConfig {
   streamingFirstByteTimeout: number;
   streamingIdleTimeout: number;
   nonStreamingTimeout: number;
+}
+
+export interface AdmissionConfig {
+  maxConcurrent: number;
+  maxQueued: number;
+  queueTimeoutSecs: number;
+  accountLimits: Record<string, number>;
+  accountLabels: Record<string, string>;
 }
 
 export interface RectifierConfig {

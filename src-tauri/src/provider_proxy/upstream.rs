@@ -676,8 +676,15 @@ pub(super) fn build_upstream_request_url(
         }
         return Ok(trimmed.to_string());
     }
-    let base = base_url.trim().trim_end_matches('/');
+    let base = base_url.trim().split('#').next().unwrap_or_default();
+    let (base, base_query) = base
+        .split_once('?')
+        .map_or((base, None), |(path, query)| (path, Some(query)));
+    let base = base.trim_end_matches('/');
     let relative = relative_path.trim_start_matches('/');
+    let (relative, relative_query) = relative
+        .split_once('?')
+        .map_or((relative, None), |(path, query)| (path, Some(query)));
     let adjusted = if relative.is_empty() || base.ends_with(&format!("/{relative}")) {
         String::new()
     } else if let Some(stripped) = relative.strip_prefix("v1/") {
@@ -706,7 +713,13 @@ pub(super) fn build_upstream_request_url(
         format!("{base}/{adjusted}")
     };
 
-    if let Some(query) = query.filter(|value| !value.is_empty()) {
+    // The base query belongs after the joined path, never inside it. Preserve
+    // configured parameters ahead of caller parameters with the same name.
+    for query in [base_query, relative_query, query]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.is_empty())
+    {
         if let Some((_, existing)) = url.split_once('?') {
             let keys: std::collections::HashSet<_> =
                 url::form_urlencoded::parse(existing.as_bytes())

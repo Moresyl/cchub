@@ -32,6 +32,50 @@ impl std::fmt::Debug for ManagedPrincipal {
 }
 
 impl ManagedPrincipal {
+    pub(super) async fn current_headers<R: tauri::Runtime>(
+        &self,
+        app: &AppHandle<R>,
+    ) -> Result<Vec<(String, String)>, &'static str> {
+        const UNAVAILABLE: &str = "Cannot confirm current account credentials";
+        if !self.if_current(app, || {}) {
+            return Err(UNAVAILABLE);
+        }
+        // Re-lease the original account after waiting. Token refresh does not
+        // change its lane, and a changed default account must not take its place.
+        let lease = match self.provider {
+            AuthProvider::Codex => app
+                .try_state::<CodexOAuthState>()
+                .ok_or(UNAVAILABLE)?
+                .0
+                .lease(Some(&self.account_id))
+                .await
+                .map_err(|_| UNAVAILABLE)?,
+            AuthProvider::Copilot => app
+                .try_state::<CopilotAuthState>()
+                .ok_or(UNAVAILABLE)?
+                .0
+                .lease(Some(&self.account_id))
+                .await
+                .map_err(|_| UNAVAILABLE)?,
+            AuthProvider::Xai => app
+                .try_state::<XaiOAuthState>()
+                .ok_or(UNAVAILABLE)?
+                .0
+                .lease(Some(&self.account_id))
+                .await
+                .map_err(|_| UNAVAILABLE)?,
+        };
+        let (headers, principal) = ManagedCredentials {
+            provider: self.provider,
+            lease,
+        }
+        .into_parts();
+        if principal != *self || !self.if_current(app, || {}) {
+            return Err(UNAVAILABLE);
+        }
+        Ok(headers)
+    }
+
     pub(super) fn if_current<R: tauri::Runtime>(
         &self,
         app: &AppHandle<R>,

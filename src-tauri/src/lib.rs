@@ -832,6 +832,7 @@ pub fn run() {
             commands::optimizer_commands::get_rectifier_config,
             commands::optimizer_commands::set_rectifier_config,
             commands::optimizer_commands::get_circuit_breaker_stats,
+            commands::optimizer_commands::get_proxy_admission_stats,
             commands::optimizer_commands::reset_circuit_breakers,
             commands::optimizer_commands::reset_circuit_breaker,
             commands::optimizer_commands::get_circuit_breaker_config,

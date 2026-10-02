@@ -34,6 +34,7 @@ describe("AppUpdateDialog", () => {
     );
 
     expect(screen.getByRole("dialog")).toBeTruthy();
+    await act(() => vi.dynamicImportSettled());
     expect(await screen.findByText("Durable Pi session accounting")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /更新并重启|Update and restart/ }));
     expect(onInstall).toHaveBeenCalledTimes(1);

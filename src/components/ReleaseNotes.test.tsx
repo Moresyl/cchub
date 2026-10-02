@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ReleaseNotes from "./ReleaseNotes";
 import { setLocale } from "../lib/i18n";
@@ -20,6 +20,7 @@ describe("ReleaseNotes", () => {
         }
       />,
     );
+    await act(() => vi.dynamicImportSettled());
     expect(await screen.findByRole("heading", { name: "Features" })).toBeTruthy();
     expect(screen.getByRole("list")).toBeTruthy();
     expect(screen.getByRole("table")).toBeTruthy();
@@ -35,6 +36,7 @@ describe("ReleaseNotes", () => {
         }
       />,
     );
+    await act(() => vi.dynamicImportSettled());
     expect(await screen.findByText("Unsafe")).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByRole("img")).toBeNull();
@@ -45,6 +47,7 @@ describe("ReleaseNotes", () => {
   it("reports an external-link failure without navigating the application", async () => {
     open.mockRejectedValueOnce(new Error("shell failed"));
     render(<ReleaseNotes content="[Guide](https://example.test)" />);
+    await act(() => vi.dynamicImportSettled());
     fireEvent.click(await screen.findByRole("link", { name: "Guide" }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("error", "无法打开链接，请稍后重试"));
   });

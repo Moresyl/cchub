@@ -18,8 +18,9 @@ import { isCodexConfigToml, type CodexStructuredConfig } from "../lib/codexConfi
 import { useCodexEditor } from "./config-files/useCodexEditor";
 import CodexStructuredFields from "./config-files/CodexStructuredFields";
 
+import CodeEditor from "../components/DeferredCodeEditor";
+
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
-const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
 interface ConfigRoot {
   id: string;

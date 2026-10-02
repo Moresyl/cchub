@@ -1,4 +1,3 @@
-import { lazy, Suspense } from "react";
 import { ArrowLeft, ArrowRight, PackagePlus, X } from "lucide-react";
 
 import { WIZARD_PRESETS, type WizardPreset } from "./helpers";
@@ -8,7 +7,7 @@ import type { DetectedTool } from "../../types/skills";
 import { CheckboxField } from "../../components/ui/checkbox-field";
 import { Textarea } from "../../components/ui/textarea";
 
-const CodeEditor = lazy(() => import("../../components/CodeEditor"));
+import CodeEditor from "../../components/DeferredCodeEditor";
 
 interface McpServerWizardViewProps {
   zh: boolean;
@@ -295,15 +294,13 @@ export default function McpServerWizardView({
             {wizardDraft.transport === "stdio" && (
               <div>
                 <div className="field-label">{zh ? "参数解析结果" : "Parsed Arguments"}</div>
-                <Suspense fallback={null}>
-                  <CodeEditor
-                    value={JSON.stringify(wizardValidation.parsedArgs, null, 2)}
-                    language="json"
-                    readOnly
-                    minHeight={100}
-                    maxHeight={180}
-                  />
-                </Suspense>
+                <CodeEditor
+                  value={JSON.stringify(wizardValidation.parsedArgs, null, 2)}
+                  language="json"
+                  readOnly
+                  minHeight={100}
+                  maxHeight={180}
+                />
               </div>
             )}
             <div>
@@ -316,15 +313,13 @@ export default function McpServerWizardView({
                     ? "请求头解析结果"
                     : "Parsed Headers"}
               </div>
-              <Suspense fallback={null}>
-                <CodeEditor
-                  value={JSON.stringify(wizardValidation.parsedEnv, null, 2)}
-                  language="json"
-                  readOnly
-                  minHeight={100}
-                  maxHeight={180}
-                />
-              </Suspense>
+              <CodeEditor
+                value={JSON.stringify(wizardValidation.parsedEnv, null, 2)}
+                language="json"
+                readOnly
+                minHeight={100}
+                maxHeight={180}
+              />
             </div>
           </div>
         </div>

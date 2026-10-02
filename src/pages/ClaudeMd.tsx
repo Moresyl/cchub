@@ -24,8 +24,9 @@ import {
   useWriteClaudeMdContentMutation,
 } from "../hooks/mutations";
 
+import CodeEditor from "../components/DeferredCodeEditor";
+
 const MarkdownEditor = lazy(() => import("../components/MarkdownEditor"));
-const CodeEditor = lazy(() => import("../components/CodeEditor"));
 
 interface ClaudeMdFile {
   path: string;

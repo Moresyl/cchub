@@ -62,6 +62,7 @@ async function open() {
   render(<ConfigFiles />);
   fireEvent.click(await screen.findByRole("button", { name: "config.toml" }));
   await waitFor(() => expect(key().value).toBe("old-key"));
+  await screen.findByRole("textbox", { name: "Raw configuration" });
 }
 beforeEach(() => {
   setLocale("zh");

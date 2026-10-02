@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { Copy, Gauge, RefreshCw } from "lucide-react";
 import { showToast } from "./Toast";
 import type { ConfigProfile } from "../pages/profiles/helpers";
@@ -18,7 +18,7 @@ import { UsageCards } from "./UsageDetailsDialog/UsageCards";
 import { text, usageRows } from "./UsageDetailsDialog/presentation";
 import UsageAlertRule from "./usageAlerts/UsageAlertRule";
 
-const CodeEditor = lazy(() => import("./CodeEditor"));
+import CodeEditor from "./DeferredCodeEditor";
 
 interface UsageDetailsDialogProps {
   profile: ConfigProfile | null;

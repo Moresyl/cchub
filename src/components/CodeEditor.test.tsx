@@ -13,6 +13,17 @@ afterEach(() => {
 });
 
 describe("bounded configuration editor", () => {
+  it("keeps distinct accessible names for adjacent JSON fields", () => {
+    const view = render(
+      <>
+        <CodeEditor value='["node"]' ariaLabel="Arguments" readOnly />
+        <CodeEditor value="{}" ariaLabel="Environment" />
+      </>,
+    );
+    expect(screen.getByRole("textbox", { name: "Arguments" }).getAttribute("aria-readonly")).toBe("true");
+    expect(screen.getByRole("textbox", { name: "Environment" }).getAttribute("aria-readonly")).toBe("false");
+    view.unmount();
+  });
   it("shows real TOML diagnostics and clears them when raw syntax is corrected", async () => {
     const mounted = render(<CodeEditor language="toml" value='model = "unfinished' />);
     const content = screen.getByRole("textbox", { name: "TOML configuration editor" });

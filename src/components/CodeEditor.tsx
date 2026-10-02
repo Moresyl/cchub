@@ -13,7 +13,7 @@ import { tags } from "@lezer/highlight";
 import { getTomlSyntaxError } from "../lib/tomlSyntax";
 import { getLocale } from "../lib/i18n";
 
-interface CodeEditorProps {
+export interface CodeEditorProps {
   value: string;
   onChange?: (value: string) => void;
   language?: "json" | "markdown" | "yaml" | "toml" | "text";
@@ -21,6 +21,7 @@ interface CodeEditorProps {
   minHeight?: number;
   maxHeight?: number;
   placeholder?: string;
+  ariaLabel?: string;
 }
 
 const jsonLinter = linter((view) => {
@@ -164,6 +165,7 @@ function CodeEditorComponent({
   minHeight = 120,
   maxHeight,
   placeholder,
+  ariaLabel,
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -191,7 +193,7 @@ function CodeEditorComponent({
         },
       }),
       CodeMirrorView.contentAttributes.of({
-        "aria-label": `${language.toUpperCase()} configuration editor`,
+        "aria-label": ariaLabel ?? `${language.toUpperCase()} configuration editor`,
         "aria-readonly": String(readOnly),
         spellcheck: "false",
       }),
@@ -212,7 +214,7 @@ function CodeEditorComponent({
     }
 
     return nextExtensions;
-  }, [language, placeholder, readOnly, minHeight, maxHeight]);
+  }, [language, placeholder, readOnly, minHeight, maxHeight, ariaLabel]);
 
   useEffect(() => {
     if (!containerRef.current) return;

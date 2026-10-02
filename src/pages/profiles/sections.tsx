@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/rules-of-hooks */
-import { memo, lazy, useCallback, type ChangeEvent, type ReactNode } from "react";
+import { memo, useCallback, type ChangeEvent, type ReactNode } from "react";
 import { Save } from "lucide-react";
 
 import ProfileFragmentCard from "../../components/ProfileFragmentCard";
@@ -23,7 +23,7 @@ import {
   type ProviderConfigFragment,
 } from "./helpers";
 
-const CodeEditor = lazy(() => import("../../components/CodeEditor"));
+import CodeEditor from "../../components/DeferredCodeEditor";
 
 export const CodexRawConfigEditor = memo(function CodexRawConfigEditor({
   value,

@@ -6,8 +6,9 @@ import { showToast } from "../../components/Toast";
 import { t } from "../../lib/i18n";
 import type { InstalledMcpServer, SkillEntry } from "./helpers";
 
+import CodeEditor from "../../components/DeferredCodeEditor";
+
 const MarkdownEditor = lazy(() => import("../../components/MarkdownEditor"));
-const CodeEditor = lazy(() => import("../../components/CodeEditor"));
 
 interface SkillEditViewProps {
   locale: string;

@@ -1,10 +1,10 @@
-import { lazy, useEffect, useState } from "react";
+import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import { Check, Copy, Edit3, FileText, Share2, X } from "lucide-react";
 import type { I18n } from "../../lib/i18n";
 import type { DetectedTool } from "../../types/skills";
 import type { HealthCheckResult, McpServer } from "./helpers";
-
-const CodeEditor = lazy(() => import("../../components/CodeEditor"));
+import CodeEditor from "../../components/DeferredCodeEditor";
+import { Button } from "../../components/ui/button";
 
 type DetailTab = "overview" | "config" | "sync";
 
@@ -44,6 +44,7 @@ export default function McpServerDetailPanel({
   onClose,
 }: McpServerDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const tabId = useId();
 
   useEffect(() => {
     setActiveTab("overview");
@@ -54,6 +55,24 @@ export default function McpServerDetailPanel({
     { id: "config", label: zh ? "配置" : "Configuration" },
     { id: "sync", label: zh ? "同步" : "Sync" },
   ];
+
+  function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const next =
+      event.key === "ArrowRight"
+        ? (index + 1) % tabs.length
+        : event.key === "ArrowLeft"
+          ? (index + tabs.length - 1) % tabs.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? tabs.length - 1
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    setActiveTab(tabs[next].id);
+    const list = event.currentTarget.parentElement;
+    list?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+  }
 
   return (
     <div className="entity-detail">
@@ -75,49 +94,67 @@ export default function McpServerDetailPanel({
           </div>
         </div>
         <div className="entity-detail-actions">
-          <button
-            className="btn btn-ghost btn-icon-sm"
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={copyConfig}
             title={zh ? "复制配置" : "Copy configuration"}
             aria-label={zh ? "复制配置" : "Copy configuration"}
           >
             {copied ? <Check size={14} className="text-[var(--success)]" /> : <Copy size={14} />}
-          </button>
-          <button
-            className="btn btn-ghost btn-icon-sm"
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => startEdit(selected)}
             title={i.mcp.editConfig}
             aria-label={i.mcp.editConfig}
           >
             <Edit3 size={14} />
-          </button>
-          <button
-            className="btn btn-ghost btn-icon-sm"
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
             title={zh ? "关闭详情" : "Close details"}
             aria-label={zh ? "关闭详情" : "Close details"}
           >
             <X size={14} />
-          </button>
+          </Button>
         </div>
       </header>
 
       <div className="entity-detail-tabs" role="tablist" aria-label={zh ? "服务详情" : "Server details"}>
-        {tabs.map((tab) => (
-          <button
+        {tabs.map((tab, index) => (
+          <Button
             key={tab.id}
+            id={`${tabId}-${tab.id}-tab`}
+            variant="ghost"
+            size="sm"
             type="button"
             role="tab"
             aria-selected={activeTab === tab.id}
+            aria-controls={`${tabId}-panel`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
             className={`entity-detail-tab ${activeTab === tab.id ? "entity-detail-tab-active" : ""}`}
             onClick={() => setActiveTab(tab.id)}
+            onKeyDown={(event) => navigateTabs(event, index)}
           >
             {tab.label}
-          </button>
+          </Button>
         ))}
       </div>
 
-      <div className="entity-detail-scroll">
+      <div
+        className="entity-detail-scroll"
+        role="tabpanel"
+        id={`${tabId}-panel`}
+        aria-labelledby={`${tabId}-${activeTab}-tab`}
+        tabIndex={0}
+      >
         {saveSuccess && (
           <div className="mb-3 flex items-center gap-2 rounded-md bg-[var(--success-subtle)] px-3 py-2 text-xs font-medium text-[var(--success)]">
             <Check size={14} />
@@ -132,7 +169,7 @@ export default function McpServerDetailPanel({
                 <span className="field-label">{i.mcp.configPath}</span>
                 <div className="flex min-w-0 items-center gap-2 rounded-md bg-[var(--control-background)] px-2.5 py-2">
                   <FileText size={13} className="shrink-0 text-muted-foreground" />
-                  <span className="truncate font-mono text-[11px] text-[var(--text-secondary)]">
+                  <span className="min-w-0 break-all font-mono text-[11px] text-[var(--text-secondary)]">
                     {selected.config_path}
                   </span>
                 </div>
@@ -184,12 +221,20 @@ export default function McpServerDetailPanel({
           <div>
             <section className="entity-detail-section">
               <span className="field-label">{i.mcp.arguments}</span>
-              <CodeEditor value={formatJson(selected.args)} language="json" readOnly minHeight={150} maxHeight={280} />
+              <CodeEditor
+                value={formatJson(selected.args)}
+                ariaLabel={i.mcp.arguments}
+                language="json"
+                readOnly
+                minHeight={150}
+                maxHeight={280}
+              />
             </section>
             <section className="entity-detail-section">
               <span className="field-label">{i.mcp.environment}</span>
               <CodeEditor
                 value={formatEnvironment(selected.env)}
+                ariaLabel={i.mcp.environment}
                 language="json"
                 readOnly
                 minHeight={130}
@@ -220,9 +265,13 @@ export default function McpServerDetailPanel({
                           {isSynced ? (zh ? "已同步" : "Synced") : zh ? "未同步" : "Not synced"}
                         </div>
                       </div>
-                      <button
-                        className={`btn btn-xs ${isSynced ? "btn-secondary" : "btn-primary"}`}
-                        disabled={syncingTo === tool.id}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={isSynced ? "secondary" : "default"}
+                        aria-label={`${isSynced ? (zh ? "取消同步" : "Remove sync") : zh ? "同步到" : "Sync to"} ${tool.name}`}
+                        disabled={syncingTo !== null}
+                        aria-busy={syncingTo === tool.id}
                         onClick={() => toggleToolSync(tool.id)}
                       >
                         {syncingTo === tool.id ? (
@@ -233,7 +282,7 @@ export default function McpServerDetailPanel({
                           <Share2 size={11} />
                         )}
                         {isSynced ? (zh ? "取消" : "Remove") : zh ? "同步" : "Sync"}
-                      </button>
+                      </Button>
                     </div>
                   );
                 })}

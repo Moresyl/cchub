@@ -87,6 +87,17 @@ pub async fn restore_session_trash(key: String, db: State<'_, DbState>) -> Resul
     session_tasks::mutate(permit, move || plan.execute(&session_trash::directory()?)).await
 }
 
+#[tauri::command]
+pub async fn purge_session_trash(
+    targets: Vec<session_trash::SessionPurgeTarget>,
+) -> Result<session_trash::SessionPurgeResult, String> {
+    let permit = session_tasks::mutation_permit().await;
+    session_tasks::mutate(permit, move || {
+        session_trash::purge(&session_trash::directory()?, targets)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

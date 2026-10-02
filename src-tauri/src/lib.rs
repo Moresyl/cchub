@@ -429,6 +429,7 @@ pub fn run() {
             extra_commands::delete_sessions_checked,
             extra_commands::list_session_trash,
             extra_commands::restore_session_trash,
+            extra_commands::purge_session_trash,
             extra_commands::search_openclaw_daily_memory,
             extra_commands::read_openclaw_daily_memory_content,
             extra_commands::get_claude_settings,

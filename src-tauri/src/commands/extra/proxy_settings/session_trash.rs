@@ -12,6 +12,10 @@ use crate::shared::session_archive as archive;
 
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 
+mod purge;
+pub(super) use purge::purge;
+pub use purge::{SessionPurgeResult, SessionPurgeTarget};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrashedSession {
@@ -23,6 +27,8 @@ pub struct TrashedSession {
     pub deleted_at: String,
     pub file_count: usize,
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purge_revision: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -220,6 +226,7 @@ fn delete_with(
             deleted_at: chrono::Utc::now().to_rfc3339(),
             file_count: paths.len(),
             state: "prepared".into(),
+            purge_revision: None,
         },
         items: Vec::new(),
     };
@@ -278,6 +285,10 @@ fn delete_with(
 }
 
 fn read_manifest(trash: &Path, key: &str) -> Result<(PathBuf, Manifest), String> {
+    read_manifest_bytes(trash, key).map(|(dir, manifest, _)| (dir, manifest))
+}
+
+fn read_manifest_bytes(trash: &Path, key: &str) -> Result<(PathBuf, Manifest, Vec<u8>), String> {
     if uuid::Uuid::parse_str(key).is_err() || key.contains(['/', '\\']) {
         return Err("Invalid recovery key".into());
     }
@@ -304,7 +315,7 @@ fn read_manifest(trash: &Path, key: &str) -> Result<(PathBuf, Manifest), String>
     {
         return Err("Recovery manifest is damaged".into());
     }
-    Ok((dir, manifest))
+    Ok((dir, manifest, bytes))
 }
 
 pub(super) fn list(trash: &Path) -> Result<Vec<TrashedSession>, String> {
@@ -318,8 +329,9 @@ pub(super) fn list(trash: &Path) -> Result<Vec<TrashedSession>, String> {
         let Some(key) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        if let Ok((_, manifest)) = read_manifest(trash, &key) {
+        if let Ok((_, mut manifest)) = read_manifest(trash, &key) {
             if manifest.session.state != "restored" {
+                manifest.session.purge_revision = purge::revision(trash, &key).ok();
                 sessions.push(manifest.session);
             }
         }

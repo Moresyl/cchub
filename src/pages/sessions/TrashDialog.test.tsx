@@ -44,7 +44,7 @@ describe("recently deleted sessions", () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error("Existing file was preserved"));
     fireEvent.click(screen.getByRole("button", { name: "恢复" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Existing file was preserved");
+    expect(alert.textContent).toContain("恢复位置已有不同内容，已保留现有文件。");
     expect(screen.getByText(item.sessionId)).toBeTruthy();
     expect(onRestored).not.toHaveBeenCalled();
     vi.mocked(invoke).mockResolvedValueOnce(null);
@@ -93,5 +93,20 @@ describe("recently deleted sessions", () => {
     mounted.rerender(<TrashDialog open {...props} />);
     await screen.findByText("暂无可恢复的会话");
     expect(screen.queryByText(item.sessionId)).toBeNull();
+  });
+  it("masks unknown restore and list errors while keeping the entry retryable", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("masked-fixture-secret list failure"));
+    render(<TrashDialog open onClose={vi.fn()} onRestored={onRestored} uiText={uiText} />);
+    await screen.findByText("无法读取最近删除列表，请重试。");
+    expect(document.body.textContent).not.toContain("masked-fixture-secret");
+    vi.mocked(invoke).mockResolvedValueOnce([item]);
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await screen.findByText(item.sessionId);
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("masked-fixture-secret restore failure"));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+    await screen.findByText("恢复未完成，请检查配置目录后重试。");
+    expect(document.body.textContent).not.toContain("masked-fixture-secret");
+    expect(screen.getByText(item.sessionId)).toBeTruthy();
+    expect(onRestored).not.toHaveBeenCalled();
   });
 });

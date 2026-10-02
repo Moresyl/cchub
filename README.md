@@ -63,7 +63,9 @@ Codex session browsing, details and usage imports support both `.jsonl` and comp
 
 Deleting a Codex session retains original copies of the selected log and its plain/compressed twin in Recently deleted. Files updated within the last minute are refused. Restore verifies identity and content hashes, preserving existing files with different content. Shared client indexes and databases stay unchanged; recovery does not include other segments or subagents of the same thread. Other apps' deletions cannot be restored here. Bulk deletion reports each outcome, removes successful items and lets you retry only failed items.
 
-Session list/detail reads and deletion/recovery use background file workers, leaving the configuration database available during file processing. Reads run with bounded concurrency; deletion, recovery and recovery-list reads share one queue. Cancelling a wait does not release the queue while a file worker is still running.
+Recently deleted also supports Delete forever and Empty recently deleted with an in-app confirmation naming the selected sessions. Emptying applies only to the entries and revisions in that preview; later additions remain. Cleanup checks the recovery note and file metadata before each removal, refuses symbolic links, nested folders and unknown files, and reports partial failures for a fresh review and retry. It removes recovery copies only, without touching current session logs or shared indexes. Deletion is irreversible and may partially complete on failure; this is not a filesystem transaction. There is no automatic expiry. Cancelling returns focus to the initiating control, errors hide raw details, and the system's reduced-motion preference disables UI animations.
+
+Session list/detail reads and deletion/recovery use background file workers, leaving the configuration database available during file processing. Reads run with bounded concurrency; deletion, recovery, trash cleanup and recovery-list reads share one queue. Cancelling a wait does not release the queue while a file worker is still running.
 
 Codex history migration in Integration settings previews source/target buckets, plain/compressed files and state-row counts before confirmation. Default sources are old buckets declared in the current Codex configuration. Execution checks the preview revision and requires another review if history changed. Logs updated within the last minute are refused. Migration shares the background deletion/recovery queue without holding the configuration database during file processing.
 
@@ -77,9 +79,9 @@ Integration settings can also preview and selectively reverse a history migratio
 
 This screenshot shows the actual settings components with isolated demonstration data; it is not a native desktop acceptance result.
 
-![CCHub recently deleted sessions and recovery](screenshots/session-recovery.png)
+![CCHub recently deleted sessions, recovery and cleanup](screenshots/session-trash.png)
 
-This screenshot shows the actual page component with isolated demonstration data.
+This screenshot shows the actual page component with isolated demonstration data, not a native desktop acceptance result.
 
 ### Prompt library
 

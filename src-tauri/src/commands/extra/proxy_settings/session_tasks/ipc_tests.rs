@@ -27,7 +27,8 @@ fn app(root: &std::path::Path) -> tauri::App<MockRuntime> {
             crate::commands::extra_commands::get_session_messages,
             crate::commands::extra_commands::delete_session,
             crate::commands::extra_commands::delete_sessions,
-            crate::commands::extra_commands::delete_sessions_checked
+            crate::commands::extra_commands::delete_sessions_checked,
+            crate::commands::extra_commands::purge_session_trash
         ])
         .build(mock_context(noop_assets()))
         .unwrap()
@@ -52,6 +53,26 @@ fn ipc(window: &tauri::WebviewWindow<MockRuntime>, cmd: &str, body: Value) -> Re
 struct Noop;
 impl Wake for Noop {
     fn wake(self: Arc<Self>) {}
+}
+
+#[test]
+fn session_purge_ipc_rejects_empty_or_unpreviewed_payloads_without_any_deletion() {
+    let area = tempfile::tempdir().unwrap();
+    let app = app(area.path());
+    let window = tauri::WebviewWindowBuilder::new(&app, "purge-fixture", Default::default())
+        .build()
+        .unwrap();
+    let result = ipc(&window, "purge_session_trash", json!({"targets":[]})).unwrap_err();
+    assert_eq!(result, json!("Invalid session trash selection"));
+    // No unbounded all=true operation or caller-supplied filesystem root exists.
+    assert!(ipc(&window, "purge_session_trash", json!({"all":true})).is_err());
+    assert!(ipc(
+        &window,
+        "purge_session_trash",
+        json!({"targets":[{"key":"../outside","all":true}]})
+    )
+    .is_err());
+    assert!(area.path().is_dir());
 }
 
 #[tokio::test]

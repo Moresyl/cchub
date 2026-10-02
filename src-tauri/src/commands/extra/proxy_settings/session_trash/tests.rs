@@ -1,7 +1,7 @@
 use super::*;
 use std::time::UNIX_EPOCH;
 
-fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, SessionDeleteTarget) {
+pub(super) fn fixture() -> (tempfile::TempDir, PathBuf, PathBuf, SessionDeleteTarget) {
     let area = tempfile::tempdir().unwrap();
     let root = area.path().join("codex");
     let trash = area.path().join("trash");

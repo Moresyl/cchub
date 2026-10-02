@@ -175,17 +175,6 @@ body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
 /* ═══ 性能：视口外渲染跳过 ═══
    - .cv-auto: 用于长列表容器中的列表项，浏览器对屏幕外的项跳过 layout/paint，
      大幅降低长列表（240+ 行）滚动时的 jank。

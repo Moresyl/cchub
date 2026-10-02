@@ -13,6 +13,7 @@ interface ConfirmDialogProps {
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 function ConfirmDialogComponent({
@@ -25,6 +26,7 @@ function ConfirmDialogComponent({
   busy = false,
   onConfirm,
   onCancel,
+  onCloseAutoFocus,
 }: ConfirmDialogProps) {
   const isDestructive = variant === "destructive";
   const Icon = isDestructive ? AlertTriangle : Info;
@@ -33,7 +35,7 @@ function ConfirmDialogComponent({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !busy && onCancel()}>
-      <DialogContent hideClose fullscreenOnMobile={false} className="max-w-[420px]">
+      <DialogContent hideClose fullscreenOnMobile={false} className="max-w-[420px]" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader className="min-h-0 shrink overflow-y-auto pr-5">
           <div
             className="grid size-9 shrink-0 place-items-center rounded-[7px]"

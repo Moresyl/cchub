@@ -231,3 +231,123 @@ fn retains_unrelated_special_floats_in_noop_and_changed_documents() {
         );
     }
 }
+
+#[test]
+fn url_only_definitions_write_http_without_stdio_connection_fields() {
+    for definition in [
+        serde_json::json!({"url": "https://fixture.test/mcp", "headers": {"X-Fixture": "value"}}),
+        serde_json::json!({"type": "stdio", "url": "https://fixture.test/mcp"}),
+    ] {
+        let config: McpServerConfig = serde_json::from_value(definition).unwrap();
+        let text = edit("", "url-only", Some(&config), Format::Codex).unwrap();
+        let document: toml::Table = toml::from_str(&text).unwrap();
+        let entry = &document["mcp_servers"]["url-only"];
+        assert_eq!(entry["url"].as_str(), Some("https://fixture.test/mcp"));
+        for field in ["type", "command", "args", "env"] {
+            assert!(entry.get(field).is_none(), "Unexpected {field}");
+        }
+    }
+}
+
+#[test]
+fn codex_transport_edits_remove_incompatible_fields_and_retain_native_policy() {
+    let common = "# original document\nmodel='kept'\n[mcp_servers.service]\nenabled=false # user policy\nstartup_timeout_sec=90\nscopes=['read']\ncustom_option='keep'\n";
+    let local_fields = "command='node'\nargs=['server.js']\ncwd='/fixture/work'\nenv_vars=['TOKEN', { name='REMOTE_TOKEN', source='remote' }]\nexperimental_environment='remote'\n[mcp_servers.service.env]\nTOKEN='secret'\n";
+    let remote_fields = "url='https://fixture.test/mcp'\nhttp_headers_helper='fixture-helper'\nbearer_token_env_var='TOKEN'\noauth_resource='https://fixture.test/resource'\nauth='oauth'\n[mcp_servers.service.env_http_headers]\nX-Fixture='FIXTURE_HEADER'\n";
+    let suffix = "[mcp_servers.service.oauth]\nclient_id='kept'\n[mcp_servers.other]\ncommand='untouched' # other server\n";
+    let remote = McpServerConfig {
+        command: "https://fixture.test/mcp".into(),
+        args: Vec::new(),
+        env: HashMap::new(),
+        transport_type: None,
+    };
+    let local = local();
+    for (source_fields, config, removed, retained) in [
+        (
+            local_fields,
+            &remote,
+            vec![
+                "command",
+                "args",
+                "env",
+                "cwd",
+                "env_vars",
+                "experimental_environment",
+            ],
+            vec!["url"],
+        ),
+        (
+            remote_fields,
+            &local,
+            vec![
+                "url",
+                "http_headers",
+                "env_http_headers",
+                "http_headers_helper",
+                "bearer_token_env_var",
+                "oauth_resource",
+                "auth",
+            ],
+            vec!["command", "args", "env"],
+        ),
+        (
+            local_fields,
+            &local,
+            vec!["url"],
+            vec!["cwd", "env_vars", "experimental_environment"],
+        ),
+        (
+            remote_fields,
+            &remote,
+            vec!["command"],
+            vec![
+                "env_http_headers",
+                "http_headers_helper",
+                "bearer_token_env_var",
+                "oauth_resource",
+                "auth",
+            ],
+        ),
+    ] {
+        let source = format!("{common}{source_fields}{suffix}");
+        let result = edit(&source, "service", Some(config), Format::Codex).unwrap();
+        let value: toml::Table = toml::from_str(&result).unwrap();
+        let entry = &value["mcp_servers"]["service"];
+        for key in removed {
+            assert!(entry.get(key).is_none(), "Incompatible {key}");
+        }
+        for key in retained {
+            assert!(entry.get(key).is_some(), "Lost compatible {key}");
+        }
+        assert_eq!(entry["enabled"].as_bool(), Some(false));
+        assert_eq!(entry["startup_timeout_sec"].as_integer(), Some(90));
+        assert_eq!(entry["scopes"][0].as_str(), Some("read"));
+        assert_eq!(entry["custom_option"].as_str(), Some("keep"));
+        assert_eq!(entry["oauth"]["client_id"].as_str(), Some("kept"));
+        assert!(result.starts_with("# original document\nmodel='kept'\n"));
+        assert!(result.contains("enabled=false # user policy"));
+        assert!(result.ends_with("[mcp_servers.other]\ncommand='untouched' # other server\n"));
+    }
+}
+
+#[test]
+fn local_http_placement_survives_and_grok_does_not_use_codex_exclusive_field_rules() {
+    let source = "[mcp_servers.service]\ncommand='node'\nargs=['server.js']\ncwd='/fixture/work'\nenv_vars=['TOKEN']\nexperimental_environment='local'\n";
+    let config = McpServerConfig {
+        command: "https://fixture.test/mcp".into(),
+        args: Vec::new(),
+        env: HashMap::new(),
+        transport_type: Some("http".into()),
+    };
+    for format in [Format::Codex, Format::Grok] {
+        let result = edit(source, "service", Some(&config), format).unwrap();
+        let document: toml::Table = toml::from_str(&result).unwrap();
+        let entry = &document["mcp_servers"]["service"];
+        assert_eq!(entry["experimental_environment"].as_str(), Some("local"));
+        assert_eq!(entry.get("cwd").is_some(), matches!(format, Format::Grok));
+        assert_eq!(
+            entry.get("env_vars").is_some(),
+            matches!(format, Format::Grok)
+        );
+    }
+}

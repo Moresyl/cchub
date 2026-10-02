@@ -11,9 +11,32 @@ pub(crate) enum Format {
 }
 
 impl Format {
-    fn fields(self) -> &'static [&'static str] {
+    fn fields(self, config: &McpServerConfig) -> &'static [&'static str] {
         match self {
-            Self::Codex => &["type", "command", "args", "env", "url", "http_headers"],
+            // Retain compatible native options, removing the other transport's fields.
+            Self::Codex if super::formats::is_remote(config) => &[
+                "type",
+                "command",
+                "args",
+                "env",
+                "url",
+                "http_headers",
+                "cwd",
+                "env_vars",
+            ],
+            Self::Codex => &[
+                "type",
+                "command",
+                "args",
+                "env",
+                "url",
+                "http_headers",
+                "env_http_headers",
+                "http_headers_helper",
+                "bearer_token_env_var",
+                "oauth_resource",
+                "auth",
+            ],
             Self::Grok => &["type", "command", "args", "env", "url", "headers"],
         }
     }
@@ -179,15 +202,26 @@ fn edit(
                 .and_then(toml::Value::as_table)
                 .ok_or("Invalid MCP entry")?
                 .clone();
+            let mut fields = format.fields(config).to_vec();
+            // HTTP supports local placement, but not stdio's remote executor.
+            if matches!(format, Format::Codex)
+                && super::formats::is_remote(config)
+                && before
+                    .get("experimental_environment")
+                    .and_then(toml::Value::as_str)
+                    == Some("remote")
+            {
+                fields.push("experimental_environment");
+            }
             patch_fields(
                 existing.as_table_like_mut().ok_or("Invalid MCP entry")?,
                 &before,
                 &desired,
                 &generated,
-                format.fields(),
+                &fields,
             );
             let mut updated = before;
-            for field in format.fields() {
+            for field in &fields {
                 if let Some(value) = desired.get(*field) {
                     updated.insert((*field).into(), value.clone());
                 } else {

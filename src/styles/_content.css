@@ -248,3 +248,74 @@
   height: 100%;
   gap: 14px;
 }
+/* Release notes keep their Markdown hierarchy within the update dialog. */
+.app-release-notes {
+  max-height: 280px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.app-release-notes > :first-child {
+  margin-top: 0;
+}
+.app-release-notes > :last-child {
+  margin-bottom: 0;
+}
+.app-release-notes h1,
+.app-release-notes h2,
+.app-release-notes h3,
+.app-release-notes h4 {
+  margin: 16px 0 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+}
+.app-release-notes p,
+.app-release-notes ul,
+.app-release-notes ol {
+  margin: 8px 0;
+}
+.app-release-notes ul {
+  list-style: disc;
+  padding-left: 20px;
+}
+.app-release-notes ol {
+  list-style: decimal;
+  padding-left: 20px;
+}
+.app-release-notes a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.app-release-notes a:focus-visible {
+  outline: 1px solid var(--control-border-focus);
+  outline-offset: 2px;
+}
+.app-release-notes pre {
+  overflow-x: auto;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+.app-release-notes code {
+  font-family: var(--font-code);
+}
+.app-release-notes table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.app-release-notes td,
+.app-release-notes th {
+  border: 1px solid var(--border-default);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+@media (max-width: 767px) {
+  .app-release-notes {
+    max-height: none;
+  }
+}

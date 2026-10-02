@@ -1,24 +1,71 @@
 use rusqlite::Connection;
-use serde_yaml::{Mapping, Value};
+use serde_yaml::Value;
 use std::collections::HashMap;
 
 use crate::mcp::config::{McpServerConfig, ScannedMcpServer};
 
-use super::config;
-
 fn with_default_root_conn<T>(
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
-    // These legacy helpers intentionally use defaults, with a valid empty
-    // settings schema rather than swallowing missing-table errors.
+    let conn =
+        Connection::open_in_memory().map_err(|_| "Cannot initialize Hermes path settings")?;
     conn.execute_batch("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE custom_paths (tool_id TEXT PRIMARY KEY, config_dir TEXT, mcp_config_path TEXT);")
         .map_err(|_| "Cannot initialize default Hermes path settings")?;
     f(&conn)
 }
 
+pub fn scan_servers(conn: &Connection) -> Result<Vec<ScannedMcpServer>, String> {
+    // Keep the legacy global catalog's scan semantics until source-complete
+    // reconciliation is migrated with identity and mutation routing. Its caller
+    // currently swallows errors then deletes missing rows. Strict scoped reads
+    // live in native_read; enabling them here alone could erase catalog records.
+    let document = super::config::read_value(conn)?;
+    let config_path = super::config_path(conn)?.to_string_lossy().into_owned();
+    let Some(servers) = document
+        .as_mapping()
+        .and_then(|root| root.get(yaml_key("mcp_servers")))
+        .and_then(Value::as_mapping)
+    else {
+        return Ok(Vec::new());
+    };
+    let mut scanned = Vec::new();
+    for (name, entry) in servers {
+        let (Some(name), Some(entry)) = (name.as_str(), entry.as_mapping()) else {
+            continue;
+        };
+        if let Some(url) = entry.get(yaml_key("url")).and_then(Value::as_str) {
+            let transport =
+                if entry.get(yaml_key("transport")).and_then(Value::as_str) == Some("sse") {
+                    "sse"
+                } else {
+                    "http"
+                };
+            scanned.push(ScannedMcpServer {
+                name: name.into(),
+                command: url.into(),
+                args: Vec::new(),
+                env: extract_string_map(entry.get(yaml_key("headers"))),
+                transport: transport.into(),
+                source: "hermes".into(),
+                config_path: config_path.clone(),
+            });
+        } else if let Some(command) = entry.get(yaml_key("command")).and_then(Value::as_str) {
+            scanned.push(ScannedMcpServer {
+                name: name.into(),
+                command: command.into(),
+                args: extract_string_array(entry.get(yaml_key("args"))),
+                env: extract_string_map(entry.get(yaml_key("env"))),
+                transport: "stdio".into(),
+                source: "hermes".into(),
+                config_path: config_path.clone(),
+            });
+        }
+    }
+    Ok(scanned)
+}
+
 fn yaml_key(key: &str) -> Value {
-    Value::String(key.to_string())
+    Value::String(key.to_owned())
 }
 
 fn extract_string_array(value: Option<&Value>) -> Vec<String> {
@@ -28,7 +75,7 @@ fn extract_string_array(value: Option<&Value>) -> Vec<String> {
             items
                 .iter()
                 .filter_map(Value::as_str)
-                .map(str::to_string)
+                .map(str::to_owned)
                 .collect()
         })
         .unwrap_or_default()
@@ -37,68 +84,15 @@ fn extract_string_array(value: Option<&Value>) -> Vec<String> {
 fn extract_string_map(value: Option<&Value>) -> HashMap<String, String> {
     value
         .and_then(Value::as_mapping)
-        .map(|mapping| {
-            mapping
+        .map(|fields| {
+            fields
                 .iter()
                 .filter_map(|(key, value)| {
-                    Some((key.as_str()?.to_string(), value.as_str()?.to_string()))
+                    Some((key.as_str()?.to_owned(), value.as_str()?.to_owned()))
                 })
                 .collect()
         })
         .unwrap_or_default()
-}
-
-pub fn scan_servers(conn: &Connection) -> Result<Vec<ScannedMcpServer>, String> {
-    let config_value = config::read_value(conn)?;
-    let config_path = super::config_path(conn)?.to_string_lossy().to_string();
-    let Some(root) = config_value.as_mapping() else {
-        return Ok(Vec::new());
-    };
-    let Some(servers) = root
-        .get(yaml_key("mcp_servers"))
-        .and_then(Value::as_mapping)
-    else {
-        return Ok(Vec::new());
-    };
-
-    let mut scanned = Vec::new();
-    for (name_value, entry_value) in servers {
-        let Some(name) = name_value.as_str() else {
-            continue;
-        };
-        let Some(entry) = entry_value.as_mapping() else {
-            continue;
-        };
-
-        if let Some(url) = entry.get(yaml_key("url")).and_then(Value::as_str) {
-            scanned.push(ScannedMcpServer {
-                name: name.to_string(),
-                command: url.to_string(),
-                args: Vec::new(),
-                env: extract_string_map(entry.get(yaml_key("headers"))),
-                transport: "http".to_string(),
-                source: "hermes".to_string(),
-                config_path: config_path.clone(),
-            });
-            continue;
-        }
-
-        let Some(command) = entry.get(yaml_key("command")).and_then(Value::as_str) else {
-            continue;
-        };
-
-        scanned.push(ScannedMcpServer {
-            name: name.to_string(),
-            command: command.to_string(),
-            args: extract_string_array(entry.get(yaml_key("args"))),
-            env: extract_string_map(entry.get(yaml_key("env"))),
-            transport: "stdio".to_string(),
-            source: "hermes".to_string(),
-            config_path: config_path.clone(),
-        });
-    }
-
-    Ok(scanned)
 }
 
 pub fn scan_servers_from_default_root() -> Result<Vec<ScannedMcpServer>, String> {
@@ -106,57 +100,8 @@ pub fn scan_servers_from_default_root() -> Result<Vec<ScannedMcpServer>, String>
 }
 
 pub fn write_server(conn: &Connection, name: &str, server: &McpServerConfig) -> Result<(), String> {
-    let mut config_value = config::read_value(conn)?;
-    let root = config::top_level_mapping_mut(&mut config_value);
-    let servers_value = root
-        .entry(yaml_key("mcp_servers"))
-        .or_insert_with(|| Value::Mapping(Mapping::new()));
-    let servers = config::top_level_mapping_mut(servers_value);
-    let transport = server.transport_type.as_deref().unwrap_or("stdio");
-
-    let mut entry = Mapping::new();
-    if transport == "http" {
-        entry.insert(yaml_key("url"), Value::String(server.command.clone()));
-        if !server.env.is_empty() {
-            let mut headers = Mapping::new();
-            for (key, value) in &server.env {
-                headers.insert(yaml_key(key), Value::String(value.clone()));
-            }
-            entry.insert(yaml_key("headers"), Value::Mapping(headers));
-        }
-        entry.insert(
-            yaml_key("timeout"),
-            Value::Number(serde_yaml::Number::from(60)),
-        );
-    } else {
-        entry.insert(yaml_key("command"), Value::String(server.command.clone()));
-        if !server.args.is_empty() {
-            entry.insert(
-                yaml_key("args"),
-                Value::Sequence(
-                    server
-                        .args
-                        .iter()
-                        .map(|item| Value::String(item.clone()))
-                        .collect(),
-                ),
-            );
-        }
-        if !server.env.is_empty() {
-            let mut env = Mapping::new();
-            for (key, value) in &server.env {
-                env.insert(yaml_key(key), Value::String(value.clone()));
-            }
-            entry.insert(yaml_key("env"), Value::Mapping(env));
-        }
-        entry.insert(
-            yaml_key("timeout"),
-            Value::Number(serde_yaml::Number::from(60)),
-        );
-    }
-
-    servers.insert(yaml_key(name), Value::Mapping(entry));
-    config::write_value(conn, &config_value).map(|_| ())
+    let path = crate::commands::extra_commands::resolve_tool_mcp_path(conn, "hermes")?;
+    crate::mcp::native_yaml::update_at(&path, name, Some(server))
 }
 
 pub fn write_server_to_default_root(name: &str, server: &McpServerConfig) -> Result<(), String> {
@@ -164,15 +109,8 @@ pub fn write_server_to_default_root(name: &str, server: &McpServerConfig) -> Res
 }
 
 pub fn remove_server(conn: &Connection, name: &str) -> Result<(), String> {
-    let mut config_value = config::read_value(conn)?;
-    if let Some(servers) = config_value
-        .as_mapping_mut()
-        .and_then(|root| root.get_mut(yaml_key("mcp_servers")))
-        .and_then(Value::as_mapping_mut)
-    {
-        servers.remove(yaml_key(name));
-    }
-    config::write_value(conn, &config_value).map(|_| ())
+    let path = crate::commands::extra_commands::resolve_tool_mcp_path(conn, "hermes")?;
+    crate::mcp::native_yaml::update_at(&path, name, None)
 }
 
 pub fn remove_server_from_default_root(name: &str) -> Result<(), String> {
@@ -180,13 +118,12 @@ pub fn remove_server_from_default_root(name: &str) -> Result<(), String> {
 }
 
 pub fn has_server(conn: &Connection, name: &str) -> Result<bool, String> {
-    let config_value = config::read_value(conn)?;
-    Ok(config_value
+    let value = super::config::read_value(conn)?;
+    Ok(value
         .as_mapping()
         .and_then(|root| root.get(yaml_key("mcp_servers")))
         .and_then(Value::as_mapping)
-        .map(|servers| servers.contains_key(yaml_key(name)))
-        .unwrap_or(false))
+        .is_some_and(|servers| servers.contains_key(yaml_key(name))))
 }
 
 pub fn has_server_in_default_root(name: &str) -> Result<bool, String> {

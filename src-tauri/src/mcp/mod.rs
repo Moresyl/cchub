@@ -5,5 +5,6 @@ pub mod mcode;
 pub(crate) mod native_json;
 pub(crate) mod native_read;
 pub(crate) mod native_toml;
+pub(crate) mod native_yaml;
 pub mod process;
 pub mod registry;

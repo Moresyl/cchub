@@ -75,3 +75,7 @@ pub(super) fn validate_json_entry(name: &str, value: &Value, tool: &str) -> Resu
         Format::for_tool(tool)?,
     )
 }
+
+pub(super) fn validate_yaml_entry(name: &str, fields: &serde_yaml::Mapping) -> Result<(), String> {
+    definition::validate(name, &document::Entry::Yaml(fields.clone()), Format::Hermes)
+}

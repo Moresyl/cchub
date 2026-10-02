@@ -112,5 +112,19 @@ pub(super) fn validate(name: &str, entry: &Entry, format: Format) -> Result<(), 
             return Err("Gemini MCP transport does not match url or httpUrl".into());
         }
     }
+    // Hermes selects SSE with `transport`, while `type` is not its native
+    // selector. Never accept a conflicting marker that changes the connection.
+    if format == Format::Hermes {
+        if let Some(transport) = string(entry, "transport")? {
+            if transport != "sse" || remote.is_none() {
+                return Err("Hermes MCP transport must select SSE with a remote URL".into());
+            }
+            if string(entry, "type")?.is_some_and(|kind| kind != "sse") {
+                return Err("Hermes MCP transport selectors conflict".into());
+            }
+        } else if string(entry, "type")?.as_deref() == Some("sse") {
+            return Err("Hermes SSE requires the native transport selector".into());
+        }
+    }
     Ok(())
 }

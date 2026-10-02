@@ -461,30 +461,8 @@ pub fn reorder_config_profiles(
     ordered_ids: Vec<String>,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    for (index, profile_id) in ordered_ids.iter().enumerate() {
-        let belongs_to_tool: Option<String> = conn
-            .query_row(
-                "SELECT tool_id FROM config_profiles WHERE id = ?1",
-                rusqlite::params![profile_id],
-                |row| row.get(0),
-            )
-            .ok();
-
-        if belongs_to_tool.as_deref() != Some(tool_id.as_str()) {
-            return Err(format!(
-                "Profile does not belong to tool {tool_id}: {profile_id}"
-            ));
-        }
-
-        conn.execute(
-            "UPDATE config_profiles SET sort_order = ?1 WHERE id = ?2",
-            rusqlite::params![index as i64, profile_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    super::reorder::save_order(&mut conn, &tool_id, &ordered_ids)
 }
 
 #[tauri::command]

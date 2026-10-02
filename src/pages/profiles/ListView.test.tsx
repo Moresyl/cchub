@@ -36,6 +36,9 @@ function createProps(): ComponentProps<typeof ProfilesListView> {
     search: "",
     searchInputRef: { current: null },
     reorderEnabled: false,
+    orderBusy: false,
+    orderAnnouncement: "",
+    handleMoveProfile: vi.fn(),
     draggingProfileId: null,
     dragOverProfileId: null,
     pingingId: null,
@@ -94,6 +97,30 @@ function renderListView(props = createProps()) {
 }
 
 describe("ProfilesListView", () => {
+  it("keeps normal actions outside the draggable handle and blocks drop while saving", () => {
+    const props = { ...createProps(), reorderEnabled: true };
+    const { rerender } = renderListView(props);
+    const handle = screen.getByRole("button", { name: "调整“Primary API”的顺序" });
+    const row = handle.closest(".profile-row")!;
+    expect(row.getAttribute("draggable")).toBeNull();
+    expect(handle.draggable).toBe(true);
+    const transfer = { effectAllowed: "none", setData: vi.fn() };
+    fireEvent.dragStart(handle, { dataTransfer: transfer });
+    fireEvent.dragEnd(handle);
+    expect(props.handleCardDragEnd).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    expect(props.doApply).toHaveBeenCalledWith(profile);
+    rerender(
+      <MemoryRouter>
+        <ProfilesListView {...props} orderBusy />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("保存顺序中…")).toBeTruthy();
+    expect(row.closest(".profile-list")!.getAttribute("aria-busy")).toBe("true");
+    fireEvent.drop(row);
+    expect(props.handleCardDrop).not.toHaveBeenCalled();
+  });
+
   it("keeps switching prominent and applies the selected profile", () => {
     const props = createProps();
     renderListView(props);

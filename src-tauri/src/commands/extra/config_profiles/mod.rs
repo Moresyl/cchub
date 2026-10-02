@@ -11,6 +11,7 @@ mod helpers;
 mod network;
 mod paths;
 mod prefs;
+mod reorder;
 mod skill_storage;
 mod stream;
 mod stream_auth;

@@ -162,7 +162,9 @@ export function useProfileDragHandlers(options: {
   setDragOverProfileId: (value: string | null) => void;
   reorderProfiles: (draggingId: string, targetId: string) => void | Promise<void>;
 }) {
-  const handleCardDragStart = (profileId: string) => options.setDraggingProfileId(profileId);
+  const handleCardDragStart = (profileId: string) => {
+    if (options.reorderEnabled) options.setDraggingProfileId(profileId);
+  };
   const handleCardDragEnter = (profileId: string) => {
     if (options.reorderEnabled && options.draggingProfileId && options.draggingProfileId !== profileId) {
       options.setDragOverProfileId(profileId);
@@ -176,6 +178,7 @@ export function useProfileDragHandlers(options: {
     if (options.reorderEnabled && options.draggingProfileId) {
       void options.reorderProfiles(options.draggingProfileId, profileId);
     }
+    handleCardDragEnd();
   };
   return { handleCardDragStart, handleCardDragEnter, handleCardDragEnd, handleCardDrop };
 }

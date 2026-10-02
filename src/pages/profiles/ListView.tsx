@@ -24,6 +24,7 @@ import EmptyState from "../../components/states/EmptyState";
 import UniversalProviderManager from "../../components/UniversalProviderManager";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import type { ProfileMoveDirection } from "../../lib/profileOrdering";
 
 import {
   TOOL_ICONS,
@@ -55,6 +56,9 @@ interface ProfilesListViewProps {
   search: string;
   searchInputRef: React.Ref<HTMLInputElement>;
   reorderEnabled: boolean;
+  orderBusy: boolean;
+  orderAnnouncement: string;
+  handleMoveProfile: (id: string, direction: ProfileMoveDirection) => void;
   draggingProfileId: string | null;
   dragOverProfileId: string | null;
   pingingId: string | null;
@@ -286,6 +290,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
             <div className="profile-results-header">
               <span>{localeText("可用配置", "Available configurations", "利用可能な設定")}</span>
               <span className="profile-results-summary">
+                {props.orderBusy && <span>{localeText("保存顺序中…", "Saving order…", "並び順を保存中…")}</span>}
                 {props.filteredProfiles.length}
                 <Button
                   variant="ghost"
@@ -299,7 +304,10 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
                 </Button>
               </span>
             </div>
-            <div className="profile-list">
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              {props.orderAnnouncement}
+            </div>
+            <div className="profile-list" aria-busy={props.orderBusy}>
               {props.filteredProfiles.length === 0 ? (
                 <EmptyState
                   icon={<ArrowRightLeft size={28} style={{ color: "var(--text-muted)" }} />}
@@ -311,7 +319,7 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
                   }
                 />
               ) : (
-                props.filteredProfiles.map((profile) => {
+                props.filteredProfiles.map((profile, index) => {
                   const Icon: LucideIcon = TOOL_ICONS[profile.tool_id] || Monitor;
                   const isActive = props.activeIdSet.has(profile.id);
                   const summary = extractConfigSummary(profile.tool_id, profile.config_snapshot);
@@ -342,6 +350,10 @@ export default function ProfilesListView(props: ProfilesListViewProps) {
                       streamCheck={streamCheck}
                       streamTone={streamToneFor(streamCheck?.status)}
                       reorderEnabled={props.reorderEnabled}
+                      orderBusy={props.orderBusy}
+                      orderPosition={index}
+                      orderCount={props.filteredProfiles.length}
+                      onMove={props.handleMoveProfile}
                       isDragging={props.draggingProfileId === profile.id}
                       isDragOver={props.dragOverProfileId === profile.id}
                       isPinging={props.pingingId === profile.id}

@@ -18,7 +18,6 @@ import {
   useDeleteConfigProfileGroupAndRefreshMutation,
   useDeleteConfigProfileAndRefreshMutation,
   useDeleteProviderConfigFragmentMutation,
-  useReorderConfigProfilesMutation,
   useSaveConfigProfileAndRefreshMutation,
   useSaveProviderConfigFragmentMutation,
   useSaveSharedConfigProfilesAndRefreshMutation,
@@ -54,6 +53,7 @@ import {
   useProfilesKeyboardShortcuts,
 } from "./profiles/hooks";
 import { useModelDiscovery } from "./profiles/modelDiscovery";
+import { useProfileOrdering } from "./profiles/useProfileOrdering";
 import { modelAliasSaveError } from "./profiles/modelAliasValidation";
 import ProfilesConfirmDialogs from "./profiles/Dialogs";
 import ProfileEditorView from "./profiles/EditorView";
@@ -127,7 +127,6 @@ export default function Profiles() {
   const saveSharedConfigProfilesMutation = useSaveSharedConfigProfilesAndRefreshMutation();
   const deleteConfigProfileMutation = useDeleteConfigProfileAndRefreshMutation();
   const deleteConfigProfileGroupMutation = useDeleteConfigProfileGroupAndRefreshMutation();
-  const reorderConfigProfilesMutation = useReorderConfigProfilesMutation();
   const saveProviderConfigFragmentMutation = useSaveProviderConfigFragmentMutation<ProviderConfigFragment>();
   const deleteProviderConfigFragmentMutation = useDeleteProviderConfigFragmentMutation();
   const localeText = useCallback(
@@ -526,48 +525,6 @@ export default function Profiles() {
       setResults: setStreamCheckResults,
     });
   }, [appDialog, localeText]);
-  const reorderProfiles = useCallback(
-    async (sourceId: string, targetId: string) => {
-      if (!filterTool || sourceId === targetId || search.trim()) return;
-      const orderedProfiles = [...profiles]
-        .filter((profile) => profile.tool_id === filterTool)
-        .sort((a, b) => {
-          const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
-          if (orderDiff !== 0) return orderDiff;
-          const aTime = a.updated_at || a.created_at || "";
-          const bTime = b.updated_at || b.created_at || "";
-          return bTime.localeCompare(aTime);
-        });
-      const fromIndex = orderedProfiles.findIndex((profile) => profile.id === sourceId);
-      const toIndex = orderedProfiles.findIndex((profile) => profile.id === targetId);
-      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
-      const nextOrdered = [...orderedProfiles];
-      const [moved] = nextOrdered.splice(fromIndex, 1);
-      nextOrdered.splice(toIndex, 0, moved);
-      const nextOrderMap = new Map(nextOrdered.map((profile, index) => [profile.id, index]));
-      setProfiles((current) =>
-        current.map((profile) =>
-          profile.tool_id === filterTool && nextOrderMap.has(profile.id)
-            ? { ...profile, sort_order: nextOrderMap.get(profile.id) ?? profile.sort_order }
-            : profile,
-        ),
-      );
-      try {
-        await reorderConfigProfilesMutation.mutateAsync({
-          toolId: filterTool,
-          orderedIds: nextOrdered.map((profile) => profile.id),
-        });
-      } catch (e) {
-        console.error(e);
-        showToast("error", locale === "zh" ? `排序失败: ${e}` : `Reorder failed: ${e}`);
-        await load({ force: true });
-      } finally {
-        setDraggingProfileId(null);
-        setDragOverProfileId(null);
-      }
-    },
-    [filterTool, load, locale, profiles, reorderConfigProfilesMutation, search],
-  );
   useEffect(() => {
     void load();
     const refreshProfiles = () => void load({ force: true });
@@ -576,7 +533,6 @@ export default function Profiles() {
   }, [load]);
   const activeIdSet = useMemo(() => new Set(activeIds), [activeIds]);
   const presetCategories = useMemo(() => getPresetCategories(draftTool), [draftTool]);
-  const reorderEnabled = Boolean(filterTool) && search.trim().length === 0;
   const structuredInstalledTools = useMemo(
     () => tools.filter((tool) => tool.installed && supportsStructuredConfig(tool.id)),
     [tools],
@@ -773,8 +729,18 @@ export default function Profiles() {
   const sharedGroupCounts = useMemo(() => countSharedProfileGroups(profiles), [profiles]);
   const deferredSearch = useDeferredValue(search);
   const filteredProfiles = useFilteredProfiles(profiles, filterTool, deferredSearch, activeIdSet);
+  const reorderEnabled = Boolean(filterTool) && !search.trim() && !deferredSearch.trim();
+  const { reorderProfiles, handleMoveProfile, orderBusy, orderAnnouncement } = useProfileOrdering({
+    profiles,
+    orderedProfiles: filteredProfiles,
+    filterTool,
+    enabled: reorderEnabled,
+    setProfiles,
+    reload: () => load({ force: true }),
+    localeText,
+  });
   const { handleCardDragStart, handleCardDragEnter, handleCardDragEnd, handleCardDrop } = useProfileDragHandlers({
-    reorderEnabled,
+    reorderEnabled: reorderEnabled && !orderBusy,
     draggingProfileId,
     setDraggingProfileId,
     setDragOverProfileId,
@@ -848,6 +814,9 @@ export default function Profiles() {
         search={search}
         searchInputRef={searchInputRef}
         reorderEnabled={reorderEnabled}
+        orderBusy={orderBusy}
+        orderAnnouncement={orderAnnouncement}
+        handleMoveProfile={handleMoveProfile}
         draggingProfileId={draggingProfileId}
         dragOverProfileId={dragOverProfileId}
         pingingId={pingingId}

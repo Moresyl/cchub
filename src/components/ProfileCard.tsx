@@ -1,7 +1,9 @@
 import { memo, type MouseEvent } from "react";
-import { ArrowRightLeft, Check, Edit3, GripVertical, type LucideIcon } from "lucide-react";
+import { ArrowRightLeft, Check, Edit3, type LucideIcon } from "lucide-react";
 import ProviderIcon from "./ProviderIcon";
 import ProfileActionsMenu from "./ProfileActionsMenu";
+import ProfileOrderHandle from "./ProfileOrderHandle";
+import type { ProfileMoveDirection } from "../lib/profileOrdering";
 import { Button } from "./ui/button";
 
 interface ConfigProfileCard {
@@ -60,6 +62,10 @@ interface ProfileCardProps {
   streamCheck?: ProviderStatus;
   streamTone: string;
   reorderEnabled: boolean;
+  orderBusy: boolean;
+  orderPosition: number;
+  orderCount: number;
+  onMove: (id: string, direction: ProfileMoveDirection) => void;
   isDragging: boolean;
   isDragOver: boolean;
   isPinging: boolean;
@@ -99,6 +105,10 @@ function ProfileCardComponent({
   streamCheck,
   streamTone,
   reorderEnabled,
+  orderBusy,
+  orderPosition,
+  orderCount,
+  onMove,
   isDragging,
   isDragOver,
   isPinging,
@@ -118,7 +128,7 @@ function ProfileCardComponent({
   onDelete,
 }: ProfileCardProps) {
   const handleDrop = (event: MouseEvent<HTMLDivElement> | React.DragEvent<HTMLDivElement>) => {
-    if (!reorderEnabled) return;
+    if (!reorderEnabled || orderBusy) return;
     event.preventDefault();
     onDrop(profile.id);
   };
@@ -126,30 +136,26 @@ function ProfileCardComponent({
   return (
     <div
       className={`profile-row ${isActive ? "profile-row-active" : ""} ${isDragging ? "profile-row-dragging" : ""} ${isDragOver ? "profile-row-drag-over" : ""}`}
-      draggable={reorderEnabled}
-      onDragStart={() => onDragStart(profile.id)}
       onDragEnter={() => onDragEnter(profile.id)}
       onDragOver={(event) => {
-        if (!reorderEnabled) return;
+        if (!reorderEnabled || orderBusy) return;
         event.preventDefault();
       }}
-      onDragEnd={onDragEnd}
       onDrop={handleDrop}
     >
       <div className="profile-row-layout">
         <div className="profile-row-main">
           {reorderEnabled && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="profile-icon-button"
-              type="button"
-              title={text.dragEnabledTitle}
-              aria-label={text.dragEnabledTitle}
-              style={{ cursor: "grab" }}
-            >
-              <GripVertical size={14} />
-            </Button>
+            <ProfileOrderHandle
+              id={profile.id}
+              name={profile.name}
+              position={orderPosition}
+              count={orderCount}
+              busy={orderBusy}
+              onMove={onMove}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+            />
           )}
           <div className="profile-row-icon">
             <ProviderIcon iconUrl={iconUrl} fallbackIcon={Icon} size={16} />

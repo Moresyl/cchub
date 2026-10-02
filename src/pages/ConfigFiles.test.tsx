@@ -8,7 +8,8 @@ import { setLocale, t } from "../lib/i18n";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../components/Toast", () => ({ showToast: vi.fn() }));
 vi.mock("../lib/appPreferences", () => ({ fetchVisibleApps: async () => ["codex"] }));
-const { fixtureTree } = vi.hoisted(() => ({
+const { fixtureTree, treeOverrides } = vi.hoisted(() => ({
+  treeOverrides: {} as Record<string, unknown>,
   fixtureTree: {
     name: "codex",
     path: "C:/fixture",
@@ -20,8 +21,8 @@ const { fixtureTree } = vi.hoisted(() => ({
   },
 }));
 vi.mock("../hooks/queries", () => ({
-  useConfigFiles: () => ({
-    data: fixtureTree,
+  useConfigFiles: (rootId: string) => ({
+    data: treeOverrides[rootId] ?? fixtureTree,
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -67,6 +68,7 @@ async function open() {
 beforeEach(() => {
   setLocale("zh");
   vi.clearAllMocks();
+  for (const rootId of Object.keys(treeOverrides)) delete treeOverrides[rootId];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "get_config_roots") return [{ id: "codex", name: "Codex", path: "C:/fixture", exists: true }];
     if (command === "read_codex_toml_structured") return loaded;
@@ -79,6 +81,67 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("configuration editor ownership", () => {
+  it("opens and saves an external MCP file inside its tool tree without adding another tab", async () => {
+    const path = "C:/external/custom.toml";
+    treeOverrides.codex = {
+      ...fixtureTree,
+      children: [{ name: "MCP · custom.toml", path, is_dir: false, children: [] }],
+    };
+    const fallback = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation((command, args) =>
+      command === "read_config_file_content" ? Promise.resolve("original = true\n") : fallback(command, args),
+    );
+    render(<ConfigFiles />);
+    expect(await screen.findByRole("button", { name: "Codex" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Codex MCP" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "MCP · custom.toml" }));
+    await waitFor(() => expect(raw().value).toBe("original = true\n"));
+    fireEvent.change(raw(), { target: { value: "updated = true\n" } });
+    fireEvent.click(saveButton());
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("write_config_file_content", { path, content: "updated = true\n" }),
+    );
+    expect(invoke).toHaveBeenCalledWith("read_config_file_content", { path });
+    expect(invoke).not.toHaveBeenCalledWith("write_codex_toml_structured", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith(
+      "write_config_file_content",
+      expect.objectContaining({ path: "C:/fixture/config.toml" }),
+    );
+  });
+
+  it("keeps Claude Desktop accessible and continues honoring managed tool visibility", async () => {
+    const fallback = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation((command, args) =>
+      command === "get_config_roots"
+        ? Promise.resolve([
+            { id: "claude", name: "Claude", path: "C:/hidden", exists: true },
+            { id: "mcode", name: "MiniMax Code", path: "C:/hidden-minimax", exists: true },
+            { id: "claude-desktop", name: "Claude Desktop", path: "C:/desktop", exists: true },
+          ])
+        : fallback(command, args),
+    );
+    treeOverrides["claude-desktop"] = {
+      name: "Desktop",
+      path: "C:/desktop",
+      is_dir: true,
+      children: [
+        {
+          name: "claude_desktop_config.json",
+          path: "C:/desktop/claude_desktop_config.json",
+          is_dir: false,
+          children: [],
+        },
+      ],
+    };
+    render(<ConfigFiles />);
+    expect((await screen.findByRole("button", { name: "Claude Desktop" })).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Claude" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "MiniMax Code" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "claude_desktop_config.json" }));
+    await waitFor(() => expect(raw().value).toContain("other file"));
+    expect(invoke).toHaveBeenCalledWith("read_config_file_content", { path: "C:/desktop/claude_desktop_config.json" });
+  });
+
   it("saves the latest credential with the keyboard shortcut after several edits", async () => {
     await open();
     fireEvent.change(key(), { target: { value: "first-key" } });

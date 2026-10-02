@@ -53,7 +53,7 @@ pub(crate) fn prepare_tool_snapshot(
         )?,
         "codex" => {
             let dir = resolve_tool_config_dir(conn, tool_id)?;
-            let config_path = dir.join("config.toml");
+            let config_path = resolve_tool_config_path(conn, tool_id)?;
             let config_original = crate::config_write::read(&config_path)?;
             let source = if preserve_user_edits {
                 if let Some(bytes) = &config_original {
@@ -116,12 +116,15 @@ pub(crate) fn prepare_tool_snapshot(
                 let env_text = crate::hermes::env::render_env_map(&env)?;
                 plan.replace(dir.join(".env"), env_text.into_bytes())?;
                 plan.replace(
-                    dir.join("settings.json"),
+                    resolve_tool_config_path(conn, tool_id)?,
                     serde_json::to_vec_pretty(config)
                         .map_err(|_| "Cannot encode Gemini settings")?,
                 )?;
             } else {
-                plan.replace(dir.join("settings.json"), effective.into_bytes())?;
+                plan.replace(
+                    resolve_tool_config_path(conn, tool_id)?,
+                    effective.into_bytes(),
+                )?;
             }
         }
         "pi" | "openclaw" => {

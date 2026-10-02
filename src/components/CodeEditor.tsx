@@ -20,6 +20,7 @@ export interface CodeEditorProps {
   readOnly?: boolean;
   minHeight?: number;
   maxHeight?: number;
+  fillHeight?: boolean;
   placeholder?: string;
   ariaLabel?: string;
 }
@@ -164,6 +165,7 @@ function CodeEditorComponent({
   readOnly = false,
   minHeight = 120,
   maxHeight,
+  fillHeight = false,
   placeholder,
   ariaLabel,
 }: CodeEditorProps) {
@@ -188,7 +190,7 @@ function CodeEditorComponent({
       EditorView.lineWrapping,
       EditorView.theme({
         ".cm-scroller": {
-          minHeight: `${Math.max(0, Math.min(minHeight, maxHeight ?? minHeight) - 34)}px`,
+          minHeight: fillHeight ? "0" : `${Math.max(0, Math.min(minHeight, maxHeight ?? minHeight) - 34)}px`,
           ...(maxHeight === undefined ? {} : { maxHeight: `${Math.max(0, maxHeight - 34)}px` }),
         },
       }),
@@ -214,7 +216,7 @@ function CodeEditorComponent({
     }
 
     return nextExtensions;
-  }, [language, placeholder, readOnly, minHeight, maxHeight, ariaLabel]);
+  }, [language, placeholder, readOnly, minHeight, maxHeight, fillHeight, ariaLabel]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -251,8 +253,9 @@ function CodeEditorComponent({
     <div
       className="code-editor-wrapper flex flex-col overflow-hidden rounded-md border border-border bg-[var(--bg-input)] shadow-[var(--shadow-xs)] focus-within:border-[var(--border-strong)] focus-within:ring-2 focus-within:ring-primary/10"
       style={{
-        minHeight,
+        minHeight: fillHeight ? 0 : Math.min(minHeight, maxHeight ?? Infinity),
         maxHeight,
+        ...(fillHeight ? { height: "100%", flex: "1 1 auto" } : {}),
       }}
     >
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-[var(--bg-elevated)]/65 px-3">

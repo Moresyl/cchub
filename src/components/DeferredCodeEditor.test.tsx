@@ -97,3 +97,17 @@ it("forwards changes and read-only mode through the deferred field", async () =>
   view.rerender(<DeferredCodeEditor value="saved" readOnly ariaLabel="Environment" />);
   expect((screen.getByRole("textbox", { name: "Environment" }) as HTMLTextAreaElement).readOnly).toBe(true);
 });
+
+it("keeps a failed workspace editor within its available height while retaining the editable draft", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  loader.fail = true;
+  const change = vi.fn();
+  render(<DeferredCodeEditor value="retained draft" ariaLabel="Workspace" fillHeight onChange={change} />);
+  const field = (await screen.findByRole("textbox", { name: "Workspace" })) as HTMLTextAreaElement;
+  expect(field.value).toBe("retained draft");
+  expect(field.style.minHeight).toBe("0px");
+  expect(field.parentElement!.style.height).toBe("100%");
+  expect(field.parentElement!.style.minHeight).toBe("0px");
+  fireEvent.change(field, { target: { value: "corrected" } });
+  expect(change).toHaveBeenCalledWith("corrected");
+});

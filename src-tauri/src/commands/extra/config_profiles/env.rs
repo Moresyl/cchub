@@ -10,19 +10,35 @@ pub fn bootstrap_tool_environment_from_conn(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<BootstrapToolEnvironmentResult, String> {
+    if !matches!(
+        tool_id,
+        "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes" | "pi"
+    ) {
+        return Err("Unsupported tool environment bootstrap".into());
+    }
     let mut created_dirs = 0usize;
     let mut created_files = 0usize;
     let mut notes = Vec::new();
 
     let config_dir = resolve_tool_config_dir(conn, tool_id)?;
-    ensure_dir_exists(&config_dir, &mut created_dirs)?;
-
     let skills_dir = resolve_tool_skills_dir(conn, tool_id)?;
+    let config_path = resolve_tool_config_path(conn, tool_id)?;
+    let claude_paths = if tool_id == "claude" {
+        Some(resolve_claude_paths(conn)?)
+    } else {
+        None
+    };
+    // Resolve all persisted paths before creating any directories or files.
+    ensure_dir_exists(&config_dir, &mut created_dirs)?;
     ensure_dir_exists(&skills_dir, &mut created_dirs)?;
+    if let Some(parent) = config_path.parent() {
+        ensure_dir_exists(parent, &mut created_dirs)?;
+    }
 
     match tool_id {
         "claude" => {
-            let (claude_json_path, settings_json_path) = resolve_claude_paths(conn)?;
+            let (claude_json_path, settings_json_path) =
+                claude_paths.ok_or("Missing Claude paths")?;
             if let Some(parent) = claude_json_path.parent() {
                 ensure_dir_exists(parent, &mut created_dirs)?;
             }
@@ -33,7 +49,7 @@ pub fn bootstrap_tool_environment_from_conn(
             write_default_file_if_missing(&settings_json_path, "{}\n", &mut created_files)?;
         }
         "codex" => {
-            write_default_file_if_missing(&config_dir.join("config.toml"), "", &mut created_files)?;
+            write_default_file_if_missing(&config_path, "", &mut created_files)?;
             write_default_file_if_missing(
                 &config_dir.join("auth.json"),
                 "{}\n",
@@ -42,11 +58,7 @@ pub fn bootstrap_tool_environment_from_conn(
             notes.push("Codex CLI 仍需登录后 auth.json 才会真正可用".to_string());
         }
         "gemini" => {
-            write_default_file_if_missing(
-                &config_dir.join("settings.json"),
-                "{}\n",
-                &mut created_files,
-            )?;
+            write_default_file_if_missing(&config_path, "{}\n", &mut created_files)?;
             write_default_file_if_missing(
                 &config_dir.join(".env"),
                 "# Add GEMINI_API_KEY=...\n",
@@ -55,22 +67,14 @@ pub fn bootstrap_tool_environment_from_conn(
             notes.push("Gemini CLI 仍需在 .env 中填写 GEMINI_API_KEY".to_string());
         }
         "opencode" => {
-            write_default_file_if_missing(
-                &resolve_tool_config_path(conn, tool_id)?,
-                "{}\n",
-                &mut created_files,
-            )?;
+            write_default_file_if_missing(&config_path, "{}\n", &mut created_files)?;
         }
         "openclaw" => {
-            write_default_file_if_missing(
-                &config_dir.join("openclaw.json"),
-                "{}\n",
-                &mut created_files,
-            )?;
+            write_default_file_if_missing(&config_path, "{}\n", &mut created_files)?;
         }
         "hermes" => {
             write_default_file_if_missing(
-                &config_dir.join("config.yaml"),
+                &config_path,
                 "model:\n  provider: openrouter\n  default: anthropic/claude-sonnet-4.6\n  base_url: https://openrouter.ai/api/v1\n",
                 &mut created_files,
             )?;
@@ -83,7 +87,7 @@ pub fn bootstrap_tool_environment_from_conn(
         }
         "pi" => {
             write_default_file_if_missing(
-                &config_dir.join("models.json"),
+                &config_path,
                 "{\n  \"providers\": {}\n}\n",
                 &mut created_files,
             )?;
@@ -93,6 +97,7 @@ pub fn bootstrap_tool_environment_from_conn(
                 &mut created_files,
             )?;
         }
+        "grokbuild" => write_default_file_if_missing(&config_path, "", &mut created_files)?,
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     }
 
@@ -508,9 +513,11 @@ pub fn resolve_codex_structured_paths(
     conn: &rusqlite::Connection,
     path: Option<String>,
 ) -> Result<(PathBuf, PathBuf), String> {
+    let configured = resolve_tool_config_path(conn, "codex")?;
     let config_path = match path.and_then(|value| normalized_non_empty(&value)) {
-        Some(path) => PathBuf::from(path),
-        None => resolve_tool_config_dir(conn, "codex")?.join("config.toml"),
+        Some(path) => crate::configured_paths::validate(&path, true)?
+            .ok_or("Invalid Codex configuration path")?,
+        None => configured.clone(),
     };
 
     if config_path
@@ -518,6 +525,7 @@ pub fn resolve_codex_structured_paths(
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         != "config.toml"
+        && config_path != configured
     {
         return Err(format!(
             "Codex structured editing only supports config.toml: {}",
@@ -528,7 +536,12 @@ pub fn resolve_codex_structured_paths(
     let dir = config_path
         .parent()
         .ok_or_else(|| "Invalid Codex config.toml path".to_string())?;
-    Ok((config_path.clone(), dir.join("auth.json")))
+    let auth_dir = if config_path == configured {
+        resolve_tool_config_dir(conn, "codex")?
+    } else {
+        dir.to_owned()
+    };
+    Ok((config_path, auth_dir.join("auth.json")))
 }
 
 #[cfg(test)]

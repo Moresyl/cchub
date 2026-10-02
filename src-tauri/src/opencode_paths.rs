@@ -42,24 +42,12 @@ pub(crate) fn config_in_dir(directory: &Path) -> Result<PathBuf, String> {
     Ok(directory.join("opencode.json"))
 }
 
-fn custom_path(conn: &rusqlite::Connection, column: &str) -> Option<PathBuf> {
-    // The column comes from the fixed internal call sites below.
-    conn.query_row(
-        &format!("SELECT {column} FROM custom_paths WHERE tool_id = 'opencode'"),
-        [],
-        |row| row.get::<_, Option<String>>(0),
-    )
-    .ok()
-    .flatten()
-    .filter(|value| !value.trim().is_empty())
-    .map(PathBuf::from)
-}
-
 pub(crate) fn config_dir(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
-    if let Some(directory) = custom_path(conn, "config_dir") {
+    use crate::configured_paths::{read, Field};
+    if let Some(directory) = read(conn, "opencode", Field::ConfigDir)? {
         return Ok(directory);
     }
-    if let Some(path) = custom_path(conn, "mcp_config_path")
+    if let Some(path) = read(conn, "opencode", Field::McpFile)?
         .or_else(|| absolute_environment_path("OPENCODE_CONFIG"))
     {
         return path
@@ -72,10 +60,11 @@ pub(crate) fn config_dir(conn: &rusqlite::Connection) -> Result<PathBuf, String>
 }
 
 pub(crate) fn config_path(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
-    if let Some(path) = custom_path(conn, "mcp_config_path") {
+    use crate::configured_paths::{read, Field};
+    if let Some(path) = read(conn, "opencode", Field::McpFile)? {
         return Ok(path);
     }
-    if let Some(directory) = custom_path(conn, "config_dir") {
+    if let Some(directory) = read(conn, "opencode", Field::ConfigDir)? {
         return config_in_dir(&directory);
     }
     default_config_path()

@@ -177,7 +177,7 @@ pub fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<
                 &std::fs::read_to_string(&auth_path).map_err(|e| e.to_string())?,
             )
             .map_err(|e| e.to_string())?;
-            let config_path = dir.join("config.toml");
+            let config_path = resolve_tool_config_path(conn, tool_id)?;
             let config = if config_path.exists() {
                 std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?
             } else {
@@ -204,7 +204,7 @@ pub fn read_tool_snapshot(conn: &rusqlite::Connection, tool_id: &str) -> Result<
                         .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
                 })
                 .collect();
-            let settings_path = dir.join("settings.json");
+            let settings_path = resolve_tool_config_path(conn, tool_id)?;
             let config = if settings_path.exists() {
                 serde_json::from_str::<serde_json::Value>(
                     &std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?,

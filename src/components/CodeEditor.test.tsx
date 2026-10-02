@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { diagnosticCount, forceLinting } from "@codemirror/lint";
@@ -53,6 +53,26 @@ describe("bounded configuration editor", () => {
     expect(getComputedStyle(view.scrollDOM).minHeight).toBe("126px");
     expect(content.getAttribute("aria-readonly")).toBe("true");
     expect(view.state.facet(EditorState.readOnly)).toBe(true);
+    mounted.unmount();
+  });
+
+  it("fits the workspace without recreating the editor or losing edits when the workspace resizes", () => {
+    const shell = (height: number) => (
+      <div style={{ height }}>
+        <CodeEditor value='{"original":true}' fillHeight />
+      </div>
+    );
+    const mounted = render(shell(600));
+    const content = screen.getByRole("textbox", { name: "JSON configuration editor" });
+    const view = EditorView.findFromDOM(content)!;
+    expect(getComputedStyle(view.scrollDOM).minHeight).toBe("0px");
+    const wrapper = content.closest<HTMLElement>(".code-editor-wrapper")!;
+    expect(wrapper.style.height).toBe("100%");
+    expect(wrapper.style.minHeight).toBe("0px");
+    act(() => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '{"edited":true}' } }));
+    mounted.rerender(shell(280));
+    expect(EditorView.findFromDOM(screen.getByRole("textbox", { name: "JSON configuration editor" }))).toBe(view);
+    expect(view.state.doc.toString()).toBe('{"edited":true}');
     mounted.unmount();
   });
 

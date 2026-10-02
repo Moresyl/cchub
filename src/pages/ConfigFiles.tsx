@@ -122,7 +122,7 @@ export default function ConfigFiles() {
     content !== originalContent ||
     (isCodexConfigToml(activeRoot, activeFile) && codexApiKey !== originalCodexApiKey);
   const visibleRoots = useMemo(
-    () => roots.filter((root) => visibleApps.includes(root.id as ManagedAppId)),
+    () => roots.filter((root) => root.id === "claude-desktop" || visibleApps.includes(root.id as ManagedAppId)),
     [roots, visibleApps],
   );
   const activeRootMeta = useMemo(
@@ -289,9 +289,14 @@ export default function ConfigFiles() {
       setRoots(result);
       setVisibleApps(nextVisibleApps);
       const currentRoot = result.find(
-        (root) => root.id === activeRoot && root.exists && nextVisibleApps.includes(root.id as ManagedAppId),
+        (root) =>
+          root.id === activeRoot &&
+          root.exists &&
+          (root.id === "claude-desktop" || nextVisibleApps.includes(root.id as ManagedAppId)),
       );
-      const firstExisting = result.find((root) => root.exists && nextVisibleApps.includes(root.id as ManagedAppId));
+      const firstExisting = result.find(
+        (root) => root.exists && (root.id === "claude-desktop" || nextVisibleApps.includes(root.id as ManagedAppId)),
+      );
       if (!hasChanges) setActiveRoot(currentRoot?.id || firstExisting?.id || "");
     } catch (error) {
       console.error(error);
@@ -428,8 +433,11 @@ export default function ConfigFiles() {
     );
   }
 
+  const fillCodeEditor =
+    !(structuredCodexFile && codexStructuredConfig) && !claudeQuickToggleFile && activeLanguage !== "markdown";
+
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div className="animate-in" style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div className="page-header">
         <div>
           <h2 className="page-title">{i.configFiles.title}</h2>
@@ -539,7 +547,7 @@ export default function ConfigFiles() {
             )}
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 16 }}>
+          <div className={`config-file-editor-body${fillCodeEditor ? " config-file-editor-body-raw" : ""}`}>
             {needsReload && activeFile && (
               <div role="alert" className="card" style={{ padding: 12, marginBottom: 16, fontSize: 12 }}>
                 {zh
@@ -594,7 +602,13 @@ export default function ConfigFiles() {
                   invalidCompactLimit={codexEditor.invalidCompactLimit}
                 />
 
-                <CodeEditor value={content} onChange={setContent} language={activeLanguage} minHeight={520} />
+                <CodeEditor
+                  value={content}
+                  onChange={setContent}
+                  language={activeLanguage}
+                  minHeight={280}
+                  maxHeight={520}
+                />
               </div>
             ) : claudeQuickToggleFile ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -692,7 +706,13 @@ export default function ConfigFiles() {
                   </div>
                 </div>
 
-                <CodeEditor value={content} onChange={setContent} language={activeLanguage} minHeight={520} />
+                <CodeEditor
+                  value={content}
+                  onChange={setContent}
+                  language={activeLanguage}
+                  minHeight={280}
+                  maxHeight={520}
+                />
               </div>
             ) : activeLanguage === "markdown" ? (
               <Suspense
@@ -705,7 +725,7 @@ export default function ConfigFiles() {
                 <MarkdownEditor value={content} onChange={setContent} minHeight={520} />
               </Suspense>
             ) : (
-              <CodeEditor value={content} onChange={setContent} language={activeLanguage} minHeight={520} />
+              <CodeEditor value={content} onChange={setContent} language={activeLanguage} fillHeight />
             )}
           </div>
         </div>

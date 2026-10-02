@@ -3,12 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::configured_paths::{read as configured_path, Field};
 use crate::hermes;
 #[cfg(target_os = "windows")]
 use crate::utils::configure_background_command;
 
 use super::super::statusline::*;
-use super::skill_storage::configured_skill_storage_dir;
+use super::skill_storage::read_skill_storage_dir;
 
 // ── Config Profiles ──
 
@@ -70,7 +71,7 @@ pub fn default_tool_config_dir(home: &std::path::Path, tool_id: &str) -> Result<
         "opencode" => ".opencode",
         "openclaw" => ".openclaw",
         "hermes" => ".hermes",
-        "pi" => ".pi\\agent",
+        "pi" => ".pi/agent",
         "mcode" => ".minimax",
         _ => return Err(format!("Unknown tool: {}", tool_id)),
     };
@@ -81,11 +82,15 @@ pub fn resolve_tool_config_dir(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<PathBuf, String> {
+    tool_config_file_name(tool_id)?;
     if tool_id == "opencode" {
         return crate::opencode_paths::config_dir(conn);
     }
     if tool_id == "hermes" {
         return hermes::hermes_root(conn);
+    }
+    if let Some(dir) = configured_path(conn, tool_id, Field::ConfigDir)? {
+        return Ok(dir);
     }
     if tool_id == "mcode" {
         return crate::commands::mcode_commands::config_path()?
@@ -96,32 +101,12 @@ pub fn resolve_tool_config_dir(
 
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
 
-    let custom_dir: Option<String> = conn
-        .query_row(
-            "SELECT config_dir FROM custom_paths WHERE tool_id = ?1",
-            rusqlite::params![tool_id],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if let Some(dir) = custom_dir.filter(|dir| !dir.trim().is_empty()) {
-        return Ok(PathBuf::from(dir));
-    }
-
-    let custom_config_path: Option<String> = conn
-        .query_row(
-            "SELECT mcp_config_path FROM custom_paths WHERE tool_id = ?1",
-            rusqlite::params![tool_id],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if let Some(path) = custom_config_path.filter(|path| !path.trim().is_empty()) {
-        let path = PathBuf::from(path);
-        if let Some(parent) = path.parent() {
-            return Ok(parent.to_path_buf());
+    // Claude's primary MCP file is separate from its settings directory.
+    if tool_id != "claude" {
+        if let Some(path) = configured_path(conn, tool_id, Field::McpFile)? {
+            if let Some(parent) = path.parent() {
+                return Ok(parent.to_path_buf());
+            }
         }
     }
 
@@ -132,69 +117,74 @@ pub fn resolve_tool_config_path(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<PathBuf, String> {
+    tool_config_file_name(tool_id)?;
     if tool_id == "opencode" {
         return crate::opencode_paths::config_path(conn);
     }
     if tool_id == "hermes" {
         return hermes::config_path(conn);
     }
+    if !matches!(tool_id, "claude" | "mcode") {
+        if let Some(path) = configured_path(conn, tool_id, Field::McpFile)? {
+            return Ok(path);
+        }
+    }
     Ok(resolve_tool_config_dir(conn, tool_id)?.join(tool_config_file_name(tool_id)?))
 }
 
+/// MCP and provider files differ for Claude and MiniMax Code.
+pub fn resolve_tool_mcp_path(
+    conn: &rusqlite::Connection,
+    tool_id: &str,
+) -> Result<PathBuf, String> {
+    if !matches!(
+        tool_id,
+        "claude"
+            | "claude-desktop"
+            | "codex"
+            | "gemini"
+            | "grokbuild"
+            | "opencode"
+            | "hermes"
+            | "mcode"
+    ) {
+        return Err("MCP configuration is not supported for this tool".into());
+    }
+    if let Some(path) = configured_path(conn, tool_id, Field::McpFile)? {
+        return Ok(path);
+    }
+    match tool_id {
+        "claude" => dirs::home_dir()
+            .map(|home| home.join(".claude.json"))
+            .ok_or_else(|| "Cannot find home directory".into()),
+        "claude-desktop" => {
+            if let Some(dir) = configured_path(conn, tool_id, Field::ConfigDir)? {
+                return Ok(dir.join("claude_desktop_config.json"));
+            }
+            crate::mcp::config::claude_desktop_config_path()
+                .ok_or_else(|| "Cannot find Claude Desktop config path".into())
+        }
+        "mcode" => Ok(resolve_tool_config_dir(conn, tool_id)?.join("mcp.json")),
+        _ => resolve_tool_config_path(conn, tool_id),
+    }
+}
+
 pub fn resolve_claude_paths(conn: &rusqlite::Connection) -> Result<(PathBuf, PathBuf), String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-
-    let custom_dir: Option<String> = conn
-        .query_row(
-            "SELECT config_dir FROM custom_paths WHERE tool_id = 'claude'",
-            [],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    let settings_json = if let Some(dir) = custom_dir.filter(|dir| !dir.trim().is_empty()) {
-        PathBuf::from(dir).join("settings.json")
-    } else {
-        home.join(".claude").join("settings.json")
-    };
-
-    let custom_mcp_path: Option<String> = conn
-        .query_row(
-            "SELECT mcp_config_path FROM custom_paths WHERE tool_id = 'claude'",
-            [],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    let claude_json = if let Some(path) = custom_mcp_path.filter(|path| !path.trim().is_empty()) {
-        PathBuf::from(path)
-    } else {
-        home.join(".claude.json")
-    };
-
-    Ok((claude_json, settings_json))
+    Ok((
+        resolve_tool_mcp_path(conn, "claude")?,
+        resolve_tool_config_path(conn, "claude")?,
+    ))
 }
 
 pub fn resolve_tool_skills_dir(
     conn: &rusqlite::Connection,
     tool_id: &str,
 ) -> Result<PathBuf, String> {
-    let custom_skills_dir: Option<String> = conn
-        .query_row(
-            "SELECT skills_dir FROM custom_paths WHERE tool_id = ?1",
-            rusqlite::params![tool_id],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if let Some(dir) = custom_skills_dir.filter(|dir| !dir.trim().is_empty()) {
-        return Ok(PathBuf::from(dir));
+    if let Some(dir) = configured_path(conn, tool_id, Field::SkillsDir)? {
+        return Ok(dir);
     }
 
-    if let Some(root) = configured_skill_storage_dir(conn) {
+    if let Some(root) = read_skill_storage_dir(conn)? {
         return Ok(root);
     }
 

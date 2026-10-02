@@ -10,6 +10,10 @@ fn with_default_root_conn<T>(
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
     let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    // These legacy helpers intentionally use defaults, with a valid empty
+    // settings schema rather than swallowing missing-table errors.
+    conn.execute_batch("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE custom_paths (tool_id TEXT PRIMARY KEY, config_dir TEXT, mcp_config_path TEXT);")
+        .map_err(|_| "Cannot initialize default Hermes path settings")?;
     f(&conn)
 }
 

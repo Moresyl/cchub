@@ -12,7 +12,11 @@ fn fixture() -> (tempfile::TempDir, Connection) {
             params![
                 tool,
                 root.to_str().unwrap(),
-                dir.path().join("claude-global.json").to_str().unwrap()
+                (tool == "claude").then(|| dir
+                    .path()
+                    .join("claude-global.json")
+                    .to_string_lossy()
+                    .into_owned())
             ],
         )
         .unwrap();

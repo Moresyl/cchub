@@ -17,7 +17,10 @@ fn connection(root: &std::path::Path) -> rusqlite::Connection {
             rusqlite::params![
                 tool,
                 root.join(tool).to_str().unwrap(),
-                root.join("claude-global.json").to_str().unwrap()
+                (tool == "claude").then(|| root
+                    .join("claude-global.json")
+                    .to_string_lossy()
+                    .into_owned())
             ],
         )
         .unwrap();

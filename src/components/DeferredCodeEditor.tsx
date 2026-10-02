@@ -24,7 +24,11 @@ class EditorBoundary extends Component<EditorBoundaryProps, { failed: boolean }>
     return (
       <div
         className="flex flex-col overflow-hidden rounded-md border border-border bg-[var(--bg-input)]"
-        style={{ minHeight: this.props.minHeight, maxHeight: this.props.editorProps.maxHeight }}
+        style={{
+          minHeight: this.props.minHeight,
+          maxHeight: this.props.editorProps.maxHeight,
+          ...(this.props.editorProps.fillHeight ? { height: "100%", flex: "1 1 auto" } : {}),
+        }}
       >
         <p role="alert" className="shrink-0 border-b border-border px-3 py-2 text-xs text-muted-foreground">
           {this.props.failedLabel}
@@ -40,7 +44,7 @@ class EditorBoundary extends Component<EditorBoundaryProps, { failed: boolean }>
           placeholder={this.props.editorProps.placeholder}
           spellCheck={false}
           className="min-h-0 flex-1 resize-none rounded-none border-0 font-mono text-xs"
-          style={{ minHeight: Math.max(48, this.props.minHeight - 44) }}
+          style={{ minHeight: this.props.editorProps.fillHeight ? 0 : Math.max(48, this.props.minHeight - 44) }}
         />
       </div>
     );
@@ -52,7 +56,7 @@ class EditorBoundary extends Component<EditorBoundaryProps, { failed: boolean }>
 export default function DeferredCodeEditor(props: CodeEditorProps) {
   const locale = getLocale();
   const text = (zh: string, en: string, ja: string) => (locale === "zh" ? zh : locale === "ja" ? ja : en);
-  const minHeight = Math.min(props.minHeight ?? 120, props.maxHeight ?? Infinity);
+  const minHeight = props.fillHeight ? 0 : Math.min(props.minHeight ?? 120, props.maxHeight ?? Infinity);
   return (
     <EditorBoundary
       minHeight={minHeight}
@@ -68,7 +72,11 @@ export default function DeferredCodeEditor(props: CodeEditorProps) {
           <div
             role="status"
             className="flex items-center justify-center gap-2 rounded-md border border-border bg-[var(--bg-input)] text-xs text-muted-foreground"
-            style={{ minHeight, maxHeight: props.maxHeight }}
+            style={{
+              minHeight,
+              maxHeight: props.maxHeight,
+              ...(props.fillHeight ? { height: "100%", flex: "1 1 auto" } : {}),
+            }}
           >
             <span className="spinner size-3" aria-hidden="true" />
             {text("正在加载编辑器…", "Loading editor…", "エディターを読み込み中…")}

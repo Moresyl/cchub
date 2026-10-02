@@ -3,15 +3,27 @@ use std::path::PathBuf;
 /// Resolve the optional shared skill directory selected in Settings.
 /// Empty or unknown values keep the legacy per-tool directory behavior.
 pub fn configured_skill_storage_dir(conn: &rusqlite::Connection) -> Option<PathBuf> {
+    read_skill_storage_dir(conn).ok().flatten()
+}
+
+pub(super) fn read_skill_storage_dir(
+    conn: &rusqlite::Connection,
+) -> Result<Option<PathBuf>, String> {
+    use rusqlite::OptionalExtension;
     let location = conn
         .query_row(
             "SELECT value FROM app_settings WHERE key = 'skill_storage_location'",
             [],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, Option<String>>(0),
         )
-        .ok()
-        .filter(|value| !value.trim().is_empty())?;
-    storage_root_for_location(&dirs::home_dir()?, &location)
+        .optional()
+        .map_err(|_| "Cannot read skill storage settings; repair settings before continuing")?
+        .flatten();
+    let Some(location) = location.filter(|value| !value.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    Ok(storage_root_for_location(&home, &location))
 }
 
 fn storage_root_for_location(home: &std::path::Path, location: &str) -> Option<PathBuf> {

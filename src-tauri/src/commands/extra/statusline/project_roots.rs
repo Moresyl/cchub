@@ -321,8 +321,13 @@ pub fn build_tool_environment_report_from_conn(
         let config_path = resolve_tool_config_path(conn, &tool.id)?
             .to_string_lossy()
             .to_string();
-        let mcp_config_path = if tool.id == "claude" {
-            resolve_claude_paths(conn)?.0.to_string_lossy().to_string()
+        let mcp_config_path = if matches!(
+            tool.id.as_str(),
+            "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode"
+        ) {
+            resolve_tool_mcp_path(conn, &tool.id)?
+                .to_string_lossy()
+                .to_string()
         } else {
             resolve_tool_config_path(conn, &tool.id)?
                 .to_string_lossy()
@@ -335,13 +340,15 @@ pub fn build_tool_environment_report_from_conn(
             .to_string_lossy()
             .to_string();
 
+        use rusqlite::OptionalExtension;
         let custom_row: Option<(Option<String>, Option<String>, Option<String>)> = conn
             .query_row(
                 "SELECT config_dir, mcp_config_path, skills_dir FROM custom_paths WHERE tool_id = ?1",
                 rusqlite::params![&tool.id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .ok();
+            .optional()
+            .map_err(|_| "Cannot read configured tool paths; repair settings before continuing")?;
 
         let has_custom_config_dir = custom_row
             .as_ref()

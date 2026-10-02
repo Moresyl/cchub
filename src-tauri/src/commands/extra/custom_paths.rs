@@ -30,8 +30,8 @@ pub fn get_custom_paths(db: State<'_, DbState>) -> Result<Vec<CustomPath>, Strin
             })
         })
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "Cannot read configured tool paths; repair settings before continuing")?;
 
     Ok(paths)
 }
@@ -44,6 +44,15 @@ pub fn save_custom_path(
     skills_dir: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
+    for (value, file) in [
+        (&config_dir, false),
+        (&mcp_config_path, true),
+        (&skills_dir, false),
+    ] {
+        if let Some(value) = value {
+            crate::configured_paths::validate(value, file)?;
+        }
+    }
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT OR REPLACE INTO custom_paths (tool_id, config_dir, mcp_config_path, skills_dir) VALUES (?1, ?2, ?3, ?4)",

@@ -273,7 +273,7 @@ fn path_resolution_is_strict_and_distinguishes_claude_mcp_location() {
     .unwrap();
     assert_eq!(
         storage::config_path(&conn, "codex").unwrap(),
-        root.path().join("config.toml")
+        root.path().join("elsewhere.json")
     );
     conn.execute(
         "INSERT INTO custom_paths VALUES ('claude', ?1, ?2)",
@@ -289,6 +289,48 @@ fn path_resolution_is_strict_and_distinguishes_claude_mcp_location() {
     );
     conn.execute_batch("DROP TABLE custom_paths").unwrap();
     assert!(storage::config_path(&conn, "codex").is_err());
+}
+
+#[test]
+fn ipc_honors_custom_filename_and_preserves_an_unselected_default_file() {
+    let root = tempfile::tempdir().unwrap();
+    let default = root.path().join("config.toml");
+    let custom = root.path().join("custom.toml");
+    let source = "model='fixture' # retain\n";
+    for file in [&default, &custom] {
+        std::fs::write(file, source).unwrap();
+    }
+    let app = app(root.path());
+    let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let previous = ipc(&window, "get_codex_settings", json!({})).unwrap();
+    app.state::<DbState>()
+        .0
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE custom_paths SET mcp_config_path=?1",
+            [custom.to_str().unwrap()],
+        )
+        .unwrap();
+    assert!(ipc(&window, "set_codex_setting", json!({
+        "key":"reasoning_effort", "value":"high", "expectedRevision":previous["config_revision"],
+    })).is_err());
+    let current = ipc(&window, "get_codex_settings", json!({})).unwrap();
+    let changed = ipc(
+        &window,
+        "set_codex_setting",
+        json!({
+            "key":"reasoning_effort", "value":"high", "expectedRevision":current["config_revision"],
+        }),
+    )
+    .unwrap();
+    assert_eq!(changed["reasoning_effort"], "high");
+    assert_eq!(std::fs::read_to_string(default).unwrap(), source);
+    let actual = std::fs::read_to_string(custom).unwrap();
+    assert!(actual.starts_with(source));
+    assert!(actual.contains("model_reasoning_effort = \"high\""));
 }
 
 #[test]

@@ -4,7 +4,7 @@ pub mod mcp;
 pub mod providers;
 pub mod snapshot;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
 
 pub const ROOT_OVERRIDE_SETTING_KEY: &str = "hermes.rootOverride";
@@ -16,18 +16,24 @@ pub fn default_root() -> Result<PathBuf, String> {
 }
 
 pub fn read_root_override(conn: &Connection) -> Result<Option<String>, String> {
-    let value: Option<String> = conn
+    let value = conn
         .query_row(
             "SELECT value FROM app_settings WHERE key = ?1",
             rusqlite::params![ROOT_OVERRIDE_SETTING_KEY],
-            |row| row.get(0),
+            |row| row.get::<_, Option<String>>(0),
         )
-        .ok();
+        .optional()
+        .map_err(|_| "Cannot read Hermes root settings; repair settings before continuing")?
+        .flatten();
 
-    Ok(value.and_then(|raw| {
-        let trimmed = raw.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_string())
-    }))
+    value
+        .as_deref()
+        .map(|raw| {
+            crate::configured_paths::validate(raw, false)
+                .map(|path| path.map(|path| path.to_string_lossy().into_owned()))
+        })
+        .transpose()
+        .map(Option::flatten)
 }
 
 pub fn write_root_override(
@@ -38,6 +44,9 @@ pub fn write_root_override(
         .map(str::trim)
         .filter(|raw| !raw.is_empty())
         .map(str::to_string);
+    if let Some(path) = normalized.as_deref() {
+        crate::configured_paths::validate(path, false)?;
+    }
 
     match normalized.as_deref() {
         Some(path) => {
@@ -60,6 +69,16 @@ pub fn write_root_override(
 }
 
 pub fn hermes_root(conn: &Connection) -> Result<PathBuf, String> {
+    use crate::configured_paths::{read, Field};
+    if let Some(directory) = read(conn, "hermes", Field::ConfigDir)? {
+        return Ok(directory);
+    }
+    if let Some(path) = read(conn, "hermes", Field::McpFile)? {
+        return path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .ok_or_else(|| "Invalid Hermes configuration path".into());
+    }
     if let Some(override_path) = read_root_override(conn)? {
         return Ok(PathBuf::from(override_path));
     }
@@ -67,6 +86,11 @@ pub fn hermes_root(conn: &Connection) -> Result<PathBuf, String> {
 }
 
 pub fn config_path(conn: &Connection) -> Result<PathBuf, String> {
+    if let Some(path) =
+        crate::configured_paths::read(conn, "hermes", crate::configured_paths::Field::McpFile)?
+    {
+        return Ok(path);
+    }
     Ok(hermes_root(conn)?.join("config.yaml"))
 }
 

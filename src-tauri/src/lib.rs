@@ -8,6 +8,7 @@ mod cloud_transfer;
 mod codex_oauth;
 mod commands;
 mod config_write;
+mod configured_paths;
 mod copilot_auth;
 mod db;
 mod deeplink;

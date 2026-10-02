@@ -1,40 +1,15 @@
 use crate::config_write::{self, FileUpdate};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 const MAX_SETTINGS_BYTES: usize = 8 * 1024 * 1024;
 
 pub(super) fn config_path(conn: &Connection, tool: &str) -> Result<PathBuf, String> {
-    let row: Option<(Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT config_dir, mcp_config_path FROM custom_paths WHERE tool_id = ?1",
-            [tool],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(|_| "Cannot read configured settings location")?;
-    let (directory, mcp) = row.unwrap_or_default();
-    let file = match tool {
-        "claude" => "settings.json",
-        "codex" => "config.toml",
-        _ => return Err("Unsupported settings tool".into()),
-    };
-    if let Some(directory) = directory.filter(|value| !value.trim().is_empty()) {
-        return Ok(PathBuf::from(directory).join(file));
+    if !matches!(tool, "claude" | "codex") {
+        return Err("Unsupported settings tool".into());
     }
-    // Claude's MCP file is separate from its settings directory.
-    if tool == "codex" {
-        if let Some(mcp) = mcp.filter(|value| !value.trim().is_empty()) {
-            return PathBuf::from(mcp)
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .map(|parent| parent.join(file))
-                .ok_or_else(|| "Invalid configured settings location".into());
-        }
-    }
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    Ok(home.join(format!(".{tool}")).join(file))
+    crate::commands::extra_commands::resolve_tool_config_path(conn, tool)
 }
 
 pub(super) fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {

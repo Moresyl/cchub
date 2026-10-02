@@ -23,11 +23,14 @@ const ROOT_ICONS: Record<string, LucideIcon> = {
   openclaw: Monitor,
   hermes: Bot,
   pi: Terminal,
+  grokbuild: Terminal,
+  mcode: Bot,
+  "claude-desktop": Monitor,
 };
 
 function ConfigFilesRootTabsComponent({ roots, activeRoot, onSelectRoot }: ConfigFilesRootTabsProps) {
   return (
-    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+    <div className="config-file-root-tabs">
       {roots.map((root) => {
         const Icon = ROOT_ICONS[root.id] || FolderOpen;
         return (

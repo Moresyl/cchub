@@ -43,6 +43,8 @@ describe("Copilot quota and model panel", () => {
     expect(screen.getByRole("button", { name: "刷新 Copilot 配额与模型" }).getAttribute("type")).toBe("button");
     expect(screen.getByText("不限量")).toBeTruthy();
     expect(screen.getByText("未提供")).toBeTruthy();
+    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    expect(screen.getByRole("progressbar", { name: "Premium 请求" }).getAttribute("aria-valuenow")).toBe("40");
   });
   it("retains an expandable model list when quota fails", async () => {
     vi.mocked(invoke).mockResolvedValueOnce({ ...data, usage: null, usage_error: "sign_in_required" });

@@ -24,7 +24,7 @@ describe("reported quota display", () => {
   it("shows unlimited allowance without inventing finite counts", () => {
     render(<QuotaItem {...labels} value={{ ...quota, entitlement: null, remaining: null, unlimited: true }} />);
     expect(screen.getByText("不限量")).toBeTruthy();
-    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("100");
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
   it.each([-20, 150])("clamps a reported percentage %s to the visible range", (percent) => {
     render(<QuotaItem {...labels} value={{ ...quota, percent_remaining: percent }} />);

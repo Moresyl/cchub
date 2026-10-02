@@ -22,7 +22,7 @@ export function QuotaItem({
     entitlement >= 0 &&
     remaining >= 0;
   const percent = value?.unlimited
-    ? 100
+    ? null
     : typeof reported === "number" && Number.isFinite(reported)
       ? Math.max(0, Math.min(100, reported))
       : knownCount && entitlement > 0
@@ -55,7 +55,7 @@ export function QuotaItem({
             style={{ width: `${percent}%`, background: percent < 20 ? "var(--warning)" : "var(--accent)" }}
           />
         </div>
-      ) : (
+      ) : value?.unlimited ? null : (
         <div className="h-1.5 rounded-sm bg-[var(--bg-card-hover)]" aria-hidden="true" />
       )}
     </div>

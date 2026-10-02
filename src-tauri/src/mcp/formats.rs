@@ -9,12 +9,13 @@ pub enum JsonMcpFormat {
     Standard,
     Gemini,
     OpenCode,
+    MiniMax,
 }
 
 impl JsonMcpFormat {
     fn container_key(self) -> &'static str {
         match self {
-            Self::Standard => "mcpServers",
+            Self::Standard | Self::MiniMax => "mcpServers",
             Self::Gemini => "mcpServers",
             Self::OpenCode => "mcp",
         }
@@ -143,6 +144,15 @@ fn opencode_spec(config: &McpServerConfig) -> Value {
     }
 }
 
+fn minimax_spec(config: &McpServerConfig) -> Value {
+    let mut spec = standard_spec(config);
+    if is_remote(config) {
+        spec["type"] = json!(config.transport_type.as_deref().unwrap_or("http"));
+    }
+    spec["enabled"] = json!(true);
+    spec
+}
+
 fn gemini_spec(config: &McpServerConfig) -> Value {
     if is_remote(config) {
         let mut spec = serde_json::Map::new();
@@ -171,55 +181,99 @@ pub fn write_json_server(
     config: &McpServerConfig,
     format: JsonMcpFormat,
 ) -> Result<(), String> {
+    super::native_json::update_at(path, name, Some(config), format)
+}
+
+pub(super) fn edit_json_value(
+    document: &mut Value,
+    name: &str,
+    config: Option<&McpServerConfig>,
+    format: JsonMcpFormat,
+) -> Result<(), String> {
+    if name.trim().is_empty() || name.chars().any(char::is_control) {
+        return Err("MCP server names must be nonempty and contain no control characters".into());
+    }
+    let root = document
+        .as_object_mut()
+        .ok_or("MCP config must be a JSON object")?;
+    let container_key = format.container_key();
+    let Some(config) = config else {
+        if let Some(container) = root.get_mut(container_key) {
+            let servers = container
+                .as_object_mut()
+                .ok_or("MCP container must be a JSON object")?;
+            if servers.get(name).is_some_and(|entry| !entry.is_object()) {
+                return Err("Existing MCP entry must be a JSON object".into());
+            }
+            servers.remove(name);
+        }
+        return Ok(());
+    };
+    if config.transport_type.as_deref().is_some_and(|transport| {
+        !matches!(
+            transport,
+            "stdio" | "local" | "http" | "sse" | "remote" | "streamable-http"
+        )
+    }) {
+        return Err("Unsupported MCP transport".into());
+    }
+    if config.args.iter().any(|arg| arg.contains('\0')) {
+        return Err("MCP arguments must not contain null characters".into());
+    }
     let spec = match format {
         JsonMcpFormat::Standard => standard_spec(config),
         JsonMcpFormat::Gemini => gemini_spec(config),
         JsonMcpFormat::OpenCode => opencode_spec(config),
+        JsonMcpFormat::MiniMax => minimax_spec(config),
     };
-    crate::json_config::update_json_file(path, |document| {
-        let root = document
-            .as_object_mut()
-            .ok_or("MCP config must be a JSON object")?;
-        let container_key = format.container_key();
-        let servers = root.entry(container_key).or_insert_with(|| json!({}));
-        let servers = servers
-            .as_object_mut()
-            .ok_or_else(|| format!("{container_key} must be a JSON object"))?;
-        let mut entry = match servers.get(name) {
-            Some(Value::Object(existing)) => existing.clone(),
-            Some(_) => return Err("Existing MCP entry must be a JSON object".into()),
-            None => serde_json::Map::new(),
-        };
-        // These fields belong to the connection form. Preserve all extension
-        // fields (timeouts, OAuth, vendor options), but discard stale transport fields.
-        for key in [
-            "type",
-            "command",
-            "args",
-            "env",
-            "environment",
-            "url",
-            "httpUrl",
-            "headers",
-        ] {
-            entry.remove(key);
-        }
-        entry.extend(spec.as_object().expect("MCP spec object").clone());
-        servers.insert(name.to_string(), Value::Object(entry));
-        Ok(())
-    })
+    let tool = match format {
+        JsonMcpFormat::Standard => "claude",
+        JsonMcpFormat::Gemini => "gemini",
+        JsonMcpFormat::OpenCode => "opencode",
+        JsonMcpFormat::MiniMax => "mcode",
+    };
+    super::native_read::validate_json_entry(name, &spec, tool)?;
+    let servers = root.entry(container_key).or_insert_with(|| json!({}));
+    let servers = servers
+        .as_object_mut()
+        .ok_or_else(|| format!("{container_key} must be a JSON object"))?;
+    let mut entry = match servers.get(name) {
+        Some(Value::Object(existing)) => existing.clone(),
+        Some(_) => return Err("Existing MCP entry must be a JSON object".into()),
+        None => serde_json::Map::new(),
+    };
+    // Connection edits do not change native policy. Creation keeps the
+    // format's default; an existing explicit disabled value remains false.
+    let enabled = entry.get("enabled").cloned();
+    if enabled.as_ref().is_some_and(|value| !value.is_boolean()) {
+        return Err("MCP enabled flag must be a boolean".into());
+    }
+    // These fields belong to the connection form. Preserve all extension
+    // fields (timeouts, OAuth, vendor options), but discard stale transport fields.
+    for key in [
+        "type",
+        "command",
+        "args",
+        "env",
+        "environment",
+        "url",
+        "httpUrl",
+        "headers",
+    ] {
+        entry.remove(key);
+    }
+    entry.extend(spec.as_object().expect("MCP spec object").clone());
+    if let Some(enabled) = enabled {
+        entry.insert("enabled".into(), enabled);
+    }
+    let entry = Value::Object(entry);
+    super::native_read::validate_json_entry(name, &entry, tool)?;
+    servers.insert(name.to_string(), entry);
+    Ok(())
 }
 
 pub fn remove_json_server(path: &Path, name: &str, format: JsonMcpFormat) -> Result<(), String> {
-    crate::json_config::update_json_file(path, |document| {
-        if let Some(container) = document.get_mut(format.container_key()) {
-            let servers = container
-                .as_object_mut()
-                .ok_or("MCP container must be a JSON object")?;
-            servers.remove(name);
-        }
-        Ok(())
-    })
+    super::native_json::update_at(path, name, None, format)
 }
 
 pub fn has_json_server(path: &Path, name: &str, format: JsonMcpFormat) -> bool {

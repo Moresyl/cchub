@@ -1,6 +1,5 @@
 use super::config::{parse_server_entry, McpServerConfig, ScannedMcpServer};
 use serde_json::{json, Value};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn path() -> Result<PathBuf, String> {
@@ -8,17 +7,14 @@ pub fn path() -> Result<PathBuf, String> {
 }
 
 fn read(path: &Path) -> Result<Value, String> {
-    if !path.exists() {
+    let Some(bytes) = crate::config_write::read(path)? else {
         return Ok(json!({"mcpServers": {}}));
-    }
-    let text = fs::read_to_string(path)
-        .map_err(|error| format!("Cannot read MiniMax Code MCP config: {error}"))?;
-    let value: Value =
-        serde_json::from_str(&text).map_err(|_| "Invalid MiniMax Code MCP JSON".to_string())?;
-    if !value.is_object()
-        || value
-            .get("mcpServers")
-            .is_some_and(|servers| !servers.is_object())
+    };
+    let text = std::str::from_utf8(&bytes).map_err(|_| "MiniMax Code MCP config must use UTF-8")?;
+    let value = crate::json_config::parse_json_object(text)?;
+    if value
+        .get("mcpServers")
+        .is_some_and(|servers| !servers.is_object())
     {
         return Err("Invalid MiniMax Code mcpServers mapping".to_string());
     }
@@ -44,67 +40,8 @@ pub fn scan() -> Vec<ScannedMcpServer> {
     path().map(|path| scan_at(&path)).unwrap_or_default()
 }
 
-fn spec_for(config: &McpServerConfig) -> Value {
-    let remote = matches!(
-        config.transport_type.as_deref(),
-        Some("http" | "sse" | "streamable-http" | "remote")
-    ) || config.command.starts_with("https://")
-        || config.command.starts_with("http://");
-    if remote {
-        json!({"type": config.transport_type.as_deref().unwrap_or("http"), "url": config.command, "headers": config.env, "enabled": true})
-    } else {
-        json!({"type": "stdio", "command": config.command, "args": config.args, "env": config.env, "enabled": true})
-    }
-}
-
-struct ConfigLock(PathBuf);
-impl Drop for ConfigLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir(&self.0);
-    }
-}
-
 fn sync_at(path: &Path, name: &str, config: Option<&McpServerConfig>) -> Result<(), String> {
-    if name.trim().is_empty() {
-        return Err("MCP server name cannot be empty".to_string());
-    }
-    if config.is_none() && !path.exists() {
-        return Ok(());
-    }
-    let parent = path.parent().ok_or("Invalid MiniMax Code MCP path")?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("Cannot create MiniMax Code directory: {error}"))?;
-    let lock_path = PathBuf::from(format!("{}.lock", path.display()));
-    fs::create_dir(&lock_path).map_err(|_| "MiniMax Code MCP configuration is busy".to_string())?;
-    let _lock = ConfigLock(lock_path);
-    let mut document = read(path)?;
-    let root = document
-        .as_object_mut()
-        .ok_or("Invalid MiniMax Code MCP document")?;
-    let entry = root.entry("mcpServers").or_insert_with(|| json!({}));
-    let servers = entry
-        .as_object_mut()
-        .ok_or("Invalid MiniMax Code mcpServers mapping")?;
-    if let Some(config) = config {
-        if config.command.trim().is_empty() {
-            return Err("MCP server command or URL cannot be empty".to_string());
-        }
-        let next = spec_for(config);
-        let mut existing = servers.get(name).cloned().unwrap_or_else(|| json!({}));
-        let fields = existing
-            .as_object_mut()
-            .ok_or("Invalid MiniMax Code MCP entry")?;
-        for key in ["command", "args", "env", "url", "headers", "type"] {
-            fields.remove(key);
-        }
-        fields.extend(next.as_object().expect("MCP spec is an object").clone());
-        servers.insert(name.to_string(), existing);
-    } else {
-        servers.remove(name);
-    }
-    let text = serde_json::to_string_pretty(&document).map_err(|error| error.to_string())?;
-    crate::commands::mcode_commands::write_config(path, &text)
-        .map_err(|error| format!("Cannot save MiniMax Code MCP config: {error}"))
+    super::native_json::update_at(path, name, config, super::formats::JsonMcpFormat::MiniMax)
 }
 
 pub fn sync(name: &str, config: Option<&McpServerConfig>) -> Result<(), String> {
@@ -128,6 +65,7 @@ pub fn has_server(name: &str) -> bool {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::fs;
 
     #[test]
     fn preserves_unmanaged_fields_and_remote_transport() {
@@ -169,5 +107,88 @@ mod tests {
         };
         assert!(sync_at(&file, "service", Some(&config)).is_err());
         assert_eq!(fs::read_to_string(&file).unwrap(), "not JSON");
+    }
+
+    #[test]
+    fn connection_changes_keep_disabled_policy_comments_and_exact_noop_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mcp.json");
+        let source = "\u{feff}{\r\n // unrelated\r\n \"version\": 7,\r\n \"mcpServers\": {\"service\": {\"type\": \"stdio\", \"command\": \"old\", \"enabled\": false, \"timeout\": 95, \"oauth\": {\"scopes\": [\"read\"]}}, \"other\": {\"command\": \"keep\"}}\r\n}\r\n";
+        fs::write(&file, source).unwrap();
+        let config = McpServerConfig {
+            command: "https://example.com/mcp".into(),
+            args: vec![],
+            env: HashMap::from([("Authorization".into(), "Bearer token".into())]),
+            transport_type: Some("streamable-http".into()),
+        };
+        sync_at(&file, "service", Some(&config)).unwrap();
+        let output = fs::read_to_string(&file).unwrap();
+        assert!(output.starts_with('\u{feff}'));
+        assert!(output.contains("// unrelated\r\n \"version\": 7"));
+        assert!(output.contains("\"other\": {\"command\": \"keep\"}"));
+        let value = crate::json_config::parse_json_object(&output).unwrap();
+        let entry = &value["mcpServers"]["service"];
+        assert_eq!(entry["enabled"], false);
+        assert_eq!(entry["type"], "streamable-http");
+        assert_eq!(entry["timeout"], 95);
+        assert_eq!(entry["oauth"]["scopes"][0], "read");
+        assert!(entry.get("command").is_none());
+        assert_eq!(entry["headers"]["Authorization"], "Bearer token");
+        assert_eq!(read(&file).unwrap(), value);
+        let scanned = scan_at(&file);
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].name, "other");
+        sync_at(&file, "service", Some(&config)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), output);
+        sync_at(&file, "service", None).unwrap();
+        let value =
+            crate::json_config::parse_json_object(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert!(value["mcpServers"].get("service").is_none());
+        assert_eq!(value["mcpServers"]["other"]["command"], "keep");
+    }
+
+    #[test]
+    fn invalid_inputs_and_missing_removals_create_neither_file_nor_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("missing/mcp.json");
+        sync_at(&file, "missing", None).unwrap();
+        let config = McpServerConfig {
+            command: "file:///private-secret".into(),
+            args: vec![],
+            env: HashMap::new(),
+            transport_type: Some("http".into()),
+        };
+        for name in ["service", "", "bad\nname"] {
+            let error = sync_at(&file, name, Some(&config)).unwrap_err();
+            assert!(!error.contains("private-secret"));
+            assert!(!file.parent().unwrap().exists());
+        }
+    }
+
+    #[test]
+    fn reads_reject_invalid_file_shapes_without_disclosing_private_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mcp.json");
+        assert!(read(&file).unwrap()["mcpServers"]
+            .as_object()
+            .unwrap()
+            .is_empty());
+        assert!(!file.exists());
+        for bytes in [
+            b"{\"private-secret\":".as_slice(),
+            b"{\"mcpServers\":[],\"token\":\"private-secret\"}",
+            b"{\"mcpServers\":{},\"mcpServers\":{\"secret\":\"private-secret\"}}",
+            &[255, 254, 0],
+        ] {
+            fs::write(&file, bytes).unwrap();
+            let error = read(&file).unwrap_err();
+            assert!(!error.contains("private-secret"));
+            assert!(!error.contains(file.to_str().unwrap()));
+            assert_eq!(fs::read(&file).unwrap(), bytes);
+        }
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        assert!(read(&file).is_err());
+        assert!(file.is_dir());
     }
 }

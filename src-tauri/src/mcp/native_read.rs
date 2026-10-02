@@ -66,3 +66,12 @@ fn read_config_at(path: &Path, format: Format) -> Result<ConfigView, String> {
 
 #[cfg(test)]
 mod tests;
+
+pub(super) fn validate_json_entry(name: &str, value: &Value, tool: &str) -> Result<(), String> {
+    let fields = value.as_object().ok_or("MCP entry must be a JSON object")?;
+    definition::validate(
+        name,
+        &document::Entry::Json(fields.clone()),
+        Format::for_tool(tool)?,
+    )
+}

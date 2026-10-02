@@ -20,6 +20,8 @@ use crate::db::DbState;
 
 mod transport;
 use transport::*;
+mod status;
+use status::*;
 
 const SETTINGS_KEY: &str = "s3_sync_settings";
 const KEYRING_ACCOUNT: &str = "s3_sync_secret_access_key";
@@ -447,18 +449,29 @@ pub async fn upload(
     let _workflow = crate::cloud_sync::workflow_lock().lock().await;
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        let settings = read_settings(&conn)?;
-        if !settings.enabled {
-            return Err("S3 sync is not enabled".to_string());
-        }
-        crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
-        settings
+        read_settings(&conn)?
     };
-    let remote = fetch_manifest(&settings).await?;
+    finish_transfer(
+        db,
+        &settings,
+        upload_inner(db, &settings, reviewed_revision).await,
+    )
+}
+
+async fn upload_inner(
+    db: &State<'_, DbState>,
+    settings: &S3SyncSettings,
+    reviewed_revision: Option<String>,
+) -> Result<S3RemoteInfo, String> {
+    if !settings.enabled {
+        return Err("S3 sync is not enabled".to_string());
+    }
+    crate::cloud_backup::validate_new_passphrase(&settings.backup_encryption.passphrase)?;
+    let remote = fetch_manifest(settings).await?;
     if let Some((manifest, _)) = &remote {
         validate_manifest(manifest)?;
     }
-    let scope = backup_scope(&settings);
+    let scope = backup_scope(settings);
     let condition = cloud_revision::authorize(
         &KeyringStore,
         &scope,
@@ -480,8 +493,8 @@ pub async fn upload(
     let digest = sha256_hex(&payload);
     let snapshot_path = format!("snapshots/cchub-sync-{}.cchub-backup", uuid::Uuid::new_v4());
     put_object(
-        &settings,
-        &object_key(&settings, &snapshot_path),
+        settings,
+        &object_key(settings, &snapshot_path),
         payload,
         &WriteCondition::Absent,
     )
@@ -498,12 +511,12 @@ pub async fn upload(
         sha256: digest,
         payload_format: crate::cloud_backup::PAYLOAD_FORMAT.into(),
         device_name: device_name(),
-        profile_path: profile_path(&settings),
+        profile_path: profile_path(settings),
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     let headers = put_object(
-        &settings,
-        &object_key(&settings, MANIFEST_NAME),
+        settings,
+        &object_key(settings, MANIFEST_NAME),
         manifest_bytes.clone(),
         &condition,
     )
@@ -511,7 +524,7 @@ pub async fn upload(
     let written = if cloud_revision::strong_etag(&headers).is_some() {
         Some(cloud_revision::observe(&scope, &manifest_bytes, &headers))
     } else {
-        fetch_manifest(&settings)
+        fetch_manifest(settings)
             .await?
             .map(|(_, revision)| revision)
     };
@@ -519,7 +532,7 @@ pub async fn upload(
     cloud_revision::accept(&KeyringStore, &scope, &written)?;
     let info = S3RemoteInfo {
         exists: true,
-        remote_url: object_url(&settings, &object_key(&settings, MANIFEST_NAME))?.to_string(),
+        remote_url: object_url(settings, &object_key(settings, MANIFEST_NAME))?.to_string(),
         snapshot_path: Some(snapshot_path),
         updated_at: Some(created_at.clone()),
         size_bytes: Some(size_bytes),
@@ -532,11 +545,10 @@ pub async fn upload(
         )?),
         protocol_version: Some(PROTOCOL_VERSION),
         db_compat_version: Some(DB_COMPAT_VERSION),
-        profile_path: profile_path(&settings),
+        profile_path: profile_path(settings),
     };
     let conn = db.0.lock().map_err(|error| error.to_string())?;
-    update_upload_status(&conn, &settings, created_at)?;
-    crate::cloud_http::complete(&credential_scope(&settings));
+    update_upload_status(&conn, settings, created_at)?;
     Ok(info)
 }
 
@@ -545,17 +557,28 @@ pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<
     let _workflow = crate::cloud_sync::workflow_lock().lock().await;
     let settings = {
         let conn = db.0.lock().map_err(|error| error.to_string())?;
-        let settings = read_settings(&conn)?;
-        if !settings.enabled {
-            return Err("S3 sync is not enabled".to_string());
-        }
-        settings
+        read_settings(&conn)?
     };
-    let (manifest, revision) = fetch_manifest(&settings)
+    finish_transfer(
+        db,
+        &settings,
+        download_inner(db, &settings, allow_plaintext).await,
+    )
+}
+
+async fn download_inner(
+    db: &State<'_, DbState>,
+    settings: &S3SyncSettings,
+    allow_plaintext: bool,
+) -> Result<String, String> {
+    if !settings.enabled {
+        return Err("S3 sync is not enabled".to_string());
+    }
+    let (manifest, revision) = fetch_manifest(settings)
         .await?
         .ok_or("No remote S3 sync manifest found")?;
     validate_manifest(&manifest)?;
-    let bytes = get_object(&settings, &object_key(&settings, &manifest.snapshot_path))
+    let bytes = get_object(settings, &object_key(settings, &manifest.snapshot_path))
         .await?
         .ok_or("Remote S3 snapshot is missing")?;
     crate::cloud_transfer::verify_snapshot(&bytes, manifest.size_bytes, Some(&manifest.sha256))?;
@@ -572,32 +595,9 @@ pub async fn download(db: &State<'_, DbState>, allow_plaintext: bool) -> Result<
     std::fs::write(&temp_file, bytes.as_slice()).map_err(|error| error.to_string())?;
     let message = import_cloud_backup_from_path_impl(db, &temp_file)?;
     let conn = db.0.lock().map_err(|error| error.to_string())?;
-    update_upload_status(&conn, &settings, Utc::now().to_rfc3339())?;
-    cloud_revision::accept(&KeyringStore, &backup_scope(&settings), &revision)?;
-    crate::cloud_http::complete(&credential_scope(&settings));
+    update_upload_status(&conn, settings, Utc::now().to_rfc3339())?;
+    cloud_revision::accept(&KeyringStore, &backup_scope(settings), &revision)?;
     Ok(message)
-}
-
-pub fn update_error(conn: &rusqlite::Connection, error: &str) -> Result<(), String> {
-    let mut settings = read_settings(conn)?;
-    settings.last_error = Some(error.to_string());
-    settings.secret_access_key.clear();
-    set_json_app_setting(conn, SETTINGS_KEY, &settings)
-}
-
-fn update_upload_status(
-    conn: &rusqlite::Connection,
-    expected: &S3SyncSettings,
-    synced_at: String,
-) -> Result<(), String> {
-    let mut current: S3SyncSettings = get_json_app_setting(conn, SETTINGS_KEY)?.unwrap_or_default();
-    current.normalize();
-    if same_remote(&current, expected) {
-        current.last_sync_at = Some(synced_at);
-        current.last_error = None;
-        set_json_app_setting(conn, SETTINGS_KEY, &current.masked_for_frontend())?;
-    }
-    Ok(())
 }
 
 pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
@@ -633,6 +633,9 @@ pub fn spawn_auto_sync_loop(app_handle: AppHandle) {
 
 #[cfg(test)]
 mod rate_limit_tests;
+
+#[cfg(test)]
+mod status_tests;
 
 #[cfg(test)]
 mod tests {

@@ -51,15 +51,7 @@ pub async fn s3_sync_upload(
     db: State<'_, DbState>,
     reviewed_revision: Option<String>,
 ) -> Result<S3RemoteInfo, String> {
-    match s3_sync::upload(&db, reviewed_revision).await {
-        Ok(info) => Ok(info),
-        Err(error) => {
-            if let Ok(conn) = db.0.lock() {
-                let _ = s3_sync::update_error(&conn, &error);
-            }
-            Err(error)
-        }
-    }
+    s3_sync::upload(&db, reviewed_revision).await
 }
 
 #[tauri::command]
@@ -67,13 +59,5 @@ pub async fn s3_sync_download(
     db: State<'_, DbState>,
     allow_plaintext: Option<bool>,
 ) -> Result<String, String> {
-    match s3_sync::download(&db, allow_plaintext.unwrap_or(false)).await {
-        Ok(message) => Ok(message),
-        Err(error) => {
-            if let Ok(conn) = db.0.lock() {
-                let _ = s3_sync::update_error(&conn, &error);
-            }
-            Err(error)
-        }
-    }
+    s3_sync::download(&db, allow_plaintext.unwrap_or(false)).await
 }

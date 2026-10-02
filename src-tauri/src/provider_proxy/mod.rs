@@ -15,6 +15,7 @@ use tokio::sync::oneshot;
 
 mod affinity;
 mod alpha_search;
+mod chat_history;
 mod circuits;
 mod cost;
 use circuits::{CircuitState, EndpointCircuitState};
@@ -101,6 +102,7 @@ pub(super) struct LocalProviderProxyRuntimeInner {
     pub(super) rectifier_config: Option<crate::proxy_optimizer::config::RectifierConfig>,
     pub(super) routing_rotations: std::collections::VecDeque<(String, u64)>,
     pub(in crate::provider_proxy) affinity: affinity::Store,
+    pub(in crate::provider_proxy) chat_history: chat_history::Store,
 }
 
 pub(crate) struct LocalProviderProxyRuntime(pub(super) Arc<Mutex<LocalProviderProxyRuntimeInner>>);

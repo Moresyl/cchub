@@ -24,6 +24,8 @@ mod bounded_stream_tests;
 mod cache_usage_tests;
 #[path = "chat_compat_tests.rs"]
 mod chat_compat_tests;
+#[path = "chat_history_tests.rs"]
+mod chat_history_tests;
 #[path = "chat_parts_tests.rs"]
 mod chat_parts_tests;
 #[path = "deadline_tests.rs"]

@@ -1,13 +1,12 @@
 // 把 proxy 上下文路由到对应的 upstream URL，按顺序尝试候选并落配额日志。
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, Response, StatusCode};
-use bytes::Bytes;
 use serde_json::Value;
 use std::time::Instant;
 use tauri::{AppHandle, Manager};
 
 use crate::db::DbState;
-use crate::provider_proxy_transform::{openai_error_to_anthropic, rectify_anthropic_request_bytes};
+use crate::provider_proxy_transform::openai_error_to_anthropic;
 
 use super::circuits::{
     profile_available, retry_after_seconds, track_body, CircuitLease, CircuitScope,
@@ -24,6 +23,8 @@ mod context;
 mod model_request;
 #[path = "forward/quota.rs"]
 mod quota;
+#[path = "forward/rectifier.rs"]
+mod rectifier;
 #[path = "forward/responses_history.rs"]
 mod responses_history;
 #[path = "forward/streaming.rs"]
@@ -40,6 +41,8 @@ mod streaming_keepalive;
 mod streaming_preflight;
 #[path = "forward/timeouts.rs"]
 mod timeouts;
+#[path = "forward/transport.rs"]
+mod transport;
 use super::optimizer::{read_optimizer_config, read_rectifier_config};
 use super::profiles::{
     endpoint_circuit_key, is_claude_messages_path, ordered_upstream_base_urls, profile_circuit_key,
@@ -49,8 +52,7 @@ use super::usage::{parse_usage_metrics_with_basis, source_input_basis};
 use super::{
     build_proxy_error, build_upstream_request_url, extract_upstream_target, is_hop_by_hop_header,
     is_retryable_upstream_status, next_proxy_request_id, parse_json_bytes, reqwest_client,
-    ClaudeApiFormat, LocalProviderProxyRuntime, MAX_PROXY_BODY_BYTES,
-    MAX_PROXY_RESPONSE_BODY_BYTES,
+    LocalProviderProxyRuntime, MAX_PROXY_BODY_BYTES, MAX_PROXY_RESPONSE_BODY_BYTES,
 };
 use timeouts::{read_response_body_limited, AttemptBudget};
 
@@ -329,49 +331,50 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
             ) else {
                 continue;
             };
-            let mut request_body_bytes = effective_body_bytes.clone();
             let mut rectifier_attempts = 0usize;
-
+            let aliased_base_url = match super::model_aliases::alias_base_url(
+                base_url,
+                upstream.use_full_url,
+                &effective_relative_path,
+                &request_insights,
+            ) {
+                Ok(url) => url,
+                Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+            };
+            let upstream_url = match build_upstream_request_url(
+                &aliased_base_url,
+                &effective_relative_path,
+                effective_request_query.as_deref(),
+                upstream.use_full_url,
+            ) {
+                Ok(url) => url,
+                Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
+            };
+            let mut history = super::chat_history::Recovery::new(
+                runtime.clone(),
+                &tool_id,
+                &upstream,
+                &snapshot,
+                &effective_relative_path,
+                &upstream_url,
+                request_insights.sent_model(),
+                method == axum::http::Method::POST,
+            );
+            let mut request_body_bytes = history.prepare(effective_body_bytes.clone());
+            // Repairs share the endpoint's deadline, including reading its error
+            // body. A validation loop cannot restart the timeout each time.
+            let budget = AttemptBudget::new(&optimizer_config, request_insights.is_streaming);
             loop {
-                let aliased_base_url = match super::model_aliases::alias_base_url(
-                    base_url,
-                    upstream.use_full_url,
-                    &effective_relative_path,
-                    &request_insights,
-                ) {
-                    Ok(url) => url,
-                    Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
-                };
-                let upstream_url = match build_upstream_request_url(
-                    &aliased_base_url,
-                    &effective_relative_path,
-                    effective_request_query.as_deref(),
-                    upstream.use_full_url,
-                ) {
-                    Ok(url) => url,
-                    Err(error) => return build_proxy_error(StatusCode::BAD_REQUEST, error),
-                };
-                let mut builder = client.request(method.clone(), upstream_url.clone());
-                for (name, value) in &forwarded_headers {
-                    builder = builder.header(name, value);
-                }
-                for (name, value) in &upstream.headers {
-                    builder = builder.header(name, value);
-                }
-                for (name, value) in &upstream.request_header_overrides {
-                    builder = builder.header(name, value);
-                }
-                for (name, value) in &optimizer_extra_headers {
-                    builder = builder.header(name.as_str(), value.as_str());
-                }
-                if !request_insights.is_streaming && !has_accept_encoding_header {
-                    builder = builder.header(reqwest::header::ACCEPT_ENCODING, "gzip, deflate, br");
-                }
-                if !request_body_bytes.is_empty() {
-                    builder = builder.body(request_body_bytes.clone());
-                }
-
-                let budget = AttemptBudget::new(&optimizer_config, request_insights.is_streaming);
+                let builder = transport::request(
+                    &client,
+                    &method,
+                    &upstream_url,
+                    &forwarded_headers,
+                    &upstream,
+                    &optimizer_extra_headers,
+                    !request_insights.is_streaming && !has_accept_encoding_header,
+                    &request_body_bytes,
+                );
                 match timeouts::send(builder, budget).await {
                     Ok(response) => {
                         let status = response.status();
@@ -441,7 +444,11 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                 && is_claude_messages_path(&original_relative_path)
                         });
 
-                        if is_json_response && (!is_stream_response || !status.is_success()) {
+                        let inspect_history_error = history.can_retry(status)
+                            && !content_type.contains("text/event-stream");
+                        if (is_json_response || inspect_history_error)
+                            && (!is_stream_response || !status.is_success())
+                        {
                             match read_response_body_limited(
                                 response,
                                 MAX_PROXY_RESPONSE_BODY_BYTES,
@@ -481,50 +488,27 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         .as_ref()
                                         .and_then(extract_error_message_from_response);
 
-                                    if status == StatusCode::BAD_REQUEST
-                                        && rectifier_attempts < 2
-                                        && matches!(
-                                            upstream.claude_api_format,
-                                            Some(ClaudeApiFormat::Anthropic)
-                                        )
-                                        && is_claude_messages_path(&original_relative_path)
+                                    if let Some(next) =
+                                        history.retry(status, &bytes, &request_body_bytes)
                                     {
-                                        match rectify_anthropic_request_bytes(
-                                            request_body_bytes.as_ref(),
-                                            upstream_error_message.as_deref(),
-                                            &rectifier_config,
-                                        ) {
-                                            Ok(Some(rectified_body)) => {
-                                                rectifier_attempts += 1;
-                                                request_body_bytes = Bytes::from(rectified_body);
-                                                crate::utils::append_runtime_log(
-                                                    "info",
-                                                    "provider_proxy",
-                                                    &format!(
-                                                        "Applied Claude request rectifier [{tool_id}] {} ({}) after upstream 400: {}",
-                                                        upstream.profile_name,
-                                                        upstream.profile_id,
-                                                        upstream_error_message
-                                                            .as_deref()
-                                                            .unwrap_or("unknown error")
-                                                    ),
-                                                );
-                                                continue;
-                                            }
-                                            Ok(None) => {}
-                                            Err(error) => {
-                                                crate::utils::append_runtime_log(
-                                                    "warn",
-                                                    "provider_proxy",
-                                                    &format!(
-                                                        "Failed to apply Claude request rectifier [{tool_id}] {} ({}): {error}",
-                                                        upstream.profile_name, upstream.profile_id
-                                                    ),
-                                                );
-                                            }
-                                        }
+                                        request_body_bytes = next;
+                                        continue;
+                                    }
+                                    if rectifier::retry(
+                                        status,
+                                        &original_relative_path,
+                                        &upstream,
+                                        &mut rectifier_attempts,
+                                        &mut request_body_bytes,
+                                        upstream_error_message.as_deref(),
+                                        &rectifier_config,
+                                    ) {
+                                        continue;
                                     }
 
+                                    let valid_chat_reply = parsed
+                                        .as_ref()
+                                        .is_some_and(super::chat_history::is_chat_reply);
                                     let transform_usage = parsed.as_ref().and_then(|body| {
                                         parse_usage_metrics_with_basis(
                                             body,
@@ -600,6 +584,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                     };
 
                                     if status.is_success() {
+                                        if valid_chat_reply {
+                                            history.success();
+                                        }
                                         let endpoint_accepted = endpoint_lease.success();
                                         let profile_accepted = profile_lease.success();
                                         if endpoint_accepted && profile_accepted {
@@ -677,6 +664,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             let route_target = upstream.clone();
                             let route_base = base_url.clone();
                             let on_success = move || {
+                                history.success();
                                 route_succeeded(
                                     &route_app,
                                     &route_tool,

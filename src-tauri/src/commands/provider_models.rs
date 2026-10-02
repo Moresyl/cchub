@@ -10,6 +10,7 @@ mod catalog;
 mod detailed;
 
 pub use catalog::ModelInfo;
+pub(crate) use catalog::{merge_catalog, model as parse_model_info};
 
 const PROVIDER_MODELS_TIMEOUT_SECS: u64 = 15;
 

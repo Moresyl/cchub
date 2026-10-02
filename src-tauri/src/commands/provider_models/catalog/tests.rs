@@ -2,6 +2,32 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn reasoning_effort_catalog_aliases_preserve_default_and_future_values() {
+    let models = parse_catalog(&json!({"data":[
+        {"id":"snake","supported_reasoning_efforts":[{"reasoning_effort":"high"}],"default_reasoning_effort":"high"},
+        {"id":"camel","supportedReasoningEfforts":[{"reasoningEffort":"future"}],"defaultReasoningEffort":"future"},
+        {"id":"empty","supportedReasoningEfforts":[]},
+        {"id":"bad","supportedReasoningEfforts":[{},false],"defaultReasoningEffort":12}
+    ]}),false).unwrap();
+    assert_eq!(
+        models[0].supported_reasoning_levels,
+        Some(vec!["high".into()])
+    );
+    assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(
+        models[1].supported_reasoning_levels,
+        Some(vec!["future".into()])
+    );
+    assert_eq!(
+        models[1].default_reasoning_effort.as_deref(),
+        Some("future")
+    );
+    assert_eq!(models[2].supported_reasoning_levels, Some(vec![]));
+    assert_eq!(models[3].supported_reasoning_levels, None);
+    assert_eq!(models[3].default_reasoning_effort, None);
+}
+
+#[test]
 fn model_billing_is_preserved_separately_from_token_prices_and_missing_metadata() {
     let models = parse_catalog(&json!({"data":[
         {"id":"free","billing":{"is_premium":false,"multiplier":0}},

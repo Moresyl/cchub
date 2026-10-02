@@ -9,8 +9,10 @@ use crate::codex_oauth::{
 };
 use crate::db::DbState;
 
+mod models;
+pub use models::CodexCliModel;
+
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
-const CODEX_MODELS_URL: &str = "https://chatgpt.com/backend-api/codex/models";
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_ERROR_BODY_CHARS: usize = 512;
@@ -33,14 +35,6 @@ pub struct CodexCliQuota {
     pub tiers: Vec<CodexQuotaTier>,
     pub error: Option<String>,
     pub queried_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexCliModel {
-    pub id: String,
-    pub display_name: Option<String>,
-    pub owned_by: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -320,71 +314,6 @@ fn parse_claude_quota(value: &Value) -> Vec<CodexQuotaTier> {
     tiers
 }
 
-fn string_field(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .filter_map(|key| object.get(*key))
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .find(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn parse_models(value: &Value) -> Vec<CodexCliModel> {
-    let mut models = Vec::new();
-    let entries = value
-        .get("data")
-        .and_then(Value::as_array)
-        .or_else(|| value.get("models").and_then(Value::as_array))
-        .or_else(|| value.get("items").and_then(Value::as_array))
-        .or_else(|| value.as_array());
-
-    if let Some(entries) = entries {
-        for entry in entries {
-            push_model(&mut models, entry, None);
-        }
-    }
-    if let Some(map) = value.get("models").and_then(Value::as_object) {
-        for (key, entry) in map {
-            push_model(&mut models, entry, Some(key));
-        }
-    }
-    models.sort_by(|left, right| left.id.cmp(&right.id));
-    models.dedup_by(|left, right| left.id == right.id);
-    models
-}
-
-fn push_model(models: &mut Vec<CodexCliModel>, value: &Value, fallback_id: Option<&str>) {
-    if let Some(id) = value.as_str().map(str::trim).filter(|id| !id.is_empty()) {
-        models.push(CodexCliModel {
-            id: id.to_string(),
-            display_name: None,
-            owned_by: Some("Codex".to_string()),
-        });
-        return;
-    }
-    let Some(object) = value.as_object() else {
-        if let Some(id) = fallback_id.filter(|id| !id.trim().is_empty()) {
-            models.push(CodexCliModel {
-                id: id.trim().to_string(),
-                display_name: None,
-                owned_by: Some("Codex".to_string()),
-            });
-        }
-        return;
-    };
-    let id = string_field(object, &["slug", "id", "model", "name"])
-        .or_else(|| fallback_id.map(str::to_string));
-    let Some(id) = id.filter(|id| !id.trim().is_empty()) else {
-        return;
-    };
-    models.push(CodexCliModel {
-        id,
-        display_name: string_field(object, &["display_name", "displayName", "label"]),
-        owned_by: string_field(object, &["owned_by", "ownedBy", "provider", "vendor"])
-            .or_else(|| Some("Codex".to_string())),
-    });
-}
-
 #[tauri::command]
 pub async fn get_codex_cli_quota(db: State<'_, DbState>) -> Result<CodexCliQuota, String> {
     let (credentials, client) = {
@@ -459,30 +388,12 @@ pub async fn get_codex_cli_models(db: State<'_, DbState>) -> Result<Vec<CodexCli
     let token = credentials
         .access_token
         .ok_or_else(|| "Codex OAuth token is missing".to_string())?;
-    let mut request = client
-        .get(CODEX_MODELS_URL)
-        .query(&[("client_version", env!("CARGO_PKG_VERSION"))])
-        .header("Authorization", format!("Bearer {token}"))
-        .header("originator", "cchub");
-    if let Some(account_id) = credentials.account_id.as_deref() {
-        request = request.header("ChatGPT-Account-Id", account_id);
-    }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("Codex model request failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!(
-            "Codex model API returned HTTP {status}: {}",
-            truncate_body(response.text().await.unwrap_or_default())
-        ));
-    }
-    let value: Value = response
-        .json()
-        .await
-        .map_err(|error| format!("Failed to parse Codex model response: {error}"))?;
-    Ok(parse_models(&value))
+    models::fetch_cli_models(models::request(
+        &client,
+        &token,
+        credentials.account_id.as_deref(),
+    ))
+    .await
 }
 
 #[tauri::command]
@@ -534,16 +445,11 @@ pub async fn get_codex_oauth_models(
     let value = state
         .0
         .resource_json(account_id.as_deref(), |id, token| {
-            client
-                .get(CODEX_MODELS_URL)
-                .query(&[("client_version", env!("CARGO_PKG_VERSION"))])
-                .bearer_auth(token)
-                .header("originator", "cchub")
-                .header("ChatGPT-Account-Id", id)
+            models::request(&client, token, Some(id))
         })
         .await
         .map_err(|error| error.to_string())?;
-    Ok(parse_models(&value))
+    models::parse(&value)
 }
 
 fn oauth_quota_failure(error: CodexOAuthError) -> CodexCliQuota {
@@ -740,7 +646,7 @@ pub async fn get_subscription_quota(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_claude_quota, parse_credentials, parse_models, parse_quota, tier_name};
+    use super::{parse_claude_quota, parse_credentials, parse_quota, tier_name};
     use serde_json::json;
 
     #[test]
@@ -796,15 +702,6 @@ mod tests {
         assert_eq!(tiers[0].name, "five_hour");
         assert_eq!(tiers[0].utilization, 100.0);
         assert_eq!(tiers[1].name, "seven_day");
-    }
-
-    #[test]
-    fn parses_and_deduplicates_model_shapes() {
-        let models = parse_models(&json!({
-            "data": [{"id": "gpt-5"}, {"slug": "gpt-5-mini", "displayName": "Mini"}, {"id": "gpt-5"}]
-        }));
-        assert_eq!(models.len(), 2);
-        assert_eq!(models[1].display_name.as_deref(), Some("Mini"));
     }
 
     #[test]

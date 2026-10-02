@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { normalizeModelCatalog } from "./modelCatalog";
 
 describe("persisted model catalog", () => {
+  it("preserves reported defaults through persistence and distinguishes malformed lists from empty capabilities", () => {
+    const result = normalizeModelCatalog({
+      toolId: "codex",
+      models: [
+        { id: "a", supportedReasoningLevels: ["high"], defaultReasoningEffort: "high" },
+        { id: "a", supportedReasoningLevels: [null, {}], defaultReasoningEffort: false },
+        { id: "empty", supportedReasoningLevels: [] },
+        { id: "unknown", supportedReasoningLevels: [null, {}] },
+      ],
+    });
+    expect(result?.models).toEqual([
+      { id: "a", supportedReasoningLevels: ["high"], defaultReasoningEffort: "high" },
+      { id: "empty", supportedReasoningLevels: [] },
+      { id: "unknown" },
+    ]);
+    expect(normalizeModelCatalog(JSON.parse(JSON.stringify(result)))).toEqual(result);
+  });
   it("round-trips request billing separately from monetary prices and old catalogs", () => {
     const result = normalizeModelCatalog({
       toolId: "claude",

@@ -92,8 +92,10 @@ pub async fn get_xai_oauth_models(
         .map_err(error_message)?
         .into_iter()
         .map(|model| CodexCliModel {
-            id: model.id,
-            display_name: None,
+            model: crate::commands::provider_models::ModelInfo {
+                id: model.id,
+                ..Default::default()
+            },
             owned_by: model.owned_by,
         })
         .collect::<Vec<_>>();

@@ -9,6 +9,7 @@ export interface ModelInfo {
   outputPrice?: string | null;
   nativeEndpoints?: string[] | null;
   supportedReasoningLevels?: string[] | null;
+  defaultReasoningEffort?: string | null;
   inputModalities?: string[] | null;
   outputModalities?: string[] | null;
   premiumRequestBilling?: ModelBilling | null;
@@ -28,7 +29,7 @@ export function normalizeModelCatalog(value: unknown): SavedModelCatalog | undef
   for (const row of catalog.models) {
     if (!row || typeof row.id !== "string" || !row.id.trim()) continue;
     const model: ModelInfo = { ...unique.get(row.id.trim()), id: row.id.trim() };
-    for (const key of ["displayName", "inputPrice", "outputPrice"] as const) {
+    for (const key of ["displayName", "inputPrice", "outputPrice", "defaultReasoningEffort"] as const) {
       if (typeof row[key] === "string" && row[key].trim()) model[key] = row[key].trim();
     }
     for (const key of ["contextWindow", "maxOutputTokens"] as const) {
@@ -36,10 +37,12 @@ export function normalizeModelCatalog(value: unknown): SavedModelCatalog | undef
     }
     for (const key of ["nativeEndpoints", "supportedReasoningLevels", "inputModalities", "outputModalities"] as const) {
       const list = row[key];
-      if (Array.isArray(list))
-        model[key] = [
+      if (Array.isArray(list)) {
+        const normalized = [
           ...new Set(list.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim())),
         ];
+        if (list.length === 0 || normalized.length > 0) model[key] = normalized;
+      }
     }
     if (row.premiumRequestBilling !== undefined && row.premiumRequestBilling !== null) {
       model.premiumRequestBilling = model.premiumRequestBilling

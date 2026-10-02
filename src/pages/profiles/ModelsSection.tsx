@@ -57,6 +57,7 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
       selected.nativeEndpoints?.length,
       selected.supportedReasoningLevels?.length,
       Array.isArray(selected.supportedReasoningLevels),
+      selected.defaultReasoningEffort,
       selected.inputModalities?.length,
       selected.outputModalities?.length,
     ].some(Boolean);
@@ -139,6 +140,7 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
                 <ReasoningEffortSelect
                   value={fields.codexReasoningEffort}
                   reportedLevels={selected?.supportedReasoningLevels}
+                  defaultEffort={selected?.defaultReasoningEffort}
                   localeText={localeText}
                   onValueChange={(value) => onDraftChange(draftTool, { codexReasoningEffort: value })}
                 />
@@ -221,6 +223,12 @@ export const ProfileModelsSection = memo(function ProfileModelsSection({
                     ? selected.supportedReasoningLevels.join(" · ")
                     : localeText("无可配置等级", "No configurable levels", "設定可能なレベルなし")}
                 </dd>
+              </div>
+            )}
+            {selected.defaultReasoningEffort && (
+              <div>
+                <dt>{localeText("默认推理等级", "Default reasoning effort", "既定の推論レベル")}</dt>
+                <dd>{selected.defaultReasoningEffort}</dd>
               </div>
             )}
             {!!selected.inputModalities?.length && (

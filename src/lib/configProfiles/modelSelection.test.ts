@@ -14,6 +14,7 @@ describe("model capabilities and selection", () => {
             id: "custom",
             contextWindow: 200000,
             supportedReasoningLevels: ["high"],
+            defaultReasoningEffort: "high",
             nativeEndpoints: ["/responses"],
             inputModalities: ["text", "image"],
           },

@@ -4,6 +4,27 @@ import { createDefaultStructuredFields } from "../../lib/configProfiles";
 import { ProfileModelsSection } from "./ModelsSection";
 
 describe("profile model section", () => {
+  it("shows a discovered default and preserves the saved effort after refresh", () => {
+    const onDraftChange = vi.fn();
+    const props = {
+      locale: "zh",
+      localeText: (zh: string) => zh,
+      draftTool: "codex",
+      draftFields: { ...createDefaultStructuredFields("codex"), model: "custom", codexReasoningEffort: "high" },
+      fetchedModels: ["custom"],
+      fetchedModelDetails: [{ id: "custom", supportedReasoningLevels: ["high", "max"], defaultReasoningEffort: "max" }],
+      fetchingModels: false,
+      modelFetchError: null,
+      onFetchModels: vi.fn(),
+      onDraftChange,
+    };
+    const view = render(<ProfileModelsSection {...props} />);
+    expect(screen.getByText("默认推理等级")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "推理强度" }).textContent).toBe("high");
+    view.rerender(<ProfileModelsSection {...props} fetchedModelDetails={[]} />);
+    expect(screen.getByRole("combobox", { name: "推理强度" }).textContent).toBe("high");
+    expect(onDraftChange).not.toHaveBeenCalled();
+  });
   it("binds reasoning to the selected model and preserves the original effort through capability changes", () => {
     const fields = { ...createDefaultStructuredFields("codex"), model: "plain", codexReasoningEffort: "" };
     const onDraftChange = vi.fn();

@@ -16,6 +16,8 @@ pub struct ModelInfo {
     #[serde(default)]
     pub supported_reasoning_levels: Option<Vec<String>>,
     #[serde(default)]
+    pub default_reasoning_effort: Option<String>,
+    #[serde(default)]
     pub input_modalities: Option<Vec<String>>,
     #[serde(default)]
     pub output_modalities: Option<Vec<String>>,
@@ -45,11 +47,15 @@ fn first_number(entry: &Value, paths: &[&str]) -> Option<u64> {
         .find_map(|path| entry.pointer(path).and_then(positive_integer))
 }
 
-fn list(value: &Value, object_key: Option<&str>) -> Option<Vec<String>> {
+fn list(value: &Value, object_keys: &[&str]) -> Option<Vec<String>> {
     let entries = value.as_array()?;
     let mut result = Vec::new();
     for entry in entries {
-        let name = text(entry).or_else(|| object_key.and_then(|key| entry.get(key)).and_then(text));
+        let name = text(entry).or_else(|| {
+            object_keys
+                .iter()
+                .find_map(|key| entry.get(*key).and_then(text))
+        });
         if let Some(name) = name {
             if !result.contains(&name) {
                 result.push(name);
@@ -60,11 +66,11 @@ fn list(value: &Value, object_key: Option<&str>) -> Option<Vec<String>> {
     (entries.is_empty() || !result.is_empty()).then_some(result)
 }
 
-fn first_list(entry: &Value, paths: &[&str], object_key: Option<&str>) -> Option<Vec<String>> {
+fn first_list(entry: &Value, paths: &[&str], object_keys: &[&str]) -> Option<Vec<String>> {
     paths.iter().find_map(|path| {
         entry
             .pointer(path)
-            .and_then(|value| list(value, object_key))
+            .and_then(|value| list(value, object_keys))
     })
 }
 
@@ -78,7 +84,7 @@ fn price(value: &Value) -> Option<String> {
     (number.is_finite() && number >= 0.0).then_some(text)
 }
 
-fn model(entry: &Value, gemini: bool) -> Option<ModelInfo> {
+pub(crate) fn model(entry: &Value, gemini: bool) -> Option<ModelInfo> {
     let raw_id = if gemini {
         entry
             .get("name")
@@ -138,13 +144,26 @@ fn model(entry: &Value, gemini: bool) -> Option<ModelInfo> {
                 "/nativeEndpoints",
                 "/supported_endpoints",
             ],
-            None,
+            &[],
         ),
         supported_reasoning_levels: first_list(
             entry,
-            &["/supported_reasoning_levels", "/supportedReasoningLevels"],
-            Some("effort"),
+            &[
+                "/supported_reasoning_levels",
+                "/supportedReasoningLevels",
+                "/supported_reasoning_efforts",
+                "/supportedReasoningEfforts",
+            ],
+            &["effort", "reasoning_effort", "reasoningEffort"],
         ),
+        default_reasoning_effort: [
+            "default_reasoning_effort",
+            "defaultReasoningEffort",
+            "default_reasoning_level",
+            "defaultReasoningLevel",
+        ]
+        .iter()
+        .find_map(|key| entry.get(*key).and_then(text)),
         input_modalities: first_list(
             entry,
             &[
@@ -153,7 +172,7 @@ fn model(entry: &Value, gemini: bool) -> Option<ModelInfo> {
                 "/inputModalities",
                 "/architecture/input_modalities",
             ],
-            None,
+            &[],
         ),
         output_modalities: first_list(
             entry,
@@ -163,7 +182,7 @@ fn model(entry: &Value, gemini: bool) -> Option<ModelInfo> {
                 "/outputModalities",
                 "/architecture/output_modalities",
             ],
-            None,
+            &[],
         ),
     })
 }
@@ -182,7 +201,7 @@ pub(super) fn parse_catalog(payload: &Value, gemini: bool) -> Result<Vec<ModelIn
         .collect())
 }
 
-pub(super) fn merge_catalog(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
+pub(crate) fn merge_catalog(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
     let mut unique: BTreeMap<String, ModelInfo> = BTreeMap::new();
     for next in models {
         let previous = unique.entry(next.id.clone()).or_insert_with(|| ModelInfo {
@@ -200,6 +219,7 @@ pub(super) fn merge_catalog(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
             output_price,
             native_endpoints,
             supported_reasoning_levels,
+            default_reasoning_effort,
             input_modalities,
             output_modalities
         );

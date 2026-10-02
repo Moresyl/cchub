@@ -34,6 +34,19 @@ beforeEach(() => {
 });
 
 describe("model discovery", () => {
+  it("retains OAuth capabilities and defaults in the saved catalog", async () => {
+    const model = {
+      id: "custom",
+      contextWindow: 200000,
+      supportedReasoningLevels: ["high", "max"],
+      defaultReasoningEffort: "high",
+    };
+    invoke.mockResolvedValue([model]);
+    const ctx = context({ draftTool: "codex", draftProviderType: "codex_oauth", draftApiKey: "" });
+    await performFetchModels(ctx);
+    expect(ctx.setFetchedModelDetails).toHaveBeenCalledWith([model]);
+    expect(ctx.onCatalog).toHaveBeenCalledWith({ toolId: "codex", models: [model] });
+  });
   it("deduplicates and enriches IDs without discarding valid metadata", async () => {
     invoke.mockResolvedValue([
       { id: " a ", displayName: "Alpha", contextWindow: 128000 },

@@ -11,6 +11,22 @@ afterAll(() => {
 });
 
 describe("reasoning effort selector", () => {
+  it("shows the reported default without writing it into the saved configuration", async () => {
+    const onValueChange = vi.fn();
+    render(
+      <ReasoningEffortSelect
+        value="high"
+        reportedLevels={["high", "max"]}
+        defaultEffort="max"
+        onValueChange={onValueChange}
+        localeText={localeText}
+      />,
+    );
+    expect(onValueChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "使用模型默认值（max）" }));
+    expect(onValueChange).toHaveBeenCalledExactlyOnceWith("");
+  });
   it("reports no configurable levels without offering the legacy four", () => {
     const onValueChange = vi.fn();
     render(

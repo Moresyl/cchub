@@ -6,15 +6,32 @@ interface Props {
   id?: string;
   value: string;
   reportedLevels?: string[] | null;
+  defaultEffort?: string | null;
   onValueChange: (value: string) => void;
   localeText: (zh: string, en: string, ja?: string) => string;
 }
 
-export default function ReasoningEffortSelect({ id, value, reportedLevels, onValueChange, localeText }: Props) {
+export default function ReasoningEffortSelect({
+  id,
+  value,
+  reportedLevels,
+  defaultEffort,
+  onValueChange,
+  localeText,
+}: Props) {
   const descriptionId = useId();
   const { reported, levels, unsupported } = codexReasoningChoices(value, reportedLevels);
   const options = [
-    { value: "", label: localeText("使用模型默认值", "Use model default", "モデルの既定値を使用") },
+    {
+      value: "",
+      label: defaultEffort
+        ? localeText(
+            `使用模型默认值（${defaultEffort}）`,
+            `Use model default (${defaultEffort})`,
+            `モデルの既定値を使用（${defaultEffort}）`,
+          )
+        : localeText("使用模型默认值", "Use model default", "モデルの既定値を使用"),
+    },
     ...levels.map((level) => ({ value: level, label: level })),
   ];
   if (value && !levels.includes(value)) {

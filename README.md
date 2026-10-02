@@ -105,9 +105,21 @@ Codex reasoning settings sit beside the selected model and use its reported leve
 
 Codex 配置页将推理强度放在模型选择旁，按当前模型报告的等级显示选项。明确为空时不提供额外等级；未报告能力时保留常用选项和已有自定义值。未被报告支持的原值会提示并保留，直到主动修改。配置管理、配置文件和工具设置共用“使用模型默认值”，保存时移除 `model_reasoning_effort`；字面值 `none` 与默认值区分。启动代理时保留已经清除的强度，主动切换配置则遵循所选配置。配置文件编辑保留注释和无关 MCP 设置。
 
+CLI and managed-account model discovery preserve reported context/output limits, input modalities, reasoning levels and defaults. Duplicate rows enrich one model; hidden entries stay out of the picker without changing saved model IDs. Missing or malformed capabilities remain unknown. Defaults are displayed as hints and are not written automatically. Invalid catalog containers fail explicitly. CLI catalog responses are limited to 2 MiB and a 15-second deadline; query errors omit upstream bodies and sensitive transport details. Catalog discovery does not prove inference access.
+
+CLI 与托管账户的模型发现保留报告的上下文／输出上限、输入模态、推理等级与默认值。重复记录合并补全，隐藏项不进入选择器，也不改写已有模型 ID。缺失或损坏的能力保持未知，默认等级只提示，不自动写入配置。错误的目录结构会明确报错。CLI 目录查询限制为 2 MiB 和 15 秒，错误提示不显示上游正文或敏感网络详情；发现模型不等于验证推理权限。
+
 ![CCHub model reasoning capabilities](screenshots/model-reasoning.png)
 
 This screenshot shows the actual model editor with isolated demonstration data, not a native desktop acceptance result.
+
+The local CLI quota card updates Codex usage, Claude usage and the model catalog independently. Failed refreshes keep last results labeled as such, with separate retry guidance and no credential/error-body disclosure. Loading and authentication states remain visible; refresh uses the shared control, and usage bars have accessible labels.
+
+本机 CLI 配额卡片独立更新 Codex 用量、Claude 用量与模型目录。刷新失败保留并标明上次结果，各项提供单独的失败提示，不显示凭据或错误正文。加载与认证状态明确可见，刷新按钮使用统一控件，用量条提供无障碍标签。
+
+![CCHub local CLI quota](screenshots/local-cli-quota.png)
+
+This is the actual quota component with isolated demonstration data, not a live subscription or native desktop acceptance result.
 
 The Codex file editor counts API-key-only edits as unsaved changes. It saves the raw TOML draft together with a field-level authentication update, checking the exact loaded revision of both files before writing. Malformed authentication and invalid TOML stop the complete save. A reported write failure rolls back changes still owned by this save; newer external edits are preserved, and incomplete recovery retains original files with a recovery path. This is not a power-loss transaction. Late file reads and save acknowledgements cannot replace another file or newer drafts. Editor actions and file navigation use the shared controls.
 

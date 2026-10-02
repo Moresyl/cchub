@@ -181,17 +181,13 @@ export {
 } from "./mutations/openClaw";
 export {
   useSetClaudeHudConfigMutation,
-  useSetClaudeSettingMutation,
   useSetClaudeStatuslineMutation,
-  useSetCodexSettingMutation,
   useSetHello2ccConfigMutation,
   useSetHello2ccEnabledMutation,
   useUpdateClaudeHudMutation,
   useUpdateHello2ccMutation,
   type SetClaudeHudConfigInput,
-  type SetClaudeSettingInput,
   type SetClaudeStatuslineInput,
-  type SetCodexSettingInput,
   type SetHello2ccConfigInput,
   type SetHello2ccEnabledInput,
   type UpdateClaudeHudResult,

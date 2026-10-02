@@ -87,7 +87,15 @@ Manage instruction versions for Claude, Codex, Gemini, OpenCode, OpenClaw, Herme
 
 Saves check the loaded library and file revisions. Conflicts retain the draft until you reload and review the current file or stored version. Writes are serialized, and late responses cannot replace another tool's state. Reported database commit failures roll back file writes still owned by the save; newer external edits are preserved. This recovery does not cover a crash or power loss.
 
-### Local proxy and failover
+### Tool settings
+
+Tools > Claude reads the configured `settings.json` and preserves existing permission rules while changing the native starting mode. Exact custom model IDs, unset defaults and tool-search thresholds remain visible. Saves require the loaded revision of both user and legacy local settings; choosing a tool-search value explicitly moves that field to user settings without removing other local fields. Invalid JSON, duplicate fields and stale reads prevent writes. Pending or failed writes keep the last confirmed values, with masked errors and reload recovery. Turning off background updates retains the channel and does not disable manual updates or override other update policies.
+
+工具 > Claude 读取指定目录中的 `settings.json`，修改原生默认权限模式时保留已有允许、询问和拒绝规则。自定义模型 ID、未指定默认值和工具搜索阈值都会原样显示，百分比阈值支持输入后点击应用或按 Enter 保存。保存前核对用户配置与旧版本地配置的版本；主动选择工具搜索值时，迁移该字段到用户配置，保留其他本地字段。JSON 格式错误、重复字段和过期读取会阻止写入。保存中或失败时保留上次确认值，错误信息脱敏并支持重新读取。关闭后台更新保留更新频道，不禁用手动更新，也不覆盖其他更新策略。
+
+![CCHub tool settings](screenshots/tool-settings.png)
+
+This screenshot uses actual settings components and isolated demonstration data; it is not native desktop acceptance evidence.
 
 Tools > Codex reads the configured user settings file and checks its location and content revision before saving. Permission presets update `approval_policy` and `sandbox_mode`, preserving valid reply styles, comments and unrelated settings; granular or named permission policies remain custom until explicitly changed. A selected configuration profile keeps the global permissions control read-only. Failed reads do not invent defaults, and failed writes retain the last confirmed values until reload. The 1M toggle removes only a 1M override when disabled, preserving other context limits. The legacy response-storage field is retained for compatibility and does not guarantee that local or server records are disabled.
 
@@ -104,6 +112,8 @@ This screenshot shows the actual model editor with isolated demonstration data, 
 The Codex file editor counts API-key-only edits as unsaved changes. It saves the raw TOML draft together with a field-level authentication update, checking the exact loaded revision of both files before writing. Malformed authentication and invalid TOML stop the complete save. A reported write failure rolls back changes still owned by this save; newer external edits are preserved, and incomplete recovery retains original files with a recovery path. This is not a power-loss transaction. Late file reads and save acknowledgements cannot replace another file or newer drafts. Editor actions and file navigation use the shared controls.
 
 Claude local option switches preserve JSONC comments, formatting and unrelated settings. Empty, malformed, duplicate-key or non-object configurations and invalid `env` values stop the edit with an error. Switching an already-disabled absent option off leaves the file untouched, including when the file does not exist.
+
+### Local proxy and failover
 
 Native Responses and compaction forwarding repair legacy tool-search item IDs with incorrect prefixes. The repair preserves `call_id` links, encrypted reasoning and all other history bytes; valid IDs remain unchanged, and renamed IDs avoid collisions with existing history. This does not make encrypted history portable between providers.
 

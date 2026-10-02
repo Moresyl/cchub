@@ -186,10 +186,6 @@ export interface MarketplaceCatalogQueryResult {
 }
 
 export interface ToolSettingsQueryResult {
-  permissionsLevel: number;
-  autoUpdateChannel: string;
-  claudeModel: string;
-  toolSearchEnabled: boolean;
   visibleApps: ManagedAppId[];
 }
 
@@ -379,21 +375,7 @@ export async function fetchSkillsPageData() {
 }
 
 export async function fetchToolsPageData(): Promise<ToolSettingsQueryResult> {
-  const [permissionsLevel, autoUpdateChannel, claudeModel, toolSearchEnabled, visibleApps] = await Promise.all([
-    invoke<number>("get_claude_permissions_level").catch(() => 0),
-    invoke<string>("get_claude_auto_update").catch(() => "latest"),
-    invoke<string>("get_claude_model").catch(() => ""),
-    invoke<boolean>("get_claude_tool_search").catch(() => false),
-    fetchVisibleAppsQuery(),
-  ]);
-
-  return {
-    permissionsLevel,
-    autoUpdateChannel,
-    claudeModel,
-    toolSearchEnabled,
-    visibleApps,
-  };
+  return { visibleApps: await fetchVisibleAppsQuery() };
 }
 
 export async function fetchClaudeMdPageData() {

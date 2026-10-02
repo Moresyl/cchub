@@ -7,16 +7,6 @@ import {
   type HudStatusQueryResult,
 } from "../queries";
 
-export interface SetClaudeSettingInput {
-  command: string;
-  args: Record<string, unknown>;
-}
-
-export interface SetCodexSettingInput {
-  key: string;
-  value: string;
-}
-
 export interface SetClaudeStatuslineInput {
   enabled: boolean;
 }
@@ -38,24 +28,6 @@ function invalidateToolSettings(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.toolSettings });
   void queryClient.invalidateQueries({ queryKey: queryKeys.hudStatus });
   void queryClient.invalidateQueries({ queryKey: queryKeys.hello2ccStatus });
-}
-
-export function useSetClaudeSettingMutation<TValue>() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (input: SetClaudeSettingInput) => invoke<TValue>(input.command, input.args),
-    onSuccess: () => invalidateToolSettings(queryClient),
-  });
-}
-
-export function useSetCodexSettingMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (input: SetCodexSettingInput) => invoke("set_codex_setting", { ...input }),
-    onSuccess: () => invalidateToolSettings(queryClient),
-  });
 }
 
 export function useSetClaudeStatuslineMutation() {

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { PERM_LEVELS, type HudDisplayBooleanKey, type HudGitStatusKey, type Hello2ccSelectKey } from "./helpers";
+import { type HudDisplayBooleanKey, type HudGitStatusKey, type Hello2ccSelectKey } from "./helpers";
 import { type Hello2ccSelectOption } from "../../components/Hello2ccSelectField";
 
 type UiText = (zh: string, en: string, ja?: string) => string;
@@ -10,26 +10,6 @@ type UiText = (zh: string, en: string, ja?: string) => string;
  */
 export function useToolsOptions(uiText: UiText, tab: "claude" | "codex") {
   const unavailableLabel = useMemo(() => uiText("未安装", "N/A", "未インストール"), [uiText]);
-  const permLevelLabels = useMemo(
-    () => PERM_LEVELS.map((level) => uiText(level.label_zh, level.label_en, level.label_ja)),
-    [uiText],
-  );
-  const autoUpdateOptions = useMemo(
-    () => [
-      { value: "latest", label: uiText("最新", "Latest", "最新") },
-      { value: "stable", label: uiText("稳定", "Stable", "安定版") },
-      { value: "disabled", label: uiText("关闭", "Off", "オフ") },
-    ],
-    [uiText],
-  );
-  const claudeModelOptions = useMemo(
-    () => [
-      { value: "opus", label: "Opus" },
-      { value: "sonnet", label: "Sonnet" },
-      { value: "haiku", label: "Haiku" },
-    ],
-    [],
-  );
   const hudLayoutOptions = useMemo(
     () => [
       { value: "expanded", label: uiText("多行展开", "Expanded", "展開表示"), style: { fontSize: 11 } },
@@ -49,10 +29,6 @@ export function useToolsOptions(uiText: UiText, tab: "claude" | "codex") {
       { value: "both", label: uiText("全部", "Both", "両方"), style: { fontSize: 11 } },
     ],
     [uiText],
-  );
-  const permLevelOptions = useMemo(
-    () => PERM_LEVELS.map((level, index) => ({ value: index, label: permLevelLabels[index], color: level.color })),
-    [permLevelLabels],
   );
   const hudGitStatusOptions = useMemo(
     () => [
@@ -250,13 +226,9 @@ export function useToolsOptions(uiText: UiText, tab: "claude" | "codex") {
 
   return {
     unavailableLabel,
-    permLevelLabels,
-    autoUpdateOptions,
-    claudeModelOptions,
     hudLayoutOptions,
     hudPathLevelOptions,
     hudContextValueOptions,
-    permLevelOptions,
     hudGitStatusOptions,
     hudDisplayOptions,
     hello2ccRoutingOptions,

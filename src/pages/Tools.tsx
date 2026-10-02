@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal, Code, Download, RefreshCw, Trash2 } from "lucide-react";
 import { type Hello2ccConfigField } from "../components/Hello2ccConfigSection";
@@ -12,30 +12,18 @@ import { type ManagedAppId } from "../lib/appPreferences";
 
 import {
   useSetClaudeHudConfigMutation,
-  useSetClaudeSettingMutation,
   useSetClaudeStatuslineMutation,
   useSetHello2ccConfigMutation,
   useSetHello2ccEnabledMutation,
   useUpdateClaudeHudMutation,
   useUpdateHello2ccMutation,
 } from "../hooks/mutations";
-import {
-  useDetectTools,
-  fetchToolsPageData,
-  queryKeys,
-  useHello2ccStatus,
-  useHudStatus,
-  type ToolSettingsQueryResult,
-} from "../hooks/queries";
+import { useDetectTools, fetchToolsPageData, queryKeys, useHello2ccStatus, useHudStatus } from "../hooks/queries";
 
 import {
   DEFAULT_HELLO2CC_CONFIG,
   DEFAULT_HUD_CONFIG,
   migrateHudConfig,
-  PERM_DESC_EN,
-  PERM_DESC_JA,
-  PERM_DESC_ZH,
-  PERM_LEVELS,
   type Hello2ccConfig,
   type Hello2ccSelectKey,
   type Hello2ccUpdateInfo,
@@ -53,10 +41,6 @@ export default function Tools() {
     queryKeys.toolsPage,
   );
   const [tab, setTab] = useState<ToolTab>("claude");
-  const [permLevel, setPermLevel] = useState(cachedToolsPageData?.permissionsLevel ?? 0);
-  const [autoUpdate, setAutoUpdate] = useState(cachedToolsPageData?.autoUpdateChannel ?? "latest");
-  const [claudeModel, setClaudeModel] = useState(cachedToolsPageData?.claudeModel ?? "");
-  const [toolSearch, setToolSearch] = useState(cachedToolsPageData?.toolSearchEnabled ?? false);
   const [visibleApps, setVisibleApps] = useState<ManagedAppId[]>(
     cachedToolsPageData?.visibleApps ?? [
       "claude",
@@ -85,13 +69,11 @@ export default function Tools() {
   const [hello2ccToggling, setHello2ccToggling] = useState(false);
   const [hello2ccUpdateInfo, setHello2ccUpdateInfo] = useState<Hello2ccUpdateInfo | null>(null);
   const [hello2ccDraft, setHello2ccDraft] = useState<Hello2ccConfig>(DEFAULT_HELLO2CC_CONFIG);
-  const pendingPermLevelRef = useRef<number | null>(null);
   const { data: tools = [] } = useDetectTools();
   const { data: rawHudStatus, refetch: refetchHudStatus } = useHudStatus();
   const { data: hello2ccStatus, refetch: refetchHello2ccStatus } = useHello2ccStatus();
   const setHudConfigMutation = useSetClaudeHudConfigMutation();
   const setHello2ccConfigMutation = useSetHello2ccConfigMutation();
-  const setClaudeSettingMutation = useSetClaudeSettingMutation<unknown>();
   const setClaudeStatuslineMutation = useSetClaudeStatuslineMutation();
   const setHello2ccEnabledMutation = useSetHello2ccEnabledMutation();
   const updateClaudeHudMutation = useUpdateClaudeHudMutation();
@@ -133,10 +115,6 @@ export default function Tools() {
           queryFn: fetchToolsPageData,
           staleTime: force ? 0 : 30_000,
         });
-        setPermLevel(data.permissionsLevel);
-        setAutoUpdate(data.autoUpdateChannel);
-        setClaudeModel(data.claudeModel);
-        setToolSearch(data.toolSearchEnabled);
         setVisibleApps(data.visibleApps);
       } catch (e) {
         console.error(e);
@@ -157,34 +135,6 @@ export default function Tools() {
   useEffect(() => {
     setHello2ccDraft(hello2ccStatus?.config ?? DEFAULT_HELLO2CC_CONFIG);
   }, [hello2ccStatus]);
-
-  const patchToolsPageCache = useCallback(
-    (partial: Partial<ToolSettingsQueryResult>) => {
-      queryClient.setQueryData<ToolSettingsQueryResult>(queryKeys.toolsPage, (prev) =>
-        prev ? { ...prev, ...partial } : prev,
-      );
-    },
-    [queryClient],
-  );
-
-  const setClaudeSetting = useCallback(
-    async <T,>(
-      fn: string,
-      args: Record<string, unknown>,
-      onSuccess: (value: T) => void,
-      syncCache?: (value: T) => void,
-    ) => {
-      try {
-        const value = (await setClaudeSettingMutation.mutateAsync({ command: fn, args })) as T;
-        onSuccess(value);
-        syncCache?.(value);
-        showToast("success", uiText("已更新", "Updated", "更新しました"));
-      } catch (e) {
-        showToast("error", `${e}`);
-      }
-    },
-    [setClaudeSettingMutation, uiText],
-  );
 
   const handleInstallHud = useCallback(async () => {
     setHudInstalling(true);
@@ -360,24 +310,11 @@ export default function Tools() {
     [hudStatus, setHudConfigMutation, uiText],
   );
 
-  const commitPermLevel = useCallback(
-    async (nextLevel = pendingPermLevelRef.current ?? permLevel) => {
-      pendingPermLevelRef.current = null;
-      await setClaudeSetting<number>("set_claude_permissions_level", { level: nextLevel }, setPermLevel, (v) =>
-        patchToolsPageCache({ permissionsLevel: v }),
-      );
-    },
-    [patchToolsPageCache, permLevel, setClaudeSetting],
-  );
-
   const {
     unavailableLabel,
-    autoUpdateOptions,
-    claudeModelOptions,
     hudLayoutOptions,
     hudPathLevelOptions,
     hudContextValueOptions,
-    permLevelOptions,
     hudGitStatusOptions,
     hudDisplayOptions,
     hello2ccRoutingOptions,
@@ -392,35 +329,6 @@ export default function Tools() {
   const handleSelectTab = useCallback((value: string) => {
     setTab(value as ToolTab);
   }, []);
-  const handleSelectPermLevel = useCallback(
-    (value: string | number) => {
-      const nextLevel = Number(value);
-      setPermLevel(nextLevel);
-      pendingPermLevelRef.current = nextLevel;
-      void commitPermLevel(nextLevel);
-    },
-    [commitPermLevel],
-  );
-  const handleSelectAutoUpdate = useCallback(
-    (value: string | number) => {
-      const nextValue = String(value);
-      setAutoUpdate(nextValue);
-      void setClaudeSetting<string>("set_claude_auto_update", { channel: nextValue }, setAutoUpdate, (v) =>
-        patchToolsPageCache({ autoUpdateChannel: v }),
-      );
-    },
-    [patchToolsPageCache, setClaudeSetting],
-  );
-  const handleSelectClaudeModel = useCallback(
-    (value: string | number) => {
-      const nextValue = String(value);
-      setClaudeModel(nextValue);
-      void setClaudeSetting<string>("set_claude_model", { model: nextValue }, setClaudeModel, (v) =>
-        patchToolsPageCache({ claudeModel: v }),
-      );
-    },
-    [patchToolsPageCache, setClaudeSetting],
-  );
   const handleSelectHudLayout = useCallback(
     (value: string | number) => {
       void updateHudConfig({ lineLayout: value as HudConfig["lineLayout"] });
@@ -450,43 +358,6 @@ export default function Tools() {
       void updateHudConfig({ display: { [key]: checked } as Partial<NonNullable<HudConfig["display"]>> });
     },
     [updateHudConfig],
-  );
-  const handleToggleBypassPermissions = useCallback(
-    (enabled: boolean) => {
-      const nextLevel = enabled ? 3 : 0;
-      setPermLevel(nextLevel);
-      pendingPermLevelRef.current = nextLevel;
-      void commitPermLevel(nextLevel);
-    },
-    [commitPermLevel],
-  );
-  const handleToggleToolSearch = useCallback(
-    (enabled: boolean) => {
-      setToolSearch(enabled);
-      void setClaudeSetting<boolean>("set_claude_tool_search", { enabled }, setToolSearch, (v) =>
-        patchToolsPageCache({ toolSearchEnabled: v }),
-      );
-    },
-    [patchToolsPageCache, setClaudeSetting],
-  );
-  const handleChangePermLevelRange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const nextLevel = Number(event.target.value);
-    pendingPermLevelRef.current = nextLevel;
-    setPermLevel(nextLevel);
-  }, []);
-  const handleCommitPermLevelPointerUp = useCallback(() => {
-    void commitPermLevel();
-  }, [commitPermLevel]);
-  const handleCommitPermLevelBlur = useCallback(() => {
-    void commitPermLevel();
-  }, [commitPermLevel]);
-  const handleCommitPermLevelKeyUp = useCallback(
-    (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End") {
-        void commitPermLevel();
-      }
-    },
-    [commitPermLevel],
   );
   const handleInstallHudClick = useCallback(() => {
     void handleInstallHud();
@@ -534,7 +405,6 @@ export default function Tools() {
   const handleSaveHello2ccConfigClick = useCallback(() => {
     void handleSaveHello2ccConfig();
   }, [handleSaveHello2ccConfig]);
-  const perm = PERM_LEVELS[permLevel] || PERM_LEVELS[0];
   const hc = hudStatus?.hudConfig || DEFAULT_HUD_CONFIG;
   const hudResolvedGitStatusOptions = useMemo(
     () =>
@@ -665,7 +535,6 @@ export default function Tools() {
     [hello2ccStatus?.enabled, hello2ccToggling, toggleHello2ccEnabled, uiText],
   );
   const hello2ccHasChanges = JSON.stringify(hello2ccDraft) !== JSON.stringify(hello2ccConfigSource);
-  const permDescription = uiText(PERM_DESC_ZH[permLevel], PERM_DESC_EN[permLevel], PERM_DESC_JA[permLevel]);
   const hello2ccSelectFields = useMemo<Hello2ccConfigField[]>(
     () =>
       buildHello2ccSelectFields({
@@ -736,24 +605,6 @@ export default function Tools() {
         {tab === "claude" && toolById.get("claude")?.installed && (
           <ClaudeTab
             uiText={uiText}
-            perm={perm}
-            permLevel={permLevel}
-            permDescription={permDescription}
-            permLevelOptions={permLevelOptions}
-            handleSelectPermLevel={handleSelectPermLevel}
-            handleChangePermLevelRange={handleChangePermLevelRange}
-            handleCommitPermLevelPointerUp={handleCommitPermLevelPointerUp}
-            handleCommitPermLevelKeyUp={handleCommitPermLevelKeyUp}
-            handleCommitPermLevelBlur={handleCommitPermLevelBlur}
-            handleToggleBypassPermissions={handleToggleBypassPermissions}
-            autoUpdate={autoUpdate}
-            autoUpdateOptions={autoUpdateOptions}
-            handleSelectAutoUpdate={handleSelectAutoUpdate}
-            claudeModel={claudeModel}
-            claudeModelOptions={claudeModelOptions}
-            handleSelectClaudeModel={handleSelectClaudeModel}
-            toolSearch={toolSearch}
-            handleToggleToolSearch={handleToggleToolSearch}
             hudStatus={hudStatus}
             hudInstallAction={hudInstallAction}
             hudPrimaryAction={hudPrimaryAction}

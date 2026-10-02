@@ -1,6 +1,6 @@
 import { Command } from "cmdk";
 import { Check, ChevronDown, Search, X } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -34,6 +34,31 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
   const searchLabel = text("搜索模型", "Search models", "モデルを検索");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const focusSearchOnOpen = useRef(true);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const handleListMount = useCallback((list: HTMLDivElement | null) => {
+    listRef.current = list;
+    if (!list) return;
+    // The portal is initially measured before its available height is known.
+    // Keep the active row visible as that viewport changes, without scrolling the surrounding page.
+    const observer = new ResizeObserver(() => {
+      if (!list.clientHeight) return;
+      const selected = list.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]');
+      if (!selected) return;
+      const itemRect = selected.getBoundingClientRect();
+      const listRect = list.getBoundingClientRect();
+      const top = itemRect.top - listRect.top;
+      const bottom = itemRect.bottom - listRect.top - list.clientHeight;
+      if (top < 0 || itemRect.height > list.clientHeight) list.scrollTop += top;
+      else if (bottom > 0) list.scrollTop += bottom;
+    });
+    observer.observe(list);
+    return () => {
+      observer.disconnect();
+      if (listRef.current === list) listRef.current = null;
+    };
+  }, []);
 
   const filteredModels = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
@@ -89,6 +114,21 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
             aria-label={label || placeholder || chooseLabel}
             aria-expanded={open}
             disabled={disabled}
+            onPointerDown={(event) => {
+              focusSearchOnOpen.current = event.pointerType !== "touch" && event.pointerType !== "pen";
+            }}
+            onClick={(event) => {
+              if (event.detail === 0) focusSearchOnOpen.current = true;
+            }}
+            onKeyDown={(event) => {
+              if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)) {
+                focusSearchOnOpen.current = true;
+              }
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                handleOpenChange(true);
+              }
+            }}
           >
             <span className={value ? "model-selector-value" : "model-selector-placeholder"}>
               {value || placeholder || chooseLabel}
@@ -97,16 +137,29 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
           </Button>
         </PopoverTrigger>
 
-        <PopoverContent className="model-selector-popover" onOpenAutoFocus={(event) => event.preventDefault()}>
-          <Command defaultValue={value} shouldFilter={false} className="model-selector-command" label={searchLabel}>
+        <PopoverContent
+          className="model-selector-popover"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            const target = focusSearchOnOpen.current ? searchRef.current : listRef.current;
+            target?.focus({ preventScroll: true });
+          }}
+        >
+          <Command
+            defaultValue={value}
+            shouldFilter={false}
+            disablePointerSelection={!focusSearchOnOpen.current}
+            className="model-selector-command"
+            label={searchLabel}
+          >
             <div className="model-selector-search">
               <Search size={14} aria-hidden="true" />
               <Command.Input
+                ref={searchRef}
                 value={search}
                 onValueChange={setSearch}
                 placeholder={text("搜索或输入模型 ID", "Search or enter a model ID", "モデル ID を検索または入力")}
                 aria-label={searchLabel}
-                autoFocus
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) {
                     event.preventDefault();
@@ -121,7 +174,7 @@ function ModelSelectorComponent({ value, models, onChange, placeholder, disabled
               />
             </div>
 
-            <Command.List className="model-selector-list">
+            <Command.List ref={handleListMount} className="model-selector-list" label={chooseLabel}>
               {filteredModels.length === 0 && !canUseCustomValue && (
                 <Command.Empty className="model-selector-empty">
                   {text("没有匹配的模型", "No matching models", "一致するモデルがありません")}

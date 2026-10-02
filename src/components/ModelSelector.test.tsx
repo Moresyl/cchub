@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelSelector, { type ModelInfo } from "./ModelSelector";
 import { setLocale } from "../lib/i18n";
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 beforeEach(() => setLocale("zh"));
 
@@ -38,6 +39,135 @@ beforeAll(() => {
 });
 
 describe("ModelSelector", () => {
+  it.each([
+    { top: 1_000, bottom: 1_040, height: 40, initialScroll: 0, expected: 724 },
+    { top: 110, bottom: 150, height: 40, initialScroll: 0, expected: 0 },
+    { top: 60, bottom: 100, height: 40, initialScroll: 900, expected: 860 },
+    { top: 1_000, bottom: 1_300, height: 300, initialScroll: 0, expected: 900 },
+  ])(
+    "aligns a measured selection at $top within the list",
+    async ({ top, bottom, height, initialScroll, expected }) => {
+      const callbacks: (() => void)[] = [];
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(callback: ResizeObserverCallback) {
+            callbacks.push(() => callback([], this as unknown as ResizeObserver));
+          }
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      );
+      try {
+        render(<ModelSelector value="model-beta" models={models} onChange={vi.fn()} />);
+        fireEvent.click(screen.getByRole("combobox", { name: "选择模型" }));
+        const list = await screen.findByRole("listbox", { name: "选择模型" });
+        const selected = screen.getByRole("option", { name: /model-beta/ });
+        const listRect = { top: 100, bottom: 316, height: 216 } as DOMRect;
+        const itemRect = { top, bottom, height } as DOMRect;
+        list.scrollTop = initialScroll;
+        vi.spyOn(list, "getBoundingClientRect").mockReturnValue(listRect);
+        vi.spyOn(selected, "getBoundingClientRect").mockReturnValue(itemRect);
+        act(() => callbacks.forEach((callback) => callback()));
+        expect(list.scrollTop).toBe(initialScroll);
+        Object.defineProperty(list, "clientHeight", { value: 216 });
+        act(() => callbacks.forEach((callback) => callback()));
+        expect(list.scrollTop).toBe(expected);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each(["touch", "pen"])("lets %s users browse without focusing the search input", async (pointerType) => {
+    const onChange = vi.fn();
+    render(<ModelSelector value="model-beta" models={models} onChange={onChange} />);
+    const trigger = screen.getByRole("combobox", { name: "选择模型" });
+    const pointer = createEvent.pointerDown(trigger);
+    Object.defineProperty(pointer, "pointerType", { value: pointerType });
+    fireEvent(trigger, pointer);
+    fireEvent.click(trigger, { detail: 1 });
+    const input = await screen.findByRole("combobox", { name: "搜索模型" });
+    const list = screen.getByRole("listbox", { name: "选择模型" });
+    await waitFor(() => expect(document.activeElement).toBe(list));
+    const focusSearch = vi.spyOn(input, "focus");
+    fireEvent.pointerMove(screen.getByRole("option", { name: /model-alpha/ }));
+    fireEvent.keyDown(list, { key: "ArrowUp" });
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /model-alpha/ }).getAttribute("data-selected")).toBe("true"),
+    );
+    fireEvent.click(screen.getByRole("option", { name: /model-alpha/ }));
+    expect(focusSearch).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledWith("model-alpha");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("focuses search for a mouse and returns focus on Escape", async () => {
+    render(<ModelSelector value="model-beta" models={models} onChange={vi.fn()} />);
+    const trigger = screen.getByRole("combobox", { name: "选择模型" });
+    const pointer = createEvent.pointerDown(trigger);
+    Object.defineProperty(pointer, "pointerType", { value: "mouse" });
+    fireEvent(trigger, pointer);
+    fireEvent.click(trigger, { detail: 1 });
+    const input = await screen.findByRole("combobox", { name: "搜索模型" });
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.queryByRole("combobox", { name: "搜索模型" })).toBeNull();
+  });
+
+  it.each(["ArrowDown", "ArrowUp"])("opens with %s and preserves the current model", async (key) => {
+    const onChange = vi.fn();
+    render(<ModelSelector value="model-beta" models={models} onChange={onChange} />);
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "选择模型" }), { key });
+    const input = await screen.findByRole("combobox", { name: "搜索模型" });
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /model-beta/ }).getAttribute("data-selected")).toBe("true"),
+    );
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("model-beta");
+  });
+
+  it("switches back to keyboard search after browsing with touch", async () => {
+    render(<ModelSelector value="model-beta" models={models} onChange={vi.fn()} />);
+    const trigger = screen.getByRole("combobox", { name: "选择模型" });
+    const pointer = createEvent.pointerDown(trigger);
+    Object.defineProperty(pointer, "pointerType", { value: "touch" });
+    fireEvent(trigger, pointer);
+    fireEvent.click(trigger, { detail: 1 });
+    await screen.findByRole("combobox", { name: "搜索模型" });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("listbox", { name: "选择模型" })));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "搜索模型" })).toBeNull());
+    fireEvent.click(trigger, { detail: 0 });
+    const reopened = await screen.findByRole("combobox", { name: "搜索模型" });
+    await waitFor(() => expect(document.activeElement).toBe(reopened));
+  });
+
+  it("dismisses only the model popup inside a dialog and returns focus to the field", async () => {
+    render(
+      <Dialog open>
+        <DialogContent aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>编辑配置</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <ModelSelector value="model-beta" models={models} onChange={vi.fn()} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>,
+    );
+    const trigger = screen.getByRole("combobox", { name: "选择模型" });
+    fireEvent.click(trigger);
+    const input = await screen.findByRole("combobox", { name: "搜索模型" });
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.queryByRole("combobox", { name: "搜索模型" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "编辑配置" })).toBeTruthy();
+  });
+
   it("shows reported request units while selecting the unchanged model ID", async () => {
     const onChange = vi.fn();
     render(

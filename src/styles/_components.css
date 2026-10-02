@@ -639,22 +639,25 @@ select.input option {
 }
 
 .model-selector-popover {
+  --model-selector-search-height: var(--control-height-md);
   width: var(--radix-popover-trigger-width);
   min-width: min(360px, calc(100vw - 24px));
   max-width: min(520px, calc(100vw - 24px));
+  max-height: var(--radix-popover-content-available-height);
   overflow: hidden;
   padding: 6px;
 }
 
 .model-selector-command {
   background: transparent;
+  outline: none;
 }
 
 .model-selector-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 34px;
+  height: var(--model-selector-search-height);
   padding: 0 9px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-muted);
@@ -677,7 +680,11 @@ select.input option {
 }
 
 .model-selector-list {
-  max-height: min(216px, var(--radix-popover-content-available-height));
+  /* Reserve the search row, 12px padding and 2px border in the popup budget. */
+  max-height: min(
+    216px,
+    max(0px, calc(var(--radix-popover-content-available-height) - var(--model-selector-search-height) - 14px))
+  );
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-top: 5px;

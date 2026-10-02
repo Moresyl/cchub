@@ -12,37 +12,14 @@ pub struct McpConfigResponse {
     pub servers: HashMap<String, serde_json::Value>,
 }
 
-/// Compatibility view of the unified MCP store for one application.
+/// Read one application's configured native MCP document without global name matching.
 #[tauri::command]
-pub fn get_mcp_config(app: String, _db: State<'_, DbState>) -> Result<McpConfigResponse, String> {
-    let config_path = if app.eq_ignore_ascii_case("claude-desktop") {
-        config::claude_desktop_config_path()
-    } else if app.eq_ignore_ascii_case("mcode") {
-        crate::mcp::mcode::path().ok()
-    } else {
-        dirs::home_dir().map(|home| home.join(".claude.json"))
-    }
-    .map(|path| path.to_string_lossy().into_owned())
-    .unwrap_or_default();
-    let mut servers = HashMap::new();
-    for server in config::scan_all_mcp_servers()
-        .into_iter()
-        .filter(|server| config::check_server_in_tool(&server.name, &app))
-    {
-        servers.insert(
-            server.name,
-            serde_json::json!({
-                "command": server.command,
-                "args": server.args,
-                "env": server.env,
-                "type": server.transport,
-                "enabled": true,
-            }),
-        );
-    }
+pub fn get_mcp_config(app: String, db: State<'_, DbState>) -> Result<McpConfigResponse, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    let view = crate::mcp::native_read::read_config(&conn, &app)?;
     Ok(McpConfigResponse {
-        config_path,
-        servers,
+        config_path: view.config_path,
+        servers: view.servers,
     })
 }
 

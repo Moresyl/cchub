@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { getRequestTiming, type RequestTimingRecord } from "../lib/requestTiming";
 import CollapsibleSection from "./CollapsibleSection";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -17,7 +18,7 @@ export interface StreamAttemptRecord {
   total_cost_usd: string;
 }
 
-export interface RequestDetailRecord {
+export interface RequestDetailRecord extends RequestTimingRecord {
   request_id: string;
   tool_id: string;
   profile_id: string;
@@ -25,13 +26,9 @@ export interface RequestDetailRecord {
   request_model: string | null;
   response_model: string | null;
   input_tokens: number;
-  output_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
   total_cost_usd: string;
-  latency_ms: number;
-  status_code: number;
-  is_streaming: boolean;
   error_message: string | null;
   created_at: string;
   stream_attempts?: StreamAttemptRecord[];
@@ -61,6 +58,7 @@ function RequestDetailPanel({
   localeText: text = englishText,
 }: Props) {
   if (!record && !loading && !error) return null;
+  const timing = record ? getRequestTiming(record) : null;
   return (
     <Card className="mt-3 min-w-0" aria-busy={loading}>
       <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
@@ -90,6 +88,18 @@ function RequestDetailPanel({
               <Detail label={text("供应商", "Provider")} value={record.provider_name} />
               <Detail label={text("状态", "Status")} value={String(record.status_code)} />
               <Detail label={text("延迟", "Latency")} value={`${record.latency_ms} ms`} />
+              {record.is_streaming && (
+                <>
+                  <Detail
+                    label={text("首个输出耗时", "Time to first output", "最初の出力まで")}
+                    value={timing?.firstOutputMs == null ? "—" : `${timing.firstOutputMs} ms`}
+                  />
+                  <Detail
+                    label={text("估算输出速率", "Estimated output rate", "推定出力速度")}
+                    value={timing?.tokensPerSecond == null ? "—" : `~${timing.tokensPerSecond.toFixed(1)} tok/s`}
+                  />
+                </>
+              )}
               <Detail label={text("估算费用", "Estimated cost")} value={`$${record.total_cost_usd}`} />
               <Detail
                 label={text("输入 / 输出 Token", "Input / output tokens")}
@@ -109,6 +119,15 @@ function RequestDetailPanel({
               />
               {record.error_message && <Detail label={text("错误", "Error")} value={record.error_message} />}
             </dl>
+            {record.is_streaming && (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {text(
+                  "首个输出包含文本、推理和工具输出。速率按首次至末次输出的接收间隔估算，受网络与客户端读取速度影响；不足 100 ms、未完成或缺少计时的请求不估算速率。",
+                  "First output includes text, reasoning and tool output. Rate is estimated from the first-to-last output receipt interval and depends on the network and client reading speed. Windows under 100 ms, incomplete requests and missing timings have no rate estimate.",
+                  "最初の出力にはテキスト・推論・ツール出力を含みます。速度は最初から最後の受信間隔による推定値で、ネットワークや読み取り速度に影響されます。100 ms 未満・未完了・計測なしの場合は推定しません。",
+                )}
+              </p>
+            )}
             {!!record.stream_attempts?.length && (
               <CollapsibleSection
                 key={record.request_id}

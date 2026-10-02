@@ -8,6 +8,7 @@ pub(super) struct RequestRecord<'a> {
     pub upstream: &'a UpstreamTarget,
     pub insights: &'a ProxyRequestInsights,
     pub usage: &'a ProxyUsageMetrics,
+    pub timing: crate::provider_proxy::usage::StreamTiming,
     pub latency_ms: u64,
     pub status_code: u16,
     pub error_message: Option<&'a str>,
@@ -90,12 +91,30 @@ pub(super) fn persist_request(
         latency: counter(record.latency_ms),
         ..Default::default()
     };
+    let timing = record.timing;
+    let valid_timing = record.insights.is_streaming
+        && timing
+            .first_output_ms
+            .is_some_and(|first| first <= record.latency_ms)
+        && timing
+            .first_output_ms
+            .zip(timing.generation_ms)
+            .is_none_or(|(first, generation)| generation <= record.latency_ms - first);
+    let first_output = valid_timing
+        .then_some(timing.first_output_ms)
+        .flatten()
+        .map(counter);
+    let generation = valid_timing
+        .then_some(timing.generation_ms)
+        .flatten()
+        .map(counter);
     tx.execute(
         "INSERT INTO proxy_request_logs (
             request_id,tool_id,profile_id,provider_name,request_model,response_model,
             input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,total_cost_usd,
-            latency_ms,status_code,is_streaming,error_message,created_at,upstream_model,input_tokens_is_total
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,1)
+            latency_ms,status_code,is_streaming,error_message,created_at,upstream_model,input_tokens_is_total,
+            first_output_ms,generation_ms
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,1,?18,?19)
         ON CONFLICT(request_id) DO UPDATE SET
             profile_id=excluded.profile_id,provider_name=excluded.provider_name,
             request_model=excluded.request_model,response_model=excluded.response_model,upstream_model=excluded.upstream_model,
@@ -103,12 +122,14 @@ pub(super) fn persist_request(
             input_tokens_is_total=excluded.input_tokens_is_total,
             cache_read_tokens=excluded.cache_read_tokens,cache_creation_tokens=excluded.cache_creation_tokens,
             total_cost_usd=excluded.total_cost_usd,latency_ms=excluded.latency_ms,
+            first_output_ms=excluded.first_output_ms,generation_ms=excluded.generation_ms,
             status_code=excluded.status_code,is_streaming=excluded.is_streaming,error_message=excluded.error_message",
         params![
             record.request_id,record.tool_id,record.upstream.profile_id,record.upstream.profile_name,
             record.insights.request_model,record.usage.response_model,next.input,next.output,next.cache_read,
             next.cache_creation,format!("{:.6}", next.cost),next.latency,record.status_code,
             record.insights.is_streaming,record.error_message,created_at,record.insights.upstream_model,
+            first_output,generation,
         ],
     )?;
     if present {

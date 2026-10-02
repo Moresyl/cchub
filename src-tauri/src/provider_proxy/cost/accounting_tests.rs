@@ -41,6 +41,7 @@ fn write(
             upstream: &upstream,
             insights: &ProxyRequestInsights::default(),
             usage: &usage,
+            timing: Default::default(),
             latency_ms: latency,
             status_code: status,
             error_message: (status >= 400).then_some("failed"),

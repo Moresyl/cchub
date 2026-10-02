@@ -305,6 +305,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                     &upstream,
                     &request_insights,
                     usage,
+                    None,
                     started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
                     status,
                     error,

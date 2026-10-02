@@ -244,6 +244,8 @@ export interface ProxyRequestLogRowQueryResult {
   cache_creation_tokens: number;
   total_cost_usd: string;
   latency_ms: number;
+  first_output_ms?: number | null;
+  generation_ms?: number | null;
   status_code: number;
   is_streaming: boolean;
   error_message: string | null;

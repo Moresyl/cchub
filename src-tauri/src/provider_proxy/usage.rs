@@ -213,6 +213,9 @@ mod capture;
 #[path = "usage/stream_log.rs"]
 mod stream_log;
 pub(super) use capture::{capture_stream_usage, UsageCapture};
+#[path = "usage/timing.rs"]
+mod timing;
+pub(super) use timing::{observe_stream_timing, StreamTiming, StreamTimingCapture};
 
 #[cfg(test)]
 #[path = "usage/partial_tests.rs"]
@@ -230,6 +233,7 @@ pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(
     started_at: std::time::Instant,
     health: super::forward::streaming_health::StreamHealth,
     capture: UsageCapture,
+    timing: StreamTimingCapture,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
@@ -249,6 +253,7 @@ where
         usage: ProxyUsageMetrics::default(),
         health: health.clone(),
         capture,
+        timing,
     };
     async_stream::stream! {
         let mut log = log;

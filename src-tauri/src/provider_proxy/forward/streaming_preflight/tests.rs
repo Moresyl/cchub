@@ -10,6 +10,7 @@ fn initialization_is_distinguished_from_outputs_side_effects_and_unknown_events(
         "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"output\":[]}}\n\n",
         "event: message_start\ndata: {\"message\":{\"content\":[],\"usage\":{\"input_tokens\":7}}}\n\n",
         "data: {\"usage\":{\"prompt_tokens\":7}}\n\n",
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"\"}]}}]}\n\n",
     ] { assert_eq!(classify(frame), Decision::Lead, "{frame}"); }
     for frame in [
         "data: [DONE]\n\n",
@@ -19,6 +20,8 @@ fn initialization_is_distinguished_from_outputs_side_effects_and_unknown_events(
         "event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\"}}\n\n",
         "event: response.reasoning_text.delta\ndata: {\"delta\":\"think\"}\n\n",
         "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{}}]}}]}\n\n",
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"answer\"}]}}]}\n\n",
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"\",\"unknown\":true}]}}]}\n\n",
         "event: custom\ndata: {}\n\n",
         "data: {\"choices\":[{\"delta\":{\"unknown_action\":{}}}]}\n\n",
         "data: {\"choices\":[{\"delta\":{\"refusal\":\"declined\"}}]}\n\n",

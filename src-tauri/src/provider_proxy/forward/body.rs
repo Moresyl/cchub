@@ -54,6 +54,7 @@ impl RetainedReply {
             &self.upstream,
             &self.insights,
             self.usage.as_ref(),
+            None,
             started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
             self.response.status().as_u16(),
             Some(&self.error_message),

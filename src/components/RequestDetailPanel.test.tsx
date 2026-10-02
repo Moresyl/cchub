@@ -38,6 +38,27 @@ const record: RequestDetailRecord = {
 const props = { title: "请求明细", closeLabel: "关闭", localeText: (zh: string) => zh, onClose: vi.fn() };
 
 describe("request detail panel", () => {
+  it("shows observed timing while keeping buffered and historical rates unknown", () => {
+    const view = render(
+      <RequestDetailPanel
+        {...props}
+        record={{ ...record, latency_ms: 800, first_output_ms: 200, generation_ms: 300 }}
+        loading={false}
+      />,
+    );
+    expect(screen.getByText("200 ms")).toBeTruthy();
+    expect(screen.getByText("~10.0 tok/s")).toBeTruthy();
+    view.rerender(
+      <RequestDetailPanel {...props} record={{ ...record, first_output_ms: 20, generation_ms: 0 }} loading={false} />,
+    );
+    expect(screen.getByText("20 ms")).toBeTruthy();
+    expect(screen.queryByText(/tok\/s/)).toBeNull();
+    view.rerender(<RequestDetailPanel {...props} record={record} loading={false} />);
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.getByText(/不足 100 ms/)).toBeTruthy();
+    view.rerender(<RequestDetailPanel {...props} record={{ ...record, is_streaming: false }} loading={false} />);
+    expect(screen.queryByText("首个输出耗时")).toBeNull();
+  });
   it("separates final response metrics from failed attempts and supports collapse and close", () => {
     render(<RequestDetailPanel {...props} record={record} loading={false} />);
     expect(screen.getByText("11 / 3")).toBeTruthy();

@@ -16,6 +16,7 @@ interface ProxyRequestRowProps {
   costLabel: string;
   tokenLabel: string;
   latencyLabel: string;
+  timingLabel?: string;
   createdAtLabel: string;
   onSelect?: () => void;
 }
@@ -29,6 +30,7 @@ function ProxyRequestRowComponent({
   costLabel,
   tokenLabel,
   latencyLabel,
+  timingLabel,
   createdAtLabel,
   onSelect,
 }: ProxyRequestRowProps) {
@@ -125,6 +127,7 @@ function ProxyRequestRowComponent({
       </div>
 
       {responseModelLabel && <div className="break-all text-[11px] text-muted-foreground">{responseModelLabel}</div>}
+      {timingLabel && <div className="break-words text-[11px] text-muted-foreground">{timingLabel}</div>}
 
       {item.error_message && (
         <div style={{ fontSize: 11, color: "var(--danger)", lineHeight: 1.5 }}>{item.error_message}</div>

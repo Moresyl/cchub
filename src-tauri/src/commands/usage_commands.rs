@@ -38,6 +38,10 @@ pub struct ProxyRequestLogRow {
     pub cache_creation_tokens: u64,
     pub total_cost_usd: String,
     pub latency_ms: u64,
+    #[serde(default)]
+    pub first_output_ms: Option<u64>,
+    #[serde(default)]
+    pub generation_ms: Option<u64>,
     pub status_code: u16,
     pub is_streaming: bool,
     pub error_message: Option<String>,
@@ -128,6 +132,14 @@ fn map_proxy_request_log_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProxyR
         is_streaming: row.get::<_, i64>(13)? != 0,
         error_message: row.get(14)?,
         created_at: row.get(15)?,
+        first_output_ms: row
+            .get::<_, Option<i64>>(16)?
+            .filter(|value| *value >= 0)
+            .map(|value| value as u64),
+        generation_ms: row
+            .get::<_, Option<i64>>(17)?
+            .filter(|value| *value >= 0)
+            .map(|value| value as u64),
         stream_attempts: Vec::new(),
     })
 }
@@ -325,7 +337,9 @@ pub fn get_recent_proxy_request_logs(
                     status_code,
                     is_streaming,
                     error_message,
-                    created_at
+                    created_at,
+                    first_output_ms,
+                    generation_ms
                  FROM proxy_request_logs
                  ORDER BY created_at DESC
                  LIMIT ?1",
@@ -361,12 +375,12 @@ pub fn get_request_detail(
         "SELECT request_id, tool_id, profile_id, provider_name, request_model,
                 response_model, input_tokens, output_tokens, cache_read_tokens,
                 cache_creation_tokens, total_cost_usd, latency_ms, status_code,
-                is_streaming, error_message, created_at, stream_attempts_json
+                is_streaming, error_message, created_at, first_output_ms, generation_ms, stream_attempts_json
          FROM proxy_request_logs WHERE request_id = ?1 LIMIT 1",
         rusqlite::params![request_id],
         |row| {
             let mut record = map_proxy_request_log_row(row)?;
-            let ledger: String = row.get(16)?;
+            let ledger: String = row.get(18)?;
             if ledger.len() > 1024 * 1024 {
                 return Err(rusqlite::Error::InvalidParameterName(
                     "Stream attempt data exceeds its limit".into(),
@@ -439,7 +453,9 @@ pub fn search_proxy_request_logs(
                 status_code,
                 is_streaming,
                 error_message,
-                created_at
+                created_at,
+                first_output_ms,
+                generation_ms
              FROM proxy_request_logs
              WHERE (?1 IS NULL OR tool_id = ?1)
                AND (?2 IS NULL OR LOWER(provider_name) LIKE ?2)

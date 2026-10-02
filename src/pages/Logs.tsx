@@ -16,6 +16,7 @@ import { CheckboxField } from "../components/ui/checkbox-field";
 import { Input } from "../components/ui/input";
 import { SimpleSelect } from "../components/ui/simple-select";
 import { useRequestDetail } from "./logs/useRequestDetail";
+import { requestTimingLabel } from "../lib/requestTiming";
 
 interface ActivityItem {
   id: number;
@@ -51,6 +52,8 @@ interface ProxyRequestLogRow {
   cache_creation_tokens: number;
   total_cost_usd: string;
   latency_ms: number;
+  first_output_ms?: number | null;
+  generation_ms?: number | null;
   status_code: number;
   is_streaming: boolean;
   error_message: string | null;
@@ -714,6 +717,7 @@ export default function Logs() {
                           : "--"
                     }
                     latencyLabel={`${item.latency_ms}ms`}
+                    timingLabel={requestTimingLabel(item, uiText)}
                     createdAtLabel={formatDateTime(item.created_at)}
                     onSelect={() => void requestDetail.load(item.request_id)}
                   />

@@ -17,6 +17,7 @@ pub(super) struct StreamRequestLog<R: tauri::Runtime> {
     pub usage: ProxyUsageMetrics,
     pub health: crate::provider_proxy::forward::streaming_health::StreamHealth,
     pub capture: super::UsageCapture,
+    pub timing: super::StreamTimingCapture,
 }
 
 impl<R: tauri::Runtime> StreamRequestLog<R> {
@@ -57,6 +58,7 @@ impl<R: tauri::Runtime> Drop for StreamRequestLog<R> {
             &self.upstream,
             &self.insights,
             Some(&self.usage),
+            Some(&self.timing.snapshot()),
             self.started_at
                 .elapsed()
                 .as_millis()

@@ -184,8 +184,21 @@ fn has_output(value: &Value) -> bool {
             .and_then(Value::as_array)
             .is_some_and(|items| {
                 items.iter().any(|item| {
-                    item.pointer("/content/parts")
-                        .is_some_and(|parts| !empty(parts))
+                    item.pointer("/content/parts").is_some_and(|parts| {
+                        parts.as_array().map_or_else(
+                            || !empty(parts),
+                            |parts| {
+                                parts.iter().any(|part| {
+                                    // An empty text part is initialization, just
+                                    // like Chat's empty role/content chunk. Keep
+                                    // unknown or tool parts conservative.
+                                    !part.as_object().is_some_and(|map| {
+                                        map.len() == 1 && map.get("text").is_some_and(empty)
+                                    })
+                                })
+                            },
+                        )
+                    })
                 })
             })
 }

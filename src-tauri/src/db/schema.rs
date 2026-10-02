@@ -181,6 +181,8 @@ CREATE TABLE IF NOT EXISTS proxy_request_logs (
     cache_creation_tokens INTEGER DEFAULT 0,
     total_cost_usd TEXT DEFAULT '0',
     latency_ms INTEGER DEFAULT 0,
+    first_output_ms INTEGER,
+    generation_ms INTEGER,
     status_code INTEGER DEFAULT 0,
     is_streaming INTEGER DEFAULT 0,
     error_message TEXT,
@@ -303,6 +305,13 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         .any(|column| column == "stream_attempts_json")
     {
         conn.execute_batch("ALTER TABLE proxy_request_logs ADD COLUMN stream_attempts_json TEXT NOT NULL DEFAULT '[]';")?;
+    }
+    for column in ["first_output_ms", "generation_ms"] {
+        if !log_columns.iter().any(|existing| existing == column) {
+            conn.execute_batch(&format!(
+                "ALTER TABLE proxy_request_logs ADD COLUMN {column} INTEGER;"
+            ))?;
+        }
     }
     seed_builtin_model_pricing(conn)?;
 
@@ -459,6 +468,27 @@ mod tests {
         assert!(column_exists(&conn, "mcp_servers", "config_path"));
         assert!(column_exists(&conn, "config_profiles", "source_type"));
         assert!(column_exists(&conn, "skills", "last_checked_at"));
+    }
+
+    #[test]
+    fn stream_timing_migrates_without_fabricating_historical_measurements() {
+        let conn = Connection::open_in_memory().unwrap();
+        let old = get_schema_sql()
+            .replace("    first_output_ms INTEGER,\n", "")
+            .replace("    generation_ms INTEGER,\n", "");
+        conn.execute_batch(&old).unwrap();
+        conn.execute("INSERT INTO proxy_request_logs(request_id,tool_id,profile_id,provider_name,latency_ms,total_cost_usd,created_at) VALUES('old','claude','p1','Provider',1500,'2.500000','2026-10-01')", []).unwrap();
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        let row: (i64, String, Option<i64>, Option<i64>) = conn.query_row(
+            "SELECT latency_ms,total_cost_usd,first_output_ms,generation_ms FROM proxy_request_logs WHERE request_id='old'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).unwrap();
+        assert_eq!(row, (1500, "2.500000".into(), None, None));
+        conn.execute("UPDATE proxy_request_logs SET first_output_ms=120,generation_ms=320 WHERE request_id='old'", []).unwrap();
+        run_migrations(&conn).unwrap();
+        let timing: (i64, i64) = conn.query_row("SELECT first_output_ms,generation_ms FROM proxy_request_logs WHERE request_id='old'", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!(timing, (120, 320));
     }
 
     #[test]

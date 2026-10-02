@@ -8,7 +8,8 @@ use super::streaming_health::{observe, observe_delivery, StreamHealth};
 use super::timeouts::{prepare_raw_stream, Deadline, ResponseStream};
 use crate::provider_proxy::desktop;
 use crate::provider_proxy::usage::{
-    capture_stream_usage, create_usage_tracking_stream, source_input_basis, UsageCapture,
+    capture_stream_usage, create_usage_tracking_stream, observe_stream_timing, source_input_basis,
+    StreamTimingCapture, UsageCapture,
 };
 use crate::provider_proxy::{ClaudeApiFormat, ProxyRequestInsights, UpstreamTarget};
 use crate::provider_proxy_transform::{
@@ -49,6 +50,8 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"));
     let raw = prepare_raw_stream(response, first_deadline, config.streaming_idle_timeout).await?;
+    let timing = StreamTimingCapture::new(started_at);
+    let raw = boxed(observe_stream_timing(raw, timing.clone()));
     let raw = if is_sse || transform.is_some() {
         super::streaming_preflight::prepare(raw, relative_path, transform).await?
     } else {
@@ -109,6 +112,7 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         started_at,
         health,
         capture,
+        timing,
     ));
     if is_desktop {
         Ok(Body::from_stream(desktop::restore_stream_model(

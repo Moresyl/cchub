@@ -48,10 +48,6 @@ pub fn read_snapshot(conn: &Connection) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
-pub fn apply_snapshot(conn: &Connection, snapshot: &str) -> Result<Option<PathBuf>, String> {
-    apply_snapshot_impl(conn, snapshot, true)
-}
-
 pub(crate) fn apply_snapshot_without_backup(
     conn: &Connection,
     snapshot: &str,
@@ -64,8 +60,18 @@ fn apply_snapshot_impl(
     snapshot: &str,
     create_backup: bool,
 ) -> Result<Option<PathBuf>, String> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(snapshot).map_err(|e| format!("Invalid Hermes snapshot JSON: {e}"))?;
+    let _guard = crate::json_config::write_lock()?;
+    let (plan, backup) = prepare_snapshot(conn, snapshot, create_backup)?;
+    plan.commit()?;
+    Ok(backup)
+}
+
+pub(crate) fn prepare_snapshot(
+    conn: &Connection,
+    snapshot: &str,
+    create_backup: bool,
+) -> Result<(crate::config_write::FilePlan, Option<PathBuf>), String> {
+    let parsed = crate::json_config::parse_json_object(snapshot)?;
     let incoming_config_value = parsed
         .get("config")
         .ok_or_else(|| "Hermes snapshot is missing config".to_string())
@@ -74,36 +80,56 @@ fn apply_snapshot_impl(
         .get("env")
         .cloned()
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-    let incoming_env: HashMap<String, String> =
-        serde_json::from_value(incoming_env_value).map_err(|e| e.to_string())?;
+    let incoming_env: HashMap<String, String> = serde_json::from_value(incoming_env_value)
+        .map_err(|_| "Hermes environment must contain string values")?;
+    env::render_env_map(&incoming_env)?;
     let metadata = parsed
         .get("metadata")
-        .and_then(serde_json::Value::as_object)
+        .map(|value| {
+            value
+                .as_object()
+                .ok_or("Hermes snapshot metadata must be an object")
+        })
+        .transpose()?
         .cloned()
         .unwrap_or_default();
 
-    let mut next_config = config::read_value(conn)?;
+    let config_path = super::config_path(conn)?;
+    let env_path = super::env_path(conn)?;
+    let config_bytes = crate::config_write::read(&config_path)?;
+    let env_bytes = crate::config_write::read(&env_path)?;
+    let mut next_config = match config_bytes.as_deref() {
+        Some(bytes) => serde_yaml::from_slice::<Value>(bytes)
+            .map_err(|_| "Invalid Hermes YAML configuration")?,
+        None => Value::Mapping(Mapping::new()),
+    };
+    if !next_config.is_mapping() {
+        return Err("Hermes configuration must be an object".into());
+    }
     {
         let next_root = config::top_level_mapping_mut(&mut next_config);
         let incoming_root = incoming_config_value
             .as_mapping()
             .ok_or_else(|| "Hermes snapshot config must be an object".to_string())?;
 
-        if let Some(incoming_model) = incoming_root
-            .get(Value::String("model".to_string()))
-            .and_then(Value::as_mapping)
-        {
+        if let Some(incoming_model) = incoming_root.get(Value::String("model".to_string())) {
+            let incoming_model = incoming_model
+                .as_mapping()
+                .ok_or("Hermes snapshot model must be an object")?;
             let model_value = mapping_entry_mut(next_root, "model");
-            let next_model = config::top_level_mapping_mut(model_value);
+            let next_model = model_value
+                .as_mapping_mut()
+                .ok_or("Existing Hermes model must be an object")?;
             for key in ["provider", "base_url", "default"] {
                 if let Some(value) = incoming_model.get(Value::String(key.to_string())) {
+                    if !value.is_string() {
+                        return Err("Hermes model fields must contain strings".into());
+                    }
                     next_model.insert(Value::String(key.to_string()), value.clone());
                 }
             }
         }
     }
-
-    let backup_path = config::write_value_with_backup(conn, &next_config, create_backup)?;
 
     let mut next_env = env::read_env_map(conn)?;
     let provider = next_config
@@ -141,7 +167,32 @@ fn apply_snapshot_impl(
             next_env.insert(key, trimmed.to_string());
         }
     }
-    env::write_env_map(conn, &next_env)?;
-
-    Ok(backup_path)
+    let mut plan = crate::config_write::FilePlan::default();
+    let mut backup_path = None;
+    if create_backup && config_bytes.is_some() && !config::has_existing_backup(&config_path) {
+        let path = config::backup_path_for(&config_path);
+        if crate::config_write::read(&path)?.is_some() {
+            return Err("Hermes backup location already exists".into());
+        }
+        plan.updates.push(crate::config_write::FileUpdate {
+            path: path.clone(),
+            original: None,
+            desired: config_bytes.as_ref().unwrap().clone(),
+        });
+        backup_path = Some(path);
+    }
+    let config_text =
+        serde_yaml::to_string(&next_config).map_err(|_| "Cannot encode Hermes YAML")?;
+    let env_text = env::render_env_map(&next_env)?;
+    plan.updates.push(crate::config_write::FileUpdate {
+        path: config_path,
+        original: config_bytes,
+        desired: config_text.into_bytes(),
+    });
+    plan.updates.push(crate::config_write::FileUpdate {
+        path: env_path,
+        original: env_bytes,
+        desired: env_text.into_bytes(),
+    });
+    Ok((plan, backup_path))
 }

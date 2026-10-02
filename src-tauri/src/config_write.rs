@@ -2,6 +2,9 @@
 //! this is not an atomic transaction across processes or power loss.
 use std::path::{Path, PathBuf};
 
+mod plan;
+pub(crate) use plan::FilePlan;
+
 pub(crate) struct FileUpdate {
     pub path: PathBuf,
     pub original: Option<Vec<u8>>,
@@ -55,6 +58,7 @@ fn commit_with_finalizer(
     mut write: impl FnMut(usize, &Path, &[u8]) -> std::io::Result<()>,
     finalize: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
+    plan::check_distinct(updates.iter().map(|update| update.path.as_path()))?;
     let mut saved = Vec::new();
     let mut paths = std::collections::HashSet::new();
     for update in updates {

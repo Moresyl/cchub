@@ -94,12 +94,20 @@ pub(super) struct Prepared {
 }
 
 impl Prepared {
+    #[cfg(test)]
     pub(super) fn commit(self) -> Result<(), String> {
-        check_absent(&self.absent)?;
-        config_write::commit_then(self.updates, || check_absent(&self.absent))
+        self.into_plan().commit()
+    }
+
+    pub(super) fn into_plan(self) -> config_write::FilePlan {
+        config_write::FilePlan {
+            updates: self.updates,
+            guards: self.absent.into_iter().map(|path| (path, None)).collect(),
+        }
     }
 }
 
+#[cfg(test)]
 fn check_absent(paths: &[std::path::PathBuf]) -> Result<(), String> {
     for path in paths {
         if config_write::read(path)?.is_some() {

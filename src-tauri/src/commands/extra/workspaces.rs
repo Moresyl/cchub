@@ -77,7 +77,15 @@ fn activate_workspace(conn: &mut rusqlite::Connection, id: &str) -> Result<(), S
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
-    let exists: bool = tx
+    activate_in_transaction(&tx, id)?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
+pub(super) fn activate_in_transaction(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("Workspace ID is required".into());
+    }
+    let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?1)",
             [id],
@@ -87,9 +95,9 @@ fn activate_workspace(conn: &mut rusqlite::Connection, id: &str) -> Result<(), S
     if !exists {
         return Err("Workspace not found".into());
     }
-    tx.execute("UPDATE workspaces SET is_active = 0", [])
+    conn.execute("UPDATE workspaces SET is_active = 0", [])
         .map_err(|e| e.to_string())?;
-    let changed = tx
+    let changed = conn
         .execute(
             "UPDATE workspaces SET is_active = 1 WHERE id = ?1",
             rusqlite::params![id],
@@ -98,7 +106,7 @@ fn activate_workspace(conn: &mut rusqlite::Connection, id: &str) -> Result<(), S
     if changed != 1 {
         return Err("Workspace could not be activated".into());
     }
-    tx.commit().map_err(|e| e.to_string())
+    Ok(())
 }
 
 #[tauri::command]

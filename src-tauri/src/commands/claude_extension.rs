@@ -72,25 +72,50 @@ fn write_config(
     conn: &rusqlite::Connection,
     official: bool,
 ) -> Result<ClaudeExtensionStatus, String> {
+    let _guard = crate::json_config::write_lock()?;
     let path = config_path(conn)?;
-    let (object, existed) = read_config_object(&path)?;
-    let next = updated_object(object, official);
-    let value = serde_json::Value::Object(next);
-    let content = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?
-    );
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("创建 Claude 扩展配置目录失败: {error}"))?;
-    }
-    crate::utils::atomic_write_string(&path, &content).map_err(|error| error.to_string())?;
+    prepare_config(conn, official)?.commit()?;
 
     Ok(ClaudeExtensionStatus {
         path: path.display().to_string(),
-        exists: existed || path.exists(),
+        exists: true,
         enabled: !official,
         valid_json: true,
+    })
+}
+
+fn prepare_config(
+    conn: &rusqlite::Connection,
+    official: bool,
+) -> Result<crate::config_write::FilePlan, String> {
+    let path = config_path(conn)?;
+    let original = crate::config_write::read(&path)?;
+    if original
+        .as_ref()
+        .is_some_and(|bytes| bytes.len() > MAX_CONFIG_BYTES)
+    {
+        return Err("Claude extension configuration exceeds the 2 MB limit".into());
+    }
+    let source = original
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| "Claude extension configuration must be UTF-8")?
+        .unwrap_or("{}\n");
+    serde_json::from_str::<serde_json::Value>(source)
+        .map_err(|_| "Claude extension configuration must contain valid JSON")?;
+    let desired = crate::json_config::edit_json_text(source, |value| {
+        *value =
+            serde_json::Value::Object(updated_object(value.as_object().unwrap().clone(), official));
+        Ok(())
+    })?;
+    Ok(crate::config_write::FilePlan {
+        updates: vec![crate::config_write::FileUpdate {
+            path,
+            original,
+            desired: desired.into_bytes(),
+        }],
+        guards: Vec::new(),
     })
 }
 
@@ -102,18 +127,25 @@ fn integration_enabled(conn: &rusqlite::Connection) -> Result<bool, String> {
 }
 
 pub fn sync_for_profile(conn: &rusqlite::Connection, snapshot: &str) -> Result<(), String> {
+    let _guard = crate::json_config::write_lock()?;
+    prepare_for_profile(conn, snapshot)?.commit()
+}
+
+pub(crate) fn prepare_for_profile(
+    conn: &rusqlite::Connection,
+    snapshot: &str,
+) -> Result<crate::config_write::FilePlan, String> {
     if !integration_enabled(conn)? {
-        return Ok(());
+        return Ok(crate::config_write::FilePlan::default());
     }
-    let parsed: serde_json::Value = serde_json::from_str(snapshot)
-        .map_err(|error| format!("读取 Claude profile 元数据失败: {error}"))?;
+    let parsed = crate::json_config::parse_json_object(snapshot)?;
     let category = parsed
         .get("metadata")
         .and_then(|metadata| metadata.get("category"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     let official = category == "official";
-    write_config(conn, official).map(|_| ())
+    prepare_config(conn, official)
 }
 
 #[tauri::command]

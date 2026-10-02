@@ -6,9 +6,7 @@ use tauri::State;
 
 use crate::db::DbState;
 
-use super::config_profiles::{
-    apply_config_profile_from_conn, get_active_config_profile_ids_from_conn,
-};
+use super::config_profiles::{apply_profile_group, get_active_config_profile_ids_from_conn};
 
 const MAX_NAME_CHARS: usize = 120;
 const MAX_DESCRIPTION_CHARS: usize = 2_000;
@@ -151,10 +149,17 @@ fn row_to_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectProfileRow
 }
 
 fn load_profiles(conn: &rusqlite::Connection) -> Result<Vec<ProjectProfile>, String> {
-    let workspace_id = current_workspace_id(conn)?;
     let mut current_ids = get_active_config_profile_ids_from_conn(conn)?;
     current_ids.sort();
     current_ids.dedup();
+    load_profiles_with_state(conn, &current_ids)
+}
+
+fn load_profiles_with_state(
+    conn: &rusqlite::Connection,
+    current_ids: &[String],
+) -> Result<Vec<ProjectProfile>, String> {
+    let workspace_id = current_workspace_id(conn)?;
     let mut statement = conn
         .prepare(
             "SELECT id, name, description, snapshot, created_at, updated_at, last_applied_at
@@ -233,30 +238,6 @@ fn validate_snapshot_targets(
     Ok(tools)
 }
 
-fn apply_snapshot(
-    conn: &rusqlite::Connection,
-    snapshot: &ProjectProfileSnapshot,
-) -> Result<Vec<String>, String> {
-    validate_snapshot_targets(conn, snapshot)?;
-    let mut applied = Vec::with_capacity(snapshot.config_profile_ids.len());
-    for profile_id in &snapshot.config_profile_ids {
-        apply_config_profile_from_conn(conn, profile_id, false).map_err(|error| {
-            format!("Failed to apply configuration profile {profile_id}: {error}")
-        })?;
-        applied.push(profile_id.clone());
-    }
-    if let Some(workspace_id) = snapshot.workspace_id.as_deref() {
-        conn.execute("UPDATE workspaces SET is_active = 0", [])
-            .map_err(|error| error.to_string())?;
-        conn.execute(
-            "UPDATE workspaces SET is_active = 1 WHERE id = ?1",
-            params![workspace_id],
-        )
-        .map_err(|error| error.to_string())?;
-    }
-    Ok(applied)
-}
-
 #[tauri::command]
 pub fn get_project_profiles(db: State<'_, DbState>) -> Result<Vec<ProjectProfile>, String> {
     let conn = db.0.lock().map_err(|error| error.to_string())?;
@@ -269,22 +250,41 @@ pub fn create_project_profile(
     description: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<ProjectProfile, String> {
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    create_project_from_conn(&conn, &name, description)
+}
+
+fn create_project_from_conn(
+    conn: &rusqlite::Connection,
+    name: &str,
+    description: Option<String>,
+) -> Result<ProjectProfile, String> {
     let name = validate_name(&name)?;
     let description = normalize_description(description)?;
-    let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let snapshot = capture_snapshot(&conn)?;
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|_| "Cannot start project profile save")?;
+    let snapshot = capture_snapshot(&tx)?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let raw_snapshot = serde_json::to_string(&snapshot).map_err(|error| error.to_string())?;
-    conn.execute(
+    tx.execute(
         "INSERT INTO project_profiles (id, name, description, snapshot, created_at, updated_at, last_applied_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5, NULL)",
         params![id, name, description, raw_snapshot, now],
     )
-    .map_err(|error| error.to_string())?;
-    load_profiles(&conn)?
-        .into_iter()
-        .find(|profile| profile.id == id)
-        .ok_or_else(|| "Project profile was saved but could not be reloaded".to_string())
+    .map_err(|_| "Cannot save project profile")?;
+    let profile = ProjectProfile {
+        id,
+        name,
+        description,
+        snapshot,
+        created_at: now.clone(),
+        updated_at: now,
+        last_applied_at: None,
+        is_active: true,
+    };
+    tx.commit()
+        .map_err(|_| "Cannot commit project profile save")?;
+    Ok(profile)
 }
 
 #[tauri::command]
@@ -295,30 +295,64 @@ pub fn update_project_profile(
     resnapshot: bool,
     db: State<'_, DbState>,
 ) -> Result<ProjectProfile, String> {
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    update_project_from_conn(&conn, &id, &name, description, resnapshot)
+}
+
+fn update_project_from_conn(
+    conn: &rusqlite::Connection,
+    id: &str,
+    name: &str,
+    description: Option<String>,
+    resnapshot: bool,
+) -> Result<ProjectProfile, String> {
     let name = validate_name(&name)?;
     let description = normalize_description(description)?;
-    let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let current_snapshot = load_profile_snapshot(&conn, &id)?;
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|_| "Cannot start project profile update")?;
+    let current_snapshot = load_profile_snapshot(&tx, id)?;
+    let (created_at, last_applied_at): (String, Option<String>) = tx
+        .query_row(
+            "SELECT created_at,last_applied_at FROM project_profiles WHERE id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| "Project profile is unavailable")?;
+    let current = capture_snapshot(&tx)?;
     let snapshot = if resnapshot {
-        capture_snapshot(&conn)?
+        current.clone()
     } else {
         current_snapshot
     };
     let now = chrono::Utc::now().to_rfc3339();
     let raw_snapshot = serde_json::to_string(&snapshot).map_err(|error| error.to_string())?;
-    let changed = conn
+    let changed = tx
         .execute(
             "UPDATE project_profiles SET name = ?1, description = ?2, snapshot = ?3, updated_at = ?4 WHERE id = ?5",
             params![name, description, raw_snapshot, now, id],
         )
-        .map_err(|error| error.to_string())?;
-    if changed == 0 {
+        .map_err(|_| "Cannot update project profile")?;
+    if changed != 1 {
         return Err("Project profile not found".to_string());
     }
-    load_profiles(&conn)?
-        .into_iter()
-        .find(|profile| profile.id == id)
-        .ok_or_else(|| "Project profile was updated but could not be reloaded".to_string())
+    let is_active = snapshot_matches_state(
+        &snapshot,
+        &current.workspace_id,
+        &current.config_profile_ids,
+    );
+    let profile = ProjectProfile {
+        id: id.to_owned(),
+        name,
+        description,
+        snapshot,
+        created_at,
+        updated_at: now,
+        last_applied_at,
+        is_active,
+    };
+    tx.commit()
+        .map_err(|_| "Cannot commit project profile update")?;
+    Ok(profile)
 }
 
 #[tauri::command]
@@ -339,23 +373,56 @@ pub fn apply_project_profile(
     db: State<'_, DbState>,
 ) -> Result<ProjectProfileMutationResult, String> {
     let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let snapshot = load_profile_snapshot(&conn, &id)?;
-    let applied_profile_ids = apply_snapshot(&conn, &snapshot)?;
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE project_profiles SET last_applied_at = ?1, updated_at = ?1 WHERE id = ?2",
-        params![now, id],
-    )
-    .map_err(|error| error.to_string())?;
-    let profile = load_profiles(&conn)?
-        .into_iter()
-        .find(|item| item.id == id)
-        .ok_or_else(|| "Project profile was applied but could not be reloaded".to_string())?;
-    Ok(ProjectProfileMutationResult {
-        profile,
-        applied_profile_ids,
-    })
+    apply_project_from_conn(&conn, &id)
 }
+
+fn apply_project_from_conn(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<ProjectProfileMutationResult, String> {
+    let snapshot = load_profile_snapshot(conn, id)?;
+    apply_profile_group(
+        conn,
+        &snapshot.config_profile_ids,
+        false,
+        |tx, profiles, active| {
+            // Re-read within the immediate transaction, so an external SQL edit
+            // cannot silently replace the project that was prepared.
+            if load_profile_snapshot(tx, id)? != snapshot {
+                return Err("Project profile changed; reload before applying".into());
+            }
+            validate_snapshot_targets(tx, &snapshot)?;
+            if let Some(workspace) = &snapshot.workspace_id {
+                super::workspaces::activate_in_transaction(tx, workspace)?;
+            } else {
+                tx.execute("UPDATE workspaces SET is_active=0", [])
+                    .map_err(|_| "Cannot restore project workspace selection")?;
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            if tx
+                .execute(
+                    "UPDATE project_profiles SET last_applied_at=?1,updated_at=?1 WHERE id=?2",
+                    params![now, id],
+                )
+                .map_err(|_| "Cannot record project profile application")?
+                != 1
+            {
+                return Err("Project profile changed while applying".into());
+            }
+            let profile = load_profiles_with_state(tx, active)?
+                .into_iter()
+                .find(|profile| profile.id == id)
+                .ok_or("Cannot reload applied project profile")?;
+            Ok(ProjectProfileMutationResult {
+                profile,
+                applied_profile_ids: profiles.iter().map(|profile| profile.id.clone()).collect(),
+            })
+        },
+    )
+}
+
+#[cfg(test)]
+mod application_tests;
 
 #[cfg(test)]
 mod tests {

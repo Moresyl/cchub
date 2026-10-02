@@ -28,12 +28,20 @@ pub fn read_env_map(conn: &Connection) -> Result<HashMap<String, String>, String
     Ok(env_map)
 }
 
-pub fn write_env_map(conn: &Connection, env_map: &HashMap<String, String>) -> Result<(), String> {
-    let path = env_path(conn)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+pub(crate) fn render_env_map(env_map: &HashMap<String, String>) -> Result<String, String> {
+    for (key, value) in env_map {
+        let mut bytes = key.bytes();
+        if !bytes
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+            || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            || value
+                .chars()
+                .any(|character| matches!(character, '\r' | '\n' | '\0'))
+        {
+            return Err("Invalid environment variable name or multiline value".into());
+        }
     }
-
     let ordered = env_map
         .iter()
         .filter_map(|(key, value)| {
@@ -55,5 +63,5 @@ pub fn write_env_map(conn: &Connection, env_map: &HashMap<String, String>) -> Re
         content.push('\n');
     }
 
-    crate::utils::atomic_write_string(&path, &content).map_err(|e| e.to_string())
+    Ok(content)
 }

@@ -158,6 +158,21 @@ pub(crate) fn normalize_profile(snapshot: &str) -> Result<String, String> {
 }
 
 pub(crate) fn apply_profile(path: &Path, snapshot: &str) -> Result<(), String> {
+    let _guard = crate::json_config::write_lock()?;
+    prepare_profile(path, snapshot)?.commit()
+}
+
+pub(crate) fn prepare_profile(
+    path: &Path,
+    snapshot: &str,
+) -> Result<crate::config_write::FilePlan, String> {
+    let original = crate::config_write::read(path)?;
+    let source = original
+        .as_deref()
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| "OpenCode configuration must be UTF-8")?
+        .unwrap_or("{}\n");
     let profile = crate::json_config::parse_json_object(&normalize_profile(snapshot)?)?;
     let id = provider_id(&profile)?;
     let mut provider = profile.as_object().unwrap().clone();
@@ -192,7 +207,7 @@ pub(crate) fn apply_profile(path: &Path, snapshot: &str) -> Result<(), String> {
         Some(model) => (!model.trim().is_empty()).then(|| model.to_string()),
         None => models.and_then(|models| models.keys().next().cloned()),
     };
-    crate::json_config::update_json_file(path, |document| {
+    let desired = crate::json_config::edit_json_text(source, |document| {
         let root = document.as_object_mut().unwrap();
         // Repair files emitted by older versions that put the provider at root.
         if root.contains_key("options") || root.contains_key("npm") {
@@ -250,6 +265,14 @@ pub(crate) fn apply_profile(path: &Path, snapshot: &str) -> Result<(), String> {
             root.remove("model");
         }
         Ok(())
+    })?;
+    Ok(crate::config_write::FilePlan {
+        updates: vec![crate::config_write::FileUpdate {
+            path: path.into(),
+            original,
+            desired: desired.into_bytes(),
+        }],
+        guards: Vec::new(),
     })
 }
 

@@ -6,6 +6,8 @@ use crate::hermes;
 use super::*;
 
 mod claude;
+mod prepare;
+pub(crate) use prepare::prepare_tool_snapshot;
 #[cfg(test)]
 mod reasoning_tests;
 
@@ -131,11 +133,9 @@ pub fn sync_live_profiles(
                 )?;
             }
             Err(_) => {
-                conn.execute(
-                    "DELETE FROM config_profiles WHERE id = ?1",
-                    rusqlite::params![id],
-                )
-                .map_err(|e| e.to_string())?;
+                // An unreadable, temporarily absent or malformed native file
+                // does not invalidate the last successfully captured profile.
+                crate::utils::append_runtime_log("warn", "profiles", &format!("Could not refresh live configuration for {tool_id}; keeping the previous snapshot"));
             }
         }
     }
@@ -321,114 +321,6 @@ pub fn apply_tool_snapshot_with_options(
     snapshot: &str,
     preserve_user_edits: bool,
 ) -> Result<(), String> {
-    let snapshot = if tool_id == "opencode" {
-        crate::opencode_profiles::normalize_profile(snapshot)?
-    } else {
-        snapshot.to_string()
-    };
-    let effective_snapshot =
-        crate::provider_proxy::materialize_tool_snapshot_for_runtime(conn, tool_id, &snapshot)?;
-
-    match tool_id {
-        "mcode" => Err("MiniMax Code providers must be managed individually".to_string()),
-        "opencode" => crate::opencode_profiles::apply_profile(
-            &resolve_tool_config_path(conn, tool_id)?,
-            &effective_snapshot,
-        ),
-        "codex" => {
-            let dir = resolve_tool_config_dir(conn, tool_id)?;
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let auth_path = dir.join("auth.json");
-            let config_path = dir.join("config.toml");
-
-            let snapshot_to_apply = if preserve_user_edits {
-                overlay_codex_user_fields_into_snapshot(&effective_snapshot, &config_path)
-            } else {
-                effective_snapshot.clone()
-            };
-
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&snapshot_to_apply) {
-                if let (Some(auth), Some(config)) = (
-                    value.get("auth"),
-                    value.get("config").and_then(|v| v.as_str()),
-                ) {
-                    let auth_text =
-                        serde_json::to_string_pretty(auth).map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&auth_path, &auth_text)
-                        .map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&config_path, config)
-                        .map_err(|e| e.to_string())?;
-                    return Ok(());
-                }
-            }
-
-            crate::utils::atomic_write_string(&config_path, &snapshot_to_apply)
-                .map_err(|e| e.to_string())
-        }
-        "gemini" => {
-            let dir = resolve_tool_config_dir(conn, tool_id)?;
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let env_path = dir.join(".env");
-            let settings_path = dir.join("settings.json");
-
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&effective_snapshot) {
-                if let (Some(env), Some(config)) = (
-                    value.get("env").and_then(|v| v.as_object()),
-                    value.get("config"),
-                ) {
-                    let env_map: std::collections::HashMap<String, String> = env
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            value.as_str().map(|v| (key.clone(), v.to_string()))
-                        })
-                        .collect();
-                    let env_text = env_map
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let config_text =
-                        serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&env_path, &env_text)
-                        .map_err(|e| e.to_string())?;
-                    crate::utils::atomic_write_string(&settings_path, &config_text)
-                        .map_err(|e| e.to_string())?;
-                    return Ok(());
-                }
-            }
-
-            crate::utils::atomic_write_string(&settings_path, &effective_snapshot)
-                .map_err(|e| e.to_string())
-        }
-        "pi" => {
-            let config_path = resolve_tool_config_path(conn, tool_id)?;
-            if let Some(parent) = config_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            crate::utils::atomic_write_string(&config_path, &effective_snapshot)
-                .map_err(|e| e.to_string())
-        }
-        "claude" => {
-            let (claude_json_path, settings_json_path) = resolve_claude_paths(conn)?;
-            let _guard = crate::json_config::write_lock()?;
-            claude::prepare_at(
-                [&claude_json_path, &settings_json_path],
-                &effective_snapshot,
-            )?
-            .commit()
-        }
-        "hermes" => hermes::snapshot::apply_snapshot(conn, &effective_snapshot).map(|_| ()),
-        "grokbuild" => crate::grok_config::apply_snapshot_at(
-            &resolve_tool_config_path(conn, tool_id)?,
-            &effective_snapshot,
-        ),
-        _ => {
-            let config_path = resolve_tool_config_path(conn, tool_id)?;
-            if let Some(parent) = config_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            crate::utils::atomic_write_string(&config_path, &effective_snapshot)
-                .map_err(|e| e.to_string())
-        }
-    }
+    let _guard = crate::json_config::write_lock()?;
+    prepare_tool_snapshot(conn, tool_id, snapshot, preserve_user_edits)?.commit()
 }

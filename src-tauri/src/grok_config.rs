@@ -32,20 +32,12 @@ pub(crate) fn read_snapshot_at(path: &Path) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn apply_snapshot_at(path: &Path, snapshot: &str) -> Result<(), String> {
-    let config = snapshot_to_toml(snapshot)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    crate::utils::atomic_write_string(&path, &config).map_err(|error| error.to_string())
-}
-
-fn snapshot_to_toml(snapshot: &str) -> Result<String, String> {
-    let value = serde_json::from_str::<Value>(snapshot).map_err(|error| error.to_string())?;
+pub(crate) fn snapshot_to_toml(snapshot: &str) -> Result<String, String> {
+    let value = crate::json_config::parse_json_object(snapshot)?;
     if let Some(config) = value.get("config").and_then(Value::as_str) {
         config
             .parse::<toml_edit::DocumentMut>()
-            .map_err(|error| format!("Invalid Grok Build config: {error}"))?;
+            .map_err(|_| "Invalid Grok Build TOML configuration".to_string())?;
         return Ok(config.to_string());
     }
 

@@ -348,39 +348,12 @@ pub fn apply_config_profile_from_conn(
     id: &str,
     preserve_user_edits: bool,
 ) -> Result<(String, String), String> {
-    let (tool_id, snapshot): (String, String) = conn
-        .query_row(
-            "SELECT tool_id, config_snapshot FROM config_profiles WHERE id = ?1",
-            rusqlite::params![id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| format!("Profile not found: {}", e))?;
-
-    apply_tool_snapshot_with_options(conn, &tool_id, &snapshot, preserve_user_edits)?;
-    if tool_id == "claude" {
-        crate::commands::claude_extension::sync_for_profile(conn, &snapshot)?;
-    }
-
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE config_profiles SET updated_at = ?1 WHERE id = ?2",
-        rusqlite::params![now, id],
+    apply_profile_group(
+        conn,
+        &[id.to_owned()],
+        preserve_user_edits,
+        |_, profiles, _| Ok((profiles[0].tool.clone(), profiles[0].snapshot.clone())),
     )
-    .map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
-        rusqlite::params![current_profile_setting_key(&tool_id), id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    crate::db::record_activity(conn, &tool_id, "profile_switch", "success", None);
-    crate::utils::append_runtime_log(
-        "info",
-        "profiles",
-        &format!("Applied profile {id} for tool {tool_id}"),
-    );
-    Ok((tool_id, snapshot))
 }
 
 #[tauri::command]
@@ -389,14 +362,19 @@ pub fn apply_config_profile(
     db: State<'_, DbState>,
 ) -> Result<ApplyConfigProfileResult, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let (tool_id, _) = apply_config_profile_from_conn(&conn, &id, false)?;
-    let active_profile_ids = get_active_config_profile_ids_from_conn(&conn)?;
-    Ok(ApplyConfigProfileResult {
-        tool_id,
-        profile_id: id,
-        active_profile_ids,
-        applied_at: chrono::Utc::now().to_rfc3339(),
-    })
+    apply_profile_group(
+        &conn,
+        std::slice::from_ref(&id),
+        false,
+        |_, profiles, active| {
+            Ok(ApplyConfigProfileResult {
+                tool_id: profiles[0].tool.clone(),
+                profile_id: id.clone(),
+                active_profile_ids: active.to_vec(),
+                applied_at: chrono::Utc::now().to_rfc3339(),
+            })
+        },
+    )
 }
 
 #[tauri::command]

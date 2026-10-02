@@ -406,7 +406,7 @@
   box-shadow: none;
 }
 
-.project-profile-switcher > button {
+.project-profile-switcher > button[data-slot="button"] {
   width: 28px;
   height: 28px;
 }

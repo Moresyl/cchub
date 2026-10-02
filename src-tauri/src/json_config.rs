@@ -52,14 +52,21 @@ fn check_keys(node: &CstNode) -> Result<(), String> {
 }
 
 fn parse(source: &str) -> Result<(CstRootNode, Value), String> {
+    parse_with_options(source, &options())
+}
+
+fn parse_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<(CstRootNode, Value), String> {
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     // Parser errors can contain credential-bearing source lines. Return a safe
     // actionable message instead of forwarding those lines to logs or the UI.
-    let root = CstRootNode::parse(source, &options())
+    let root = CstRootNode::parse(source, options)
         .map_err(|_| "Invalid JSON/JSONC configuration; check syntax before editing")?;
     let node = root.value().ok_or("Configuration is empty")?;
     check_keys(&node)?;
-    let value: Value = jsonc_parser::parse_to_serde_value(source, &options())
+    let value: Value = jsonc_parser::parse_to_serde_value(source, options)
         .map_err(|_| "Invalid JSON/JSONC configuration; check syntax before editing")?;
     if !value.is_object() {
         return Err("Configuration root must be a JSON object".into());
@@ -69,6 +76,24 @@ fn parse(source: &str) -> Result<(CstRootNode, Value), String> {
 
 pub(crate) fn parse_json_object(source: &str) -> Result<Value, String> {
     parse(source).map(|(_, value)| value)
+}
+
+pub(crate) fn parse_json5_object(source: &str) -> Result<Value, String> {
+    let options = ParseOptions {
+        allow_loose_object_property_names: true,
+        allow_single_quoted_strings: true,
+        allow_hexadecimal_numbers: true,
+        allow_unary_plus_numbers: true,
+        allow_bare_decimal_point_numbers: true,
+        allow_non_finite_numbers: true,
+        allow_extended_string_escapes: true,
+        ..options()
+    };
+    parse_with_options(source, &options)
+        .map(|(_, value)| value)
+        .map_err(|_| {
+            "Invalid JSON5 object; check syntax and duplicate fields before switching".into()
+        })
 }
 
 fn input(value: &Value) -> CstInputValue {

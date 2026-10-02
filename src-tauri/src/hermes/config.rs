@@ -14,12 +14,12 @@ fn ensure_mapping(value: &mut Value) -> &mut Mapping {
     }
 }
 
-fn backup_path_for(path: &Path) -> PathBuf {
+pub(super) fn backup_path_for(path: &Path) -> PathBuf {
     let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
     path.with_file_name(format!("config.yaml.cchub-backup.{timestamp}"))
 }
 
-fn has_existing_backup(path: &Path) -> bool {
+pub(super) fn has_existing_backup(path: &Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };

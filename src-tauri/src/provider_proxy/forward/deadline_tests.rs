@@ -262,6 +262,16 @@ async fn zero_disables_deadlines_without_substituting_another_default() {
     );
     let future = forward(app.handle().clone(), true);
     tokio::pin!(future);
+    // Observe the blocked upstream before measuring deadline behavior. Database
+    // and HTTP client setup can exceed the observation window on a busy machine.
+    tokio::select! {
+        response = &mut future => panic!("unexpected response before releasing the upstream: {}", response.status()),
+        reached = tokio::time::timeout(Duration::from_secs(10), async {
+            while upstream.hits.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        }) => reached.expect("request did not reach the controlled upstream"),
+    }
     assert!(
         tokio::time::timeout(Duration::from_millis(100), &mut future)
             .await

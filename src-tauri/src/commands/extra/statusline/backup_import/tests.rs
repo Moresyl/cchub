@@ -24,6 +24,45 @@ fn path_row(tool: &str, path: &Path) -> String {
 }
 
 #[test]
+fn recovery_waits_for_a_configuration_writer_and_preserves_its_later_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let edited = dir.path().join("edited");
+    std::fs::write(&first, [255, 0, 1]).unwrap();
+    std::fs::write(&edited, "original").unwrap();
+    let guard = crate::json_config::write_lock().unwrap();
+    let mut files = super::super::backup_file_rollback::FileRollback::new(dir.path()).unwrap();
+    for target in [&first, &edited] {
+        files.capture(target).unwrap();
+        files.write(target, b"restored").unwrap();
+    }
+    let (started, ready) = std::sync::mpsc::channel();
+    let (finished, completed) = std::sync::mpsc::channel();
+    let recovery = std::thread::spawn(move || {
+        started.send(()).unwrap();
+        let error = rollback_restored_files(&mut files, "failed".into());
+        finished.send(()).unwrap();
+        error
+    });
+    ready.recv().unwrap();
+    let waited = matches!(
+        completed.recv_timeout(std::time::Duration::from_millis(100)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    );
+    let written = crate::utils::atomic_write(&edited, b"new application edit");
+    drop(guard);
+    written.unwrap();
+    let error = recovery.join().unwrap();
+    assert!(
+        waited,
+        "recovery must wait for the active configuration writer"
+    );
+    assert!(error.contains("外部修改已保留"));
+    assert_eq!(std::fs::read(&first).unwrap(), [255, 0, 1]);
+    assert_eq!(std::fs::read(&edited).unwrap(), b"new application edit");
+}
+
+#[test]
 fn full_file_and_skill_records_override_their_snapshots_and_commit_exact_bytes() {
     use base64::Engine;
     let dir = tempfile::tempdir().unwrap();

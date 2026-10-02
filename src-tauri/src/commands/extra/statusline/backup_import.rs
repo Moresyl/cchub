@@ -56,6 +56,22 @@ fn install_restored_database(
     install_database(source, target)
 }
 
+fn rollback_restored_files(
+    files: &mut super::backup_file_rollback::FileRollback,
+    original_error: String,
+) -> String {
+    // Artifact preparation and live snapshot readers release the write lock.
+    // Reacquire it for recovery so another application writer cannot interleave
+    // our ownership check and replacement. A poisoned lock rejects all other
+    // application writers, but must not discard recoverable original files.
+    let guard = crate::json_config::write_lock();
+    let error = match &guard {
+        Ok(_) => original_error,
+        Err(error) => format!("{original_error}；{error}"),
+    };
+    files.rollback(error)
+}
+
 #[cfg(test)]
 fn import_into_connection(
     conn: &mut rusqlite::Connection,
@@ -131,7 +147,7 @@ fn import_into_connection_with_mode(
             rollback.commit();
             Ok(message)
         }
-        Err(error) => Err(rollback.rollback(error)),
+        Err(error) => Err(rollback_restored_files(&mut rollback, error)),
     }
 }
 

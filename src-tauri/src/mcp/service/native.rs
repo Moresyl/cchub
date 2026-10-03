@@ -100,6 +100,8 @@ pub(super) fn change(
         name,
         spec,
         original: snapshot.documents[0].original.clone(),
+        revision: snapshot.documents[0].revision.clone(),
+        aliases: snapshot.documents[0].bindings.clone(),
     }
 }
 
@@ -108,14 +110,16 @@ pub(super) fn origin_change(
     spec: Option<NativeSpec>,
     snapshot: &SourceSnapshot,
 ) -> crate::mcp::native_entry::Change {
-    change(
+    let mut prepared = change(
         origin.bindings[0].clone(),
         origin.canonical_path.clone(),
         origin.container.clone(),
         origin.native_name.clone(),
         spec,
         snapshot,
-    )
+    );
+    prepared.aliases = origin.bindings.clone();
+    prepared
 }
 
 pub(super) fn projection_change(

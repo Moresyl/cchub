@@ -435,3 +435,16 @@ fn export_checks_native_types_instead_of_coercing_them() {
     );
     assert_eq!(spec.to_json().unwrap()["type"], "http");
 }
+
+#[test]
+fn same_byte_file_replacement_invalidates_an_entire_source_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("native.json");
+    let bytes = br#"{"mcpServers":{"same":{"command":"node"}}}"#;
+    std::fs::write(&file, bytes).unwrap();
+    let snapshot =
+        SourceSnapshot::read_bindings(&[binding("claude", &file, SourceRole::Primary)]).unwrap();
+    crate::utils::atomic_write(&file, bytes).unwrap();
+    assert!(snapshot.verify().is_err());
+    assert_eq!(std::fs::read(file).unwrap(), bytes);
+}

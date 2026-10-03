@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 
 mod plan;
+mod revision;
 pub(crate) use plan::location as target_key;
 pub(crate) use plan::FilePlan;
+pub(crate) use revision::FileRevision;
 
 pub(crate) struct FileUpdate {
     pub path: PathBuf,

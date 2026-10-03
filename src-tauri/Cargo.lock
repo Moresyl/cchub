@@ -575,6 +575,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+ "windows-sys 0.61.2",
  "yaml-edit",
  "zeroize",
  "zip 8.2.0",

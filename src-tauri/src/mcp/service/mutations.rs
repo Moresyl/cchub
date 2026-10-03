@@ -294,6 +294,7 @@ pub(crate) fn sync(conn: &Connection, id: &str, tool: &str) -> Result<(), String
             origin.canonical_path.clone(),
             source.documents[0].original.clone(),
         ));
+        plan.guard_source(&origin, &source);
     }
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| invalid())?;
@@ -335,6 +336,16 @@ pub(crate) fn unsync(conn: &Connection, id: &str, tool: &str) -> Result<(), Stri
         )?;
     let projection = state.projections.remove(index);
     let snapshot = native::checked_projection(conn, &projection)?;
+    let mut removal = native::projection_change(&projection, None, &snapshot);
+    for alias in state.projections.iter().filter(|other| {
+        other.source_id == id
+            && other.canonical_path == projection.canonical_path
+            && other.container == projection.container
+            && other.native_name == projection.native_name
+    }) {
+        native::checked_projection(conn, alias)?;
+        removal.aliases.push(alias.binding.clone());
+    }
     // Removing one physical copy unlinks every tool alias of that copy.
     state.projections.retain(|other| {
         !(other.source_id == id
@@ -345,7 +356,7 @@ pub(crate) fn unsync(conn: &Connection, id: &str, tool: &str) -> Result<(), Stri
     native::commit(
         conn,
         state,
-        vec![native::projection_change(&projection, None, &snapshot)],
+        vec![removal],
         None,
         None,
         (id, &format!("unsync_from_{tool}")),

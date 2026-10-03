@@ -31,6 +31,7 @@ pub struct SourceBinding {
 pub struct SourceDocument {
     pub canonical_path: PathBuf,
     pub original: Option<Vec<u8>>,
+    pub(crate) revision: crate::config_write::FileRevision,
     pub bindings: Vec<SourceBinding>,
 }
 
@@ -144,6 +145,7 @@ impl SourceSnapshot {
     /// finalization. Equal-byte file replacement identity is a separate gate.
     pub fn verify(&self) -> Result<(), String> {
         for document in &self.documents {
+            document.revision.verify()?;
             for binding in &document.bindings {
                 if crate::config_write::target_key(&binding.path)? != document.canonical_path
                     || crate::config_write::read(&binding.path)? != document.original
@@ -196,11 +198,12 @@ impl SourceSnapshot {
         let mut origins: BTreeMap<String, NativeOrigin> = BTreeMap::new();
         for binding in bindings {
             let canonical = crate::config_write::target_key(&binding.path)?;
-            let original = crate::config_write::read(&binding.path)?;
+            let (revision, original) = crate::config_write::FileRevision::capture(&canonical)?;
             if crate::config_write::target_key(&binding.path)? != canonical {
                 return Err("MCP source location changed while reading; scan again".into());
             }
             if let Some(previous) = documents.get(&canonical) {
+                previous.revision.verify()?;
                 if previous.original != original {
                     return Err("MCP source changed while reading; scan again".into());
                 }
@@ -226,6 +229,7 @@ impl SourceSnapshot {
                 .or_insert_with(|| SourceDocument {
                     canonical_path: canonical.clone(),
                     original,
+                    revision,
                     bindings: Vec::new(),
                 });
             if !document.bindings.contains(binding) {

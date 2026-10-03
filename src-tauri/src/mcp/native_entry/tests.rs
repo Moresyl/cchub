@@ -20,6 +20,8 @@ fn change(tool: &str, path: &std::path::Path, name: &str, spec: Option<NativeSpe
         name: name.into(),
         spec,
         original: crate::config_write::read(path).unwrap(),
+        revision: crate::config_write::FileRevision::capture(path).unwrap().0,
+        aliases: Vec::new(),
     }
 }
 
@@ -198,7 +200,20 @@ fn real_sql_failure_recovers_native_group_and_external_guard_prevents_any_write(
     assert_eq!(std::fs::read(&second).unwrap(), original_second);
     assert!(!third.exists());
     assert!(!third.parent().unwrap().exists());
-    let prepared = prepare(&changes).unwrap();
+    // Recovery replaces the files, so a retry must capture fresh identities.
+    assert!(prepare(&changes).is_err());
+    let refreshed: Vec<_> = changes
+        .iter()
+        .map(|old| {
+            change(
+                &old.binding.tool,
+                &old.binding.path,
+                &old.name,
+                old.spec.clone(),
+            )
+        })
+        .collect();
+    let prepared = prepare(&refreshed).unwrap();
     std::fs::write(&second, "# external\n").unwrap();
     assert!(prepared
         .commit_then(|| panic!("finalizer must not run"))
@@ -247,4 +262,87 @@ fn source_revision_captured_before_prepare_refuses_intervening_edits() {
     std::fs::write(&file, external).unwrap();
     assert!(prepare(&[intended]).is_err());
     assert_eq!(std::fs::read_to_string(file).unwrap(), external);
+}
+
+#[test]
+fn equal_byte_replacements_are_rejected_before_prepare_and_commit() {
+    for before_prepare in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("native.json");
+        let bytes = br#"{"mcpServers":{"same":{"command":"old"}}}"#;
+        std::fs::write(&file, bytes).unwrap();
+        let changes = vec![change(
+            "claude",
+            &file,
+            "same",
+            Some(NativeSpec::Json(r#"{"command":"new"}"#.into())),
+        )];
+        let prepared = if before_prepare {
+            None
+        } else {
+            Some(prepare(&changes).unwrap())
+        };
+        crate::utils::atomic_write(&file, bytes).unwrap();
+        if let Some(prepared) = prepared {
+            assert!(prepared
+                .commit_then(|| panic!("finalizer must not run"))
+                .is_err());
+        } else {
+            assert!(prepare(&changes).is_err());
+        }
+        assert_eq!(std::fs::read(file).unwrap(), bytes);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn junction_retarget_is_rejected_before_prepare_and_before_commit() {
+    fn junction(path: &std::path::Path, target: &std::path::Path) {
+        let mut process = std::process::Command::new("powershell");
+        crate::utils::configure_background_command(&mut process);
+        let output = process
+            .args(["-NoProfile", "-NonInteractive", "-Command", "New-Item -ItemType Junction -Path $env:CCHUB_TEST_LINK -Target $env:CCHUB_TEST_TARGET -ErrorAction Stop | Out-Null"])
+            .env("CCHUB_TEST_LINK", path).env("CCHUB_TEST_TARGET", target)
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "owned fixture junction creation failed"
+        );
+    }
+    for before_prepare in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        let link = root.path().join("alias");
+        let bytes = br#"{"mcpServers":{"same":{"command":"old"}}}"#;
+        for dir in [&first, &second] {
+            std::fs::create_dir(dir).unwrap();
+            std::fs::write(dir.join("native.json"), bytes).unwrap();
+        }
+        junction(&link, &first);
+        let changes = vec![change(
+            "claude",
+            &link.join("native.json"),
+            "same",
+            Some(NativeSpec::Json(r#"{"command":"new"}"#.into())),
+        )];
+        let prepared = if before_prepare {
+            None
+        } else {
+            Some(prepare(&changes).unwrap())
+        };
+        std::fs::remove_dir(&link).unwrap();
+        junction(&link, &second);
+        if let Some(prepared) = prepared {
+            assert!(prepared
+                .commit_then(|| panic!("finalizer must not run"))
+                .is_err());
+        } else {
+            assert!(prepare(&changes).is_err());
+        }
+        for dir in [&first, &second] {
+            assert_eq!(std::fs::read(dir.join("native.json")).unwrap(), bytes);
+        }
+        std::fs::remove_dir(&link).unwrap();
+    }
 }

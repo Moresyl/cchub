@@ -552,3 +552,26 @@ fn malformed_client_access_stops_uninstall_before_files_change() {
     assert_eq!(f.catalog(), catalog);
     assert_eq!(list(&f.conn).unwrap().len(), 1);
 }
+
+#[test]
+fn changed_shared_alias_blocks_physical_copy_removal_and_retains_links() {
+    let f = Fixture::new();
+    let shared = f.path("mcode");
+    f.alias("claude-desktop", &shared);
+    let server = install(
+        &f.conn,
+        "same".into(),
+        config(),
+        vec!["mcode".into(), "claude-desktop".into()],
+    )
+    .unwrap();
+    let other = f.root.path().join("different-native.conf");
+    std::fs::write(&other, std::fs::read(&shared).unwrap()).unwrap();
+    f.alias("claude-desktop", &other);
+    let before = f.files();
+    let catalog = f.catalog();
+    assert!(unsync(&f.conn, &server.server.id, "mcode").is_err());
+    assert_eq!(f.files(), before);
+    assert_eq!(f.catalog(), catalog);
+    assert_eq!(CatalogState::load(&f.conn).unwrap().projections.len(), 2);
+}

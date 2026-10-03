@@ -17,19 +17,45 @@ pub(crate) struct Change {
     pub name: String,
     pub spec: Option<NativeSpec>,
     pub original: Option<Vec<u8>>,
+    pub revision: crate::config_write::FileRevision,
+    pub aliases: Vec<SourceBinding>,
 }
 
 pub(crate) struct PreparedNative {
     pub plan: FilePlan,
     bindings: Vec<(SourceBinding, PathBuf)>,
+    revisions: Vec<(crate::config_write::FileRevision, bool)>,
 }
 
 impl PreparedNative {
+    pub(crate) fn guard_source(
+        &mut self,
+        origin: &super::sources::NativeOrigin,
+        snapshot: &super::sources::SourceSnapshot,
+    ) {
+        self.revisions
+            .push((snapshot.documents[0].revision.clone(), false));
+        self.bindings.extend(
+            origin
+                .bindings
+                .iter()
+                .cloned()
+                .map(|binding| (binding, origin.canonical_path.clone())),
+        );
+    }
+
     pub(crate) fn commit_then(
         self,
         finalize: impl FnOnce() -> Result<(), String>,
     ) -> Result<(), String> {
-        let Self { plan, bindings } = self;
+        let Self {
+            plan,
+            bindings,
+            revisions,
+        } = self;
+        for (revision, _) in &revisions {
+            revision.verify()?;
+        }
         let verify = || -> Result<(), String> {
             for (binding, canonical) in &bindings {
                 if crate::config_write::target_key(&binding.path)? != *canonical {
@@ -41,6 +67,13 @@ impl PreparedNative {
         verify()?;
         plan.commit_then(|| {
             verify()?;
+            for (revision, updated) in &revisions {
+                if *updated {
+                    revision.verify_parents()?;
+                } else {
+                    revision.verify()?;
+                }
+            }
             finalize()
         })
     }
@@ -146,13 +179,23 @@ pub(crate) fn prepare(changes: &[Change]) -> Result<PreparedNative, String> {
             super::native_read::validate_entry(&change.name, &spec.entry()?, &change.binding.tool)?;
         }
         bindings.push((change.binding.clone(), change.canonical_path.clone()));
+        for alias in &change.aliases {
+            if crate::config_write::target_key(&alias.path)? != change.canonical_path {
+                return Err("MCP source alias location changed; refresh before continuing".into());
+            }
+            bindings.push((alias.clone(), change.canonical_path.clone()));
+        }
         groups
             .entry(change.canonical_path.clone())
             .or_default()
             .push(change);
     }
     let mut plan = FilePlan::default();
+    let mut revisions = Vec::new();
     for (path, changes) in groups {
+        for change in &changes {
+            change.revision.verify()?;
+        }
         let mut targets = BTreeMap::new();
         for change in &changes {
             if let Some(old) = targets.insert((&change.container, &change.name), &change.spec) {
@@ -221,8 +264,10 @@ pub(crate) fn prepare(changes: &[Change]) -> Result<PreparedNative, String> {
             }
         }
         if desired.as_bytes() == source.as_bytes() {
+            revisions.push((changes[0].revision.clone(), false));
             plan.guards.push((path, original));
         } else {
+            revisions.push((changes[0].revision.clone(), true));
             plan.updates.push(FileUpdate {
                 path,
                 original,
@@ -230,7 +275,11 @@ pub(crate) fn prepare(changes: &[Change]) -> Result<PreparedNative, String> {
             });
         }
     }
-    Ok(PreparedNative { plan, bindings })
+    Ok(PreparedNative {
+        plan,
+        bindings,
+        revisions,
+    })
 }
 
 #[cfg(test)]

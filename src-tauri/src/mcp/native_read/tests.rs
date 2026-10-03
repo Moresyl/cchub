@@ -7,6 +7,24 @@ fn connection() -> Connection {
     conn
 }
 
+#[test]
+fn invalid_null_characters_in_native_connection_fields_are_rejected() {
+    for spec in [
+        json!({"command":"node","args":["bad\0argument"]}),
+        json!({"command":"node","env":{"TOKEN":"bad\0value"}}),
+        json!({"command":"node","env":{"bad\0key":"value"}}),
+        json!({"type":"local","command":["node","bad\0argument"]}),
+        json!({"url":"https://fixture.invalid/mcp","headers":{"Authorization":"bad\0value"}}),
+    ] {
+        let tool = if spec["type"] == "local" {
+            "opencode"
+        } else {
+            "claude"
+        };
+        assert!(validate_json_entry("same", &spec, tool).is_err());
+    }
+}
+
 fn configure(conn: &Connection, tool: &str, file: &Path) {
     conn.execute(
         "INSERT INTO custom_paths(tool_id, mcp_config_path) VALUES(?1, ?2)",

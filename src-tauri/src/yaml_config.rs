@@ -120,7 +120,52 @@ fn attach_sequence_tail(sequence: &yaml_edit::Sequence) -> Result<(), String> {
     Ok(())
 }
 
+fn normalize_changed_merge_key(target: &yaml_edit::Mapping) -> Result<(), String> {
+    use yaml_edit::{AsYaml, SyntaxKind};
+    // The CST library does not recognize a MERGE_KEY token as a scalar key,
+    // so remove("<<") silently leaves the inheritance in place. Give that
+    // selected key a normal quoted KEY node before its standard field edit.
+    let syntax = target.as_node().ok_or_else(invalid)?;
+    let quoted = yaml_edit::YamlFile::from_str("\"<<\": null\n").map_err(|_| invalid())?;
+    let key_node = quoted
+        .document()
+        .and_then(|doc| doc.as_mapping())
+        .and_then(|mapping| mapping.as_node().cloned())
+        .and_then(|mapping| {
+            mapping
+                .children()
+                .find(|entry| entry.kind() == SyntaxKind::MAPPING_ENTRY)
+        })
+        .and_then(|entry| entry.children().find(|node| node.kind() == SyntaxKind::KEY))
+        .ok_or_else(invalid)?;
+    for entry in syntax
+        .children()
+        .filter(|node| node.kind() == SyntaxKind::MAPPING_ENTRY)
+    {
+        let children = entry.children_with_tokens().collect::<Vec<_>>();
+        let Some(index) = children.iter().position(|child| {
+            child.as_node().is_some_and(|node| {
+                node.kind() == SyntaxKind::KEY
+                    && node
+                        .descendants_with_tokens()
+                        .any(|token| token.kind() == SyntaxKind::MERGE_KEY)
+            })
+        }) else {
+            continue;
+        };
+        entry.splice_children(index..index + 1, vec![key_node.clone().into()]);
+    }
+    Ok(())
+}
+
 fn patch(target: &yaml_edit::Mapping, before: &Mapping, desired: &Mapping) -> Result<(), String> {
+    let merge_key = Value::String("<<".into());
+    if before
+        .get(&merge_key)
+        .is_some_and(|old| desired.get(&merge_key).is_none_or(|next| !same(old, next)))
+    {
+        normalize_changed_merge_key(target)?;
+    }
     // Set before removing, so an empty nested mapping does not detach a view
     // midway through replacing its final key with another key.
     for (name, value) in desired {
@@ -205,3 +250,6 @@ pub(crate) fn edit_yaml_text(
         output
     })
 }
+
+#[cfg(test)]
+mod tests;

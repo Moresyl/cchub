@@ -5,14 +5,15 @@ use std::path::Path;
 
 // Keep native values in their own type. In particular TOML non-finite extension
 // values must not turn into JSON null during validation or future editing.
-pub(super) enum Entry {
+#[derive(Clone, Debug)]
+pub(in crate::mcp) enum Entry {
     Json(serde_json::Map<String, Value>),
     Toml(toml::Table),
     Yaml(serde_yaml::Mapping),
 }
 
 impl Entry {
-    pub(super) fn field(&self, key: &str) -> Result<Option<Value>, String> {
+    pub(in crate::mcp) fn field(&self, key: &str) -> Result<Option<Value>, String> {
         match self {
             Self::Json(fields) => Ok(fields.get(key).cloned()),
             Self::Toml(fields) => fields
@@ -32,7 +33,7 @@ impl Entry {
         }
     }
 
-    pub(super) fn to_json(&self) -> Result<Value, String> {
+    pub(in crate::mcp) fn to_json(&self) -> Result<Value, String> {
         match self {
             Self::Json(fields) => Ok(Value::Object(fields.clone())),
             Self::Toml(fields) => {
@@ -104,33 +105,51 @@ pub(super) fn read(path: &Path, format: Format) -> Result<BTreeMap<String, Entry
         return Ok(BTreeMap::new());
     };
     let text = std::str::from_utf8(&bytes).map_err(|_| "MCP configuration must use UTF-8")?;
+    Ok(parse(text, format, false)?.1)
+}
+
+pub(super) fn parse(
+    text: &str,
+    format: Format,
+    plugin: bool,
+) -> Result<(String, BTreeMap<String, Entry>), String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let entries = match format {
-        Format::Codex | Format::Grok => read_toml(text, format)?,
-        Format::Hermes => read_yaml(text, format)?,
-        _ => read_json(text, format)?,
+    let (container, entries) = match format {
+        Format::Codex | Format::Grok => (format.container().into(), read_toml(text, format)?),
+        Format::Hermes => (format.container().into(), read_yaml(text, format)?),
+        _ => read_json(text, format, plugin)?,
     };
     // Validate the entire requested scope before returning any entries. A broken
     // sibling cannot be silently omitted from a supposedly complete scan.
     for (name, entry) in &entries {
         definition::validate(name, entry, format)?;
     }
-    Ok(entries)
+    Ok((container, entries))
 }
 
-fn read_json(text: &str, format: Format) -> Result<BTreeMap<String, Entry>, String> {
+fn read_json(
+    text: &str,
+    format: Format,
+    plugin: bool,
+) -> Result<(String, BTreeMap<String, Entry>), String> {
     let document = crate::json_config::parse_json_object(text)?;
-    let Some(container) = document.get(format.container()) else {
-        return Ok(BTreeMap::new());
+    let (container, fields) = match document.get(format.container()) {
+        Some(value) => (
+            format.container().to_owned(),
+            value.as_object().ok_or_else(invalid)?,
+        ),
+        None if plugin => (String::new(), document.as_object().ok_or_else(invalid)?),
+        None => return Ok((format.container().into(), BTreeMap::new())),
     };
-    let fields = container.as_object().ok_or_else(invalid)?;
-    fields
+    let entries = fields
         .iter()
+        .filter(|(name, _)| !container.is_empty() || name.as_str() != "$schema")
         .map(|(name, value)| {
             let fields = value.as_object().ok_or_else(invalid)?;
             Ok((name.clone(), Entry::Json(fields.clone())))
         })
-        .collect()
+        .collect::<Result<_, String>>()?;
+    Ok((container, entries))
 }
 
 fn read_toml(text: &str, format: Format) -> Result<BTreeMap<String, Entry>, String> {
@@ -149,7 +168,11 @@ fn read_toml(text: &str, format: Format) -> Result<BTreeMap<String, Entry>, Stri
 }
 
 fn read_yaml(text: &str, format: Format) -> Result<BTreeMap<String, Entry>, String> {
-    let document: serde_yaml::Value = serde_yaml::from_str(text).map_err(|_| invalid())?;
+    let mut document: serde_yaml::Value = serde_yaml::from_str(text).map_err(|_| invalid())?;
+    // Native YAML merge keys participate in the effective connection. Keep the
+    // original source bytes separately; do not export an unresolved inheritance
+    // marker as though it were a usable command/environment.
+    document.apply_merge().map_err(|_| invalid())?;
     let root = document.as_mapping().ok_or_else(invalid)?;
     let Some(container) = root.get(serde_yaml::Value::String(format.container().into())) else {
         return Ok(BTreeMap::new());

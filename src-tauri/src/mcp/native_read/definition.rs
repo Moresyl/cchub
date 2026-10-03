@@ -14,7 +14,10 @@ fn string(entry: &Entry, key: &str) -> Result<Option<String>, String> {
 
 fn string_array(value: &Value) -> Result<(), String> {
     let items = value.as_array().ok_or_else(invalid)?;
-    if items.iter().any(|item| !item.is_string()) {
+    if items
+        .iter()
+        .any(|item| item.as_str().is_none_or(|value| value.contains('\0')))
+    {
         return Err(invalid());
     }
     Ok(())
@@ -22,7 +25,9 @@ fn string_array(value: &Value) -> Result<(), String> {
 
 fn string_map(value: &Value) -> Result<(), String> {
     let fields = value.as_object().ok_or_else(invalid)?;
-    if fields.values().any(|value| !value.is_string()) {
+    if fields.iter().any(|(key, value)| {
+        key.contains('\0') || value.as_str().is_none_or(|value| value.contains('\0'))
+    }) {
         return Err(invalid());
     }
     Ok(())

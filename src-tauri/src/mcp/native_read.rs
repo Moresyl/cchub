@@ -18,7 +18,7 @@ pub(super) enum Format {
 }
 
 impl Format {
-    fn for_tool(tool: &str) -> Result<Self, String> {
+    pub(super) fn for_tool(tool: &str) -> Result<Self, String> {
         match tool {
             "claude" | "claude-desktop" | "mcode" => Ok(Self::Standard),
             "gemini" => Ok(Self::Gemini),
@@ -30,13 +30,27 @@ impl Format {
         }
     }
 
-    fn container(self) -> &'static str {
+    pub(super) fn container(self) -> &'static str {
         match self {
             Self::OpenCode => "mcp",
             Self::Codex | Self::Grok | Self::Hermes => "mcp_servers",
             _ => "mcpServers",
         }
     }
+}
+
+pub(super) use document::Entry;
+
+pub(super) fn validate_entry(name: &str, entry: &Entry, tool: &str) -> Result<(), String> {
+    definition::validate(name, entry, Format::for_tool(tool)?)
+}
+
+pub(super) fn parse_entries(
+    text: &str,
+    tool: &str,
+    plugin: bool,
+) -> Result<(String, std::collections::BTreeMap<String, Entry>), String> {
+    document::parse(text, Format::for_tool(tool)?, plugin)
 }
 
 #[derive(Debug)]

@@ -78,7 +78,7 @@ fn validate(name: &str, config: Option<&McpServerConfig>) -> Result<(), String> 
     Ok(())
 }
 
-fn patch_fields(
+pub(super) fn patch_fields(
     target: &mut dyn TableLike,
     before: &toml::Table,
     desired: &toml::Table,
@@ -124,7 +124,7 @@ fn patch_fields(
     }
 }
 
-fn same_table(left: &toml::Table, right: &toml::Table) -> bool {
+pub(super) fn same_table(left: &toml::Table, right: &toml::Table) -> bool {
     left.len() == right.len()
         && left
             .iter()
@@ -150,7 +150,7 @@ fn same_value(left: &toml::Value, right: &toml::Value) -> bool {
     }
 }
 
-fn edit(
+pub(super) fn edit(
     source: &str,
     name: &str,
     config: Option<&McpServerConfig>,

@@ -3,6 +3,7 @@ use crate::mcp::sources::SourceSnapshot;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+mod api;
 mod batch;
 
 const TOOLS: [&str; 8] = [

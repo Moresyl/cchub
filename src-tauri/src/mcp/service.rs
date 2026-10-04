@@ -5,6 +5,7 @@ use crate::db::models::McpServer;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
 
+mod api;
 mod catalog;
 mod migration;
 mod mutations;
@@ -153,9 +154,10 @@ pub(super) fn rows(conn: &Connection) -> Result<Vec<McpServer>, String> {
     Ok(rows)
 }
 
+pub(crate) use api::{resolve_id, status, statuses};
 pub(crate) use catalog::prepare_refresh;
 pub(crate) use mutations::{import_document, install, sync, uninstall, unsync, update};
-pub(crate) use view::{export, list, status, CatalogServer, ToolStatus};
+pub(crate) use view::{export, list, CatalogServer, ToolStatus};
 
 #[cfg(test)]
 mod tests;

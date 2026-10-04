@@ -73,68 +73,6 @@ pub(crate) struct ToolStatus {
     pub disabled: bool,
 }
 
-pub(crate) fn status(conn: &Connection, id: &str) -> Result<BTreeMap<String, ToolStatus>, String> {
-    let state = CatalogState::load(conn)?;
-    let origin = checked(&state, id, None)?;
-    let mut result = BTreeMap::new();
-    for tool in [
-        "claude",
-        "claude-desktop",
-        "codex",
-        "gemini",
-        "grokbuild",
-        "opencode",
-        "hermes",
-        "mcode",
-    ] {
-        let binding = native::configured_binding(conn, tool)?;
-        let canonical = crate::config_write::target_key(&binding.path)?;
-        let container = super::super::native_read::Format::for_tool(tool)?.container();
-        let snapshot = native::read_at(conn, &binding, &canonical)?;
-        let actual = native::entry(&snapshot, container, &origin.native_name);
-        let same_origin = canonical == origin.canonical_path && container == origin.container;
-        let projection = state
-            .projections
-            .iter()
-            .find(|projection| projection.source_id == id && projection.binding.tool == tool);
-        let status = if same_origin {
-            if let Some(actual) = actual {
-                if actual.spec.same(&origin.spec)? {
-                    "source"
-                } else {
-                    "conflict"
-                }
-            } else {
-                "missing"
-            }
-        } else if let Some(projection) = projection {
-            if projection.canonical_path != canonical || projection.container != container {
-                "conflict"
-            } else if let Some(actual) = actual {
-                if actual.spec.same(&projection.spec)? {
-                    "linked"
-                } else {
-                    "conflict"
-                }
-            } else {
-                "missing"
-            }
-        } else if actual.is_some() {
-            "unowned"
-        } else {
-            "missing"
-        };
-        result.insert(
-            tool.into(),
-            ToolStatus {
-                state: status.into(),
-                disabled: actual.is_some_and(|origin| origin.disabled),
-            },
-        );
-    }
-    Ok(result)
-}
-
 pub(crate) fn export(conn: &Connection, id: &str) -> Result<String, String> {
     let state = CatalogState::load(conn)?;
     let origin = checked(&state, id, None)?;

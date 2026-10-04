@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Edit3, Trash2 } from "lucide-react";
+import { Button } from "./ui/button";
 
 export interface McpServerCardServer {
   id: string;
@@ -107,21 +108,24 @@ function McpServerCardComponent({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span className={`badge ${sourceBadge}`}>{sourceLabel}</span>
-          {server.transport === "stdio" && (
-            <button
-              className="btn btn-ghost btn-icon-sm"
-              onClick={(event) => {
-                event.stopPropagation();
-                onEdit(server);
-              }}
-              title={editTitle}
-              aria-label={editTitle}
-            >
-              <Edit3 size={15} />
-            </button>
-          )}
-          <button
-            className="btn btn-danger-ghost btn-icon-sm"
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              onEdit(server);
+            }}
+            title={editTitle}
+            aria-label={editTitle}
+          >
+            <Edit3 size={15} />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="hover:bg-[var(--danger-subtle)] hover:text-[var(--danger)]"
             onClick={(event) => {
               event.stopPropagation();
               onDelete(server);
@@ -130,7 +134,7 @@ function McpServerCardComponent({
             aria-label={deleteTitle}
           >
             <Trash2 size={15} />
-          </button>
+          </Button>
         </div>
       </div>
       {commandPreview && (

@@ -53,6 +53,9 @@ export default function McpServerDetailPanel({
 }: McpServerDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const tabId = useId();
+  const remote = selected.transport !== "stdio";
+  const connectionLabel = remote ? (zh ? "服务地址" : "Server URL") : i.mcp.command;
+  const valuesLabel = remote ? (zh ? "请求头" : "Headers") : i.mcp.environment;
 
   useEffect(() => {
     setActiveTab("overview");
@@ -187,7 +190,7 @@ export default function McpServerDetailPanel({
             )}
 
             <section className="entity-detail-section">
-              <span className="field-label">{i.mcp.command}</span>
+              <span className="field-label">{connectionLabel}</span>
               <div className="code-block text-[12px]">{selected.command || i.common.na}</div>
             </section>
 
@@ -204,9 +207,11 @@ export default function McpServerDetailPanel({
                         ? i.mcp.unhealthy
                         : i.mcp.unknown}
                   </span>
-                  <span className={`badge ${healthResult.command_exists ? "badge-success" : "badge-danger"}`}>
-                    {i.mcp.commandExists}: {healthResult.command_exists ? "OK" : "--"}
-                  </span>
+                  {!remote && (
+                    <span className={`badge ${healthResult.command_exists ? "badge-success" : "badge-danger"}`}>
+                      {i.mcp.commandExists}: {healthResult.command_exists ? "OK" : "--"}
+                    </span>
+                  )}
                   {healthResult.latency_ms != null && (
                     <span className="badge badge-muted">
                       {i.mcp.latency}: {healthResult.latency_ms}ms
@@ -229,22 +234,24 @@ export default function McpServerDetailPanel({
 
         {activeTab === "config" && (
           <div>
+            {!remote && (
+              <section className="entity-detail-section">
+                <span className="field-label">{i.mcp.arguments}</span>
+                <CodeEditor
+                  value={formatJson(selected.args)}
+                  ariaLabel={i.mcp.arguments}
+                  language="json"
+                  readOnly
+                  minHeight={150}
+                  maxHeight={280}
+                />
+              </section>
+            )}
             <section className="entity-detail-section">
-              <span className="field-label">{i.mcp.arguments}</span>
-              <CodeEditor
-                value={formatJson(selected.args)}
-                ariaLabel={i.mcp.arguments}
-                language="json"
-                readOnly
-                minHeight={150}
-                maxHeight={280}
-              />
-            </section>
-            <section className="entity-detail-section">
-              <span className="field-label">{i.mcp.environment}</span>
+              <span className="field-label">{valuesLabel}</span>
               <CodeEditor
                 value={formatEnvironment(selected.env)}
-                ariaLabel={i.mcp.environment}
+                ariaLabel={valuesLabel}
                 language="json"
                 readOnly
                 minHeight={130}

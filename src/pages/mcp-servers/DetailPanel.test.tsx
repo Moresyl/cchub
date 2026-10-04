@@ -12,6 +12,27 @@ vi.mock("../../components/DeferredCodeEditor", () => ({
 }));
 afterEach(cleanup);
 
+it("shows remote addresses and headers consistently with the editor", () => {
+  render(
+    <McpServerDetailPanel
+      {...props()}
+      selected={{
+        ...server,
+        transport: "http",
+        command: "https://example.test/mcp",
+        env: '{"Accept":"application/json"}',
+      }}
+    />,
+  );
+  expect(screen.getByText("Server URL")).toBeTruthy();
+  expect(screen.queryByText("Command")).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Configuration" }));
+  expect(screen.queryByRole("textbox", { name: "Arguments" })).toBeNull();
+  expect((screen.getByRole("textbox", { name: "Headers" }) as HTMLTextAreaElement).value).toContain(
+    '"Accept": "application/json"',
+  );
+});
+
 const server: McpServer = {
   id: "one",
   name: "Fixture",

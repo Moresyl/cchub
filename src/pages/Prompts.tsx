@@ -416,7 +416,7 @@ export default function Prompts() {
         }}
       />
       <Dialog open={previewLive} onOpenChange={setPreviewLive}>
-        <DialogContent className="max-w-[720px]">
+        <DialogContent dismissOnOutsideClick className="max-w-[720px]">
           <DialogHeader>
             <div className="min-w-0">
               <DialogTitle>{text("当前指令文件", "Live instruction file")}</DialogTitle>
@@ -429,7 +429,7 @@ export default function Prompts() {
         </DialogContent>
       </Dialog>
       <Dialog open={previewStored} onOpenChange={setPreviewStored}>
-        <DialogContent className="max-w-[720px]">
+        <DialogContent dismissOnOutsideClick className="max-w-[720px]">
           <DialogHeader>
             <div className="min-w-0">
               <DialogTitle>{text("库内当前版本", "Current stored version")}</DialogTitle>

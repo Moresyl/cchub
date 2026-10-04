@@ -35,9 +35,10 @@ it("provides shared named inputs and buttons without promising an automatic heal
 });
 
 it.each([1, 2, 3])("locks every interactive control while installing, including step %s navigation", (wizardStep) => {
-  const view = render(<WizardView {...props()} wizardStep={wizardStep} wizardInstalling />);
-  for (const element of view.container.querySelectorAll("button,input,textarea"))
-    expect(element.matches(":disabled")).toBe(true);
+  render(<WizardView {...props()} wizardStep={wizardStep} wizardInstalling />);
+  const controls = screen.getByRole("dialog").querySelectorAll("button,input,textarea");
+  expect(controls.length).toBeGreaterThan(0);
+  for (const element of controls) expect(element.matches(":disabled")).toBe(true);
 });
 
 it("labels remote fields as server URL and headers", () => {
@@ -51,4 +52,16 @@ it("labels remote fields as server URL and headers", () => {
   expect(screen.getByRole("textbox", { name: "Server URL" })).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "Headers" })).toBeTruthy();
   expect(screen.queryByRole("textbox", { name: "Arguments" })).toBeNull();
+});
+
+it("explains invalid fields before the user can advance to review", () => {
+  const initial = props();
+  render(
+    <WizardView
+      {...initial}
+      wizardValidation={{ ...initial.wizardValidation, isValid: false, errors: ["Server name is invalid."] }}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toContain("Server name is invalid.");
+  expect(screen.getByRole("button", { name: "Next" }).matches(":disabled")).toBe(true);
 });

@@ -71,14 +71,14 @@ function parseEnv(envText: string, headers: boolean) {
     if (!value || value.startsWith("#")) continue;
     const separator = value.indexOf("=");
     if (separator <= 0) {
-      errors.push(`Invalid env line: ${value}`);
+      errors.push("Each environment or header line must use KEY=value.");
       continue;
     }
     const key = value.slice(0, separator).trim();
     const envValue = value.slice(separator + 1).trim();
     const validKey = headers ? /^[A-Za-z0-9_-]+$/.test(key) : /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
     if (!validKey) {
-      errors.push(`Invalid ${headers ? "header" : "env"} key: ${key}`);
+      errors.push(headers ? "Header name is invalid." : "Environment variable name is invalid.");
       continue;
     }
     parsedEnv[key] = envValue;
@@ -87,7 +87,29 @@ function parseEnv(envText: string, headers: boolean) {
   return { parsedEnv, errors };
 }
 
-export function useMcpValidation(draft: McpWizardDraft): McpValidationResult {
+const chineseMessages: Record<string, string> = {
+  "Server name is required.": "请输入服务名称。",
+  "Server name may only contain letters, numbers, dot, underscore, and dash.":
+    "服务名称只能包含英文字母、数字、点、下划线和连字符。",
+  "Command is required.": "请输入启动命令。",
+  "Remote URL is required.": "请输入远程服务 URL。",
+  "Remote URL must use HTTP or HTTPS.": "远程服务 URL 必须使用 HTTP 或 HTTPS。",
+  "Remote URL is invalid.": "请输入有效的远程服务 URL。",
+  "Arguments JSON must be a string array.": "参数 JSON 必须是字符串数组。",
+  "Arguments JSON is invalid.": "参数 JSON 格式不正确。",
+  "Environment JSON must be an object.": "环境变量或请求头 JSON 必须是对象。",
+  "Environment JSON values must be strings.": "环境变量或请求头必须使用非空名称和字符串值。",
+  "Environment JSON is invalid.": "环境变量或请求头 JSON 格式不正确。",
+  "Each environment or header line must use KEY=value.": "环境变量或请求头的每一行必须使用 KEY=value 格式。",
+  "Header name is invalid.": "请求头名称格式不正确。",
+  "Environment variable name is invalid.": "环境变量名称格式不正确。",
+  "Command contains spaces. Move extra tokens into the arguments field when possible.":
+    "命令包含空格，请尽量将附加参数移到参数字段中。",
+  "No arguments provided. Add at least the MCP package or entrypoint if required.":
+    "尚未填写参数；如果服务需要，请添加包名或入口文件。",
+};
+
+export function useMcpValidation(draft: McpWizardDraft, zh = false): McpValidationResult {
   return useMemo(() => {
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -124,10 +146,10 @@ export function useMcpValidation(draft: McpWizardDraft): McpValidationResult {
 
     return {
       isValid: errors.length === 0,
-      errors,
-      warnings,
+      errors: zh ? errors.map((message) => chineseMessages[message] ?? message) : errors,
+      warnings: zh ? warnings.map((message) => chineseMessages[message] ?? message) : warnings,
       parsedArgs: parsedArgsResult.parsedArgs,
       parsedEnv: parsedEnvResult.parsedEnv,
     };
-  }, [draft.argsText, draft.command, draft.envText, draft.name, draft.transport]);
+  }, [draft.argsText, draft.command, draft.envText, draft.name, draft.transport, zh]);
 }

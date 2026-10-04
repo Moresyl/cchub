@@ -102,7 +102,7 @@ export default function McpServers() {
   const syncStatus = useSyncStatus(selected, zh);
   const configCopy = useConfigCopy(selected, zh);
   const { save: saveConfig, saving: configSaving, isSaving: isConfigSaving } = useConfigSave(zh);
-  const wizardValidation = useMcpValidation(wizardDraft);
+  const wizardValidation = useMcpValidation(wizardDraft, zh);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
   const bulkToggleMcpAppMutation = useBulkToggleMcpAppMutation();
   const uninstallMcpServerMutation = useUninstallMcpServerMutation();
@@ -187,6 +187,7 @@ export default function McpServers() {
   }, [saveConfig, editArgs, editCommand, editEnv, editRevision, loadPageData, selected, updateMcpServerConfigMutation]);
 
   const openWizard = useCallback(() => {
+    if (installingRef.current) return;
     setWizardDraft({
       name: "",
       transport: "stdio",

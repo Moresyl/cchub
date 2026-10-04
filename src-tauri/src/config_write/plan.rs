@@ -48,10 +48,18 @@ impl FilePlan {
         self,
         finalize: impl FnOnce() -> Result<(), String>,
     ) -> Result<(), String> {
+        self.commit_then_with_revisions(Vec::new(), finalize)
+    }
+
+    pub(crate) fn commit_then_with_revisions(
+        self,
+        revisions: Vec<super::FileRevision>,
+        finalize: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
         self.check_targets()?;
         self.check_guards()?;
         let Self { updates, guards } = self;
-        super::commit_then(updates, || {
+        super::commit_then_with_revisions(updates, revisions, || {
             for (path, original) in guards {
                 if read(&path)? != original {
                     return Err(

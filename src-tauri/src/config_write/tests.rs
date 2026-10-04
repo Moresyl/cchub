@@ -1,6 +1,162 @@
 use super::*;
 
 #[test]
+fn equal_byte_external_replacement_is_not_overwritten_during_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file");
+    std::fs::write(&path, b"original").unwrap();
+    let mut external = None;
+    let error = commit_then(vec![update(&path, b"desired")], || {
+        crate::utils::atomic_write(&path, b"desired").unwrap();
+        external = Some(FileRevision::capture(&path).unwrap().0);
+        Err("database fixture refused".into())
+    })
+    .unwrap_err();
+    assert!(error.contains("recovery is incomplete"));
+    external.unwrap().verify().unwrap();
+    assert_eq!(read(&path).unwrap().unwrap(), b"desired");
+    let recovery = PathBuf::from(error.split("Original files: ").nth(1).unwrap());
+    assert_eq!(std::fs::read(recovery.join("0")).unwrap(), b"original");
+    std::fs::remove_dir_all(recovery).unwrap();
+}
+
+#[test]
+fn equal_byte_replacement_between_members_stops_before_the_second_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    std::fs::write(&first, b"original first").unwrap();
+    std::fs::write(&second, b"original second").unwrap();
+    let mut external = None;
+    let mut writes = 0;
+    let mut finalized = false;
+    let error = commit_owned(
+        vec![
+            update(&first, b"desired first"),
+            update(&second, b"desired second"),
+        ],
+        Vec::new(),
+        |index, path, bytes| {
+            writes += 1;
+            assert_eq!(index, 0);
+            let handle = crate::utils::atomic_write_retained(path, bytes).unwrap();
+            crate::utils::atomic_write(&second, b"original second").unwrap();
+            external = Some(FileRevision::capture(&second).unwrap().0);
+            (Some(handle), Ok(()))
+        },
+        || {
+            finalized = true;
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.contains("identity changed"));
+    assert!(!error.contains("recovery is incomplete"));
+    assert_eq!(writes, 1);
+    assert!(!finalized);
+    assert_eq!(read(&first).unwrap().unwrap(), b"original first");
+    assert_eq!(read(&second).unwrap().unwrap(), b"original second");
+    external.unwrap().verify().unwrap();
+}
+
+#[test]
+fn a_supplied_old_identity_rejects_equal_bytes_before_writes_or_finalization() {
+    for desired in [b"original".as_slice(), b"changed".as_slice()] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file");
+        std::fs::write(&path, b"original").unwrap();
+        let (revision, _) = FileRevision::capture(&path).unwrap();
+        crate::utils::atomic_write(&path, b"original").unwrap();
+        let (external, _) = FileRevision::capture(&path).unwrap();
+        let mut finalized = false;
+        assert!(
+            commit_then_with_revisions(vec![update(&path, desired)], vec![revision], || {
+                finalized = true;
+                Ok(())
+            })
+            .unwrap_err()
+            .contains("identity changed")
+        );
+        assert!(!finalized);
+        external.verify().unwrap();
+        assert_eq!(read(&path).unwrap().unwrap(), b"original");
+    }
+}
+
+#[test]
+fn recovery_keeps_a_directory_created_by_another_writer_between_members() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("external/second");
+    std::fs::write(&first, b"original").unwrap();
+    let error = commit_with(
+        vec![update(&first, b"desired"), update(&second, b"created")],
+        |index, path, bytes| {
+            if index == 1 {
+                return Err(std::io::Error::other("fixture failure"));
+            }
+            crate::utils::atomic_write(path, bytes)?;
+            std::fs::create_dir(second.parent().unwrap())
+        },
+    )
+    .unwrap_err();
+    assert!(!error.contains("recovery is incomplete"));
+    assert_eq!(read(&first).unwrap().unwrap(), b"original");
+    assert!(!second.exists());
+    assert!(second.parent().unwrap().is_dir());
+}
+
+#[cfg(windows)]
+#[test]
+fn junction_retarget_after_write_recovers_only_the_original_physical_source() {
+    fn junction(path: &Path, target: &Path) {
+        let mut command = std::process::Command::new("powershell");
+        crate::utils::configure_background_command(&mut command);
+        let output = command
+            .args(["-NoProfile", "-NonInteractive", "-Command", "New-Item -ItemType Junction -Path $env:CCHUB_TEST_LINK -Target $env:CCHUB_TEST_TARGET -ErrorAction Stop | Out-Null"])
+            .env("CCHUB_TEST_LINK", path)
+            .env("CCHUB_TEST_TARGET", target)
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "owned fixture junction creation failed"
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    let alias = dir.path().join("alias");
+    for folder in [&first, &second] {
+        std::fs::create_dir(folder).unwrap();
+        std::fs::write(folder.join("config"), b"original").unwrap();
+    }
+    junction(&alias, &first);
+    let mut finalized = false;
+    let error = commit_owned(
+        vec![update(&alias.join("config"), b"desired")],
+        Vec::new(),
+        |_, path, bytes| {
+            let handle = crate::utils::atomic_write_retained(path, bytes).unwrap();
+            std::fs::remove_dir(&alias).unwrap();
+            junction(&alias, &second);
+            (Some(handle), Ok(()))
+        },
+        || {
+            finalized = true;
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.contains("location changed"));
+    assert!(!error.contains("recovery is incomplete"));
+    assert!(!finalized);
+    for folder in [&first, &second] {
+        assert_eq!(std::fs::read(folder.join("config")).unwrap(), b"original");
+    }
+    std::fs::remove_dir(alias).unwrap();
+}
+
+#[test]
 fn a_failed_database_finalizer_restores_each_original_and_runs_after_verified_writes() {
     let dir = tempfile::tempdir().unwrap();
     let first = dir.path().join("first");
@@ -194,7 +350,10 @@ fn lost_write_ownership_retains_external_data_and_recoverable_originals() {
     );
     let map: serde_json::Value =
         serde_json::from_slice(&std::fs::read(recovery.join("restore-map.json")).unwrap()).unwrap();
-    assert_eq!(map[0]["target"], first.to_string_lossy().as_ref());
+    assert_eq!(
+        map[0]["target"],
+        target_key(&first).unwrap().to_string_lossy().as_ref()
+    );
     assert_eq!(map[0]["original"], "0");
     std::fs::remove_dir_all(recovery).unwrap();
 }

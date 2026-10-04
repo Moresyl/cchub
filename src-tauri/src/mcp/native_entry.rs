@@ -65,7 +65,11 @@ impl PreparedNative {
             Ok(())
         };
         verify()?;
-        plan.commit_then(|| {
+        let captured = revisions
+            .iter()
+            .map(|(revision, _)| revision.clone())
+            .collect();
+        plan.commit_then_with_revisions(captured, || {
             verify()?;
             for (revision, updated) in &revisions {
                 if *updated {

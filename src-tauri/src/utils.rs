@@ -234,11 +234,28 @@ fn replace_existing(path: &Path, replacement: &Path) -> std::io::Result<()> {
 
 /// Write and sync a temporary file before atomically replacing the destination.
 pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    atomic_write_retained(path, content).map(|_| ())
+}
+
+/// Keep the actual replacement handle so recovery can prove write ownership.
+pub(crate) fn atomic_write_retained(path: &Path, content: &[u8]) -> std::io::Result<std::fs::File> {
     let parent = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(content)?;
     temporary.as_file().sync_all()?;
+    #[cfg(windows)]
+    let retained = {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_READ_ATTRIBUTES;
+        // ReplaceFile opens the replacement without read/write sharing. Keep
+        // an attributes-only handle to its identity, then close the writer.
+        std::fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES)
+            .open(temporary.path())?
+    };
+    #[cfg(not(windows))]
+    let retained = temporary.as_file().try_clone()?;
     if path.exists() {
         let temporary_path = temporary.into_temp_path();
         #[cfg(windows)]
@@ -251,7 +268,7 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     } else {
         temporary.persist(path).map_err(|error| error.error)?;
     }
-    Ok(())
+    Ok(retained)
 }
 
 /// Atomic string write convenience wrapper

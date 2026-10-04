@@ -101,7 +101,37 @@ pub(crate) struct FileRevision {
     ancestor: Pin,
 }
 
+pub(super) struct DirectoryRevision(Pin);
+
+impl DirectoryRevision {
+    pub(super) fn capture(path: &Path) -> Result<Self, String> {
+        Ok(Self(Pin::new(
+            path,
+            open(path, true).map_err(|_| invalid())?,
+            true,
+        )?))
+    }
+
+    pub(super) fn remove_if_unchanged(self) {
+        if self.0.verify().is_ok() {
+            let _ = std::fs::remove_dir(&self.0.path);
+        }
+    }
+}
+
 impl FileRevision {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn written(&self, handle: File) -> Result<Self, String> {
+        Ok(Self {
+            path: self.path.clone(),
+            ancestor: self.ancestor.clone(),
+            target: Some(Pin::new(&self.path, handle, false)?),
+        })
+    }
+
     pub(crate) fn capture(path: &Path) -> Result<(Self, Option<Vec<u8>>), String> {
         let canonical = super::target_key(path)?;
         let target = match open(&canonical, false) {

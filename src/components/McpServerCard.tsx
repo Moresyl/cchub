@@ -37,6 +37,7 @@ function getHealthColor(status: string | null) {
 
 function getCommandPreview(server: McpServerCardServer) {
   if (!server.command) return null;
+  if (server.transport !== "stdio") return server.command;
 
   try {
     const parsedArgs = JSON.parse(server.args);

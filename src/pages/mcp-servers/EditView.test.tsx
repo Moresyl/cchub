@@ -35,6 +35,24 @@ it("locks draft fields and exit actions while the save is pending", () => {
   expect(initial.handleSave).not.toHaveBeenCalled();
   expect(initial.setEditing).not.toHaveBeenCalled();
 });
+
+it("labels remote connections as a URL and headers without local argument controls", () => {
+  const initial = props();
+  render(
+    <EditView
+      {...initial}
+      selected={{ ...initial.selected, transport: "http" }}
+      editCommand="https://example.test/mcp"
+    />,
+  );
+  expect((screen.getByRole("textbox", { name: "Server URL" }) as HTMLInputElement).value).toBe(
+    "https://example.test/mcp",
+  );
+  expect(screen.getByRole("textbox", { name: "Headers" })).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Arguments" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Format headers" }));
+  expect(initial.setEditEnv).toHaveBeenCalledWith('{\n  "MODE": "test"\n}');
+});
 const props = () => ({
   selected: {
     id: "one",

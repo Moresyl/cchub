@@ -38,6 +38,9 @@ export default function McpServerEditView({
   saving = false,
 }: McpServerEditViewProps) {
   const commandId = useId();
+  const remote = selected.transport !== "stdio";
+  const connectionLabel = remote ? (zh ? "服务地址" : "Server URL") : i.mcp.command;
+  const valuesLabel = remote ? (zh ? "请求头" : "Headers") : i.mcp.environment;
   return (
     <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div className="page-header">
@@ -73,7 +76,7 @@ export default function McpServerEditView({
       >
         <div>
           <label className="field-label" htmlFor={commandId}>
-            {i.mcp.command}
+            {connectionLabel}
           </label>
           <Input
             id={commandId}
@@ -81,58 +84,62 @@ export default function McpServerEditView({
             value={editCommand}
             disabled={saving}
             onChange={(e) => setEditCommand(e.target.value)}
-            placeholder="npx, node, python..."
+            placeholder={remote ? "https://example.com/mcp" : "npx, node, python..."}
           />
         </div>
 
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <span className="field-label" style={{ marginBottom: 0 }}>
-              {i.mcp.arguments}
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              title={zh ? "格式化参数" : "Format arguments"}
-              disabled={saving}
-              aria-label={zh ? "格式化参数" : "Format arguments"}
-              onClick={() => {
-                try {
-                  setEditArgs(JSON.stringify(JSON.parse(editArgs), null, 2));
-                } catch {
-                  showToast(
-                    "error",
-                    zh ? "参数 JSON 格式不正确，内容已保留。" : "Invalid arguments JSON. Your content is preserved.",
-                  );
-                }
-              }}
-            >
-              <Wand2 size={12} />
-            </Button>
+        {!remote && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span className="field-label" style={{ marginBottom: 0 }}>
+                {i.mcp.arguments}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                title={zh ? "格式化参数" : "Format arguments"}
+                disabled={saving}
+                aria-label={zh ? "格式化参数" : "Format arguments"}
+                onClick={() => {
+                  try {
+                    setEditArgs(JSON.stringify(JSON.parse(editArgs), null, 2));
+                  } catch {
+                    showToast(
+                      "error",
+                      zh ? "参数 JSON 格式不正确，内容已保留。" : "Invalid arguments JSON. Your content is preserved.",
+                    );
+                  }
+                }}
+              >
+                <Wand2 size={12} />
+              </Button>
+            </div>
+            <CodeEditor
+              value={editArgs}
+              readOnly={saving}
+              onChange={setEditArgs}
+              ariaLabel={i.mcp.arguments}
+              language="json"
+              minHeight={160}
+            />
           </div>
-          <CodeEditor
-            value={editArgs}
-            readOnly={saving}
-            onChange={setEditArgs}
-            ariaLabel={i.mcp.arguments}
-            language="json"
-            minHeight={160}
-          />
-        </div>
+        )}
 
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <span className="field-label" style={{ marginBottom: 0 }}>
-              {i.mcp.environment}
+              {valuesLabel}
             </span>
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              title={zh ? "格式化环境变量" : "Format environment"}
+              title={remote ? (zh ? "格式化请求头" : "Format headers") : zh ? "格式化环境变量" : "Format environment"}
               disabled={saving}
-              aria-label={zh ? "格式化环境变量" : "Format environment"}
+              aria-label={
+                remote ? (zh ? "格式化请求头" : "Format headers") : zh ? "格式化环境变量" : "Format environment"
+              }
               onClick={() => {
                 try {
                   setEditEnv(JSON.stringify(JSON.parse(editEnv), null, 2));
@@ -153,7 +160,7 @@ export default function McpServerEditView({
             value={editEnv}
             readOnly={saving}
             onChange={setEditEnv}
-            ariaLabel={i.mcp.environment}
+            ariaLabel={valuesLabel}
             language="json"
             minHeight={160}
           />

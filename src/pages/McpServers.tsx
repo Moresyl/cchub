@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, X, Plug, Activity, MonitorCheck, Upload, PackagePlus, Search } from "lucide-react";
@@ -9,9 +8,7 @@ import McpServerCard from "../components/McpServerCard";
 import EmptyState from "../components/states/EmptyState";
 import ErrorState from "../components/states/ErrorState";
 import LoadingState from "../components/states/LoadingState";
-import type { DetectedTool } from "../types/skills";
 import { useMcpValidation, type McpWizardDraft } from "../hooks/useMcpValidation";
-import { fetchMcpServersPageData, queryKeys } from "../hooks/queries";
 import {
   useInstallMcpServerMutation,
   useBulkToggleMcpAppMutation,
@@ -35,6 +32,7 @@ import { SimpleSelect } from "../components/ui/simple-select";
 import { useConfigSave } from "./mcp-servers/useConfigSave";
 import { useSyncStatus } from "./mcp-servers/useSyncStatus";
 import { useConfigCopy } from "./mcp-servers/useConfigCopy";
+import { usePageData } from "./mcp-servers/usePageData";
 
 const MCP_SYNCABLE_APPS = [
   { id: "claude", label: "Claude" },
@@ -50,14 +48,20 @@ const MCP_SYNCABLE_APPS = [
 const MCP_SYNCABLE_TOOL_IDS = new Set<string>(MCP_SYNCABLE_APPS.map((app) => app.id));
 
 export default function McpServers() {
-  const queryClient = useQueryClient();
-  const cachedMcpServersPageData = queryClient.getQueryData<Awaited<ReturnType<typeof fetchMcpServersPageData>>>(
-    queryKeys.mcpServersPage,
-  );
-  const [servers, setServers] = useState<McpServer[]>(cachedMcpServersPageData?.servers ?? []);
-  const [loading, setLoading] = useState(!cachedMcpServersPageData);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<McpServer | null>(null);
+  const zh = getLocale() === "zh";
+  const {
+    servers,
+    setServers,
+    tools,
+    selected,
+    setSelected,
+    loading,
+    loadError,
+    serverAppStatus,
+    setServerAppStatus,
+    appStatusLoading,
+    loadPageData,
+  } = usePageData(zh);
   const [editing, setEditing] = useState(false);
   const [editCommand, setEditCommand] = useState("");
   const [editArgs, setEditArgs] = useState("");
@@ -65,10 +69,13 @@ export default function McpServers() {
   const [healthResults, setHealthResults] = useState<Record<string, HealthCheckResult>>({});
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [installedTools, setInstalledTools] = useState<DetectedTool[]>(
-    cachedMcpServersPageData?.tools.filter(
-      (tool) => tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && MCP_SYNCABLE_TOOL_IDS.has(tool.id),
-    ) ?? [],
+  const installedTools = useMemo(
+    () =>
+      tools.filter(
+        (tool) =>
+          tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && MCP_SYNCABLE_TOOL_IDS.has(tool.id),
+      ),
+    [tools],
   );
   const [pendingDelete, setPendingDelete] = useState<McpServer | null>(null);
   const [runtimeDeps, setRuntimeDeps] = useState<RuntimeDepStatus[]>([]);
@@ -87,10 +94,7 @@ export default function McpServers() {
   });
   const [search, setSearch] = useState("");
   const [bulkApp, setBulkApp] = useState<string>(MCP_SYNCABLE_APPS[0].id);
-  const [serverAppStatus, setServerAppStatus] = useState<Record<string, Record<string, boolean>>>({});
-  const [appStatusLoading, setAppStatusLoading] = useState(false);
   const i = t();
-  const zh = getLocale() === "zh";
   const syncStatus = useSyncStatus(selected, zh);
   const configCopy = useConfigCopy(selected, zh);
   const { save: saveConfig, saving: configSaving, isSaving: isConfigSaving } = useConfigSave(zh);
@@ -100,54 +104,6 @@ export default function McpServers() {
   const uninstallMcpServerMutation = useUninstallMcpServerMutation();
   const updateMcpServerConfigMutation = useUpdateMcpServerConfigMutation();
   const installMcpServerMutation = useInstallMcpServerMutation<McpServer>();
-
-  const loadPageData = useCallback(
-    async (options: { force?: boolean } = {}) => {
-      const { force = false } = options;
-      if (!queryClient.getQueryData(queryKeys.mcpServersPage)) {
-        setLoading(true);
-      }
-      setLoadError(null);
-      try {
-        const data = await queryClient.fetchQuery({
-          queryKey: queryKeys.mcpServersPage,
-          queryFn: fetchMcpServersPageData,
-          staleTime: force ? 0 : 30_000,
-        });
-        setServers(data.servers);
-        setInstalledTools(
-          data.tools.filter(
-            (tool) =>
-              tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && MCP_SYNCABLE_TOOL_IDS.has(tool.id),
-          ),
-        );
-        setSelected((current) =>
-          current ? (data.servers.find((server) => server.id === current.id) ?? null) : current,
-        );
-        setAppStatusLoading(true);
-        const statusResults = await Promise.allSettled(
-          data.servers.map(
-            async (server) =>
-              [
-                server.id,
-                await invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: server.name }),
-              ] as const,
-          ),
-        );
-        const nextStatus: Record<string, Record<string, boolean>> = {};
-        for (const result of statusResults) {
-          if (result.status === "fulfilled") nextStatus[result.value[0]] = result.value[1];
-        }
-        setServerAppStatus(nextStatus);
-      } catch (e) {
-        setLoadError(String(e));
-      } finally {
-        setAppStatusLoading(false);
-        setLoading(false);
-      }
-    },
-    [queryClient],
-  );
 
   const checkDeps = useCallback(async () => {
     setCheckingDeps(true);
@@ -191,7 +147,7 @@ export default function McpServers() {
         console.error(e);
       }
     },
-    [selected, uninstallMcpServerMutation],
+    [selected, setSelected, setServers, uninstallMcpServerMutation],
   );
 
   const startEdit = useCallback((server: McpServer) => {
@@ -283,6 +239,7 @@ export default function McpServers() {
     closeWizard,
     installMcpServerMutation,
     loadPageData,
+    setSelected,
     wizardDraft,
     wizardInstalling,
     wizardSyncTargets,
@@ -300,14 +257,17 @@ export default function McpServers() {
         }));
       }
     },
-    [syncStatus],
+    [syncStatus, setServerAppStatus],
   );
 
-  const handleSelectServer = useCallback((server: McpServer) => {
-    setSelected(server);
-    setEditing(false);
-    setSaveSuccess(false);
-  }, []);
+  const handleSelectServer = useCallback(
+    (server: McpServer) => {
+      setSelected(server);
+      setEditing(false);
+      setSaveSuccess(false);
+    },
+    [setSelected],
+  );
   const handleBulkToggle = useCallback(
     async (enabled: boolean) => {
       if (bulkToggleMcpAppMutation.isPending || appStatusLoading || servers.length === 0) return;
@@ -339,7 +299,7 @@ export default function McpServers() {
         showToast("success", enabled ? i.mcp.bulkEnable : i.mcp.bulkDisable);
       }
     },
-    [appStatusLoading, bulkApp, bulkToggleMcpAppMutation, i.mcp, servers, serverAppStatus, zh],
+    [appStatusLoading, bulkApp, bulkToggleMcpAppMutation, i.mcp, servers, serverAppStatus, setServerAppStatus, zh],
   );
   const filteredServers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -385,7 +345,7 @@ export default function McpServers() {
       setSelected(server);
       startEdit(server);
     },
-    [startEdit],
+    [startEdit, setSelected],
   );
 
   const handleDeleteServer = useCallback(
@@ -405,10 +365,6 @@ export default function McpServers() {
       if (msg !== "Cancelled") showToast("error", msg);
     }
   }, [i.mcp.importSuccess, loadPageData]);
-
-  useEffect(() => {
-    void loadPageData();
-  }, [loadPageData]);
 
   useEffect(() => {
     const handleSaveShortcut = () => {

@@ -11,6 +11,7 @@ vi.mock("../../components/DeferredCodeEditor", () => ({
     <textarea
       aria-label={props.ariaLabel}
       value={props.value}
+      readOnly={props.readOnly}
       onChange={(event) => props.onChange?.(event.target.value)}
     />
   ),
@@ -18,6 +19,21 @@ vi.mock("../../components/DeferredCodeEditor", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+it("locks draft fields and exit actions while the save is pending", () => {
+  const initial = props();
+  render(<EditView {...initial} saving />);
+  for (const button of screen.getAllByRole("button")) {
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+  }
+  expect((screen.getByRole("textbox", { name: "Command" }) as HTMLInputElement).disabled).toBe(true);
+  for (const name of ["Arguments", "Environment"]) {
+    expect((screen.getByRole("textbox", { name }) as HTMLTextAreaElement).readOnly).toBe(true);
+  }
+  expect(initial.handleSave).not.toHaveBeenCalled();
+  expect(initial.setEditing).not.toHaveBeenCalled();
 });
 const props = () => ({
   selected: {

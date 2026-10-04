@@ -20,6 +20,7 @@ interface McpServerEditViewProps {
   setEditEnv: (value: string) => void;
   setEditing: (value: boolean) => void;
   handleSave: () => void;
+  saving?: boolean;
 }
 
 export default function McpServerEditView({
@@ -34,6 +35,7 @@ export default function McpServerEditView({
   setEditEnv,
   setEditing,
   handleSave,
+  saving = false,
 }: McpServerEditViewProps) {
   const commandId = useId();
   return (
@@ -45,6 +47,7 @@ export default function McpServerEditView({
             variant="ghost"
             size="icon-sm"
             onClick={() => setEditing(false)}
+            disabled={saving}
             title={i.mcp.cancel}
             aria-label={i.mcp.cancel}
           >
@@ -76,6 +79,7 @@ export default function McpServerEditView({
             id={commandId}
             style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
             value={editCommand}
+            disabled={saving}
             onChange={(e) => setEditCommand(e.target.value)}
             placeholder="npx, node, python..."
           />
@@ -91,6 +95,7 @@ export default function McpServerEditView({
               variant="ghost"
               size="icon-sm"
               title={zh ? "格式化参数" : "Format arguments"}
+              disabled={saving}
               aria-label={zh ? "格式化参数" : "Format arguments"}
               onClick={() => {
                 try {
@@ -108,6 +113,7 @@ export default function McpServerEditView({
           </div>
           <CodeEditor
             value={editArgs}
+            readOnly={saving}
             onChange={setEditArgs}
             ariaLabel={i.mcp.arguments}
             language="json"
@@ -125,6 +131,7 @@ export default function McpServerEditView({
               variant="ghost"
               size="icon-sm"
               title={zh ? "格式化环境变量" : "Format environment"}
+              disabled={saving}
               aria-label={zh ? "格式化环境变量" : "Format environment"}
               onClick={() => {
                 try {
@@ -144,6 +151,7 @@ export default function McpServerEditView({
           </div>
           <CodeEditor
             value={editEnv}
+            readOnly={saving}
             onChange={setEditEnv}
             ariaLabel={i.mcp.environment}
             language="json"
@@ -153,12 +161,12 @@ export default function McpServerEditView({
       </div>
 
       <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <Button type="button" variant="secondary" onClick={() => setEditing(false)}>
+        <Button type="button" variant="secondary" disabled={saving} onClick={() => setEditing(false)}>
           {i.mcp.cancel}
         </Button>
-        <Button type="button" onClick={handleSave}>
+        <Button type="button" onClick={handleSave} disabled={saving} aria-busy={saving}>
           <Save size={14} />
-          {i.mcp.save}
+          {saving ? (zh ? "保存中…" : "Saving…") : i.mcp.save}
         </Button>
       </div>
     </div>

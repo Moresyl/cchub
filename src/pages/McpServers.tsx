@@ -32,6 +32,7 @@ import McpServerDetailPanel from "./mcp-servers/DetailPanel";
 import MasterDetailLayout from "../components/layout/MasterDetailLayout";
 import { Input } from "../components/ui/input";
 import { SimpleSelect } from "../components/ui/simple-select";
+import { useConfigSave } from "./mcp-servers/useConfigSave";
 
 const MCP_SYNCABLE_APPS = [
   { id: "claude", label: "Claude" },
@@ -91,6 +92,7 @@ export default function McpServers() {
   const [appStatusLoading, setAppStatusLoading] = useState(false);
   const i = t();
   const zh = getLocale() === "zh";
+  const { save: saveConfig, saving: configSaving, isSaving: isConfigSaving } = useConfigSave(zh);
   const wizardValidation = useMcpValidation(wizardDraft);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
   const bulkToggleMcpAppMutation = useBulkToggleMcpAppMutation();
@@ -201,19 +203,17 @@ export default function McpServers() {
 
   const handleSave = useCallback(async () => {
     if (!selected) return;
-    try {
-      const args = JSON.parse(editArgs);
-      const env = JSON.parse(editEnv);
-      await updateMcpServerConfigMutation.mutateAsync({ name: selected.name, command: editCommand, args, env });
+    const saved = await saveConfig(
+      { name: selected.name, command: editCommand, args: editArgs, env: editEnv },
+      (config) => updateMcpServerConfigMutation.mutateAsync(config),
+    );
+    if (saved) {
       setEditing(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
       await loadPageData({ force: true });
-    } catch (e) {
-      console.error(e);
-      showToast("error", zh ? "JSON 格式错误，请检查参数和环境变量" : "Invalid JSON format");
     }
-  }, [editArgs, editCommand, editEnv, loadPageData, selected, updateMcpServerConfigMutation, zh]);
+  }, [saveConfig, editArgs, editCommand, editEnv, loadPageData, selected, updateMcpServerConfigMutation]);
 
   const openWizard = useCallback(() => {
     setWizardDraft({
@@ -453,6 +453,7 @@ export default function McpServers() {
       }
     };
     const handleEscapeShortcut = () => {
+      if (isConfigSaving()) return;
       if (wizardOpen) {
         closeWizard();
         return;
@@ -470,7 +471,7 @@ export default function McpServers() {
       window.removeEventListener("cchub-shortcut-new", handleNewShortcut);
       window.removeEventListener("cchub-shortcut-escape", handleEscapeShortcut);
     };
-  }, [closeWizard, editing, handleSave, openWizard, selected, wizardOpen]);
+  }, [closeWizard, isConfigSaving, editing, handleSave, openWizard, selected, wizardOpen]);
 
   function getSourceLabel(source: string) {
     switch (source) {
@@ -521,6 +522,7 @@ export default function McpServers() {
         setEditEnv={setEditEnv}
         setEditing={setEditing}
         handleSave={handleSave}
+        saving={configSaving}
       />
     );
   }

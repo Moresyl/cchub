@@ -1,10 +1,13 @@
 import { ArrowLeft, ArrowRight, PackagePlus, X } from "lucide-react";
+import { useId } from "react";
 
 import { WIZARD_PRESETS, type WizardPreset } from "./helpers";
 import type { McpValidationResult, McpWizardDraft } from "../../hooks/useMcpValidation";
 import type { I18n } from "../../lib/i18n";
 import type { DetectedTool } from "../../types/skills";
 import { CheckboxField } from "../../components/ui/checkbox-field";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 
 import CodeEditor from "../../components/DeferredCodeEditor";
@@ -42,8 +45,14 @@ export default function McpServerWizardView({
   closeWizard,
   handleWizardInstall,
 }: McpServerWizardViewProps) {
+  const fieldId = useId();
   return (
-    <div className="section-card" style={{ marginBottom: 16 }}>
+    <fieldset
+      disabled={wizardInstalling}
+      aria-busy={wizardInstalling}
+      className="section-card min-w-0"
+      style={{ marginBottom: 16 }}
+    >
       <div
         style={{
           display: "flex",
@@ -58,18 +67,13 @@ export default function McpServerWizardView({
           <div style={{ fontSize: 15, fontWeight: 700 }}>{zh ? "MCP 安装向导" : "MCP Install Wizard"}</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
             {zh
-              ? "按步骤填写命令、参数和环境变量，安装后会自动做一次健康检查。"
-              : "Fill in command, arguments, and environment step by step. A health check will run automatically after install."}
+              ? "填写连接信息并选择同步目标，检查无误后一次性安装。"
+              : "Enter connection details, choose sync targets, and review before installing."}
           </div>
         </div>
-        <button
-          className="btn btn-ghost btn-icon-sm"
-          aria-label={i.common.close}
-          title={i.common.close}
-          onClick={closeWizard}
-        >
+        <Button variant="ghost" size="icon-sm" aria-label={i.common.close} title={i.common.close} onClick={closeWizard}>
           <X size={14} />
-        </button>
+        </Button>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -94,15 +98,16 @@ export default function McpServerWizardView({
             </div>
             <div role="group" aria-label={zh ? "传输方式" : "Transport"} style={{ display: "flex", gap: 6 }}>
               {(["stdio", "http", "sse"] as const).map((transport) => (
-                <button
+                <Button
                   key={transport}
                   type="button"
-                  className={`btn btn-sm ${wizardDraft.transport === transport ? "btn-primary" : "btn-secondary"}`}
+                  size="sm"
+                  variant={wizardDraft.transport === transport ? "default" : "secondary"}
                   aria-pressed={wizardDraft.transport === transport}
                   onClick={() => setWizardDraft((current) => ({ ...current, transport }))}
                 >
                   {transport === "stdio" ? "STDIO" : transport.toUpperCase()}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -114,13 +119,9 @@ export default function McpServerWizardView({
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {WIZARD_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => applyWizardPreset(preset)}
-                  >
+                  <Button key={preset.id} variant="secondary" size="sm" onClick={() => applyWizardPreset(preset)}>
                     {zh ? preset.labelZh : preset.labelEn}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
@@ -128,20 +129,26 @@ export default function McpServerWizardView({
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
             <div>
-              <label className="field-label">{zh ? "服务名称" : "Server Name"}</label>
-              <input
-                className="input"
+              <label className="field-label" htmlFor={`${fieldId}-name`}>
+                {zh ? "服务名称" : "Server Name"}
+              </label>
+              <Input
+                id={`${fieldId}-name`}
+                aria-label={zh ? "服务名称" : "Server Name"}
                 value={wizardDraft.name}
                 onChange={(event) => setWizardDraft((current) => ({ ...current, name: event.target.value }))}
                 placeholder={zh ? "例如 filesystem" : "e.g. filesystem"}
               />
             </div>
             <div>
-              <label className="field-label">
+              <label className="field-label" htmlFor={`${fieldId}-command`}>
                 {wizardDraft.transport === "stdio" ? (zh ? "命令" : "Command") : zh ? "服务 URL" : "Server URL"}
               </label>
-              <input
-                className="input"
+              <Input
+                id={`${fieldId}-command`}
+                aria-label={
+                  wizardDraft.transport === "stdio" ? (zh ? "命令" : "Command") : zh ? "服务 URL" : "Server URL"
+                }
                 value={wizardDraft.command}
                 onChange={(event) => setWizardDraft((current) => ({ ...current, command: event.target.value }))}
                 placeholder={
@@ -154,9 +161,13 @@ export default function McpServerWizardView({
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
             {wizardDraft.transport === "stdio" && (
               <div>
-                <label className="field-label">{zh ? "参数" : "Arguments"}</label>
+                <label className="field-label" htmlFor={`${fieldId}-args`}>
+                  {zh ? "参数" : "Arguments"}
+                </label>
                 <Textarea
+                  id={`${fieldId}-args`}
                   className="min-h-[118px] py-2.5 font-mono text-[12px]"
+                  aria-label={zh ? "参数" : "Arguments"}
                   value={wizardDraft.argsText}
                   onChange={(event) => setWizardDraft((current) => ({ ...current, argsText: event.target.value }))}
                   placeholder={
@@ -166,11 +177,15 @@ export default function McpServerWizardView({
               </div>
             )}
             <div>
-              <label className="field-label">
+              <label className="field-label" htmlFor={`${fieldId}-env`}>
                 {wizardDraft.transport === "stdio" ? (zh ? "环境变量" : "Environment") : zh ? "请求头" : "Headers"}
               </label>
               <Textarea
+                id={`${fieldId}-env`}
                 className="min-h-[118px] py-2.5 font-mono text-[12px]"
+                aria-label={
+                  wizardDraft.transport === "stdio" ? (zh ? "环境变量" : "Environment") : zh ? "请求头" : "Headers"
+                }
                 value={wizardDraft.envText}
                 onChange={(event) => setWizardDraft((current) => ({ ...current, envText: event.target.value }))}
                 placeholder={
@@ -189,7 +204,7 @@ export default function McpServerWizardView({
           <div className="card" style={{ padding: 12, fontSize: 12, color: "var(--text-muted)" }}>
             {zh
               ? "安装会默认写入 Claude 配置。下面可以额外勾选要同步到的其他工具。"
-              : "Install always writes to Claude first. Optionally sync the same server into other tools below."}
+              : "Install into Claude and optionally into the additional tools selected below."}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -328,33 +343,34 @@ export default function McpServerWizardView({
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18, gap: 8, flexWrap: "wrap" }}>
         <div>
           {wizardStep > 1 && (
-            <button
-              className="btn btn-secondary btn-sm"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setWizardStep((current) => Math.max(1, current - 1))}
               style={{ gap: 6 }}
             >
               <ArrowLeft size={14} />
               {zh ? "上一步" : "Back"}
-            </button>
+            </Button>
           )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={closeWizard}>
+          <Button variant="secondary" size="sm" onClick={closeWizard}>
             {i.common.cancel}
-          </button>
+          </Button>
           {wizardStep < 3 ? (
-            <button
-              className="btn btn-primary btn-sm"
+            <Button
+              size="sm"
               onClick={() => setWizardStep((current) => Math.min(3, current + 1))}
               disabled={wizardStep === 1 && !wizardValidation.isValid}
               style={{ gap: 6 }}
             >
               {zh ? "下一步" : "Next"}
               <ArrowRight size={14} />
-            </button>
+            </Button>
           ) : (
-            <button
-              className="btn btn-primary btn-sm"
+            <Button
+              size="sm"
               onClick={() => void handleWizardInstall()}
               disabled={!wizardValidation.isValid || wizardInstalling}
               style={{ gap: 6 }}
@@ -364,11 +380,11 @@ export default function McpServerWizardView({
               ) : (
                 <PackagePlus size={14} />
               )}
-              {wizardInstalling ? (zh ? "安装中..." : "Installing...") : zh ? "安装并验证" : "Install & Verify"}
-            </button>
+              {wizardInstalling ? (zh ? "安装中..." : "Installing...") : zh ? "确认安装" : "Install"}
+            </Button>
           )}
         </div>
       </div>
-    </div>
+    </fieldset>
   );
 }

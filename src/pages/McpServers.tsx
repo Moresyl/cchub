@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, X, Plug, Activity, MonitorCheck, Upload, PackagePlus, Search } from "lucide-react";
 import { t, tReplace, getLocale } from "../lib/i18n";
@@ -27,6 +27,7 @@ import McpServerEditView from "./mcp-servers/EditView";
 import McpServerWizardView from "./mcp-servers/WizardView";
 import McpServerDetailPanel from "./mcp-servers/DetailPanel";
 import MasterDetailLayout from "../components/layout/MasterDetailLayout";
+import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { SimpleSelect } from "../components/ui/simple-select";
 import { useConfigSave } from "./mcp-servers/useConfigSave";
@@ -83,6 +84,8 @@ export default function McpServers() {
   const [showDeps, setShowDeps] = useState(false);
   const [checkingDeps, setCheckingDeps] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const installingRef = useRef(false);
+  const deletingRef = useRef(false);
   const [wizardStep, setWizardStep] = useState(1);
   const [wizardInstalling, setWizardInstalling] = useState(false);
   const [wizardSyncTargets, setWizardSyncTargets] = useState<string[]>([]);
@@ -140,15 +143,24 @@ export default function McpServers() {
 
   const doDelete = useCallback(
     async (server: McpServer) => {
+      if (deletingRef.current) return;
+      deletingRef.current = true;
       try {
         await uninstallMcpServerMutation.mutateAsync({ name: server.id, revision: server.origin?.revision });
         setServers((prev) => prev.filter((s) => s.id !== server.id));
         if (selected?.id === server.id) setSelected(null);
+        setPendingDelete(null);
       } catch (e) {
         console.error(e);
+        showToast(
+          "error",
+          zh ? "移除失败，配置未被确认删除。请刷新后重试。" : "Removal failed. Refresh the configuration and retry.",
+        );
+      } finally {
+        deletingRef.current = false;
       }
     },
-    [selected, setSelected, setServers, uninstallMcpServerMutation],
+    [selected, setSelected, setServers, uninstallMcpServerMutation, zh],
   );
 
   const startEdit = useCallback((server: McpServer) => {
@@ -196,12 +208,14 @@ export default function McpServers() {
   }, []);
 
   const closeWizard = useCallback(() => {
+    if (installingRef.current) return;
     setWizardOpen(false);
     setWizardInstalling(false);
   }, []);
 
   const handleWizardInstall = useCallback(async () => {
-    if (!wizardValidation.isValid || wizardInstalling) return;
+    if (!wizardValidation.isValid || installingRef.current) return;
+    installingRef.current = true;
 
     setWizardInstalling(true);
     try {
@@ -214,7 +228,7 @@ export default function McpServers() {
         targets: wizardSyncTargets,
       });
       setSelected(created);
-      closeWizard();
+      setWizardOpen(false);
       await loadPageData({ force: true });
       showToast(
         "success",
@@ -226,19 +240,10 @@ export default function McpServers() {
       console.error(error);
       showToast("error", String(error));
     } finally {
+      installingRef.current = false;
       setWizardInstalling(false);
     }
-  }, [
-    closeWizard,
-    installMcpServerMutation,
-    loadPageData,
-    setSelected,
-    wizardDraft,
-    wizardInstalling,
-    wizardSyncTargets,
-    wizardValidation,
-    zh,
-  ]);
+  }, [installMcpServerMutation, loadPageData, setSelected, wizardDraft, wizardSyncTargets, wizardValidation, zh]);
 
   const toggleToolSync = useCallback(
     async (toolId: string) => {
@@ -454,31 +459,32 @@ export default function McpServers() {
           <p className="page-subtitle">{tReplace(i.mcp.serverCount, { count: servers.length })}</p>
         </div>
         <div className="page-action-group">
-          <button className="btn btn-primary btn-sm" onClick={openWizard} style={{ gap: 6 }}>
+          <Button size="sm" onClick={openWizard} style={{ gap: 6 }}>
             <PackagePlus size={14} />
             {zh ? "安装向导" : "Install Wizard"}
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => void checkDeps()}
             disabled={checkingDeps}
             style={{ gap: 6 }}
           >
             <MonitorCheck size={14} />
             {zh ? "环境检查" : "Env Check"}
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => void handleImportServers()} style={{ gap: 6 }}>
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void handleImportServers()} style={{ gap: 6 }}>
             <Upload size={14} />
             {i.mcp.importServer}
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => void checkHealth()} disabled={checkingHealth}>
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void checkHealth()} disabled={checkingHealth}>
             <Activity size={14} />
             {checkingHealth ? i.mcp.checking : i.mcp.checkHealth}
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => void loadPageData({ force: true })}>
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void loadPageData({ force: true })}>
             <RefreshCw size={14} />
             {i.mcp.refresh}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -506,20 +512,22 @@ export default function McpServers() {
             <span className="badge badge-muted" title={zh ? "已同步数量 / 总数量" : "Synced / total"}>
               {appStatusLoading ? "..." : `${bulkEnabledCount}/${servers.length}`}
             </span>
-            <button
-              className="btn btn-secondary btn-sm"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => void handleBulkToggle(true)}
               disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
             >
               {bulkToggleMcpAppMutation.isPending ? i.mcp.bulkRunning : i.mcp.bulkEnable}
-            </button>
-            <button
-              className="btn btn-ghost btn-sm"
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => void handleBulkToggle(false)}
               disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
             >
               {i.mcp.bulkDisable}
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -558,9 +566,9 @@ export default function McpServers() {
               <MonitorCheck size={15} style={{ color: "var(--text-secondary)" }} />
               <span style={{ fontSize: 13, fontWeight: 600 }}>{zh ? "运行环境检查" : "Runtime Environment"}</span>
             </div>
-            <button className="btn btn-ghost btn-icon-sm" onClick={() => setShowDeps(false)}>
+            <Button variant="ghost" size="icon-sm" onClick={() => setShowDeps(false)}>
               <X size={14} />
-            </button>
+            </Button>
           </div>
           {checkingDeps ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
@@ -679,11 +687,13 @@ export default function McpServers() {
         message={pendingDelete ? tReplace(i.mcp.confirmRemove, { name: pendingDelete.name }) : ""}
         confirmText={i.mcp?.remove || "移除"}
         variant="destructive"
+        busy={uninstallMcpServerMutation.isPending}
         onConfirm={() => {
           if (pendingDelete) void doDelete(pendingDelete);
-          setPendingDelete(null);
         }}
-        onCancel={() => setPendingDelete(null)}
+        onCancel={() => {
+          if (!deletingRef.current) setPendingDelete(null);
+        }}
       />
     </div>
   );

@@ -421,6 +421,8 @@ export default function McpServers() {
   }, [closeWizard, isConfigSaving, editing, handleSave, openWizard, selected, wizardOpen]);
 
   function getSourceLabel(source: string) {
+    const tool = MCP_SYNCABLE_APPS.find((app) => app.id === source);
+    if (tool) return tool.label;
     switch (source) {
       case "official-plugin":
         return i.mcp.officialPlugin;

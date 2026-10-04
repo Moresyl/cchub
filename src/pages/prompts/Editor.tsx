@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Eye, FileText, Save } from "lucide-react";
 import CodeEditor from "../../components/CodeEditor";
 import MarkdownPreview from "../../components/MarkdownPreview";
@@ -28,11 +28,13 @@ export default function PromptEditor({
   text,
 }: Props) {
   const [preview, setPreview] = useState(false);
+  const [nameTouched, setNameTouched] = useState(false);
+  const nameHintId = useId();
   const invalidName = !draft.name.trim() || [...draft.name.trim()].length > 120;
   const invalidContent = new TextEncoder().encode(draft.content).length > 1024 * 1024;
   return (
-    <Card className="flex min-w-0 flex-col overflow-hidden">
-      <div className="grid gap-4 border-b border-border p-4 sm:grid-cols-2">
+    <Card className="flex min-w-0 flex-col overflow-clip">
+      <div className="grid items-start gap-4 border-b border-border p-4 sm:grid-cols-2">
         <label className="grid min-w-0 gap-1.5 text-xs font-[510]">
           {text("名称", "Name", "名前")}
           <Input
@@ -40,9 +42,17 @@ export default function PromptEditor({
             maxLength={240}
             value={draft.name}
             disabled={writing}
-            aria-invalid={invalidName || undefined}
+            aria-invalid={(nameTouched && invalidName) || undefined}
+            aria-describedby={nameHintId}
+            onBlur={() => setNameTouched(true)}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
           />
+          <span
+            id={nameHintId}
+            className={nameTouched && invalidName ? "text-[var(--danger)]" : "text-muted-foreground"}
+          >
+            {text("必填，最多 120 个字符", "Required, up to 120 characters", "必須、120 文字以内")}
+          </span>
         </label>
         <label className="grid min-w-0 gap-1.5 text-xs font-[510]">
           {text("说明（可选）", "Description (optional)", "説明（任意）")}
@@ -84,7 +94,7 @@ export default function PromptEditor({
           </p>
         )}
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border p-3">
+      <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-card p-3">
         <Button variant="ghost" disabled={writing} onClick={onClose}>
           {text("取消", "Cancel", "キャンセル")}
         </Button>

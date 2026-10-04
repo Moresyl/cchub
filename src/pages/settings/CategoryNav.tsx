@@ -20,29 +20,34 @@ export default function SettingsCategoryNav({ active, locale, onChange }: Settin
   ] as const;
 
   return (
-    <nav
-      aria-label={zh ? "设置分类" : "Settings categories"}
-      className="tab-bar"
-      style={{ marginBottom: 20, overflowX: "auto", position: "sticky", top: 0, zIndex: 4 }}
-    >
-      {items.map((item) => {
-        const Icon = item.icon;
-        return (
-          <Button
-            key={item.id}
-            variant="ghost"
-            size="sm"
-            className={`tab-item ${active === item.id ? "active" : ""}`}
-            type="button"
-            aria-pressed={active === item.id}
-            onClick={() => onChange(item.id)}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-          >
-            <Icon size={14} />
-            {item.label}
-          </Button>
-        );
-      })}
-    </nav>
+    <div className="sticky top-0 z-10 mb-5 bg-[var(--bg-app)] pb-3 shadow-[0_-20px_0_var(--bg-app)]">
+      <nav
+        aria-label={zh ? "设置分类" : "Settings categories"}
+        className="tab-bar"
+        style={{ maxWidth: "100%", overflowX: "auto" }}
+      >
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Button
+              key={item.id}
+              variant="ghost"
+              size="sm"
+              className={`tab-item ${active === item.id ? "active" : ""}`}
+              type="button"
+              aria-pressed={active === item.id}
+              onClick={(event) => {
+                event.currentTarget.closest(".page-content")?.scrollTo({ top: 0 });
+                onChange(item.id);
+              }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
+            >
+              <Icon size={14} />
+              {item.label}
+            </Button>
+          );
+        })}
+      </nav>
+    </div>
   );
 }

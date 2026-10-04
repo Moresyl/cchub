@@ -206,7 +206,9 @@ export default function Prompts() {
             <FileText size={19} />
             <h1 className="text-xl font-[590]">
               {draft
-                ? text("编辑 Prompt", "Edit prompt", "Prompt を編集")
+                ? storedDraft
+                  ? text("编辑 Prompt", "Edit prompt", "Prompt を編集")
+                  : text("新建 Prompt", "New prompt", "Prompt を作成")
                 : text("Prompt 库", "Prompt Library", "Prompt ライブラリ")}
             </h1>
           </div>

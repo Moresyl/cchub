@@ -173,10 +173,10 @@ export default function Usage() {
 
   const summary = data?.summary;
   return (
-    <div className="page-stack">
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="page-header">
         <div>
-          <div className="page-title-row">
+          <div className="flex items-center gap-2">
             <BarChart3 size={19} />
             <h1 className="page-title">{uiText("用量分析", "Usage Analytics", "使用量分析")}</h1>
           </div>

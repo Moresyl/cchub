@@ -53,6 +53,8 @@ describe("bounded configuration editor", () => {
     expect(getComputedStyle(view.scrollDOM).minHeight).toBe("126px");
     expect(content.getAttribute("aria-readonly")).toBe("true");
     expect(view.state.facet(EditorState.readOnly)).toBe(true);
+    expect(content.getAttribute("contenteditable")).toBe("false");
+    expect(content.tabIndex).toBe(0);
     mounted.unmount();
   });
 
@@ -86,6 +88,7 @@ describe("bounded configuration editor", () => {
     expect(view.state.doc.toString()).toBe('{"balance": 2}');
     expect(view.state.facet(EditorState.readOnly)).toBe(false);
     expect(next.getAttribute("aria-readonly")).toBe("false");
+    expect(next.getAttribute("contenteditable")).toBe("true");
     mounted.unmount();
   });
 });

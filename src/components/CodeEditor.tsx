@@ -195,6 +195,8 @@ function CodeEditorComponent({
         },
       }),
       CodeMirrorView.contentAttributes.of({
+        role: "textbox",
+        tabindex: "0",
         "aria-label": ariaLabel ?? `${language.toUpperCase()} configuration editor`,
         "aria-readonly": String(readOnly),
         spellcheck: "false",
@@ -204,7 +206,7 @@ function CodeEditorComponent({
     if (placeholder) nextExtensions.push(editorPlaceholder(placeholder));
 
     if (readOnly) {
-      nextExtensions.push(EditorState.readOnly.of(true));
+      nextExtensions.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
     } else {
       nextExtensions.push(
         EditorView.updateListener.of((update: ViewUpdate) => {

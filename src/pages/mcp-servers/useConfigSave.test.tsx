@@ -8,7 +8,53 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
-const draft = { name: "fixture", command: "node", args: '["server.js"]', env: '{"TOKEN":"private"}' };
+const draft = {
+  name: "fixture",
+  transport: "stdio",
+  command: "node",
+  args: '["server.js"]',
+  env: '{"TOKEN":"private"}',
+};
+
+it.each(["http", "sse"])("saves %s connections without parsing hidden local arguments", async (transport) => {
+  const hook = renderHook(() => useConfigSave(false));
+  const write = vi.fn().mockResolvedValue(undefined);
+  await act(async () => {
+    expect(
+      await hook.result.current.save(
+        { ...draft, transport, command: " https://example.test/mcp ", args: "invalid hidden args" },
+        write,
+      ),
+    ).toBe(true);
+  });
+  expect(write).toHaveBeenCalledWith({
+    name: "fixture",
+    command: "https://example.test/mcp",
+    args: [],
+    env: { TOKEN: "private" },
+  });
+});
+
+it.each([{ command: "node" }, { command: "file:///private" }, { command: "https://" }, { env: '{"Authorization":1}' }])(
+  "rejects invalid remote fields with actionable remote feedback: %j",
+  async (invalid) => {
+    const hook = renderHook(() => useConfigSave(false));
+    const write = vi.fn();
+    await act(async () => {
+      expect(
+        await hook.result.current.save(
+          { ...draft, transport: "http", command: "https://example.test/mcp", ...invalid },
+          write,
+        ),
+      ).toBe(false);
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(
+      "error",
+      "Enter a valid HTTP/HTTPS server URL and a string-valued headers object. Your draft is preserved.",
+    );
+  },
+);
 
 it("blocks repeated saves before a render and releases the lock after failure for retry", async () => {
   const hook = renderHook(() => useConfigSave(false));

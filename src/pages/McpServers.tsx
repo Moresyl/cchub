@@ -205,7 +205,7 @@ export default function McpServers() {
   const handleSave = useCallback(async () => {
     if (!selected) return;
     const saved = await saveConfig(
-      { name: selected.name, command: editCommand, args: editArgs, env: editEnv },
+      { name: selected.name, transport: selected.transport, command: editCommand, args: editArgs, env: editEnv },
       (config) => updateMcpServerConfigMutation.mutateAsync(config),
     );
     if (saved) {

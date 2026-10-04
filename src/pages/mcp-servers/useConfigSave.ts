@@ -3,6 +3,7 @@ import { showToast } from "../../components/Toast";
 
 interface Draft {
   name: string;
+  transport: string;
   command: string;
   args: string;
   env: string;
@@ -16,7 +17,11 @@ interface Config {
 }
 
 function parse(draft: Draft): Config {
-  const args: unknown = JSON.parse(draft.args);
+  const remote = draft.transport === "http" || draft.transport === "sse";
+  if (!remote && draft.transport !== "stdio") throw new Error("Unsupported transport");
+  const command = draft.command.trim();
+  if (remote && !["http:", "https:"].includes(new URL(command).protocol)) throw new Error("Invalid remote URL");
+  const args: unknown = remote ? [] : JSON.parse(draft.args);
   const env: unknown = JSON.parse(draft.env);
   if (
     !draft.command.trim() ||
@@ -31,7 +36,7 @@ function parse(draft: Draft): Config {
     )
   )
     throw new Error("Invalid configuration fields");
-  return { name: draft.name, command: draft.command.trim(), args, env: env as Record<string, string> };
+  return { name: draft.name, command, args, env: env as Record<string, string> };
 }
 
 export function useConfigSave(zh: boolean) {
@@ -44,11 +49,16 @@ export function useConfigSave(zh: boolean) {
       try {
         config = parse(draft);
       } catch {
+        const remote = draft.transport === "http" || draft.transport === "sse";
         showToast(
           "error",
-          zh
-            ? "请填写命令，并检查参数为字符串数组、环境变量为字符串对象。内容已保留。"
-            : "Enter a command, a string array of arguments, and a string-valued environment object. Your draft is preserved.",
+          remote
+            ? zh
+              ? "请填写有效的 HTTP/HTTPS 服务地址，并检查请求头为字符串对象。内容已保留。"
+              : "Enter a valid HTTP/HTTPS server URL and a string-valued headers object. Your draft is preserved."
+            : zh
+              ? "请填写命令，并检查参数为字符串数组、环境变量为字符串对象。内容已保留。"
+              : "Enter a command, a string array of arguments, and a string-valued environment object. Your draft is preserved.",
         );
         return false;
       }

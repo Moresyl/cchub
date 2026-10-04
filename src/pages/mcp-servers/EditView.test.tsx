@@ -79,6 +79,20 @@ const props = () => ({
   handleSave: vi.fn(),
 });
 
+it("preserves malformed headers and identifies the visible field in feedback", () => {
+  const initial = props();
+  render(
+    <EditView
+      {...initial}
+      selected={{ ...initial.selected, transport: "sse" }}
+      editEnv='{"Authorization":"private-secret"'
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Format headers" }));
+  expect(initial.setEditEnv).not.toHaveBeenCalled();
+  expect(showToast).toHaveBeenCalledWith("error", "Invalid headers JSON. Your content is preserved.");
+});
+
 it("labels the fields and provides shared formatting, save and cancel controls", () => {
   const initial = props();
   render(<EditView {...initial} />);

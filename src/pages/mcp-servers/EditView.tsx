@@ -146,9 +146,13 @@ export default function McpServerEditView({
                 } catch {
                   showToast(
                     "error",
-                    zh
-                      ? "环境变量 JSON 格式不正确，内容已保留。"
-                      : "Invalid environment JSON. Your content is preserved.",
+                    remote
+                      ? zh
+                        ? "请求头 JSON 格式不正确，内容已保留。"
+                        : "Invalid headers JSON. Your content is preserved."
+                      : zh
+                        ? "环境变量 JSON 格式不正确，内容已保留。"
+                        : "Invalid environment JSON. Your content is preserved.",
                   );
                 }
               }}

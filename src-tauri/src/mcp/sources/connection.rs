@@ -11,6 +11,12 @@ pub struct ConnectionFields {
     pub headers: BTreeMap<String, String>,
 }
 
+impl ConnectionFields {
+    pub(in crate::mcp) fn from_entry(entry: &Entry, tool: &str) -> Result<Self, String> {
+        read(entry, tool)
+    }
+}
+
 fn invalid() -> String {
     "Invalid MCP connection fields; check native syntax and types".into()
 }

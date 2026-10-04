@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
 
 mod api;
+mod backup;
 mod catalog;
 mod migration;
 mod mutations;
@@ -29,6 +30,8 @@ pub(super) struct Projection {
 pub(super) struct CatalogState {
     pub origins: BTreeMap<String, NativeOrigin>,
     pub projections: Vec<Projection>,
+    #[serde(default)]
+    archived: BTreeMap<String, backup::ArchivedSource>,
 }
 
 pub(super) fn invalid() -> String {
@@ -56,6 +59,12 @@ impl CatalogState {
     }
 
     fn validate(&self) -> Result<(), String> {
+        for (id, source) in &self.archived {
+            if !id.starts_with("mcp-archive-") || self.origins.contains_key(id) {
+                return Err(invalid());
+            }
+            source.validate()?;
+        }
         for (id, origin) in &self.origins {
             if id != &origin.id || origin.bindings.is_empty() {
                 return Err(invalid());
@@ -155,6 +164,7 @@ pub(super) fn rows(conn: &Connection) -> Result<Vec<McpServer>, String> {
 }
 
 pub(crate) use api::{resolve_id, status, statuses};
+pub(crate) use backup::{prepare_backup_library, restore_backup_library};
 pub(crate) use catalog::prepare_refresh;
 pub(crate) use mutations::{
     import_document, import_targets, install, install_batch, install_for_tool, replace, sync,

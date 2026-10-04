@@ -72,7 +72,7 @@ export function useSyncStatus(selected: McpServer | null, zh: boolean) {
           serverName: server.id,
           targetTool: toolId,
         });
-        if (current.current?.id === server.id) await read();
+        if (current.current?.id === server.id && server.status !== "archived") await read();
         return { serverId: server.id, toolId, enabled };
       } catch {
         showToast("error", zh ? "同步操作失败，请刷新状态后重试。" : "Sync failed. Refresh the status and retry.");

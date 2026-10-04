@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ReleaseNotes from "./ReleaseNotes";
 import { setLocale } from "../lib/i18n";
+// Keep the real renderer and link handling; exclude cold module transforms from interaction timing.
+import "./markdown-preview/MarkdownPreviewImpl";
 const { open, toast } = vi.hoisted(() => ({ open: vi.fn(), toast: vi.fn() }));
 vi.mock("@tauri-apps/plugin-shell", () => ({ open }));
 vi.mock("./Toast", () => ({ showToast: toast }));

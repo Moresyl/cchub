@@ -18,7 +18,7 @@ const TOOLS: [&str; 8] = [
 pub(crate) fn resolve_id(conn: &Connection, reference: &str) -> Result<String, String> {
     let state = CatalogState::load(conn)?;
     let rows = rows(conn)?;
-    if state.origins.contains_key(reference) {
+    if state.origins.contains_key(reference) || state.archived.contains_key(reference) {
         return Ok(reference.into());
     }
     if rows.iter().any(|row| row.id == reference) {
@@ -55,9 +55,10 @@ pub(crate) fn statuses(
     let state = CatalogState::load(conn)?;
     let origins = ids
         .iter()
+        .filter(|id| !state.archived.contains_key(*id))
         .map(|id| view::checked(&state, id, None))
         .collect::<Result<Vec<_>, _>>()?;
-    if origins.is_empty() {
+    if ids.is_empty() {
         return Ok(BTreeMap::new());
     }
     let scopes = TOOLS
@@ -75,7 +76,7 @@ pub(crate) fn statuses(
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let result = origins
+    let mut result = origins
         .into_iter()
         .map(|origin| {
             let tools = scopes
@@ -123,6 +124,29 @@ pub(crate) fn statuses(
             Ok((origin.id.clone(), tools))
         })
         .collect::<Result<BTreeMap<_, _>, String>>()?;
+    for id in ids {
+        if let Some(source) = state.archived.get(id) {
+            let tools = scopes
+                .iter()
+                .map(|scope| {
+                    let actual = native::entry(&scope.snapshot, scope.container, &source.name);
+                    (
+                        scope.tool.into(),
+                        ToolStatus {
+                            state: if actual.is_some() {
+                                "unowned"
+                            } else {
+                                "missing"
+                            }
+                            .into(),
+                            disabled: actual.is_some_and(|entry| entry.disabled),
+                        },
+                    )
+                })
+                .collect();
+            result.insert(id.clone(), tools);
+        }
+    }
     // Refuse a mixed result if any file/alias changed during the full read.
     for scope in scopes {
         scope.snapshot.verify()?;

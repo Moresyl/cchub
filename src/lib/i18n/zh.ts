@@ -65,7 +65,7 @@ export const zh = {
     source: "来源",
     configPath: "配置文件",
     status: "状态",
-    active: "运行中",
+    active: "已配置",
     disabled: "已禁用",
     remove: "删除",
     edit: "编辑",

@@ -111,11 +111,17 @@ pub(crate) fn import_targets(
     service::import_targets(conn, format_tool, text, targets)
 }
 
-fn scoped_id(conn: &Connection, tool: &str, reference: &str) -> Result<Option<String>, String> {
+fn scoped_id(
+    conn: &Connection,
+    tool: &str,
+    reference: &str,
+    include_copies: bool,
+) -> Result<Option<String>, String> {
     use super::sources::SourceRole;
     let path = crate::commands::extra_commands::resolve_tool_mcp_path(conn, tool)?;
     let canonical = crate::config_write::target_key(&path)?;
     let list = service::list(conn)?;
+    let state = service::CatalogState::load(conn)?;
     let exact = list.iter().any(|row| row.server.id == reference);
     let mut matches = Vec::new();
     for row in &list {
@@ -137,6 +143,16 @@ fn scoped_id(conn: &Connection, tool: &str, reference: &str) -> Result<Option<St
                 }
             }
         }
+        if include_copies
+            && !matches.contains(&row.server.id)
+            && state.projections.iter().any(|copy| {
+                copy.source_id == row.server.id
+                    && copy.binding.tool == tool
+                    && copy.canonical_path == canonical
+            })
+        {
+            matches.push(row.server.id.clone());
+        }
     }
     if matches.len() > 1 {
         return Err("Multiple MCP entries match this tool; select an explicit source ID".into());
@@ -153,8 +169,8 @@ pub(crate) fn remove_from_tool(
     reference: &str,
 ) -> Result<(), String> {
     let _guard = crate::json_config::write_lock()?;
-    let id =
-        scoped_id(conn, tool, reference)?.ok_or("MCP source is not bound to the selected tool")?;
+    let id = scoped_id(conn, tool, reference, true)?
+        .ok_or("MCP source is not bound to the selected tool")?;
     service::unsync(conn, &id, tool)
 }
 
@@ -183,7 +199,7 @@ pub(crate) fn upsert_native(
         _ => Entry::Json(fields.clone()),
     };
     let spec = NativeSpec::from_entry(&entry)?;
-    if let Some(id) = scoped_id(conn, tool, reference)? {
+    if let Some(id) = scoped_id(conn, tool, reference, false)? {
         service::replace(conn, &id, spec, None)?;
         return service::list(conn)?
             .into_iter()

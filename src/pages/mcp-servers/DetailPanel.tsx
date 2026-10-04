@@ -57,6 +57,16 @@ export default function McpServerDetailPanel({
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const tabId = useId();
   const remote = selected.transport !== "stdio";
+  const archived = selected.status === "archived";
+  const availableTools = archived ? installedTools.filter((tool) => tool.id === selected.source) : installedTools;
+  const statusLabels: Record<string, string> = {
+    active: i.mcp.active,
+    disabled: i.mcp.disabled,
+    archived: zh ? "待恢复" : "In library",
+    missing: zh ? "配置缺失" : "Missing configuration",
+    conflict: zh ? "需要检查" : "Needs review",
+    error: zh ? "异常" : "Error",
+  };
   const connectionLabel = remote ? (zh ? "服务地址" : "Server URL") : i.mcp.command;
   const valuesLabel = remote ? (zh ? "请求头" : "Headers") : i.mcp.environment;
 
@@ -67,7 +77,7 @@ export default function McpServerDetailPanel({
   const tabs: Array<{ id: DetailTab; label: string }> = [
     { id: "overview", label: zh ? "概览" : "Overview" },
     { id: "config", label: zh ? "配置" : "Configuration" },
-    { id: "sync", label: zh ? "同步" : "Sync" },
+    { id: "sync", label: archived ? (zh ? "恢复" : "Restore") : zh ? "同步" : "Sync" },
   ];
 
   function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -101,10 +111,12 @@ export default function McpServerDetailPanel({
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <span className={`badge ${selected.status === "active" ? "badge-success" : "badge-muted"}`}>
-              {selected.status === "active" ? i.mcp.active : i.mcp.disabled}
+              {statusLabels[selected.status] ?? i.mcp.unknown}
             </span>
             <span className="badge badge-muted">{selected.transport}</span>
-            <span className={`badge ${getSourceBadge(selected.source)}`}>{getSourceLabel(selected.source)}</span>
+            <span className={`badge ${getSourceBadge(selected.source)}`}>
+              {archived ? (zh ? "备份库" : "Backup library") : getSourceLabel(selected.source)}
+            </span>
           </div>
         </div>
         <div className="entity-detail-actions">
@@ -127,6 +139,7 @@ export default function McpServerDetailPanel({
             onClick={() => startEdit(selected)}
             title={i.mcp.editConfig}
             aria-label={i.mcp.editConfig}
+            disabled={archived}
           >
             <Edit3 size={14} />
           </Button>
@@ -180,6 +193,13 @@ export default function McpServerDetailPanel({
 
         {activeTab === "overview" && (
           <div>
+            {archived && (
+              <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
+                {zh
+                  ? "已保留备份中的完整配置，尚未写入本机。可复制配置，或在“恢复”中选择原工具恢复；已有同名配置不会被覆盖。"
+                  : "The complete backup definition is retained in your library. Copy it or restore it to its original tool in Restore. Existing entries will not be overwritten."}
+              </p>
+            )}
             {selected.config_path && (
               <section className="entity-detail-section">
                 <span className="field-label">{i.mcp.configPath}</span>
@@ -282,11 +302,17 @@ export default function McpServerDetailPanel({
             )}
             <div className="mb-3 flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
               <Share2 size={13} />
-              {zh ? "同步到其他工具" : "Sync to other tools"}
+              {archived
+                ? zh
+                  ? "恢复到本机工具"
+                  : "Restore to this device"
+                : zh
+                  ? "同步到其他工具"
+                  : "Sync to other tools"}
             </div>
-            {installedTools.length > 0 ? (
+            {availableTools.length > 0 ? (
               <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)]">
-                {installedTools.map((tool) => {
+                {availableTools.map((tool) => {
                   const state = toolStates[tool.id];
                   const isSynced = toolSyncStatus[tool.id] || false;
                   const unknown = statusLoading || statusError || typeof toolSyncStatus[tool.id] !== "boolean";
@@ -335,7 +361,7 @@ export default function McpServerDetailPanel({
                         type="button"
                         size="sm"
                         variant={isSynced ? "secondary" : "default"}
-                        aria-label={`${isSynced ? (zh ? "取消同步" : "Remove sync") : zh ? "同步到" : "Sync to"} ${tool.name}`}
+                        aria-label={`${archived ? (zh ? "恢复到" : "Restore to") : isSynced ? (zh ? "取消同步" : "Remove sync") : zh ? "同步到" : "Sync to"} ${tool.name}`}
                         disabled={syncingTo !== null || unknown}
                         aria-busy={syncingTo === tool.id}
                         onClick={() => toggleToolSync(tool.id)}
@@ -347,7 +373,17 @@ export default function McpServerDetailPanel({
                         ) : (
                           <Share2 size={11} />
                         )}
-                        {isSynced ? (zh ? "取消" : "Remove") : zh ? "同步" : "Sync"}
+                        {archived
+                          ? zh
+                            ? "恢复配置"
+                            : "Restore"
+                          : isSynced
+                            ? zh
+                              ? "取消"
+                              : "Remove"
+                            : zh
+                              ? "同步"
+                              : "Sync"}
                       </Button>
                     </div>
                   );
@@ -355,7 +391,13 @@ export default function McpServerDetailPanel({
               </div>
             ) : (
               <div className="entity-detail-empty">
-                {zh ? "没有可同步的已安装工具" : "No installed tools available"}
+                {archived
+                  ? zh
+                    ? "请先安装此配置对应的工具，再恢复配置。"
+                    : "Install the original tool before restoring this configuration."
+                  : zh
+                    ? "没有可同步的已安装工具"
+                    : "No installed tools available"}
               </div>
             )}
           </section>

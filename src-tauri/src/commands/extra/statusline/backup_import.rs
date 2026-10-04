@@ -98,11 +98,13 @@ fn import_into_connection_with_mode(
     configure_database_connection(&prepared, false)?;
     super::backup_sql::load_backup_sql(&prepared, content)?;
     super::backup_paths::validate_artifact_paths(&prepared)?;
-    let preserved_rows = if cloud {
+    let library = crate::mcp::service::prepare_backup_library(&prepared)?;
+    let mut preserved_rows = if cloud {
         super::backup_ownership::preserve_device_state(conn, &prepared)?
     } else {
         0
     };
+    preserved_rows += crate::mcp::service::restore_backup_library(conn, &prepared, library)?;
     let count =
         super::backups_restore::count_backup_rows(&prepared)?.saturating_sub(preserved_rows);
 

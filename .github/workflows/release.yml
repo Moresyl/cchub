@@ -14,38 +14,39 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 内置 CCHub 桌面界面字体，统一常规、中等和半粗三档字重，改善中英文信息层级与跨平台显示一致性
-    - 新增共享 Switch 控件，设置、同步、技能、工作流、记忆管理与供应商配置中的二元选项统一为标准开关交互
-    - 按 4px 网格重新统一按钮、输入框、选择器、复选框、弹层和对话框的尺寸、圆角、间距与字重
-    - 更新深色、浅色和配置编辑器文档截图，展示新的控件体系、模型选择器与 JSON 语法高亮
+    - 重整配置表单与模型选择面板，增加配置草稿模型测试、模型计费信息、能力筛选与供应商模型别名
+    - 增加分组路由、条件预览、按账号额度筛选、账号并发与排队保护，以及余额和额度提醒
+    - 完善会话搜索、压缩会话读取、删除恢复、历史迁移预览与项目档案成组切换
+    - MCP 工作区按原生来源区分同名服务，展示同步归属与冲突状态；安装向导使用集中弹窗、即时校验和统一控件
+    - 备份中的外部 MCP 定义进入待恢复的备份库，可复制或恢复至原始工具；本机文件归属、客户端授权和历史记录得到保留
+    - 云备份支持加密与恢复密码流程；更新中英文说明及 MCP 备份库示意截图
 
     ### 变更与安全
-    - 输入框、选择器和按钮改用中性边框焦点反馈，复选框与开关保留清晰的键盘操作状态
-    - 通用对话框采用 450px 桌面宽度和 460px 最大高度，并在 768px 以下自动切换为全屏布局
-    - 弹出菜单使用独立不透明表面、统一阴影与层级；模型长列表保持固定高度和独立滚动
-    - 启动界面移除渐变方块与旧旋转器，改为中性品牌字形、细进度条和 180ms 淡出
-    - 为减少动态效果的系统偏好补充降级样式
-    - 本次未新增文件、网络或命令执行权限，也未修改数据库结构、配置格式和供应商协议
-    - 已保存配置可以继续读取和编辑，从旧版本升级无需迁移数据
+    - 编辑表单默认阻止点击弹窗外部丢失草稿；保存、安装和移除期间防止重复提交，失败保留可重试的编辑内容
+    - 原生配置读写检查文件身份、自定义路径、重复字段和期间的外部修改，保留未修改的注释与扩展选项
+    - MCP 同步和批量导入先准备整组修改；文件或数据库提交失败时执行恢复，不将其他工具的独立同名服务视为已同步副本
+    - 备份导入检查路径、快照完整性和下载大小，隔离同步账号凭据，并保留设备本地设置；不会继承外部备份的文件操作归属
+    - 文件恢复用于处理本次操作返回的错误，不等同于跨进程或断电事务；不能无损转换为 JSON 的原生扩展值会拒绝 JSON 导出
 
     ### 问题修复与打磨
-    - 修复输入框、下拉框和按钮点击后出现蓝色或重复焦点轮廓的问题
-    - 修复模型选择器弹层宽度、透明背景、滚动边界与窗口缩放时的对齐问题
-    - 修复长表单对话框在窄窗口中内容受限、底部操作区难以触达的问题
-    - 修复多个页面用普通按钮模拟开关导致状态语义和键盘操作不一致的问题
-    - 优化配置编辑器、设置页、同步面板及供应商表单的紧凑度和可扫描性
+    - 修复只读代码编辑器仍可接收输入、异步刷新乱序覆盖新状态、配置复制未等待剪贴板结果等问题
+    - 修复远程 MCP 服务被当作本地命令编辑的问题，分别校验服务地址、请求头、参数与环境变量；检查失败提供明确重试反馈
+    - 修复云同步跨账号状态串用、过期排队任务继续执行、备份恢复失败时本地状态不一致等问题
+    - 完善流式心跳、工具调用标识、推理历史、结构化响应和故障切换处理，保留原始用量并避免重复计账
+    - 修复不限量额度的虚假进度、会话清理与迁移反馈、窄窗口详情和编辑区滚动问题
 
     ### 安装
     - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
-    - 从旧版升级无需迁移数据；安装和卸载流程保持原样。
+    - 升级前建议在设置中导出备份。外部 MCP 目录条目不继承本机文件操作归属；完整备份内的工具配置和附属文件仍按完整恢复流程还原，恢复后请刷新服务列表。
 
     ## English Summary
 
-    - Bundles the CCHub UI font family and aligns control typography, sizing, spacing, radii, and focus feedback across both themes.
-    - Introduces a shared accessible switch and migrates binary settings across configuration, sync, skills, workflows, memory, and provider surfaces.
-    - Refines selects, model popovers, checkboxes, dialogs, and the startup screen while fixing stacked blue focus rings and narrow-window overflow.
-    - Dialogs now use compact desktop dimensions and switch to a full-screen layout below 768px; reduced-motion preferences are respected.
-    - Refreshes all README product screenshots. Permissions, schemas, configuration formats, and provider protocols are unchanged; no migration is required.
+    - Refines configuration/model editors, focused installation dialogs, draft protection, read-only code previews and narrow-window interactions.
+    - Adds model testing and billing information, grouped and quota-aware routing, concurrency limits, account alerts and recoverable session deletion.
+    - Tracks native MCP source identities and owned copies, preserves native options and comments, and checks for external changes before grouped writes.
+    - Imports foreign MCP definitions into an explicit backup library while retaining local ownership, grants and history; restoration refuses existing native entries.
+    - Improves encrypted cloud backup, credential isolation, restore validation and rollback, plus streaming/tool-call compatibility and usage accounting.
+    - Export a backup before upgrading. Recovery handles reported operation failures; it does not promise cross-process or power-loss atomicity. README demonstration screenshots are identified as such.
 
     ## 下载 / Download
 

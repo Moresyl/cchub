@@ -67,7 +67,7 @@ export const en: I18n = {
     source: "Source",
     configPath: "Config Path",
     status: "Status",
-    active: "Active",
+    active: "Configured",
     disabled: "Disabled",
     remove: "Remove",
     edit: "Edit",

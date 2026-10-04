@@ -12,6 +12,34 @@ vi.mock("../../components/DeferredCodeEditor", () => ({
 }));
 afterEach(cleanup);
 
+it.each([
+  ["active", "Configured"],
+  ["missing", "Missing configuration"],
+  ["conflict", "Needs review"],
+])("shows the actual catalog state for %s instead of implying a running or disabled process", (status, label) => {
+  render(<McpServerDetailPanel {...props()} selected={{ ...server, status }} />);
+  expect(screen.getByText(label)).toBeTruthy();
+  expect(screen.queryByText("Disabled")).toBeNull();
+});
+
+it("offers library restore only to the original tool and prevents direct editing", () => {
+  const initial = props();
+  render(
+    <McpServerDetailPanel
+      {...initial}
+      selected={{ ...server, status: "archived", source: "claude", config_path: null }}
+      toolSyncStatus={{ claude: false, codex: false }}
+    />,
+  );
+  expect(screen.getByText("In library")).toBeTruthy();
+  expect(screen.getByRole("button", { name: en.mcp.editConfig }).matches(":disabled")).toBe(true);
+  expect(screen.getByRole("button", { name: "Copy configuration" }).matches(":disabled")).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Restore" }));
+  expect(screen.queryByText("Codex CLI")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Restore to Claude Code" }));
+  expect(initial.toggleToolSync).toHaveBeenCalledWith("claude");
+});
+
 it("shows remote addresses and headers consistently with the editor", () => {
   render(
     <McpServerDetailPanel

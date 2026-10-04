@@ -184,6 +184,16 @@ pub(crate) fn install_batch(
     entries: Vec<(String, NativeSpec)>,
     targets: Vec<String>,
 ) -> Result<Vec<CatalogServer>, String> {
+    install_batch_restoring(conn, source_tool, entries, targets, None)
+}
+
+pub(super) fn install_batch_restoring(
+    conn: &Connection,
+    source_tool: &str,
+    entries: Vec<(String, NativeSpec)>,
+    targets: Vec<String>,
+    restored: Option<&str>,
+) -> Result<Vec<CatalogServer>, String> {
     if entries.is_empty() {
         return Err("MCP import contains no server entries".into());
     }
@@ -238,11 +248,20 @@ pub(crate) fn install_batch(
         state.origins.insert(origin.id.clone(), origin.clone());
         origins.push(origin);
     }
+    if let Some(id) = restored {
+        state.archived.remove(id).ok_or_else(invalid)?;
+        if origins.len() != 1 {
+            return Err(invalid());
+        }
+    }
     native::commit_with_result(conn, state, changes, |tx| {
         origins
             .iter()
             .map(|origin| {
                 native::save_row(tx, origin, live_status(origin))?;
+                if let Some(id) = restored {
+                    migration::transfer(tx, id, &origin.id)?;
+                }
                 native::activity(tx, &origin.id, "install")?;
                 let server = tx
                     .query_row(
@@ -396,6 +415,9 @@ pub(crate) fn replace(
 
 pub(crate) fn sync(conn: &Connection, id: &str, tool: &str) -> Result<(), String> {
     let mut state = CatalogState::load(conn)?;
+    if state.archived.contains_key(id) {
+        return backup::restore(conn, id, tool);
+    }
     rows(conn)?;
     let origin = view::checked(&state, id, None)?.clone();
     let source = native::checked_origin(conn, &origin, true)?;
@@ -483,6 +505,21 @@ pub(crate) fn unsync(conn: &Connection, id: &str, tool: &str) -> Result<(), Stri
 pub(crate) fn uninstall(conn: &Connection, id: &str, expected: Option<&str>) -> Result<(), String> {
     let mut state = CatalogState::load(conn)?;
     rows(conn)?;
+    if let Some(source) = state.archived.remove(id) {
+        if expected
+            .is_some_and(|expected| view::spec_revision(&source.spec).as_deref() != Ok(expected))
+        {
+            return Err("MCP library entry changed; refresh before continuing".into());
+        }
+        return native::commit(
+            conn,
+            state,
+            vec![],
+            None,
+            Some(id),
+            (id, "remove_from_library"),
+        );
+    }
     let origin = view::checked(&state, id, expected)?.clone();
     let snapshot = native::checked_origin(conn, &origin, true)?;
     let mut changes = vec![native::origin_change(&origin, None, &snapshot)];

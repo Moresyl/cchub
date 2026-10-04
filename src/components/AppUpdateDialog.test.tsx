@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AppUpdateDialog from "./AppUpdateDialog";
 import { setLocale } from "../lib/i18n";
+// Warm the real markdown dependency before timing interactions, without mocking its output.
+import "./markdown-preview/MarkdownPreviewImpl";
 
 const availableUpdate = {
   current_version: "1.4.6",

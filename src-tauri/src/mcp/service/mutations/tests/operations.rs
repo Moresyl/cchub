@@ -2,6 +2,53 @@ use super::*;
 use crate::mcp::operations;
 
 #[test]
+fn compatibility_removal_resolves_owned_copies_without_deleting_the_source() {
+    for exact in [false, true] {
+        let f = Fixture::new();
+        operations::install_for_tool(&f.conn, "claude", "same".into(), config()).unwrap();
+        let source = f.source("claude");
+        operations::toggle(&f.conn, &source.id, "gemini", true).unwrap();
+        let source_bytes = std::fs::read(f.path("claude")).unwrap();
+        operations::remove_from_tool(&f.conn, "gemini", if exact { &source.id } else { "same" })
+            .unwrap();
+        assert_eq!(std::fs::read(f.path("claude")).unwrap(), source_bytes);
+        let status = operations::status(&f.conn, &source.id).unwrap();
+        assert_eq!(status["claude"].state, "source");
+        assert_eq!(status["gemini"].state, "missing");
+        assert!(CatalogState::load(&f.conn).unwrap().projections.is_empty());
+    }
+}
+
+#[test]
+fn compatibility_removal_preserves_edited_and_relocated_copies() {
+    let f = Fixture::new();
+    operations::install_for_tool(&f.conn, "claude", "same".into(), config()).unwrap();
+    let source = f.source("claude");
+    operations::toggle(&f.conn, &source.id, "gemini", true).unwrap();
+    f.write(
+        "gemini",
+        r#"{"mcpServers":{"same":{"command":"independent"}}}"#,
+    );
+    let files = f.files();
+    assert!(operations::remove_from_tool(&f.conn, "gemini", &source.id).is_err());
+    assert_eq!(f.files(), files);
+    let original = f.path("gemini");
+    let original_bytes = std::fs::read(&original).unwrap();
+    let relocated = f.root.path().join("relocated.json");
+    f.conn
+        .execute(
+            "UPDATE custom_paths SET mcp_config_path=?1 WHERE tool_id='gemini'",
+            [relocated.to_str().unwrap()],
+        )
+        .unwrap();
+    let relocated_files = f.files();
+    assert!(operations::remove_from_tool(&f.conn, "gemini", &source.id).is_err());
+    assert_eq!(f.files(), relocated_files);
+    assert_eq!(std::fs::read(original).unwrap(), original_bytes);
+    assert!(!relocated.exists());
+}
+
+#[test]
 fn production_commands_keep_same_name_origins_independent() {
     let f = Fixture::new();
     f.write(

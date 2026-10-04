@@ -16,9 +16,13 @@ pub(crate) struct OriginSummary {
 }
 
 pub(super) fn revision(origin: &NativeOrigin) -> Result<String, String> {
+    spec_revision(&origin.spec)
+}
+
+pub(super) fn spec_revision(spec: &NativeSpec) -> Result<String, String> {
     Ok(format!(
         "{:x}",
-        Sha256::digest(serde_json::to_vec(&origin.spec).map_err(|_| invalid())?)
+        Sha256::digest(serde_json::to_vec(spec).map_err(|_| invalid())?)
     ))
 }
 
@@ -61,6 +65,16 @@ pub(crate) fn list(conn: &Connection) -> Result<Vec<CatalogServer>, String> {
         .into_iter()
         .filter(|row| row.status != "removed")
         .map(|server| {
+            if let Some(source) = state.archived.get(&server.id) {
+                return Ok(CatalogServer {
+                    server,
+                    origin: Some(OriginSummary {
+                        native_name: source.name.clone(),
+                        revision: spec_revision(&source.spec)?,
+                        bindings: vec![],
+                    }),
+                });
+            }
             let origin = state.origins.get(&server.id);
             decorate(server, origin)
         })
@@ -75,6 +89,9 @@ pub(crate) struct ToolStatus {
 
 pub(crate) fn export(conn: &Connection, id: &str) -> Result<String, String> {
     let state = CatalogState::load(conn)?;
+    if let Some(source) = state.archived.get(id) {
+        return serde_json::to_string_pretty(&source.spec.to_json()?).map_err(|_| invalid());
+    }
     let origin = checked(&state, id, None)?;
     native::checked_origin(conn, origin, true)?;
     serde_json::to_string_pretty(&origin.spec.to_json()?).map_err(|_| invalid())

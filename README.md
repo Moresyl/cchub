@@ -32,13 +32,13 @@ Claude profile switching checks both configuration files before saving. Unreadab
 
 Codex and Grok Build MCP edits update connection fields while retaining unrelated server options, such as timeouts, OAuth and disabled state, and unchanged comments and values. Inline tables and quoted server names are supported. Invalid or unreadable files stop the edit. Native TOML writes omit the shared model's `type` field and remove it from the edited entry when present. Changing a Codex connection between stdio and HTTP removes incompatible working-directory, environment or HTTP authentication fields while retaining compatible options; local HTTP placement remains intact. URL-only definitions use HTTP. Prepared saves check for intervening file changes before writing; missing files remain missing when removing an absent entry.
 
-Profile capture, switching and tool bootstrap honor custom configuration filenames, with authentication and environment files kept in the configured directory. Claude's primary MCP file and settings.json, and MiniMax's mcp.json and config.yaml, resolve separately. Configuration Files shows configured directories and individual MCP files outside them; a single-file entry grants access only to that file. Database or type errors in these path reads stop the operation. Bootstrap resolves all paths before creating files. Main MCP workspace scan, sync and deletion routing remains in progress.
+Profile capture, switching and tool bootstrap honor custom configuration filenames, with authentication and environment files kept in the configured directory. Claude's primary MCP file and settings.json, and MiniMax's mcp.json and config.yaml, resolve separately. Configuration Files shows configured directories and individual MCP files outside them; a single-file entry grants access only to that file. Database or type errors in these path reads stop the operation. Bootstrap resolves all paths before creating files. The MCP workspace uses the same configured paths for source-aware scanning, synchronization and removal.
 
 The per-application MCP read API reads that tool's configured native file directly, retaining disabled entries, URLs, authentication and extension options without substituting another tool's same-name service. JSON/JSONC, TOML and Hermes YAML containers and connection fields are validated. Malformed files or invalid paths return errors; missing files return an empty collection without creating directories. Native extension values that cannot be represented as JSON without loss explicitly refuse export.
 
-JSON-based MCP connection edits retain explicit disabled state, native options and unchanged comments and formatting. MiniMax MCP reads and edits use the same JSON/JSONC parser, including BOM handling and duplicate-key rejection. Invalid connection fields stop a write, and removing an absent entry does not create a file or directory. Prepared JSON edits can compose several entries in one document and participate in file-group recovery; integration with the main MCP catalog and sync ownership remains in progress.
+JSON-based MCP connection edits retain explicit disabled state, native options and unchanged comments and formatting. MiniMax MCP reads and edits use the same JSON/JSONC parser, including BOM handling and duplicate-key rejection. Invalid connection fields stop a write, and removing an absent entry does not create a file or directory. Prepared JSON edits compose multiple entries in one document and participate in the shared catalog's grouped writes and recovery.
 
-The native Hermes MCP adapter retains YAML stream comments, unchanged trivia, BOM, CRLF and existing disabled state, timeouts, authentication, tool policies and extension options when editing connections, without forcing a timeout. SSE uses the native `transport: sse` selector; changing to HTTP or stdio removes stale connection fields. Adapter reads, writes and removals use the same custom MCP file path. The per-application read API validates transport selectors; saves reject malformed documents, invalid connection inputs and anchor edits that affect unrelated settings. Prepared YAML edits support grouped checks and recovery on reported failures; integration with main-catalog scanning and sync ownership remains in progress, and this is not a cross-process transaction.
+The native Hermes MCP adapter retains YAML stream comments, unchanged trivia, BOM, CRLF and existing disabled state, timeouts, authentication, tool policies and extension options when editing connections, without forcing a timeout. SSE uses the native `transport: sse` selector; changing to HTTP or stdio removes stale connection fields. Adapter reads, writes and removals use the same custom MCP file path. The per-application read API validates transport selectors; saves reject malformed documents, invalid connection inputs and anchor edits that affect unrelated settings. Prepared YAML edits participate in catalog scanning, explicit sync ownership, grouped checks and recovery on reported failures. This is not a cross-process transaction.
 
 Hermes profile switching uses the same YAML editor, updating only the model provider, endpoint and default model while retaining existing model options, MCP settings, unchanged comments and native extension values. Unchanged YAML is neither rewritten nor backed up again; unchanged environment variables retain the original `.env` bytes. An empty profile does not create missing files or directories. Configuration, environment and newly created backup files participate in the same save checks and recovery on reported failures. The Hermes panel in Configuration Files uses shared controls and a collapsible JSON syntax preview with masked keys. Read failures block editing and saving; failed saves retain the draft. Clearing or renaming the selected key explicitly removes its previous variable, and invalid variable names prompt correction.
 
@@ -52,6 +52,12 @@ The compact neutral light/dark workspace uses a unified frameless desktop title 
 
 ---
 
+MCP services keep separate source identities even when names match. Editing and removal use the selected source and its loaded revision. Sync states distinguish the original source, linked copies, independent entries, missing entries and conflicts; unreadable states remain unknown. The installation wizard validates fields before advancing and keeps drafts after failed installation.
+
+Backup restoration retains local MCP ownership, client access selections and history together. Imported native definitions without a matching local identity remain in a backup library without inheriting file ownership, preserving their native extension types and associated history. Select **Restore** in the service details to restore a library entry to its original tool; existing same-name entries are never overwritten. A failed database commit rolls back the new native definition. JSON-compatible definitions can also be copied; removing a library entry does not delete native configuration files.
+
+The library's same-name protection applies to restoring an individual service entry. Tool configurations and attached files included in a full backup still follow the full restoration workflow; that operation does not preserve every local file unchanged. Refresh the service list after restoration to inspect the actual file state.
+
 ## Workspace
 
 | Dark theme                                          | Light theme                                           |
@@ -59,6 +65,12 @@ The compact neutral light/dark workspace uses a unified frameless desktop title 
 | ![CCHub dark workspace](screenshots/dark-theme.png) | ![CCHub light workspace](screenshots/light-theme.png) |
 
 Screenshots are from the desktop app; the example endpoint has been anonymized.
+
+### MCP backup library
+
+![CCHub backup library in a narrow light-theme window](screenshots/mcp-backup-library.png)
+
+This screenshot shows the actual MCP page with isolated demonstration data, not native desktop acceptance evidence.
 
 ### Configuration editor
 

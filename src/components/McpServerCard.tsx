@@ -120,6 +120,7 @@ function McpServerCardComponent({
             }}
             title={editTitle}
             aria-label={editTitle}
+            disabled={server.status === "archived"}
           >
             <Edit3 size={15} />
           </Button>

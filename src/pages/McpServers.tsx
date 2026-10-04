@@ -83,6 +83,9 @@ export default function McpServers() {
   const [runtimeDeps, setRuntimeDeps] = useState<RuntimeDepStatus[]>([]);
   const [showDeps, setShowDeps] = useState(false);
   const [checkingDeps, setCheckingDeps] = useState(false);
+  const [depsError, setDepsError] = useState(false);
+  const depsCheckingRef = useRef(false);
+  const healthCheckingRef = useRef(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const installingRef = useRef(false);
   const deletingRef = useRef(false);
@@ -110,19 +113,27 @@ export default function McpServers() {
   const installMcpServerMutation = useInstallMcpServerMutation<McpServer>();
 
   const checkDeps = useCallback(async () => {
+    if (depsCheckingRef.current) return;
+    depsCheckingRef.current = true;
     setCheckingDeps(true);
     setShowDeps(true);
+    setDepsError(false);
+    setRuntimeDeps([]);
     try {
       setRuntimeDeps(await invoke<RuntimeDepStatus[]>("check_runtime_dependencies"));
-    } catch (e) {
-      console.error(e);
+    } catch {
+      setDepsError(true);
     } finally {
+      depsCheckingRef.current = false;
       setCheckingDeps(false);
     }
   }, []);
 
   const checkHealth = useCallback(async () => {
+    if (healthCheckingRef.current) return;
+    healthCheckingRef.current = true;
     setCheckingHealth(true);
+    setHealthResults({});
     try {
       const results = await invoke<HealthCheckResult[]>("check_all_mcp_health");
       const map: Record<string, HealthCheckResult> = {};
@@ -130,12 +141,18 @@ export default function McpServers() {
         map[r.server_id] = r;
       }
       setHealthResults(map);
-    } catch (e) {
-      console.error(e);
+    } catch {
+      showToast(
+        "error",
+        zh
+          ? "健康检查失败，未能确认服务状态。请重试。"
+          : "Health check failed. Server status is unknown. Please retry.",
+      );
     } finally {
+      healthCheckingRef.current = false;
       setCheckingHealth(false);
     }
-  }, []);
+  }, [zh]);
 
   const handleDelete = useCallback((server: McpServer) => {
     setPendingDelete(server);
@@ -254,9 +271,13 @@ export default function McpServers() {
           ...prev,
           [result.serverId]: { ...(prev[result.serverId] ?? {}), [toolId]: result.enabled },
         }));
+        await loadPageData({ force: true });
+        if (selected?.status === "archived" && selected.id === result.serverId) {
+          showToast("success", zh ? "已恢复到本机配置" : "Configuration restored to this device");
+        }
       }
     },
-    [syncStatus, setServerAppStatus],
+    [syncStatus, setServerAppStatus, loadPageData, selected, zh],
   );
 
   const handleSelectServer = useCallback(
@@ -270,14 +291,15 @@ export default function McpServers() {
   const handleBulkToggle = useCallback(
     async (enabled: boolean) => {
       if (bulkToggleMcpAppMutation.isPending || appStatusLoading || servers.length === 0) return;
-      if (servers.some((server) => typeof serverAppStatus[server.id]?.[bulkApp] !== "boolean")) {
+      const liveServers = servers.filter((server) => server.status !== "archived");
+      if (liveServers.some((server) => typeof serverAppStatus[server.id]?.[bulkApp] !== "boolean")) {
         showToast(
           "error",
           zh ? "部分服务的同步状态未知，请刷新后重试。" : "Some sync states are unknown. Refresh before retrying.",
         );
         return;
       }
-      const serverIds = servers
+      const serverIds = liveServers
         .filter((server) => Boolean(serverAppStatus[server.id]?.[bulkApp]) !== enabled)
         .map((server) => server.id);
       if (serverIds.length === 0) {
@@ -323,6 +345,7 @@ export default function McpServers() {
     (count, server) => count + (serverAppStatus[server.id]?.[bulkApp] ? 1 : 0),
     0,
   );
+  const liveServerCount = servers.filter((server) => server.status !== "archived").length;
   const availableMcpApps = useMemo(() => {
     const installedIds = new Set(installedTools.map((tool) => tool.id));
     return MCP_SYNCABLE_APPS.filter((app) => {
@@ -511,13 +534,13 @@ export default function McpServers() {
               options={availableMcpApps.map((app) => ({ value: app.id, label: app.label }))}
             />
             <span className="badge badge-muted" title={zh ? "已同步数量 / 总数量" : "Synced / total"}>
-              {appStatusLoading ? "..." : `${bulkEnabledCount}/${servers.length}`}
+              {appStatusLoading ? "..." : `${bulkEnabledCount}/${liveServerCount}`}
             </span>
             <Button
               variant="secondary"
               size="sm"
               onClick={() => void handleBulkToggle(true)}
-              disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
+              disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || liveServerCount === 0}
             >
               {bulkToggleMcpAppMutation.isPending ? i.mcp.bulkRunning : i.mcp.bulkEnable}
             </Button>
@@ -525,7 +548,7 @@ export default function McpServers() {
               variant="ghost"
               size="sm"
               onClick={() => void handleBulkToggle(false)}
-              disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || servers.length === 0}
+              disabled={appStatusLoading || bulkToggleMcpAppMutation.isPending || liveServerCount === 0}
             >
               {i.mcp.bulkDisable}
             </Button>
@@ -567,7 +590,12 @@ export default function McpServers() {
               <MonitorCheck size={15} style={{ color: "var(--text-secondary)" }} />
               <span style={{ fontSize: 13, fontWeight: 600 }}>{zh ? "运行环境检查" : "Runtime Environment"}</span>
             </div>
-            <Button variant="ghost" size="icon-sm" onClick={() => setShowDeps(false)}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={zh ? "关闭环境检查" : "Close environment check"}
+              onClick={() => setShowDeps(false)}
+            >
               <X size={14} />
             </Button>
           </div>
@@ -575,6 +603,13 @@ export default function McpServers() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
               <div className="spinner" style={{ width: 14, height: 14 }} />
               <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{zh ? "检测中..." : "Checking..."}</span>
+            </div>
+          ) : depsError ? (
+            <div role="alert" className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+              <span>{zh ? "无法读取运行环境，请重试。" : "Could not read the runtime environment. Please retry."}</span>
+              <Button variant="secondary" size="sm" onClick={() => void checkDeps()}>
+                {zh ? "重试" : "Retry"}
+              </Button>
             </div>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -634,7 +669,9 @@ export default function McpServers() {
                   server={server}
                   selected={selected?.id === server.id}
                   sourceBadge={getSourceBadge(server.source)}
-                  sourceLabel={getSourceLabel(server.source)}
+                  sourceLabel={
+                    server.status === "archived" ? (zh ? "备份库" : "Backup library") : getSourceLabel(server.source)
+                  }
                   healthStatus={healthResults[server.id]?.status ?? null}
                   healthTitle={
                     healthResults[server.id]

@@ -38,6 +38,7 @@ pub(super) fn prepare_snapshot(
     let mut unresolved = Vec::new();
     for row in &rows {
         if state.origins.contains_key(&row.id)
+            || state.archived.contains_key(&row.id)
             || discovered.contains_key(&row.id)
             || row.status == "removed"
         {

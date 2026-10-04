@@ -24,6 +24,9 @@ interface McpServerDetailPanelProps {
   syncingTo: string | null;
   toggleToolSync: (toolId: string) => void;
   onClose: () => void;
+  statusLoading?: boolean;
+  statusError?: boolean;
+  refreshStatus?: () => void;
 }
 
 export default function McpServerDetailPanel({
@@ -42,6 +45,9 @@ export default function McpServerDetailPanel({
   syncingTo,
   toggleToolSync,
   onClose,
+  statusLoading = false,
+  statusError = false,
+  refreshStatus,
 }: McpServerDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const tabId = useId();
@@ -246,6 +252,20 @@ export default function McpServerDetailPanel({
 
         {activeTab === "sync" && (
           <section>
+            {statusError && (
+              <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>{zh ? "暂时无法读取同步状态。" : "Sync status is unavailable."}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={refreshStatus}
+                  disabled={syncingTo !== null}
+                >
+                  {zh ? "重试" : "Retry"}
+                </Button>
+              </div>
+            )}
             <div className="mb-3 flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
               <Share2 size={13} />
               {zh ? "同步到其他工具" : "Sync to other tools"}
@@ -254,6 +274,7 @@ export default function McpServerDetailPanel({
               <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)]">
                 {installedTools.map((tool) => {
                   const isSynced = toolSyncStatus[tool.id] || false;
+                  const unknown = statusLoading || statusError || typeof toolSyncStatus[tool.id] !== "boolean";
                   return (
                     <div
                       key={tool.id}
@@ -262,7 +283,21 @@ export default function McpServerDetailPanel({
                       <div className="min-w-0">
                         <div className="truncate text-xs font-medium">{tool.name}</div>
                         <div className="mt-0.5 text-[10px] text-muted-foreground">
-                          {isSynced ? (zh ? "已同步" : "Synced") : zh ? "未同步" : "Not synced"}
+                          {statusLoading
+                            ? zh
+                              ? "读取中…"
+                              : "Loading…"
+                            : unknown
+                              ? zh
+                                ? "状态未知"
+                                : "Unknown status"
+                              : isSynced
+                                ? zh
+                                  ? "已同步"
+                                  : "Synced"
+                                : zh
+                                  ? "未同步"
+                                  : "Not synced"}
                         </div>
                       </div>
                       <Button
@@ -270,7 +305,7 @@ export default function McpServerDetailPanel({
                         size="sm"
                         variant={isSynced ? "secondary" : "default"}
                         aria-label={`${isSynced ? (zh ? "取消同步" : "Remove sync") : zh ? "同步到" : "Sync to"} ${tool.name}`}
-                        disabled={syncingTo !== null}
+                        disabled={syncingTo !== null || unknown}
                         aria-busy={syncingTo === tool.id}
                         onClick={() => toggleToolSync(tool.id)}
                       >

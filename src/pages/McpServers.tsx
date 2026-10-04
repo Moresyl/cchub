@@ -33,6 +33,7 @@ import MasterDetailLayout from "../components/layout/MasterDetailLayout";
 import { Input } from "../components/ui/input";
 import { SimpleSelect } from "../components/ui/simple-select";
 import { useConfigSave } from "./mcp-servers/useConfigSave";
+import { useSyncStatus } from "./mcp-servers/useSyncStatus";
 
 const MCP_SYNCABLE_APPS = [
   { id: "claude", label: "Claude" },
@@ -64,13 +65,11 @@ export default function McpServers() {
   const [healthResults, setHealthResults] = useState<Record<string, HealthCheckResult>>({});
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [syncingTo, setSyncingTo] = useState<string | null>(null);
   const [installedTools, setInstalledTools] = useState<DetectedTool[]>(
     cachedMcpServersPageData?.tools.filter(
       (tool) => tool.installed && MANAGED_APPS.includes(tool.id as ManagedAppId) && MCP_SYNCABLE_TOOL_IDS.has(tool.id),
     ) ?? [],
   );
-  const [toolSyncStatus, setToolSyncStatus] = useState<Record<string, boolean>>({});
   const [pendingDelete, setPendingDelete] = useState<McpServer | null>(null);
   const [runtimeDeps, setRuntimeDeps] = useState<RuntimeDepStatus[]>([]);
   const [showDeps, setShowDeps] = useState(false);
@@ -92,6 +91,7 @@ export default function McpServers() {
   const [appStatusLoading, setAppStatusLoading] = useState(false);
   const i = t();
   const zh = getLocale() === "zh";
+  const syncStatus = useSyncStatus(selected, zh);
   const { save: saveConfig, saving: configSaving, isSaving: isConfigSaving } = useConfigSave(zh);
   const wizardValidation = useMcpValidation(wizardDraft);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
@@ -121,7 +121,7 @@ export default function McpServers() {
           ),
         );
         setSelected((current) =>
-          current ? (data.servers.find((server) => server.id === current.id) ?? current) : current,
+          current ? (data.servers.find((server) => server.id === current.id) ?? null) : current,
         );
         setAppStatusLoading(true);
         const statusResults = await Promise.allSettled(
@@ -291,28 +291,15 @@ export default function McpServers() {
 
   const toggleToolSync = useCallback(
     async (toolId: string) => {
-      if (!selected) return;
-      const isSynced = toolSyncStatus[toolId];
-      setSyncingTo(toolId);
-      try {
-        if (isSynced) {
-          await invoke("unsync_mcp_server_from_tool", { serverName: selected.name, targetTool: toolId });
-        } else {
-          await invoke("sync_mcp_server_to_tool", { serverName: selected.name, targetTool: toolId });
-        }
-        const nextSynced = !isSynced;
-        setToolSyncStatus((prev) => ({ ...prev, [toolId]: nextSynced }));
+      const result = await syncStatus.toggle(toolId);
+      if (result) {
         setServerAppStatus((prev) => ({
           ...prev,
-          [selected.id]: { ...(prev[selected.id] ?? {}), [toolId]: nextSynced },
+          [result.serverId]: { ...(prev[result.serverId] ?? {}), [toolId]: result.enabled },
         }));
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setSyncingTo(null);
       }
     },
-    [selected, toolSyncStatus],
+    [syncStatus],
   );
 
   const copyConfig = useCallback(() => {
@@ -342,13 +329,17 @@ export default function McpServers() {
     setSelected(server);
     setEditing(false);
     setSaveSuccess(false);
-    void invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: server.name })
-      .then(setToolSyncStatus)
-      .catch(() => setToolSyncStatus({}));
   }, []);
   const handleBulkToggle = useCallback(
     async (enabled: boolean) => {
       if (bulkToggleMcpAppMutation.isPending || appStatusLoading || servers.length === 0) return;
+      if (servers.some((server) => typeof serverAppStatus[server.id]?.[bulkApp] !== "boolean")) {
+        showToast(
+          "error",
+          zh ? "部分服务的同步状态未知，请刷新后重试。" : "Some sync states are unknown. Refresh before retrying.",
+        );
+        return;
+      }
       const serverIds = servers
         .filter((server) => Boolean(serverAppStatus[server.id]?.[bulkApp]) !== enabled)
         .map((server) => server.id);
@@ -741,8 +732,11 @@ export default function McpServers() {
                 getSourceBadge={getSourceBadge}
                 getSourceLabel={getSourceLabel}
                 installedTools={installedTools}
-                toolSyncStatus={toolSyncStatus}
-                syncingTo={syncingTo}
+                toolSyncStatus={syncStatus.status}
+                syncingTo={syncStatus.syncingTo}
+                statusLoading={syncStatus.loading}
+                statusError={syncStatus.error}
+                refreshStatus={syncStatus.refresh}
                 toggleToolSync={toggleToolSync}
                 onClose={() => setSelected(null)}
               />

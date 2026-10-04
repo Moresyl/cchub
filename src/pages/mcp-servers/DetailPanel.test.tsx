@@ -57,7 +57,7 @@ const props = () => ({
       install_url: "",
     },
   ],
-  toolSyncStatus: { claude: true },
+  toolSyncStatus: { claude: true, codex: false },
   syncingTo: null as string | null,
   toggleToolSync: vi.fn(),
   onClose: vi.fn(),
@@ -87,6 +87,23 @@ it("links the panel to one tabbable tab and supports arrow wrap, Home and End", 
   selected(2);
   fireEvent.keyDown(tabs[2], { key: "Home" });
   selected(0);
+});
+
+it("shows unknown status and a retry action without enabling destructive sync actions", () => {
+  const initial = props();
+  const retry = vi.fn();
+  render(<McpServerDetailPanel {...initial} toolSyncStatus={{}} statusError refreshStatus={retry} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Sync" }));
+  expect(screen.getByRole("alert").textContent).toContain("Sync status is unavailable");
+  expect(screen.getAllByText("Unknown status")).toHaveLength(2);
+  for (const name of ["Sync to Claude Code", "Sync to Codex CLI"]) {
+    const button = screen.getByRole("button", { name }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+  }
+  expect(initial.toggleToolSync).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(retry).toHaveBeenCalledTimes(1);
 });
 
 it("resets the detail to overview when selecting another server and preserves malformed raw JSON", () => {

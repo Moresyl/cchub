@@ -1,9 +1,24 @@
 use crate::db::models::McpServer;
-use crate::db::{record_activity, DbState};
-use crate::mcp::config;
-use crate::mcp::health;
-use std::collections::HashMap;
+use crate::db::DbState;
+use crate::mcp::{config::McpServerConfig, health, operations, service};
+use std::collections::{BTreeMap, HashMap};
 use tauri::State;
+
+mod health_commands;
+#[tauri::command]
+pub fn check_all_mcp_health(
+    db: State<'_, DbState>,
+) -> Result<Vec<health::HealthCheckResult>, String> {
+    health_commands::check_all_mcp_health(db)
+}
+
+#[tauri::command]
+pub fn check_mcp_server_health(
+    name: String,
+    db: State<'_, DbState>,
+) -> Result<health::HealthCheckResult, String> {
+    health_commands::check_mcp_server_health(name, db)
+}
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,10 +27,10 @@ pub struct McpConfigResponse {
     pub servers: HashMap<String, serde_json::Value>,
 }
 
-/// Read one application's configured native MCP document without global name matching.
 #[tauri::command]
 pub fn get_mcp_config(app: String, db: State<'_, DbState>) -> Result<McpConfigResponse, String> {
     let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    let _guard = crate::json_config::write_lock()?;
     let view = crate::mcp::native_read::read_config(&conn, &app)?;
     Ok(McpConfigResponse {
         config_path: view.config_path,
@@ -23,43 +38,183 @@ pub fn get_mcp_config(app: String, db: State<'_, DbState>) -> Result<McpConfigRe
     })
 }
 
-/// Rescan all supported application config files and import their MCP entries.
+#[tauri::command]
+pub(crate) fn scan_mcp_servers(
+    db: State<'_, DbState>,
+) -> Result<Vec<service::CatalogServer>, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    operations::refresh(&conn)
+}
+
 #[tauri::command]
 pub fn import_mcp_from_apps(db: State<'_, DbState>) -> Result<usize, String> {
     Ok(scan_mcp_servers(db)?.len())
 }
 
 #[tauri::command]
-pub async fn read_claude_mcp_config() -> Result<Option<String>, String> {
-    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
-    let primary = home.join(".claude.json");
-    let fallback = home.join(".claude").join("settings.json");
-    let path = if primary.exists() { primary } else { fallback };
-    if !path.exists() {
-        return Ok(None);
-    }
-    std::fs::read_to_string(path)
-        .map(Some)
-        .map_err(|error| error.to_string())
+pub(crate) fn get_mcp_servers(
+    db: State<'_, DbState>,
+) -> Result<Vec<service::CatalogServer>, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    service::list(&conn)
 }
 
 #[tauri::command]
-pub async fn upsert_claude_mcp_server(id: String, spec: serde_json::Value) -> Result<bool, String> {
-    if id.trim().is_empty() {
-        return Err("MCP server id cannot be empty".to_string());
+pub fn install_mcp_server(
+    name: String,
+    transport: Option<String>,
+    command: String,
+    args: Vec<String>,
+    env: HashMap<String, String>,
+    targets: Option<Vec<String>>,
+    db: State<'_, DbState>,
+) -> Result<McpServer, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    Ok(operations::install(
+        &conn,
+        name,
+        McpServerConfig {
+            command,
+            args,
+            env,
+            transport_type: transport,
+        },
+        targets.unwrap_or_default(),
+    )?
+    .server)
+}
+
+#[tauri::command]
+pub fn uninstall_mcp_server(
+    name: String,
+    revision: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    operations::remove(&conn, &name, revision.as_deref())
+}
+
+#[tauri::command]
+pub fn update_mcp_server_config(
+    name: String,
+    command: String,
+    args: Vec<String>,
+    env: HashMap<String, String>,
+    revision: Option<String>,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    operations::update(&conn, &name, command, args, env, revision.as_deref())
+}
+
+#[tauri::command]
+pub fn sync_mcp_server_to_tool(
+    server_name: String,
+    target_tool: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    operations::toggle(&conn, &server_name, &target_tool, true)
+}
+
+#[tauri::command]
+pub fn unsync_mcp_server_from_tool(
+    server_name: String,
+    target_tool: String,
+    db: State<'_, DbState>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    operations::toggle(&conn, &server_name, &target_tool, false)
+}
+
+/// Compatibility for older clients. Rich states are available to the main UI.
+#[tauri::command]
+pub fn check_mcp_server_in_tools(
+    server_name: String,
+    db: State<'_, DbState>,
+) -> Result<BTreeMap<String, bool>, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    Ok(operations::status(&conn, &server_name)?
+        .into_iter()
+        .map(|(tool, status)| (tool, matches!(status.state.as_str(), "source" | "linked")))
+        .collect())
+}
+
+#[tauri::command]
+pub(crate) fn get_mcp_sync_statuses(
+    server_ids: Vec<String>,
+    db: State<'_, DbState>,
+) -> Result<BTreeMap<String, BTreeMap<String, service::ToolStatus>>, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    operations::statuses(&conn, &server_ids)
+}
+
+#[tauri::command]
+pub fn export_mcp_server_config(
+    server_id: String,
+    db: State<'_, DbState>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    operations::export(&conn, &server_id)
+}
+
+#[tauri::command]
+pub fn check_runtime_dependencies() -> Vec<health::RuntimeDepStatus> {
+    health::check_runtime_deps()
+}
+
+#[tauri::command]
+pub async fn import_mcp_servers_from_file(db: State<'_, DbState>) -> Result<u32, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .set_title("Import MCP Servers")
+        .add_filter("JSON", &["json", "jsonc"])
+        .pick_file()
+        .await
+        .ok_or("Cancelled")?;
+    let content =
+        std::fs::read_to_string(file.path()).map_err(|_| "Could not read MCP import file")?;
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    let tool = import_format(&content)?;
+    Ok(operations::import_document(&conn, tool, &content, vec![])?.len() as u32)
+}
+
+pub(crate) fn import_format(content: &str) -> Result<&'static str, String> {
+    let value = crate::json_config::parse_json_object(content)?;
+    if value.get("mcp").is_some() && value.get("mcpServers").is_some() {
+        return Err(
+            "MCP import contains multiple native formats; import one document at a time".into(),
+        );
     }
-    let config: config::McpServerConfig = serde_json::from_value(spec)
-        .map_err(|error| format!("Invalid MCP server config: {error}"))?;
-    config::write_claude_mcp_server(&id, &config)?;
+    Ok(if value.get("mcp").is_some() {
+        "opencode"
+    } else {
+        "claude"
+    })
+}
+
+#[tauri::command]
+pub fn read_claude_mcp_config(db: State<'_, DbState>) -> Result<Option<String>, String> {
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    let _guard = crate::json_config::write_lock()?;
+    let path = crate::commands::extra_commands::resolve_tool_mcp_path(&conn, "claude")?;
+    crate::config_write::read(&path)?
+        .map(|bytes| String::from_utf8(bytes).map_err(|_| "MCP file is not UTF-8".into()))
+        .transpose()
+}
+
+#[tauri::command]
+pub fn upsert_claude_mcp_server(
+    id: String,
+    spec: serde_json::Value,
+    db: State<'_, DbState>,
+) -> Result<bool, String> {
+    super::compat_commands::upsert_mcp_server_in_config("claude".into(), id, spec, None, db)?;
     Ok(true)
 }
 
 #[tauri::command]
-pub async fn delete_claude_mcp_server(id: String) -> Result<bool, String> {
-    if id.trim().is_empty() {
-        return Err("MCP server id cannot be empty".to_string());
-    }
-    config::remove_claude_mcp_server(&id)?;
+pub fn delete_claude_mcp_server(id: String, db: State<'_, DbState>) -> Result<bool, String> {
+    super::compat_commands::delete_mcp_server_in_config("claude".into(), id, db)?;
     Ok(true)
 }
 
@@ -73,498 +228,13 @@ pub async fn validate_mcp_command(cmd: String) -> Result<bool, String> {
     if path.components().count() > 1 {
         return Ok(path.is_file());
     }
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
-    Ok(std::env::split_paths(&path_var).any(|directory| {
-        let candidate = directory.join(command);
-        candidate.is_file()
-            || (cfg!(windows)
-                && [".exe", ".cmd", ".bat"]
-                    .iter()
-                    .any(|suffix| directory.join(format!("{command}{suffix}")).is_file()))
-    }))
-}
-
-fn log_command_timing(command: &str, started_at: std::time::Instant) {
-    eprintln!(
-        "[cchub][invoke] {command} completed in {}ms",
-        started_at.elapsed().as_millis()
-    );
-}
-
-#[tauri::command]
-pub fn scan_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String> {
-    let started_at = std::time::Instant::now();
-    let result = (|| {
-        let scanned = config::scan_all_mcp_servers();
-
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        let now = chrono::Utc::now().to_rfc3339();
-        let scanned_ids = scanned
-            .iter()
-            .map(|server| server.name.clone())
-            .collect::<std::collections::HashSet<_>>();
-
-        let mut all_servers = Vec::new();
-
-        for s in scanned {
-            let args_json = serde_json::to_string(&s.args).unwrap_or_else(|_| "[]".to_string());
-            let env_json = serde_json::to_string(&s.env).unwrap_or_else(|_| "{}".to_string());
-
-            let status = "active".to_string();
-
-            conn.execute(
-                "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE((SELECT installed_at FROM mcp_servers WHERE id = ?1), ?10), ?10)",
-                rusqlite::params![s.name, s.name, s.command, args_json, env_json, s.transport, s.source, s.config_path, status, now],
-            ).map_err(|e| e.to_string())?;
-
-            all_servers.push(McpServer {
-                id: s.name.clone(),
-                name: s.name,
-                package_name: None,
-                version: None,
-                transport: s.transport,
-                command: Some(s.command),
-                args: args_json,
-                env: env_json,
-                status,
-                source: s.source,
-                config_path: Some(s.config_path),
-                installed_at: Some(now.clone()),
-                updated_at: Some(now.clone()),
-            });
-        }
-
-        let stale_ids = {
-            let mut stmt = conn
-                .prepare("SELECT id FROM mcp_servers")
-                .map_err(|error| error.to_string())?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(|error| error.to_string())?
-                .filter_map(Result::ok)
-                .filter(|id| !scanned_ids.contains(id))
-                .collect::<Vec<_>>();
-            rows
-        };
-        for id in stale_ids {
-            conn.execute(
-                "DELETE FROM mcp_servers WHERE id = ?1",
-                rusqlite::params![id],
-            )
-            .map_err(|error| error.to_string())?;
-        }
-
-        Ok(all_servers)
-    })();
-    log_command_timing("scan_mcp_servers", started_at);
-    result
-}
-
-#[tauri::command]
-pub fn get_mcp_servers(db: State<'_, DbState>) -> Result<Vec<McpServer>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, package_name, version, transport, command, args, env, status, source, config_path, installed_at, updated_at FROM mcp_servers")
-        .map_err(|e| e.to_string())?;
-
-    let servers = stmt
-        .query_map([], |row| {
-            Ok(McpServer {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                package_name: row.get(2)?,
-                version: row.get(3)?,
-                transport: row.get(4)?,
-                command: row.get(5)?,
-                args: row.get(6)?,
-                env: row.get(7)?,
-                status: row.get(8)?,
-                source: row.get(9)?,
-                config_path: row.get(10)?,
-                installed_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(servers)
-}
-
-#[tauri::command]
-pub fn install_mcp_server(
-    name: String,
-    transport: Option<String>,
-    command: String,
-    args: Vec<String>,
-    env: HashMap<String, String>,
-    db: State<'_, DbState>,
-) -> Result<McpServer, String> {
-    let transport = transport.unwrap_or_else(|| "stdio".to_string());
-    if !matches!(transport.as_str(), "stdio" | "http" | "sse") {
-        return Err(format!("Unsupported MCP transport: {transport}"));
-    }
-    if transport != "stdio"
-        && url::Url::parse(&command)
-            .ok()
-            .filter(|url| matches!(url.scheme(), "http" | "https"))
-            .is_none()
-    {
-        return Err("Remote MCP URL must use HTTP or HTTPS".to_string());
-    }
-    let server_config = config::McpServerConfig {
-        command: command.clone(),
-        args: args.clone(),
-        env: env.clone(),
-        transport_type: Some(transport.clone()),
-    };
-
-    config::write_claude_mcp_server(&name, &server_config)?;
-
-    let config_path = dirs::home_dir()
-        .map(|h| {
-            h.join(".claude")
-                .join("settings.json")
-                .to_string_lossy()
-                .to_string()
-        })
-        .unwrap_or_default();
-
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".to_string());
-    let env_json = serde_json::to_string(&env).unwrap_or_else(|_| "{}".to_string());
-
-    conn.execute(
-        "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'local', ?7, 'active', ?8, ?8)",
-        rusqlite::params![name, name, command, args_json, env_json, transport, config_path, now],
-    ).map_err(|e| e.to_string())?;
-
-    record_activity(&conn, &name, "install", "success", None);
-
-    Ok(McpServer {
-        id: name.clone(),
-        name,
-        package_name: None,
-        version: None,
-        transport,
-        command: Some(command),
-        args: args_json,
-        env: env_json,
-        status: "active".to_string(),
-        source: "local".to_string(),
-        config_path: Some(config_path),
-        installed_at: Some(now.clone()),
-        updated_at: Some(now),
-    })
-}
-
-#[tauri::command]
-pub fn uninstall_mcp_server(name: String, db: State<'_, DbState>) -> Result<(), String> {
-    for tool in [
-        "claude",
-        "claude-desktop",
-        "codex",
-        "gemini",
-        "grokbuild",
-        "opencode",
-        "hermes",
-    ] {
-        if config::check_server_in_tool(&name, tool) {
-            config::unsync_mcp_from_tool(&name, tool)?;
-        }
-    }
-
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM mcp_servers WHERE id = ?1",
-        rusqlite::params![name],
+    Ok(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|directory| {
+            directory.join(command).is_file()
+                || (cfg!(windows)
+                    && [".exe", ".cmd", ".bat"]
+                        .iter()
+                        .any(|suffix| directory.join(format!("{command}{suffix}")).is_file()))
+        }),
     )
-    .map_err(|e| e.to_string())?;
-    record_activity(&conn, &name, "uninstall", "success", None);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn update_mcp_server_config(
-    name: String,
-    command: String,
-    args: Vec<String>,
-    env: HashMap<String, String>,
-    db: State<'_, DbState>,
-) -> Result<(), String> {
-    let mut server_config = config::McpServerConfig {
-        command: command.clone(),
-        args: args.clone(),
-        env: env.clone(),
-        transport_type: None,
-    };
-
-    // Get config_path from DB to write back to the correct file
-    let source_and_path: Option<(String, Option<String>, String)> = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        conn.query_row(
-            "SELECT source, config_path, transport FROM mcp_servers WHERE id = ?1",
-            rusqlite::params![name],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .ok()
-    };
-
-    if let Some((source, config_path, transport)) = source_and_path {
-        server_config.transport_type = Some(transport);
-        match source.as_str() {
-            "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode"
-            | "claude-desktop" => config::sync_mcp_to_tool(&name, &server_config, &source)?,
-            _ => match config_path {
-                Some(path) => config::write_mcp_server_to_config(&name, &server_config, &path)?,
-                None => config::write_claude_mcp_server(&name, &server_config)?,
-            },
-        }
-    } else {
-        return Err(format!("Server not found: {name}"));
-    }
-
-    let now = chrono::Utc::now().to_rfc3339();
-    let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".to_string());
-    let env_json = serde_json::to_string(&env).unwrap_or_else(|_| "{}".to_string());
-
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE mcp_servers SET command = ?1, args = ?2, env = ?3, updated_at = ?4 WHERE id = ?5",
-        rusqlite::params![command, args_json, env_json, now, name],
-    )
-    .map_err(|e| e.to_string())?;
-
-    record_activity(&conn, &name, "config_update", "success", None);
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn check_mcp_server_health(
-    name: String,
-    db: State<'_, DbState>,
-) -> Result<health::HealthCheckResult, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let server: McpServer = conn
-        .query_row(
-            "SELECT id, name, package_name, version, transport, command, args, env, status, source, config_path, installed_at, updated_at FROM mcp_servers WHERE id = ?1",
-            rusqlite::params![name],
-            |row| {
-                Ok(McpServer {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    package_name: row.get(2)?,
-                    version: row.get(3)?,
-                    transport: row.get(4)?,
-                    command: row.get(5)?,
-                    args: row.get(6)?,
-                    env: row.get(7)?,
-                    status: row.get(8)?,
-                    source: row.get(9)?,
-                    config_path: row.get(10)?,
-                    installed_at: row.get(11)?,
-                    updated_at: row.get(12)?,
-                })
-            },
-        )
-        .map_err(|e| format!("Server not found: {}", e))?;
-
-    let command = server.command.unwrap_or_default();
-    Ok(health::check_server_health(
-        &server.id,
-        &server.name,
-        &command,
-        &server.args,
-        &server.env,
-    ))
-}
-
-#[tauri::command]
-pub fn check_all_mcp_health(
-    db: State<'_, DbState>,
-) -> Result<Vec<health::HealthCheckResult>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, command, args, env FROM mcp_servers WHERE status != 'disabled'")
-        .map_err(|e| e.to_string())?;
-
-    let servers: Vec<(String, String, String, String, String)> = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    drop(stmt);
-    drop(conn);
-
-    let results: Vec<health::HealthCheckResult> = servers
-        .iter()
-        .map(|(id, name, cmd, args, env)| health::check_server_health(id, name, cmd, args, env))
-        .collect();
-
-    // Log health check results
-    let conn2 = db.0.lock().map_err(|e| e.to_string())?;
-    for r in &results {
-        let status = if r.status == "healthy" {
-            "success"
-        } else {
-            "error"
-        };
-        record_activity(
-            &conn2,
-            &r.server_id,
-            "health_check",
-            status,
-            r.latency_ms.map(|v| v as i64),
-        );
-    }
-
-    Ok(results)
-}
-
-#[tauri::command]
-pub fn sync_mcp_server_to_tool(
-    server_name: String,
-    target_tool: String,
-    db: State<'_, DbState>,
-) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let (command, args_json, env_json, transport): (String, String, String, String) = conn
-        .query_row(
-            "SELECT COALESCE(command,''), args, env, transport FROM mcp_servers WHERE id = ?1",
-            rusqlite::params![server_name],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .map_err(|e| format!("Server not found: {}", e))?;
-
-    let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
-    let env: std::collections::HashMap<String, String> =
-        serde_json::from_str(&env_json).unwrap_or_default();
-
-    let mcp_config = config::McpServerConfig {
-        command: command.clone(),
-        args,
-        env,
-        transport_type: Some(transport),
-    };
-
-    config::sync_mcp_to_tool(&server_name, &mcp_config, &target_tool)?;
-    record_activity(
-        &conn,
-        &server_name,
-        &format!("sync_to_{}", target_tool),
-        "success",
-        None,
-    );
-    Ok(())
-}
-
-#[tauri::command]
-pub fn unsync_mcp_server_from_tool(server_name: String, target_tool: String) -> Result<(), String> {
-    config::unsync_mcp_from_tool(&server_name, &target_tool)
-}
-
-#[tauri::command]
-pub fn check_mcp_server_in_tools(server_name: String) -> std::collections::HashMap<String, bool> {
-    let tools = [
-        "claude",
-        "claude-desktop",
-        "codex",
-        "gemini",
-        "grokbuild",
-        "opencode",
-        "openclaw",
-        "hermes",
-    ];
-    let mut result = std::collections::HashMap::new();
-    for tool in tools {
-        result.insert(
-            tool.to_string(),
-            config::check_server_in_tool(&server_name, tool),
-        );
-    }
-    result
-}
-
-#[tauri::command]
-pub fn check_runtime_dependencies() -> Vec<health::RuntimeDepStatus> {
-    health::check_runtime_deps()
-}
-
-/// Import MCP server configs from a JSON file via file dialog.
-/// Expects a JSON object where keys are server names and values are
-/// `{ "command": "...", "args": [...], "env": {...} }`.
-#[tauri::command]
-pub async fn import_mcp_servers_from_file(db: State<'_, DbState>) -> Result<u32, String> {
-    let file = rfd::AsyncFileDialog::new()
-        .set_title("Import MCP Servers")
-        .add_filter("JSON", &["json"])
-        .pick_file()
-        .await
-        .ok_or("Cancelled")?;
-
-    let content =
-        std::fs::read_to_string(file.path()).map_err(|e| format!("Failed to read file: {}", e))?;
-
-    let data: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {}", e))?;
-
-    // Support two formats:
-    // 1. { "mcpServers": { "name": {...}, ... } }  (Claude-compatible format)
-    // 2. { "mcp": { "name": {...}, ... } }  (OpenCode format)
-    // 3. { "name": { "command": "...", "args": [...], ... }, ... }  (flat map)
-    let servers_map = if let Some(inner) = data.get("mcpServers").and_then(|v| v.as_object()) {
-        inner.clone()
-    } else if let Some(inner) = data.get("mcp").and_then(|v| v.as_object()) {
-        inner.clone()
-    } else if let Some(obj) = data.as_object() {
-        obj.clone()
-    } else {
-        return Err("JSON must be an object mapping server names to configs".into());
-    };
-
-    let mut imported = 0u32;
-    for (name, cfg) in &servers_map {
-        let Some(server) = config::parse_server_entry(name, cfg, "import", "") else {
-            continue;
-        };
-
-        let server_config = config::McpServerConfig {
-            command: server.command.clone(),
-            args: server.args.clone(),
-            env: server.env.clone(),
-            transport_type: Some(server.transport.clone()),
-        };
-
-        if let Err(e) = config::write_claude_mcp_server(name, &server_config) {
-            eprintln!("Failed to write MCP server {}: {}", name, e);
-            continue;
-        }
-
-        // Insert into DB
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
-        let args_str = serde_json::to_string(&server.args).unwrap_or_default();
-        let env_str = serde_json::to_string(&server.env).unwrap_or_default();
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, status, transport, source, package_name, version, config_path) VALUES (?1, ?1, ?2, ?3, ?4, 'active', ?5, 'import', NULL, NULL, NULL)",
-            rusqlite::params![name, server.command, args_str, env_str, server.transport],
-        );
-
-        imported += 1;
-    }
-
-    Ok(imported)
 }

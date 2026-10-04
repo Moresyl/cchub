@@ -7,6 +7,7 @@ import { fetchMarketplaceLocalData, fetchMarketplaceSearchPage, queryKeys } from
 import type { DetectedTool } from "../../types/skills";
 
 import type { InstalledMcpServer, InstalledSkillRecord, RegistryEntry, SkillEntry } from "./helpers";
+import { resolveInstalledMcp } from "./mcpSource";
 
 export interface InstallMcpContext {
   entry: RegistryEntry;
@@ -28,31 +29,14 @@ export async function performInstallMcp(ctx: InstallMcpContext): Promise<void> {
       command: entry.command,
       args: entry.args,
       envValues: envVals,
+      targetTool: activeTool || "claude",
     });
-    if (activeTool && activeTool !== "claude") {
-      try {
-        await invoke("sync_mcp_server_to_tool", { serverName: entry.name, targetTool: activeTool });
-        await invoke("unsync_mcp_server_from_tool", { serverName: entry.name, targetTool: "claude" });
-      } catch (syncErr) {
-        showToast(
-          "error",
-          locale === "zh" ? `同步到 ${activeTool} 失败: ${syncErr}` : `Sync to ${activeTool} failed: ${syncErr}`,
-        );
-        throw syncErr;
-      }
-    }
     ctx.setInstalledIdsByTool((prev) => {
       const next = { ...prev };
       const set = new Set(next[activeTool] ?? []);
       set.add(entry.name);
       set.add(entry.id);
       next[activeTool] = set;
-      if (activeTool !== "claude" && next.claude) {
-        const claudeSet = new Set(next.claude);
-        claudeSet.delete(entry.name);
-        claudeSet.delete(entry.id);
-        next.claude = claudeSet;
-      }
       return next;
     });
   } catch (e) {
@@ -195,18 +179,6 @@ export async function performSaveSkillContent(ctx: SaveSkillContentContext): Pro
   }
 }
 
-export interface SaveMcpConfigContext {
-  editingMcp: InstalledMcpServer;
-  editCommand: string;
-  editArgs: string;
-  editEnv: string;
-  locale: string;
-  updateMcpServerConfigMutation: { mutateAsync: (input: any) => Promise<any> };
-  refreshInstalledMcpDetails: () => Promise<InstalledMcpServer[]>;
-  setEditingMcp: (v: InstalledMcpServer | null) => void;
-  setEntries: (updater: (prev: RegistryEntry[]) => RegistryEntry[]) => void;
-}
-
 // 加载远程 GitHub skill 仓库到当前会话；同时记录到 customSources 里作为一个"已加载的源"。
 export interface LoadRecommendedRepoContext {
   repoName: string;
@@ -312,7 +284,7 @@ export async function loadMcpPage(ctx: MarketplacePageContext, page: number): Pr
 export interface RefreshInstalledMcpContext {
   queryClient: QueryClient;
   setInstalledMcpDetails: (v: InstalledMcpServer[]) => void;
-  rebuildMcpByTool: (serverNames: string[]) => Promise<Record<string, Set<string>>>;
+  rebuildMcpByTool: (servers: InstalledMcpServer[]) => Promise<Record<string, Set<string>>>;
   setInstalledIdsByTool: (v: Record<string, Set<string>>) => void;
 }
 
@@ -325,9 +297,7 @@ export async function performRefreshInstalledMcpDetails(
     staleTime: 0,
   });
   ctx.setInstalledMcpDetails(servers);
-  void ctx.rebuildMcpByTool(servers.map((s) => s.name)).then((map) => {
-    ctx.setInstalledIdsByTool(Object.keys(map).length > 0 ? map : { claude: new Set(servers.map((s) => s.name)) });
-  });
+  ctx.setInstalledIdsByTool(await ctx.rebuildMcpByTool(servers));
   return servers;
 }
 
@@ -336,13 +306,15 @@ export interface UninstallMcpContext {
   entry: RegistryEntry;
   activeTool: string;
   locale: string;
+  refreshInstalledMcpDetails: () => Promise<InstalledMcpServer[]>;
   setInstalledIdsByTool: (updater: (prev: Record<string, Set<string>>) => Record<string, Set<string>>) => void;
 }
 
 export async function performUninstallMcp(ctx: UninstallMcpContext): Promise<void> {
   const { entry, activeTool, locale } = ctx;
   try {
-    await invoke("unsync_mcp_server_from_tool", { serverName: entry.name, targetTool: activeTool });
+    const server = await resolveInstalledMcp(entry, activeTool, await ctx.refreshInstalledMcpDetails());
+    await invoke("unsync_mcp_server_from_tool", { serverName: server.id, targetTool: activeTool });
     ctx.setInstalledIdsByTool((prev) => {
       const next = { ...prev };
       if (next[activeTool]) {
@@ -360,46 +332,5 @@ export async function performUninstallMcp(ctx: UninstallMcpContext): Promise<voi
   } catch (e) {
     console.error(e);
     showToast("error", locale === "zh" ? `卸载失败: ${e}` : `Uninstall failed: ${e}`);
-  }
-}
-
-export async function performSaveMcpConfig(ctx: SaveMcpConfigContext): Promise<void> {
-  const { editingMcp, editCommand, editArgs, editEnv, locale } = ctx;
-  try {
-    const args = JSON.parse(editArgs);
-    const env = JSON.parse(editEnv);
-    await ctx.updateMcpServerConfigMutation.mutateAsync({
-      name: editingMcp.name,
-      command: editCommand,
-      args,
-      env,
-    });
-    const refreshed = await ctx.refreshInstalledMcpDetails();
-    const updated = refreshed.find((server) => server.id === editingMcp.id || server.name === editingMcp.name) || null;
-    ctx.setEditingMcp(
-      updated || {
-        ...editingMcp,
-        command: editCommand,
-        args: JSON.stringify(args),
-        env: JSON.stringify(env),
-      },
-    );
-    ctx.setEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === editingMcp.id || entry.name === editingMcp.name
-          ? {
-              ...entry,
-              command: editCommand,
-              args,
-              env_keys: Object.keys(env),
-              description: `${editCommand} ${Array.isArray(args) ? args.join(" ") : ""}`.trim(),
-            }
-          : entry,
-      ),
-    );
-    showToast("success", locale === "zh" ? "MCP 配置已保存" : "MCP config saved");
-  } catch (e) {
-    console.error(e);
-    showToast("error", locale === "zh" ? "JSON 格式错误，请检查参数和环境变量" : "Invalid JSON format");
   }
 }

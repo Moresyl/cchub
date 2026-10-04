@@ -40,7 +40,7 @@ export interface MarketplaceLoadAllSetters {
   setMcpTotal: (v: number) => void;
   setMcpPage: (v: number) => void;
   rebuildSkillsByTool: (records: InstalledSkillRecord[]) => Record<string, Set<string>>;
-  rebuildMcpByTool: (serverNames: string[]) => Promise<Record<string, Set<string>>>;
+  rebuildMcpByTool: (servers: InstalledMcpServer[]) => Promise<Record<string, Set<string>>>;
 }
 
 export async function performMarketplaceLoadAll(
@@ -106,10 +106,7 @@ export async function performMarketplaceLoadAll(
       source: "local",
     }));
     setters.setInstalledMcpDetails(localData.servers);
-    // 先给 Claude 一份基础集合，避免 UI 在等待 per-tool 探测时空一帧
-    setters.setInstalledIdsByTool({
-      claude: new Set(localData.servers.flatMap((s) => [s.id, s.name])),
-    });
+    setters.setInstalledIdsByTool({});
     setters.setEntries(scannedEntries);
 
     try {
@@ -122,9 +119,7 @@ export async function performMarketplaceLoadAll(
       });
     }
 
-    void setters.rebuildMcpByTool(localData.servers.map((s) => s.name)).then((map) => {
-      if (Object.keys(map).length > 0) setters.setInstalledIdsByTool(map);
-    });
+    setters.setInstalledIdsByTool(await setters.rebuildMcpByTool(localData.servers));
 
     try {
       const skillsPageData = await queryClient.fetchQuery({

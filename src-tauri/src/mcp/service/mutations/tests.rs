@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 mod api;
 mod batch;
+mod operations;
 
 const TOOLS: [&str; 8] = [
     "claude",

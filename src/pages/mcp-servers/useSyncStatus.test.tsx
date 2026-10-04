@@ -19,6 +19,9 @@ const one: McpServer = {
   version: null,
   config_path: null,
 };
+const states = (id: string, enabled: boolean) => ({
+  [id]: { claude: { state: enabled ? "source" : "missing", disabled: false } },
+});
 const two = { ...one, id: "two", name: "Two" };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -33,14 +36,14 @@ beforeEach(() => vi.mocked(invoke).mockReset());
 afterEach(cleanup);
 
 it.each([false, true])("ignores superseded status results and errors (failure=%s)", async (failure) => {
-  const old = deferred<Record<string, boolean>>();
-  vi.mocked(invoke).mockReturnValueOnce(old.promise).mockResolvedValueOnce({ claude: false });
+  const old = deferred<ReturnType<typeof states>>();
+  vi.mocked(invoke).mockReturnValueOnce(old.promise).mockResolvedValueOnce(states("two", false));
   const hook = renderHook(({ selected }) => useSyncStatus(selected, false), { initialProps: { selected: one } });
   hook.rerender({ selected: two });
   await waitFor(() => expect(hook.result.current.status).toEqual({ claude: false }));
   await act(async () => {
     if (failure) old.reject(new Error("private"));
-    else old.resolve({ claude: true });
+    else old.resolve(states("one", true));
   });
   expect(hook.result.current.status).toEqual({ claude: false });
   expect(hook.result.current.error).toBe(false);
@@ -54,7 +57,7 @@ it("refuses unknown state and allows explicit retry after a failed read", async 
     expect(await hook.result.current.toggle("claude")).toBeNull();
   });
   expect(invoke).toHaveBeenCalledTimes(1);
-  vi.mocked(invoke).mockResolvedValueOnce({ claude: true });
+  vi.mocked(invoke).mockResolvedValueOnce(states("one", true));
   await act(async () => {
     await hook.result.current.refresh();
   });
@@ -65,9 +68,9 @@ it("refuses unknown state and allows explicit retry after a failed read", async 
 it("locks repeated toggles and keeps a completed old operation out of the newly selected service", async () => {
   const write = deferred<void>();
   vi.mocked(invoke)
-    .mockResolvedValueOnce({ claude: false })
+    .mockResolvedValueOnce(states("one", false))
     .mockReturnValueOnce(write.promise)
-    .mockResolvedValueOnce({ claude: false });
+    .mockResolvedValueOnce(states("two", false));
   const hook = renderHook(({ selected }) => useSyncStatus(selected, false), { initialProps: { selected: one } });
   await waitFor(() => expect(hook.result.current.loading).toBe(false));
   let pending!: ReturnType<typeof hook.result.current.toggle>;

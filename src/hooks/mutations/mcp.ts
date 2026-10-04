@@ -4,10 +4,12 @@ import { queryKeys } from "../queries";
 
 export interface UninstallMcpServerInput {
   name: string;
+  revision?: string;
 }
 
 export interface UpdateMcpServerConfigInput {
   name: string;
+  revision?: string;
   command: string;
   args: unknown[];
   env: Record<string, string>;
@@ -15,6 +17,7 @@ export interface UpdateMcpServerConfigInput {
 
 export interface InstallMcpServerInput {
   name: string;
+  targets?: string[];
   transport: "stdio" | "http" | "sse";
   command: string;
   args: string[];

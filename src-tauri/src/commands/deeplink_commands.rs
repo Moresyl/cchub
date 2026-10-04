@@ -2,11 +2,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
 
-use crate::db::{record_activity, DbState};
+use crate::db::DbState;
 use crate::deeplink::{
     decode_text_payload, merge_deeplink_request as merge_request_impl, parse_deeplink_url,
     DeepLinkErrorPayload, DeepLinkImportRequest, DeepLinkState,
 };
+#[cfg(test)]
 use crate::mcp::config::{self, McpServerConfig};
 
 fn provider_snapshot(request: &DeepLinkImportRequest) -> Result<String, String> {
@@ -289,74 +290,52 @@ pub fn import_mcp_servers_from_deeplink(
     db: State<'_, DbState>,
 ) -> Result<DeepLinkMcpImportResult, String> {
     if request.resource != "mcp" {
-        return Err("Deep link resource is not MCP".to_string());
+        return Err("Deep link resource is not MCP".into());
     }
-
     let apps = parse_target_apps(
         request
             .apps
             .as_deref()
-            .ok_or_else(|| "Missing apps field in MCP deep link".to_string())?,
+            .ok_or("Missing apps field in MCP deep link")?,
     )?;
-    let servers = parse_mcp_servers(&request)?;
-
-    let conn = db.0.lock().map_err(|error| error.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let mut imported_ids = Vec::new();
-    let mut failed = Vec::new();
-
-    for (server_name, server_config) in servers {
-        let mut sync_error: Option<String> = None;
-        for app in &apps {
-            if let Err(error) = config::sync_mcp_to_tool(&server_name, &server_config, app) {
-                sync_error = Some(match sync_error {
-                    Some(current) => format!("{current}; {app}: {error}"),
-                    None => format!("{app}: {error}"),
-                });
-            }
-        }
-
-        if let Some(error) = sync_error {
-            failed.push(DeepLinkImportFailure {
-                id: server_name,
-                error,
-            });
-            continue;
-        }
-
-        let args_json =
-            serde_json::to_string(&server_config.args).unwrap_or_else(|_| "[]".to_string());
-        let env_json =
-            serde_json::to_string(&server_config.env).unwrap_or_else(|_| "{}".to_string());
-        let transport = server_config
-            .transport_type
-            .clone()
-            .unwrap_or_else(|| "stdio".to_string());
-
-        conn.execute(
-            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, status, installed_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'deeplink', 'active', COALESCE((SELECT installed_at FROM mcp_servers WHERE id = ?1), ?7), ?7)",
-            rusqlite::params![
-                &server_name,
-                &server_name,
-                &server_config.command,
-                &args_json,
-                &env_json,
-                &transport,
-                &now,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-
-        record_activity(&conn, &server_name, "deeplink_import", "success", None);
-        imported_ids.push(server_name);
-    }
-
+    let (format, text) = decode_mcp_document(&request)?;
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    let imported = crate::mcp::operations::import_targets(&conn, format, &text, apps)?;
+    let imported_ids: Vec<_> = imported.into_iter().map(|row| row.server.id).collect();
     Ok(DeepLinkMcpImportResult {
         imported_count: imported_ids.len(),
         imported_ids,
-        failed,
+        failed: vec![],
     })
+}
+
+fn decode_mcp_document(request: &DeepLinkImportRequest) -> Result<(&'static str, String), String> {
+    let text = decode_text_payload(
+        request
+            .config
+            .as_deref()
+            .ok_or("Missing MCP configuration")?,
+    )
+    .map_err(String::from)?;
+    let value = crate::json_config::parse_json_object(&text)?;
+    if value.get("command").is_some()
+        || value.get("url").is_some()
+        || value.get("httpUrl").is_some()
+    {
+        let name = request
+            .name
+            .as_deref()
+            .ok_or("Single MCP config requires a name")?;
+        let tool = if value.get("command").is_some_and(Value::is_array)
+            || value.get("type").and_then(Value::as_str) == Some("remote")
+        {
+            "opencode"
+        } else {
+            "claude"
+        };
+        return Ok((tool, serde_json::json!({name: value}).to_string()));
+    }
+    Ok((super::mcp_commands::import_format(&text)?, text))
 }
 
 fn parse_target_apps(raw: &str) -> Result<Vec<String>, String> {
@@ -384,62 +363,7 @@ fn parse_target_apps(raw: &str) -> Result<Vec<String>, String> {
     Ok(apps)
 }
 
-fn parse_mcp_servers(
-    request: &DeepLinkImportRequest,
-) -> Result<Vec<(String, McpServerConfig)>, String> {
-    let config_value = request
-        .config
-        .as_deref()
-        .ok_or_else(|| "Missing config field in MCP deep link".to_string())?;
-    let config_text = decode_text_payload(config_value).map_err(String::from)?;
-    let parsed: Value =
-        serde_json::from_str(&config_text).map_err(|error| format!("Invalid MCP JSON: {error}"))?;
-
-    let mut servers = Vec::new();
-    let wrapped = parsed
-        .get("mcpServers")
-        .or_else(|| parsed.get("mcp"))
-        .and_then(Value::as_object);
-    if let Some(object) = wrapped {
-        for (name, value) in object {
-            if value.get("enabled").and_then(Value::as_bool) == Some(false) {
-                continue;
-            }
-            servers.push((name.clone(), parse_mcp_server_config(value)?));
-        }
-        if servers.is_empty() {
-            return Err("No enabled MCP servers found in deep link config".to_string());
-        }
-        return Ok(servers);
-    }
-
-    if parsed.get("command").is_some()
-        || parsed.get("url").is_some()
-        || parsed.get("httpUrl").is_some()
-    {
-        let name = request
-            .name
-            .clone()
-            .ok_or_else(|| "Single MCP config deep link requires a name field".to_string())?;
-        servers.push((name, parse_mcp_server_config(&parsed)?));
-        return Ok(servers);
-    }
-
-    if let Some(object) = parsed.as_object() {
-        for (name, value) in object {
-            if let Ok(config) = parse_mcp_server_config(value) {
-                servers.push((name.clone(), config));
-            }
-        }
-    }
-
-    if servers.is_empty() {
-        return Err("No MCP servers found in deep link config".to_string());
-    }
-
-    Ok(servers)
-}
-
+#[cfg(test)]
 fn parse_mcp_server_config(value: &Value) -> Result<McpServerConfig, String> {
     let server = config::parse_server_entry("deeplink", value, "deeplink", "")
         .ok_or_else(|| "MCP server config is disabled or missing a command/URL".to_string())?;

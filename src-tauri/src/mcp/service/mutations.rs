@@ -146,8 +146,18 @@ pub(crate) fn install(
     config: McpServerConfig,
     targets: Vec<String>,
 ) -> Result<CatalogServer, String> {
-    let spec = crate::mcp::native_entry::patch_connection(None, &name, "claude", &config)?;
-    install_batch(conn, "claude", vec![(name, spec)], targets)?
+    install_for_tool(conn, "claude", name, config, targets)
+}
+
+pub(crate) fn install_for_tool(
+    conn: &Connection,
+    tool: &str,
+    name: String,
+    config: McpServerConfig,
+    targets: Vec<String>,
+) -> Result<CatalogServer, String> {
+    let spec = crate::mcp::native_entry::patch_connection(None, &name, tool, &config)?;
+    install_batch(conn, tool, vec![(name, spec)], targets)?
         .pop()
         .ok_or_else(invalid)
 }
@@ -247,6 +257,46 @@ pub(crate) fn install_batch(
     })
 }
 
+pub(crate) fn import_targets(
+    conn: &Connection,
+    format_tool: &str,
+    text: &str,
+    targets: Vec<String>,
+) -> Result<Vec<CatalogServer>, String> {
+    let source_tool = targets.first().ok_or("MCP import requires a target tool")?;
+    for tool in &targets {
+        crate::mcp::native_read::Format::for_tool(tool)?;
+    }
+    let binding = native::configured_binding(conn, format_tool)?;
+    let canonical = crate::config_write::target_key(&binding.path)?;
+    let (container, entries) = crate::mcp::native_read::parse_entries(text, format_tool, true)?;
+    let entries = entries
+        .into_iter()
+        .map(|(name, entry)| {
+            let spec = NativeSpec::from_entry(&entry)?;
+            let origin = NativeOrigin::new(
+                binding.clone(),
+                canonical.clone(),
+                container.clone(),
+                name.clone(),
+                spec,
+            )?;
+            let spec = if source_tool == format_tool {
+                origin.spec
+            } else {
+                crate::mcp::native_entry::project_connection(&origin, source_tool)?
+            };
+            Ok((name, spec))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    install_batch(
+        conn,
+        source_tool,
+        entries,
+        targets.iter().skip(1).cloned().collect(),
+    )
+}
+
 pub(crate) fn update(
     conn: &Connection,
     id: &str,
@@ -255,10 +305,8 @@ pub(crate) fn update(
     env: std::collections::HashMap<String, String>,
     expected: Option<&str>,
 ) -> Result<(), String> {
-    let mut state = CatalogState::load(conn)?;
-    rows(conn)?;
+    let state = CatalogState::load(conn)?;
     let old = view::checked(&state, id, expected)?.clone();
-    let snapshot = native::checked_origin(conn, &old, false)?;
     let config = McpServerConfig {
         command,
         args,
@@ -271,6 +319,19 @@ pub(crate) fn update(
         &old.bindings[0].tool,
         &config,
     )?;
+    replace(conn, id, spec, expected)
+}
+
+pub(crate) fn replace(
+    conn: &Connection,
+    id: &str,
+    spec: NativeSpec,
+    expected: Option<&str>,
+) -> Result<(), String> {
+    let mut state = CatalogState::load(conn)?;
+    rows(conn)?;
+    let old = view::checked(&state, id, expected)?.clone();
+    let snapshot = native::checked_origin(conn, &old, false)?;
     let mut origin = NativeOrigin::new(
         old.bindings[0].clone(),
         old.canonical_path.clone(),

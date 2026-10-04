@@ -7,31 +7,7 @@ use super::super::types::*;
 use super::*;
 
 pub fn refresh_mcp_servers_from_scan(conn: &rusqlite::Connection) -> Result<usize, String> {
-    let scanned = crate::mcp::config::scan_all_mcp_servers();
-    let now = chrono::Utc::now().to_rfc3339();
-
-    for s in &scanned {
-        let args_json = serde_json::to_string(&s.args).unwrap_or_else(|_| "[]".to_string());
-        let env_json = serde_json::to_string(&s.env).unwrap_or_else(|_| "{}".to_string());
-
-        let existing_status: Option<String> = conn
-            .query_row(
-                "SELECT status FROM mcp_servers WHERE id = ?1",
-                rusqlite::params![s.name],
-                |row| row.get(0),
-            )
-            .ok();
-
-        let status = existing_status.unwrap_or_else(|| "active".to_string());
-
-        conn.execute(
-            "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, config_path, status, installed_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, COALESCE((SELECT installed_at FROM mcp_servers WHERE id = ?1), ?10), ?10)",
-            rusqlite::params![s.name, s.name, s.command, args_json, env_json, s.transport, s.source, s.config_path, status, now],
-        ).map_err(|e| e.to_string())?;
-    }
-
-    Ok(scanned.len())
+    Ok(crate::mcp::operations::refresh(conn)?.len())
 }
 
 pub fn run_full_rescan_from_conn(conn: &rusqlite::Connection) -> Result<FullRescanResult, String> {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchMcpServersPageData, queryKeys } from "../../hooks/queries";
 import type { McpServer } from "./helpers";
+import { knownMcpStates, readMcpStatuses } from "../../lib/mcpCatalog";
 
 type PageData = Awaited<ReturnType<typeof fetchMcpServersPageData>>;
 type AppStatus = Record<string, Record<string, boolean>>;
@@ -39,25 +40,14 @@ export function usePageData(zh: boolean) {
         setTools(data.tools);
         setSelected((current) => (current ? (data.servers.find((server) => server.id === current.id) ?? null) : null));
         setLoading(false);
-        const results = await Promise.allSettled(
-          data.servers.map(async (server) => {
-            const status = await invoke<Record<string, boolean>>("check_mcp_server_in_tools", {
-              serverName: server.name,
-            });
-            if (
-              !status ||
-              typeof status !== "object" ||
-              Array.isArray(status) ||
-              Object.values(status).some((value) => typeof value !== "boolean")
-            )
-              throw new Error("Invalid sync status");
-            return [server.id, status] as const;
-          }),
-        );
+        const ids = data.servers.filter((server) => server.origin).map((server) => server.id);
+        const results = ids.length
+          ? readMcpStatuses(await invoke("get_mcp_sync_statuses", { serverIds: ids }), ids)
+          : {};
         if (!ownsRequest()) return;
         const next: AppStatus = {};
-        for (const result of results) {
-          if (result.status === "fulfilled") next[result.value[0]] = result.value[1];
+        for (const id of ids) {
+          next[id] = knownMcpStates(results[id]);
         }
         setServerAppStatus(next);
       } catch {

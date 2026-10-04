@@ -7,6 +7,7 @@ pub(crate) mod native_json;
 pub(crate) mod native_read;
 pub(crate) mod native_toml;
 pub(crate) mod native_yaml;
+pub(crate) mod operations;
 pub mod process;
 pub mod registry;
 pub(crate) mod service;

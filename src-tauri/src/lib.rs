@@ -293,6 +293,8 @@ pub fn run() {
             commands::mcp_commands::sync_mcp_server_to_tool,
             commands::mcp_commands::unsync_mcp_server_from_tool,
             commands::mcp_commands::check_mcp_server_in_tools,
+            commands::mcp_commands::get_mcp_sync_statuses,
+            commands::mcp_commands::export_mcp_server_config,
             commands::mcp_commands::check_runtime_dependencies,
             commands::mcp_commands::import_mcp_servers_from_file,
             skill_commands::scan_skills,

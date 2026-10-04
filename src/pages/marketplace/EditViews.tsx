@@ -1,12 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Suspense, lazy } from "react";
-import { ArrowLeft, RotateCcw, Save, Wand2, Zap } from "lucide-react";
+import { ArrowLeft, RotateCcw, Save, Zap } from "lucide-react";
 
-import { showToast } from "../../components/Toast";
 import { t } from "../../lib/i18n";
 import type { InstalledMcpServer, SkillEntry } from "./helpers";
 
-import CodeEditor from "../../components/DeferredCodeEditor";
+import McpServerEditView from "../mcp-servers/EditView";
 
 const MarkdownEditor = lazy(() => import("../../components/MarkdownEditor"));
 
@@ -75,6 +74,7 @@ export function SkillEditView(props: SkillEditViewProps) {
 }
 
 interface McpEditViewProps {
+  saving?: boolean;
   locale: string;
   editingMcp: InstalledMcpServer;
   editCommand: string;
@@ -92,113 +92,30 @@ interface McpEditViewProps {
 }
 
 export function McpEditView(props: McpEditViewProps) {
-  const { locale, editingMcp, editCommand, editArgs, editEnv, hasMcpChanges } = props;
-  const i = t();
   return (
-    <div className="animate-in" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div className="page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            className="btn btn-ghost btn-icon-sm"
-            onClick={() => props.setEditingMcp(null)}
-            title={locale === "zh" ? "返回" : "Back"}
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <div>
-            <h2 className="page-title">{editingMcp.name}</h2>
-            <p className="page-subtitle">{locale === "zh" ? "编辑 MCP 服务器配置" : "Edit MCP server configuration"}</p>
-          </div>
-        </div>
-        {hasMcpChanges && <span className="badge badge-warning">{locale === "zh" ? "未保存" : "Unsaved"}</span>}
-      </div>
-
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 20,
-          paddingBottom: 20,
-        }}
-      >
-        <div>
-          <span className="field-label">{locale === "zh" ? "命令" : "Command"}</span>
-          <input
-            className="input"
-            style={{ fontFamily: "var(--font-code)", fontSize: 12 }}
-            value={editCommand}
-            onChange={(e) => props.setEditCommand(e.target.value)}
-            placeholder="npx, node, python..."
-          />
-        </div>
-
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <span className="field-label" style={{ marginBottom: 0 }}>
-              {locale === "zh" ? "参数" : "Arguments"}
-            </span>
-            <button
-              className="btn btn-ghost btn-icon-sm"
-              title="Format"
-              onClick={() => {
-                try {
-                  props.setEditArgs(JSON.stringify(JSON.parse(editArgs), null, 2));
-                } catch (error) {
-                  showToast("error", String(error));
-                }
-              }}
-            >
-              <Wand2 size={12} />
-            </button>
-          </div>
-          <CodeEditor value={editArgs} onChange={props.setEditArgs} language="json" minHeight={160} />
-        </div>
-
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <span className="field-label" style={{ marginBottom: 0 }}>
-              {locale === "zh" ? "环境变量" : "Environment"}
-            </span>
-            <button
-              className="btn btn-ghost btn-icon-sm"
-              title="Format"
-              onClick={() => {
-                try {
-                  props.setEditEnv(JSON.stringify(JSON.parse(editEnv), null, 2));
-                } catch (error) {
-                  showToast("error", String(error));
-                }
-              }}
-            >
-              <Wand2 size={12} />
-            </button>
-          </div>
-          <CodeEditor value={editEnv} onChange={props.setEditEnv} language="json" minHeight={160} />
-        </div>
-      </div>
-
-      <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        {hasMcpChanges && (
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
+    <McpServerEditView
+      selected={props.editingMcp}
+      i={t()}
+      zh={props.locale === "zh"}
+      editCommand={props.editCommand}
+      setEditCommand={props.setEditCommand}
+      editArgs={props.editArgs}
+      setEditArgs={props.setEditArgs}
+      editEnv={props.editEnv}
+      setEditEnv={props.setEditEnv}
+      setEditing={() => props.setEditingMcp(null)}
+      handleSave={props.handleSaveMcpConfig}
+      saving={props.saving}
+      saveDisabled={!props.hasMcpChanges}
+      onRevert={
+        props.hasMcpChanges
+          ? () => {
               props.setEditCommand(props.originalMcpCommand);
               props.setEditArgs(props.originalMcpArgs);
               props.setEditEnv(props.originalMcpEnv);
-            }}
-          >
-            <RotateCcw size={14} />
-            {locale === "zh" ? "撤销" : "Revert"}
-          </button>
-        )}
-        <button className="btn btn-primary btn-sm" onClick={props.handleSaveMcpConfig} disabled={!hasMcpChanges}>
-          <Save size={14} />
-          {i.common.save}
-        </button>
-      </div>
-    </div>
+            }
+          : undefined
+      }
+    />
   );
 }

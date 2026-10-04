@@ -1,8 +1,10 @@
 import { memo } from "react";
 import { Edit3, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
+import type { McpOrigin } from "../lib/mcpCatalog";
 
 export interface McpServerCardServer {
+  origin?: McpOrigin | null;
   id: string;
   name: string;
   command: string | null;

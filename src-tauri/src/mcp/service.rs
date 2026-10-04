@@ -1,5 +1,5 @@
-//! One catalog/projection service. Command activation follows the complete
-//! mutation and renderer migration; never switch discovery alone to new IDs.
+//! Shared native catalog/projection service used by command operations.
+//! Call production mutations through operations to preserve lock ordering.
 use super::sources::{NativeOrigin, NativeSpec, SourceBinding};
 use crate::db::models::McpServer;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -156,7 +156,10 @@ pub(super) fn rows(conn: &Connection) -> Result<Vec<McpServer>, String> {
 
 pub(crate) use api::{resolve_id, status, statuses};
 pub(crate) use catalog::prepare_refresh;
-pub(crate) use mutations::{import_document, install, sync, uninstall, unsync, update};
+pub(crate) use mutations::{
+    import_document, import_targets, install, install_batch, install_for_tool, replace, sync,
+    uninstall, unsync, update,
+};
 pub(crate) use view::{export, list, CatalogServer, ToolStatus};
 
 #[cfg(test)]

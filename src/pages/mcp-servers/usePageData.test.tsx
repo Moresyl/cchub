@@ -9,7 +9,11 @@ vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => client }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../../hooks/queries", () => ({ queryKeys: { mcpServersPage: ["mcp"] }, fetchMcpServersPageData: vi.fn() }));
 beforeEach(() => {
-  vi.mocked(invoke).mockResolvedValue({ claude: true });
+  vi.mocked(invoke).mockImplementation(async (_command, args) =>
+    Object.fromEntries(
+      (args as { serverIds: string[] }).serverIds.map((id) => [id, { claude: { state: "source", disabled: false } }]),
+    ),
+  );
 });
 afterEach(() => {
   cleanup();
@@ -29,6 +33,7 @@ function server(id: string): McpServer {
   return {
     id,
     name: id,
+    origin: { native_name: id, revision: "rev", bindings: [] },
     command: "node",
     args: "[]",
     env: "{}",
@@ -58,8 +63,8 @@ it("ignores an older list response after a newer refresh and does not read its s
 });
 
 it("keeps the latest status request pending when an older status finishes", async () => {
-  const old = deferred<Record<string, boolean>>();
-  const fresh = deferred<Record<string, boolean>>();
+  const old = deferred<unknown>();
+  const fresh = deferred<unknown>();
   client.fetchQuery.mockResolvedValue(page("same"));
   vi.mocked(invoke).mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
   const hook = renderHook(() => usePageData(false));
@@ -69,12 +74,12 @@ it("keeps the latest status request pending when an older status finishes", asyn
     refresh = hook.result.current.loadPageData({ force: true });
   });
   await act(async () => {
-    old.resolve({ claude: true });
+    old.resolve({ same: { claude: { state: "source", disabled: false } } });
   });
   expect(hook.result.current.appStatusLoading).toBe(true);
   expect(hook.result.current.serverAppStatus).toEqual({});
   await act(async () => {
-    fresh.resolve({ claude: false });
+    fresh.resolve({ same: { claude: { state: "missing", disabled: false } } });
     await refresh;
   });
   expect(hook.result.current.serverAppStatus).toEqual({ same: { claude: false } });
@@ -97,25 +102,30 @@ it("keeps cached content on refresh failure but removes stale known states and p
   expect(hook.result.current.loading).toBe(false);
 });
 
-it("treats rejected and malformed states as unknown and clears removed selection", async () => {
-  client.fetchQuery
-    .mockResolvedValueOnce(page("removed"))
-    .mockResolvedValueOnce({ servers: [server("valid"), server("bad"), server("failed")], tools: [] });
-  const hook = renderHook(() => usePageData(false));
-  await act(async () => {});
-  act(() => {
-    hook.result.current.setSelected(server("removed"));
-  });
-  vi.mocked(invoke)
-    .mockResolvedValueOnce({ claude: false })
-    .mockResolvedValueOnce({ claude: "true" })
-    .mockRejectedValueOnce(new Error("private"));
-  await act(async () => {
-    await hook.result.current.loadPageData();
-  });
-  expect(hook.result.current.selected).toBeNull();
-  expect(hook.result.current.serverAppStatus).toEqual({ valid: { claude: false } });
-});
+it.each([false, true])(
+  "treats invalid batch statuses as unknown and clears removed selection (rejected=%s)",
+  async (rejected) => {
+    client.fetchQuery
+      .mockResolvedValueOnce(page("removed"))
+      .mockResolvedValueOnce({ servers: [server("valid"), server("bad"), server("failed")], tools: [] });
+    const hook = renderHook(() => usePageData(false));
+    await act(async () => {});
+    act(() => {
+      hook.result.current.setSelected(server("removed"));
+    });
+    if (rejected) vi.mocked(invoke).mockRejectedValueOnce(new Error("private"));
+    else
+      vi.mocked(invoke).mockResolvedValueOnce({
+        valid: { claude: { state: "missing", disabled: false } },
+        bad: { claude: "true" },
+      });
+    await act(async () => {
+      await hook.result.current.loadPageData();
+    });
+    expect(hook.result.current.selected).toBeNull();
+    expect(hook.result.current.serverAppStatus).toEqual({});
+  },
+);
 
 it("does not launch status reads after the page unmounts", async () => {
   const request = deferred<ReturnType<typeof page>>();

@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { knownMcpStates, readMcpStatuses } from "../lib/mcpCatalog";
 import { getLocale, t } from "../lib/i18n";
 import { showToast } from "../components/Toast";
 import { type FeaturedSkillBundle } from "../components/FeaturedSkillBundleCard";
@@ -41,12 +42,13 @@ import {
   performLoadCustomSource,
   performLoadRecommendedRepo,
   performRefreshInstalledMcpDetails,
-  performSaveMcpConfig,
   performSaveSkillContent,
   performUninstallMcp,
   performUninstallSkill,
 } from "./marketplace/handlers";
 import { performMarketplaceLoadAll } from "./marketplace/loadAll";
+import { resolveInstalledMcp } from "./marketplace/mcpSource";
+import { useConfigSave } from "./mcp-servers/useConfigSave";
 import {
   CustomSourceModal,
   EnvModal,
@@ -147,10 +149,7 @@ export default function Marketplace() {
     "hermes",
   ]);
   // Per-tool installed indices: { toolId -> Set of server names/ids } and { toolId -> Set of skill names (lowercase) }
-  // Initial Claude state derived from `cachedLocalData` so the UI doesn't flash empty.
-  const [installedIdsByTool, setInstalledIdsByTool] = useState<Record<string, Set<string>>>(() => ({
-    claude: new Set(cachedLocalData?.servers.flatMap((server) => [server.id, server.name]) ?? []),
-  }));
+  const [installedIdsByTool, setInstalledIdsByTool] = useState<Record<string, Set<string>>>({});
   const [installedSkillsByTool, setInstalledSkillsByTool] = useState<Record<string, Set<string>>>(() => ({
     claude: new Set(cachedLocalData?.installedSkills.map((skill) => skill.name.toLowerCase()) ?? []),
   }));
@@ -166,7 +165,7 @@ export default function Marketplace() {
   const [mcpPage, setMcpPage] = useState(0);
   const [mcpTotal, setMcpTotal] = useState(cachedSearchData?.total ?? 0);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [installedMcpDetails, setInstalledMcpDetails] = useState<InstalledMcpServer[]>(cachedLocalData?.servers ?? []);
+  const [, setInstalledMcpDetails] = useState<InstalledMcpServer[]>(cachedLocalData?.servers ?? []);
   const [previewMcp, setPreviewMcp] = useState<RegistryEntry | null>(null);
   const [previewSkill, setPreviewSkill] = useState<SkillEntry | null>(null);
   const [editingSkill, setEditingSkill] = useState<SkillEntry | null>(null);
@@ -206,26 +205,17 @@ export default function Marketplace() {
     }
     return map;
   }, []);
-  // Helper: probe each MCP server name across all 6 tools so the per-tool
-  // map covers Claude AND any tool the server has been synced to.
-  const rebuildMcpByTool = useCallback(async (serverNames: string[]) => {
-    if (serverNames.length === 0) return {} as Record<string, Set<string>>;
-    const results = await Promise.all(
-      serverNames.map(async (name) => {
-        try {
-          const map = await invoke<Record<string, boolean>>("check_mcp_server_in_tools", { serverName: name });
-          return { name, map };
-        } catch {
-          return { name, map: { claude: true } as Record<string, boolean> };
-        }
-      }),
-    );
+  const rebuildMcpByTool = useCallback(async (servers: InstalledMcpServer[]) => {
+    const resolved = servers.filter((server) => server.origin);
+    if (!resolved.length) return {};
+    const ids = resolved.map((server) => server.id);
+    const statuses = readMcpStatuses(await invoke("get_mcp_sync_statuses", { serverIds: ids }), ids);
     const out: Record<string, Set<string>> = {};
-    for (const { name, map } of results) {
-      for (const [toolId, present] of Object.entries(map)) {
+    for (const server of resolved) {
+      for (const [tool, present] of Object.entries(knownMcpStates(statuses[server.id]))) {
         if (!present) continue;
-        if (!out[toolId]) out[toolId] = new Set();
-        out[toolId].add(name);
+        (out[tool] ??= new Set()).add(server.name);
+        out[tool].add(server.id);
       }
     }
     return out;
@@ -350,12 +340,7 @@ export default function Marketplace() {
   const startMcpEdit = useCallback(
     async (entry: RegistryEntry) => {
       try {
-        let installed =
-          installedMcpDetails.find((server) => server.id === entry.id || server.name === entry.name) || null;
-        if (!installed) {
-          const refreshed = await refreshInstalledMcpDetails();
-          installed = refreshed.find((server) => server.id === entry.id || server.name === entry.name) || null;
-        }
+        const installed = await resolveInstalledMcp(entry, activeTool, await refreshInstalledMcpDetails());
         if (!installed) {
           showToast("error", locale === "zh" ? "未找到已安装的 MCP 配置" : "Installed MCP config not found");
           return;
@@ -370,22 +355,20 @@ export default function Marketplace() {
         showToast("error", locale === "zh" ? "打开 MCP 编辑器失败" : "Failed to open MCP editor");
       }
     },
-    [installedMcpDetails, locale, refreshInstalledMcpDetails],
+    [activeTool, locale, refreshInstalledMcpDetails],
   );
-  const handleSaveMcpConfig = useCallback(() => {
+  const mcpSave = useConfigSave(locale === "zh");
+  const handleSaveMcpConfig = useCallback(async () => {
     if (!editingMcp) return;
-    return performSaveMcpConfig({
-      editingMcp,
-      editCommand,
-      editArgs,
-      editEnv,
-      locale,
-      updateMcpServerConfigMutation,
-      refreshInstalledMcpDetails,
-      setEditingMcp,
-      setEntries,
-    });
-  }, [editArgs, editCommand, editEnv, editingMcp, locale, refreshInstalledMcpDetails, updateMcpServerConfigMutation]);
+    const saved = await mcpSave.save(
+      { name: editingMcp.id, transport: editingMcp.transport, command: editCommand, args: editArgs, env: editEnv },
+      (config) => updateMcpServerConfigMutation.mutateAsync({ ...config, revision: editingMcp.origin?.revision }),
+    );
+    if (!saved) return;
+    setEditingMcp(null);
+    showToast("success", locale === "zh" ? "MCP 配置已保存" : "MCP configuration saved");
+    await loadAll({ force: true });
+  }, [editArgs, editCommand, editEnv, editingMcp, locale, loadAll, mcpSave, updateMcpServerConfigMutation]);
 
   const handleSearch = useCallback(async () => {
     if (!search.trim()) {
@@ -680,9 +663,10 @@ export default function Marketplace() {
         entry,
         activeTool,
         locale,
+        refreshInstalledMcpDetails,
         setInstalledIdsByTool,
       }),
-    [activeTool, locale],
+    [activeTool, locale, refreshInstalledMcpDetails],
   );
   const handleEditMarketSkill = useCallback(
     (skill: SkillEntry) => {
@@ -753,6 +737,7 @@ export default function Marketplace() {
   if (editingMcp) {
     return (
       <McpEditView
+        saving={mcpSave.saving}
         locale={locale}
         editingMcp={editingMcp}
         editCommand={editCommand}

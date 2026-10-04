@@ -1,9 +1,11 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { showToast } from "../../components/Toast";
+import { invoke } from "@tauri-apps/api/core";
 import { useConfigCopy } from "./useConfigCopy";
 import type { McpServer } from "./helpers";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../../components/Toast", () => ({ showToast: vi.fn() }));
 const server: McpServer = {
   id: "one",
@@ -20,6 +22,11 @@ const server: McpServer = {
 };
 const write = vi.fn();
 beforeEach(() => {
+  vi.mocked(invoke)
+    .mockReset()
+    .mockResolvedValue(
+      JSON.stringify({ command: "node", args: ["server.js"], env: { TOKEN: "private" }, timeout: 45, disabled: true }),
+    );
   write.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal("navigator", { clipboard: { writeText: write } });
 });
@@ -29,18 +36,19 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-it.each(["stdio", "http", "sse"])("copies validated %s connection fields", async (transport) => {
-  const selected = { ...server, transport, command: transport === "stdio" ? "node" : "https://example.test/mcp" };
-  const hook = renderHook(() => useConfigCopy(selected, false));
+it("copies the full native configuration by origin ID, including extension fields", async () => {
+  const hook = renderHook(() => useConfigCopy(server, false));
   await act(async () => {
     await hook.result.current.copy();
   });
-  const result = JSON.parse(write.mock.calls[0][0]);
-  expect(result).toEqual(
-    transport === "stdio"
-      ? { command: "node", args: ["server.js"], env: { TOKEN: "private" } }
-      : { type: transport, url: selected.command, headers: { TOKEN: "private" } },
-  );
+  expect(invoke).toHaveBeenCalledWith("export_mcp_server_config", { serverId: "one" });
+  expect(JSON.parse(write.mock.calls[0][0])).toEqual({
+    command: "node",
+    args: ["server.js"],
+    env: { TOKEN: "private" },
+    timeout: 45,
+    disabled: true,
+  });
   expect(hook.result.current.copied).toBe(true);
 });
 
@@ -87,17 +95,22 @@ it("reports clipboard failure without exposing native errors and permits retry",
   expect(hook.result.current.copied).toBe(true);
 });
 
-it.each([
-  { args: "[1]" },
-  { env: "null" },
-  { env: "[]" },
-  { transport: "unknown" },
-  { transport: "http", command: "file:///private" },
-])("refuses invalid stored fields before copying: %j", async (invalid) => {
-  const hook = renderHook(() => useConfigCopy({ ...server, ...invalid }, false));
+it.each(["null", "[]", "{", '"text"'])("refuses malformed native exports: %s", async (invalid) => {
+  vi.mocked(invoke).mockResolvedValueOnce(invalid);
+  const hook = renderHook(() => useConfigCopy(server, false));
   await act(async () => {
     await hook.result.current.copy();
   });
   expect(write).not.toHaveBeenCalled();
   expect(hook.result.current.copied).toBe(false);
+});
+
+it("does not copy stale connection fields when native export fails", async () => {
+  vi.mocked(invoke).mockRejectedValueOnce(new Error("private path"));
+  const hook = renderHook(() => useConfigCopy(server, false));
+  await act(async () => {
+    await hook.result.current.copy();
+  });
+  expect(write).not.toHaveBeenCalled();
+  expect(showToast).toHaveBeenCalled();
 });

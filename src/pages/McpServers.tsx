@@ -66,6 +66,7 @@ export default function McpServers() {
   const [editCommand, setEditCommand] = useState("");
   const [editArgs, setEditArgs] = useState("");
   const [editEnv, setEditEnv] = useState("");
+  const [editRevision, setEditRevision] = useState<string>();
   const [healthResults, setHealthResults] = useState<Record<string, HealthCheckResult>>({});
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -140,7 +141,7 @@ export default function McpServers() {
   const doDelete = useCallback(
     async (server: McpServer) => {
       try {
-        await uninstallMcpServerMutation.mutateAsync({ name: server.name });
+        await uninstallMcpServerMutation.mutateAsync({ name: server.id, revision: server.origin?.revision });
         setServers((prev) => prev.filter((s) => s.id !== server.id));
         if (selected?.id === server.id) setSelected(null);
       } catch (e) {
@@ -151,6 +152,7 @@ export default function McpServers() {
   );
 
   const startEdit = useCallback((server: McpServer) => {
+    setEditRevision(server.origin?.revision);
     setEditing(true);
     setSaveSuccess(false);
     setEditCommand(server.command || "");
@@ -161,8 +163,8 @@ export default function McpServers() {
   const handleSave = useCallback(async () => {
     if (!selected) return;
     const saved = await saveConfig(
-      { name: selected.name, transport: selected.transport, command: editCommand, args: editArgs, env: editEnv },
-      (config) => updateMcpServerConfigMutation.mutateAsync(config),
+      { name: selected.id, transport: selected.transport, command: editCommand, args: editArgs, env: editEnv },
+      (config) => updateMcpServerConfigMutation.mutateAsync({ ...config, revision: editRevision }),
     );
     if (saved) {
       setEditing(false);
@@ -170,7 +172,7 @@ export default function McpServers() {
       setTimeout(() => setSaveSuccess(false), 3000);
       await loadPageData({ force: true });
     }
-  }, [saveConfig, editArgs, editCommand, editEnv, loadPageData, selected, updateMcpServerConfigMutation]);
+  }, [saveConfig, editArgs, editCommand, editEnv, editRevision, loadPageData, selected, updateMcpServerConfigMutation]);
 
   const openWizard = useCallback(() => {
     setWizardDraft({
@@ -209,20 +211,11 @@ export default function McpServers() {
         command: wizardDraft.command.trim(),
         args: wizardValidation.parsedArgs,
         env: wizardValidation.parsedEnv,
+        targets: wizardSyncTargets,
       });
-
-      for (const toolId of wizardSyncTargets) {
-        await invoke("sync_mcp_server_to_tool", {
-          serverName: created.name,
-          targetTool: toolId,
-        });
-      }
-
-      const health = await invoke<HealthCheckResult>("check_mcp_server_health", { name: created.name });
-      setHealthResults((current) => ({ ...current, [health.server_id]: health }));
-      await loadPageData({ force: true });
       setSelected(created);
       closeWizard();
+      await loadPageData({ force: true });
       showToast(
         "success",
         zh
@@ -668,6 +661,7 @@ export default function McpServers() {
                 getSourceLabel={getSourceLabel}
                 installedTools={installedTools}
                 toolSyncStatus={syncStatus.status}
+                toolStates={syncStatus.states}
                 syncingTo={syncStatus.syncingTo}
                 statusLoading={syncStatus.loading}
                 statusError={syncStatus.error}

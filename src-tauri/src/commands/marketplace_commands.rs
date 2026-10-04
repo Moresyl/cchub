@@ -59,45 +59,22 @@ pub fn install_from_marketplace(
     command: String,
     args: Vec<String>,
     env_values: HashMap<String, String>,
+    target_tool: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<McpServer, String> {
-    // Write to Claude Code settings.json
-    registry::install_from_registry(&name, &command, &args, &env_values)?;
-
-    // Save to DB
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".to_string());
-    let env_json = serde_json::to_string(&env_values).unwrap_or_else(|_| "{}".to_string());
-
-    conn.execute(
-        "INSERT OR REPLACE INTO mcp_servers (id, name, command, args, env, transport, source, status, installed_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'stdio', 'marketplace', 'active', ?6, ?6)",
-        rusqlite::params![name, name, command, args_json, env_json, now],
-    ).map_err(|e| e.to_string())?;
-
-    record_activity(&conn, &name, "marketplace_install", "success", None);
-
-    Ok(McpServer {
-        id: name.clone(),
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    Ok(crate::mcp::operations::install_for_tool(
+        &conn,
+        target_tool.as_deref().unwrap_or("claude"),
         name,
-        package_name: None,
-        version: None,
-        transport: "stdio".to_string(),
-        command: Some(command),
-        args: args_json,
-        env: env_json,
-        status: "active".to_string(),
-        source: "marketplace".to_string(),
-        config_path: dirs::home_dir().map(|h| {
-            h.join(".claude")
-                .join("settings.json")
-                .to_string_lossy()
-                .to_string()
-        }),
-        installed_at: Some(now.clone()),
-        updated_at: Some(now),
-    })
+        crate::mcp::config::McpServerConfig {
+            command,
+            args,
+            env: env_values,
+            transport_type: Some("stdio".into()),
+        },
+    )?
+    .server)
 }
 
 // ── Skills Marketplace ──

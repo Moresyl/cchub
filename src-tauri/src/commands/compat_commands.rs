@@ -673,16 +673,17 @@ pub fn clear_current_profile(tool_id: String, db: State<'_, DbState>) -> Result<
 
 #[tauri::command]
 pub fn delete_mcp_server(id: String, db: State<'_, DbState>) -> Result<(), String> {
-    crate::commands::mcp_commands::uninstall_mcp_server(id, db)
+    crate::commands::mcp_commands::uninstall_mcp_server(id, None, db)
 }
 
 #[tauri::command]
 pub fn delete_mcp_server_in_config(
-    _app: String,
+    app: String,
     id: String,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
-    crate::commands::mcp_commands::uninstall_mcp_server(id, db)
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    crate::mcp::operations::remove_from_tool(&conn, &app, &id)
 }
 
 #[tauri::command]
@@ -691,27 +692,20 @@ pub fn upsert_mcp_server(
     spec: serde_json::Value,
     db: State<'_, DbState>,
 ) -> Result<crate::db::models::McpServer, String> {
-    let config: crate::mcp::config::McpServerConfig = serde_json::from_value(spec)
-        .map_err(|error| format!("Invalid MCP server config: {error}"))?;
-    crate::commands::mcp_commands::install_mcp_server(
-        id,
-        config.transport_type,
-        config.command,
-        config.args,
-        config.env,
-        db,
-    )
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    crate::mcp::operations::upsert_native(&conn, "claude", &id, spec)
 }
 
 #[tauri::command]
 pub fn upsert_mcp_server_in_config(
-    _app: String,
+    app: String,
     id: String,
     spec: serde_json::Value,
     _sync_other_side: Option<bool>,
     db: State<'_, DbState>,
 ) -> Result<crate::db::models::McpServer, String> {
-    upsert_mcp_server(id, spec, db)
+    let conn = db.0.lock().map_err(|_| "MCP settings are unavailable")?;
+    crate::mcp::operations::upsert_native(&conn, &app, &id, spec)
 }
 
 #[tauri::command]
@@ -724,7 +718,7 @@ pub fn toggle_mcp_app(
     if enabled {
         crate::commands::mcp_commands::sync_mcp_server_to_tool(server_id, app, db)
     } else {
-        crate::commands::mcp_commands::unsync_mcp_server_from_tool(server_id, app)
+        crate::commands::mcp_commands::unsync_mcp_server_from_tool(server_id, app, db)
     }
 }
 

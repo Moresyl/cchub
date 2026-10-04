@@ -68,6 +68,7 @@ export interface ProviderConfigFragmentQueryResult {
 }
 
 export interface McpServerQueryResult {
+  origin?: import("../lib/mcpCatalog").McpOrigin | null;
   id: string;
   name: string;
   command: string | null;
@@ -400,11 +401,12 @@ export async function fetchClaudeMdPageData() {
 }
 
 export async function fetchMarketplaceLocalData() {
-  // 复用 mcpServersPage / skillsPage 的缓存，避免重复扫描 scan_mcp_servers / scan_skills
+  // Refresh source identities and revisions before opening marketplace editors.
   const [mcpPage, skillsPage] = await Promise.all([
-    queryClient.ensureQueryData({
+    queryClient.fetchQuery({
       queryKey: queryKeys.mcpServersPage,
       queryFn: fetchMcpServersPageData,
+      staleTime: 0,
     }),
     queryClient.ensureQueryData({
       queryKey: queryKeys.skillsPage,

@@ -21,6 +21,8 @@ interface McpServerEditViewProps {
   setEditing: (value: boolean) => void;
   handleSave: () => void;
   saving?: boolean;
+  saveDisabled?: boolean;
+  onRevert?: () => void;
 }
 
 export default function McpServerEditView({
@@ -36,6 +38,8 @@ export default function McpServerEditView({
   setEditing,
   handleSave,
   saving = false,
+  saveDisabled = false,
+  onRevert,
 }: McpServerEditViewProps) {
   const commandId = useId();
   const remote = selected.transport !== "stdio";
@@ -172,10 +176,15 @@ export default function McpServerEditView({
       </div>
 
       <div className="sticky-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        {onRevert && (
+          <Button type="button" variant="ghost" disabled={saving} onClick={onRevert}>
+            {zh ? "撤销更改" : "Revert changes"}
+          </Button>
+        )}
         <Button type="button" variant="secondary" disabled={saving} onClick={() => setEditing(false)}>
           {i.mcp.cancel}
         </Button>
-        <Button type="button" onClick={handleSave} disabled={saving} aria-busy={saving}>
+        <Button type="button" onClick={handleSave} disabled={saving || saveDisabled} aria-busy={saving}>
           <Save size={14} />
           {saving ? (zh ? "保存中…" : "Saving…") : i.mcp.save}
         </Button>

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../components/Toast";
 import type { McpServer } from "./helpers";
+import { knownMcpStates, readMcpStatuses, type McpToolStatuses } from "../../lib/mcpCatalog";
 
 type Status = Record<string, boolean>;
 interface Snapshot {
   id: string;
   status: Status;
+  states: McpToolStatuses;
   loading: boolean;
   error: boolean;
 }
@@ -25,22 +27,18 @@ export function useSyncStatus(selected: McpServer | null, zh: boolean) {
     if (!server) return;
     const request = ++generation.current;
     snapshotRef.current = null;
-    setSnapshot({ id: server.id, status: {}, loading: true, error: false });
+    setSnapshot({ id: server.id, status: {}, states: {}, loading: true, error: false });
     try {
-      const status = await invoke<Status>("check_mcp_server_in_tools", { serverName: server.name });
-      if (
-        !status ||
-        typeof status !== "object" ||
-        Array.isArray(status) ||
-        Object.values(status).some((value) => typeof value !== "boolean")
-      )
-        throw new Error("Invalid sync status");
+      const states = readMcpStatuses(await invoke("get_mcp_sync_statuses", { serverIds: [server.id] }), [server.id])[
+        server.id
+      ];
+      const status = knownMcpStates(states);
       if (request === generation.current && current.current?.id === server.id) {
-        setSnapshot({ id: server.id, status, loading: false, error: false });
+        setSnapshot({ id: server.id, status, states, loading: false, error: false });
       }
     } catch {
       if (request === generation.current && current.current?.id === server.id) {
-        setSnapshot({ id: server.id, status: {}, loading: false, error: true });
+        setSnapshot({ id: server.id, status: {}, states: {}, loading: false, error: true });
       }
     }
   }, []);
@@ -71,7 +69,7 @@ export function useSyncStatus(selected: McpServer | null, zh: boolean) {
       const enabled = !known.status[toolId];
       try {
         await invoke(enabled ? "sync_mcp_server_to_tool" : "unsync_mcp_server_from_tool", {
-          serverName: server.name,
+          serverName: server.id,
           targetTool: toolId,
         });
         if (current.current?.id === server.id) await read();
@@ -90,6 +88,7 @@ export function useSyncStatus(selected: McpServer | null, zh: boolean) {
   const matches = selected && snapshot?.id === selected.id;
   return {
     status: matches ? snapshot.status : {},
+    states: matches ? snapshot.states : {},
     loading: !!selected && (!matches || snapshot.loading),
     error: !!matches && snapshot.error,
     syncingTo,

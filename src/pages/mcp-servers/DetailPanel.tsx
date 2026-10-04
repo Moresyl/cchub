@@ -5,6 +5,7 @@ import type { DetectedTool } from "../../types/skills";
 import type { HealthCheckResult, McpServer } from "./helpers";
 import CodeEditor from "../../components/DeferredCodeEditor";
 import { Button } from "../../components/ui/button";
+import type { McpToolStatuses } from "../../lib/mcpCatalog";
 
 type DetailTab = "overview" | "config" | "sync";
 
@@ -22,6 +23,7 @@ interface McpServerDetailPanelProps {
   getSourceLabel: (source: string) => string;
   installedTools: DetectedTool[];
   toolSyncStatus: Record<string, boolean>;
+  toolStates?: McpToolStatuses;
   syncingTo: string | null;
   toggleToolSync: (toolId: string) => void;
   onClose: () => void;
@@ -44,6 +46,7 @@ export default function McpServerDetailPanel({
   getSourceLabel,
   installedTools,
   toolSyncStatus,
+  toolStates = {},
   syncingTo,
   toggleToolSync,
   onClose,
@@ -284,6 +287,7 @@ export default function McpServerDetailPanel({
             {installedTools.length > 0 ? (
               <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)]">
                 {installedTools.map((tool) => {
+                  const state = toolStates[tool.id];
                   const isSynced = toolSyncStatus[tool.id] || false;
                   const unknown = statusLoading || statusError || typeof toolSyncStatus[tool.id] !== "boolean";
                   return (
@@ -298,17 +302,33 @@ export default function McpServerDetailPanel({
                             ? zh
                               ? "读取中…"
                               : "Loading…"
-                            : unknown
+                            : state?.state === "conflict"
                               ? zh
-                                ? "状态未知"
-                                : "Unknown status"
-                              : isSynced
+                                ? "配置已在外部更改，请先处理冲突"
+                                : "Configuration changed externally; resolve the conflict first"
+                              : state?.state === "unowned"
                                 ? zh
-                                  ? "已同步"
-                                  : "Synced"
-                                : zh
-                                  ? "未同步"
-                                  : "Not synced"}
+                                  ? "已有独立配置，不会覆盖"
+                                  : "Independent configuration exists; it will not be overwritten"
+                                : state?.disabled
+                                  ? zh
+                                    ? "配置存在，已在目标工具中禁用"
+                                    : "Configuration exists but is disabled in this tool"
+                                  : state?.state === "source"
+                                    ? zh
+                                      ? "原始配置"
+                                      : "Original configuration"
+                                    : unknown
+                                      ? zh
+                                        ? "状态未知"
+                                        : "Unknown status"
+                                      : isSynced
+                                        ? zh
+                                          ? "已同步"
+                                          : "Synced"
+                                        : zh
+                                          ? "未同步"
+                                          : "Not synced"}
                         </div>
                       </div>
                       <Button

@@ -30,6 +30,7 @@ export function dedupByName<T extends { name: string }>(arr: T[]): T[] {
 }
 
 export interface InstalledMcpServer {
+  origin?: import("../../lib/mcpCatalog").McpOrigin | null;
   id: string;
   name: string;
   command: string | null;

@@ -34,6 +34,7 @@ import { Input } from "../components/ui/input";
 import { SimpleSelect } from "../components/ui/simple-select";
 import { useConfigSave } from "./mcp-servers/useConfigSave";
 import { useSyncStatus } from "./mcp-servers/useSyncStatus";
+import { useConfigCopy } from "./mcp-servers/useConfigCopy";
 
 const MCP_SYNCABLE_APPS = [
   { id: "claude", label: "Claude" },
@@ -61,7 +62,6 @@ export default function McpServers() {
   const [editCommand, setEditCommand] = useState("");
   const [editArgs, setEditArgs] = useState("");
   const [editEnv, setEditEnv] = useState("");
-  const [copied, setCopied] = useState(false);
   const [healthResults, setHealthResults] = useState<Record<string, HealthCheckResult>>({});
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -92,6 +92,7 @@ export default function McpServers() {
   const i = t();
   const zh = getLocale() === "zh";
   const syncStatus = useSyncStatus(selected, zh);
+  const configCopy = useConfigCopy(selected, zh);
   const { save: saveConfig, saving: configSaving, isSaving: isConfigSaving } = useConfigSave(zh);
   const wizardValidation = useMcpValidation(wizardDraft);
   const wizardSyncableTools = installedTools.filter((tool) => tool.id !== "claude");
@@ -302,29 +303,6 @@ export default function McpServers() {
     [syncStatus],
   );
 
-  const copyConfig = useCallback(() => {
-    if (!selected) return;
-    const config = {
-      command: selected.command,
-      args: (() => {
-        try {
-          return JSON.parse(selected.args);
-        } catch {
-          return selected.args;
-        }
-      })(),
-      env: (() => {
-        try {
-          return JSON.parse(selected.env);
-        } catch {
-          return selected.env;
-        }
-      })(),
-    };
-    navigator.clipboard.writeText(JSON.stringify(config, null, 2));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [selected]);
   const handleSelectServer = useCallback((server: McpServer) => {
     setSelected(server);
     setEditing(false);
@@ -724,8 +702,9 @@ export default function McpServers() {
                 selected={selected}
                 i={i}
                 zh={zh}
-                copied={copied}
-                copyConfig={copyConfig}
+                copied={configCopy.copied}
+                copying={configCopy.copying}
+                copyConfig={configCopy.copy}
                 startEdit={startEdit}
                 saveSuccess={saveSuccess}
                 healthResult={healthResults[selected.id]}

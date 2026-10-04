@@ -13,6 +13,7 @@ interface McpServerDetailPanelProps {
   i: I18n;
   zh: boolean;
   copied: boolean;
+  copying?: boolean;
   copyConfig: () => void;
   startEdit: (server: McpServer) => void;
   saveSuccess: boolean;
@@ -34,6 +35,7 @@ export default function McpServerDetailPanel({
   i,
   zh,
   copied,
+  copying = false,
   copyConfig,
   startEdit,
   saveSuccess,
@@ -105,6 +107,8 @@ export default function McpServerDetailPanel({
             variant="ghost"
             size="icon-sm"
             onClick={copyConfig}
+            disabled={copying}
+            aria-busy={copying}
             title={zh ? "复制配置" : "Copy configuration"}
             aria-label={zh ? "复制配置" : "Copy configuration"}
           >

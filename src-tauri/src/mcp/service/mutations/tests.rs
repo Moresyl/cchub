@@ -3,6 +3,8 @@ use crate::mcp::sources::SourceSnapshot;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+mod batch;
+
 const TOOLS: [&str; 8] = [
     "claude",
     "claude-desktop",

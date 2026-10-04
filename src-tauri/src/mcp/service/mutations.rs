@@ -146,48 +146,104 @@ pub(crate) fn install(
     config: McpServerConfig,
     targets: Vec<String>,
 ) -> Result<CatalogServer, String> {
+    let spec = crate::mcp::native_entry::patch_connection(None, &name, "claude", &config)?;
+    install_batch(conn, "claude", vec![(name, spec)], targets)?
+        .pop()
+        .ok_or_else(invalid)
+}
+
+/// Prepare every source and projection before committing any native file.
+/// Imported specifications keep their native extension and policy fields.
+pub(crate) fn import_document(
+    conn: &Connection,
+    source_tool: &str,
+    text: &str,
+    targets: Vec<String>,
+) -> Result<Vec<CatalogServer>, String> {
+    let (_, entries) = crate::mcp::native_read::parse_entries(text, source_tool, true)?;
+    let entries = entries
+        .into_iter()
+        .map(|(name, entry)| Ok((name, NativeSpec::from_entry(&entry)?)))
+        .collect::<Result<Vec<_>, String>>()?;
+    install_batch(conn, source_tool, entries, targets)
+}
+
+pub(crate) fn install_batch(
+    conn: &Connection,
+    source_tool: &str,
+    entries: Vec<(String, NativeSpec)>,
+    targets: Vec<String>,
+) -> Result<Vec<CatalogServer>, String> {
+    if entries.is_empty() {
+        return Err("MCP import contains no server entries".into());
+    }
     let mut state = CatalogState::load(conn)?;
     rows(conn)?;
-    let binding = native::configured_binding(conn, "claude")?;
+    let binding = native::configured_binding(conn, source_tool)?;
+    let container = super::super::native_read::Format::for_tool(source_tool)?.container();
     let canonical = crate::config_write::target_key(&binding.path)?;
     let snapshot = native::read_at(conn, &binding, &canonical)?;
-    if native::entry(&snapshot, "mcpServers", &name).is_some() {
-        return Err(
-            "This source already has an MCP entry with this name; edit that entry instead".into(),
-        );
-    }
-    let spec = crate::mcp::native_entry::patch_connection(None, &name, "claude", &config)?;
-    let origin = NativeOrigin::new(binding, canonical, "mcpServers".into(), name, spec)?;
-    if state.origins.contains_key(&origin.id) {
-        return Err(
-            "This MCP source already exists in the library; restore and edit it instead".into(),
-        );
-    }
-    let mut changes = vec![native::origin_change(
-        &origin,
-        Some(origin.spec.clone()),
-        &snapshot,
-    )];
-    for tool in targets
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>()
-    {
-        if tool != "claude" {
-            add_projection(conn, &mut state, &origin, &tool, &mut changes)?;
+    let targets: std::collections::BTreeSet<_> = targets.into_iter().collect();
+    let mut names = std::collections::BTreeSet::new();
+    let mut origins = Vec::new();
+    let mut changes = Vec::new();
+    for (name, spec) in entries {
+        if !names.insert(name.clone()) {
+            return Err("MCP import contains duplicate server names".into());
         }
+        if native::entry(&snapshot, container, &name).is_some() {
+            return Err(
+                "This source already has an MCP entry with this name; edit that entry instead"
+                    .into(),
+            );
+        }
+        let origin = NativeOrigin::new(
+            binding.clone(),
+            canonical.clone(),
+            container.into(),
+            name,
+            spec,
+        )?;
+        if state.origins.contains_key(&origin.id)
+            || state.projections.iter().any(|projection| {
+                projection.canonical_path == canonical
+                    && projection.container == container
+                    && projection.native_name == origin.native_name
+            })
+        {
+            return Err(
+                "This MCP source already exists in the library; restore and edit it instead".into(),
+            );
+        }
+        changes.push(native::origin_change(
+            &origin,
+            Some(origin.spec.clone()),
+            &snapshot,
+        ));
+        for tool in &targets {
+            if tool != source_tool {
+                add_projection(conn, &mut state, &origin, tool, &mut changes)?;
+            }
+        }
+        state.origins.insert(origin.id.clone(), origin.clone());
+        origins.push(origin);
     }
-    state.origins.insert(origin.id.clone(), origin.clone());
     native::commit_with_result(conn, state, changes, |tx| {
-        native::save_row(tx, &origin, live_status(&origin))?;
-        native::activity(tx, &origin.id, "install")?;
-        let server = tx
-            .query_row(
-                &format!("SELECT {COLUMNS} FROM mcp_servers WHERE id=?1"),
-                [&origin.id],
-                row,
-            )
-            .map_err(|_| invalid())?;
-        view::decorate(server, Some(&origin))
+        origins
+            .iter()
+            .map(|origin| {
+                native::save_row(tx, origin, live_status(origin))?;
+                native::activity(tx, &origin.id, "install")?;
+                let server = tx
+                    .query_row(
+                        &format!("SELECT {COLUMNS} FROM mcp_servers WHERE id=?1"),
+                        [&origin.id],
+                        row,
+                    )
+                    .map_err(|_| invalid())?;
+                view::decorate(server, Some(origin))
+            })
+            .collect()
     })
 }
 

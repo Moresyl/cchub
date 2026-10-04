@@ -154,7 +154,7 @@ pub(super) fn rows(conn: &Connection) -> Result<Vec<McpServer>, String> {
 }
 
 pub(crate) use catalog::prepare_refresh;
-pub(crate) use mutations::{install, sync, uninstall, unsync, update};
+pub(crate) use mutations::{import_document, install, sync, uninstall, unsync, update};
 pub(crate) use view::{export, list, status, CatalogServer, ToolStatus};
 
 #[cfg(test)]

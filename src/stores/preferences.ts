@@ -38,6 +38,18 @@ export const usePreferences = create<PreferencesState>()(
     {
       name: "cchub-prefs",
       partialize: (state) => ({ locale: state.locale, theme: state.theme }),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<PreferencesState> | null;
+        return {
+          ...current,
+          locale:
+            saved?.locale === "zh" || saved?.locale === "en" || saved?.locale === "ja" ? saved.locale : current.locale,
+          theme:
+            saved?.theme === "dark" || saved?.theme === "light" || saved?.theme === "system"
+              ? saved.theme
+              : current.theme,
+        };
+      },
     },
   ),
 );

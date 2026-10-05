@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,6 +9,11 @@
       (function () {
         try {
           var saved = localStorage.getItem("cchub-theme");
+          try {
+            var prefs = JSON.parse(localStorage.getItem("cchub-prefs") || "null");
+            var theme = prefs && prefs.state && prefs.state.theme;
+            if (theme === "dark" || theme === "light" || theme === "system") saved = theme;
+          } catch (e) {}
           if (saved === "light" || (saved === "system" && matchMedia("(prefers-color-scheme: light)").matches)) {
             document.documentElement.setAttribute("data-theme", "light");
           }

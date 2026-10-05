@@ -14,40 +14,24 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 重整配置表单与模型选择面板，增加配置草稿模型测试、模型计费信息、能力筛选与供应商模型别名
-    - 增加分组路由、条件预览、按账号额度筛选、账号并发与排队保护，以及余额和额度提醒
-    - 完善会话搜索、压缩会话读取、删除恢复、历史迁移预览与项目档案成组切换
-    - MCP 工作区按原生来源区分同名服务，展示同步归属与冲突状态；安装向导使用集中弹窗、即时校验和统一控件
-    - 备份中的外部 MCP 定义进入待恢复的备份库，可复制或恢复至原始工具；本机文件归属、客户端授权和历史记录得到保留
-    - 云备份支持加密与恢复密码流程；更新中英文说明及 MCP 备份库示意截图
+    - 明确首次启动默认使用深色主题；用户已选择的浅色或跟随系统设置仍然保留
 
     ### 变更与安全
-    - 编辑表单默认阻止点击弹窗外部丢失草稿；保存、安装和移除期间防止重复提交，失败保留可重试的编辑内容
-    - 原生配置读写检查文件身份、自定义路径、重复字段和期间的外部修改，保留未修改的注释与扩展选项
-    - MCP 同步和批量导入先准备整组修改；文件或数据库提交失败时执行恢复，不将其他工具的独立同名服务视为已同步副本
-    - 备份导入检查路径、快照完整性和下载大小，隔离同步账号凭据，并保留设备本地设置；不会继承外部备份的文件操作归属
-    - 文件恢复用于处理本次操作返回的错误，不等同于跨进程或断电事务；不能无损转换为 JSON 的原生扩展值会拒绝 JSON 导出
+    - 恢复偏好设置时校验主题与语言值，异常值回退到有效旧设置或默认值
+    - 无新增安全功能；本次不修改代理、工具配置或账号凭据
 
     ### 问题修复与打磨
-    - 修复只读代码编辑器仍可接收输入、异步刷新乱序覆盖新状态、配置复制未等待剪贴板结果等问题
-    - 修复远程 MCP 服务被当作本地命令编辑的问题，分别校验服务地址、请求头、参数与环境变量；检查失败提供明确重试反馈
-    - 修复云同步跨账号状态串用、过期排队任务继续执行、备份恢复失败时本地状态不一致等问题
-    - 完善流式心跳、工具调用标识、推理历史、结构化响应和故障切换处理，保留原始用量并避免重复计账
-    - 修复不限量额度的虚假进度、会话清理与迁移反馈、窄窗口详情和编辑区滚动问题
-    - 修复设置分类滚动遮挡与切换后位置错乱、用量页间距缺失、MCP 来源标签笼统，以及 Prompt 新建表单提前报错和保存按钮不易触达的问题
+    - 启动页与主界面统一优先读取当前偏好，修复新旧主题设置冲突时启动颜色不一致的问题
+    - 补充首次启动、旧设置兼容、异常主题值与跟随系统等场景的回归测试
 
     ### 安装
-    - 从下方选择对应平台安装包。Windows 推荐 NSIS；也可使用 MSI。macOS 提供 Intel/Apple Silicon 包，Linux 提供 deb/AppImage。
-    - 升级前建议在设置中导出备份。外部 MCP 目录条目不继承本机文件操作归属；完整备份内的工具配置和附属文件仍按完整恢复流程还原，恢复后请刷新服务列表。
+    - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
+    - 可从应用内检查更新，或下载下方对应平台安装包。已有明确主题选择不会被强制覆盖。
 
     ## English Summary
-
-    - Refines configuration/model editors, focused installation dialogs, draft protection, read-only code previews and narrow-window interactions.
-    - Adds model testing and billing information, grouped and quota-aware routing, concurrency limits, account alerts and recoverable session deletion.
-    - Tracks native MCP source identities and owned copies, preserves native options and comments, and checks for external changes before grouped writes.
-    - Imports foreign MCP definitions into an explicit backup library while retaining local ownership, grants and history; restoration refuses existing native entries.
-    - Improves encrypted cloud backup, credential isolation, restore validation and rollback, plus streaming/tool-call compatibility and usage accounting.
-    - Export a backup before upgrading. Recovery handles reported operation failures; it does not promise cross-process or power-loss atomicity. README demonstration screenshots are identified as such.
+    - Defaults fresh installations to dark mode while preserving explicit light/system preferences.
+    - Aligns startup theme selection with persisted application preferences and validates restored theme/language values.
+    - Adds regression coverage for defaults, legacy preferences, invalid values and system mode.
 
     ## 下载 / Download
 

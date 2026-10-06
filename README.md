@@ -78,6 +78,14 @@ This screenshot shows the actual MCP page with isolated demonstration data, not 
 
 Model discovery follows the selected API protocol and retains provider-reported context/output limits, modalities, native endpoints, and reasoning levels. Catalogs are saved with their profile and invalidated when its connection changes. OpenCode model edits remain separate when switching models; reported limits and modalities can be applied explicitly, and clearing token limits restores the tool defaults. Discovery uses a single 15-second deadline across supported pagination, with limits of 50 pages, 10,000 model rows, and 8 MiB.
 
+### Managed account quota
+
+Failed refreshes retain clearly marked last successful results for the same login, with a separate retry action, last-update time and valid reset times. Switching accounts or signing in again clears old results. This cache exists only in the current interface and does not drive automatic account switching.
+
+![CCHub managed account quota refresh](screenshots/account-quota-refresh.png)
+
+This screenshot shows the actual quota component with isolated demonstration data, not a live subscription query. See the [changelog](CHANGELOG.md) for version updates.
+
 ---
 
 ## Features

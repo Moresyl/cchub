@@ -14,24 +14,29 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 明确首次启动默认使用深色主题；用户已选择的浅色或跟随系统设置仍然保留
+    - 托管账户配额显示上次成功读取时间和有效的重置时间，支持失败后单独重试
+    - 统一中等与加粗字重为 500 / 600，大号控件高度统一为 36px
 
     ### 变更与安全
-    - 恢复偏好设置时校验主题与语言值，异常值回退到有效旧设置或默认值
-    - 无新增安全功能；本次不修改代理、工具配置或账号凭据
+    - 同一登录账户的配额刷新失败时保留并标记上次结果；切换账户或重新登录后清除旧结果，避免混用
+    - 代理规范化超过 64 个字符的工具调用标识，保持调用与结果关联，并保留其他历史内容
+    - 本次不新增第三方配置预设，不更改默认深色主题设置
 
     ### 问题修复与打磨
-    - 启动页与主界面统一优先读取当前偏好，修复新旧主题设置冲突时启动颜色不一致的问题
-    - 补充首次启动、旧设置兼容、异常主题值与跟随系统等场景的回归测试
+    - 修复下拉框长名称撑宽窄窗口的问题，保持选项换行、键盘选择和关闭后的焦点恢复
+    - 统一复选框尺寸、圆角、选中、混合和禁用状态，修复全局样式覆盖组件焦点提示的问题
+    - 修复 Prompt 名称输入框的标签关联，辅助说明独立作为无障碍描述
+    - 补充控件、配额刷新、账户隔离和代理调用配对的回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
-    - 可从应用内检查更新，或下载下方对应平台安装包。已有明确主题选择不会被强制覆盖。
+    - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Defaults fresh installations to dark mode while preserving explicit light/system preferences.
-    - Aligns startup theme selection with persisted application preferences and validates restored theme/language values.
-    - Adds regression coverage for defaults, legacy preferences, invalid values and system mode.
+    - Refines checkbox states, typography and narrow-window select layout.
+    - Retains clearly marked last successful account quota results on refresh failure, with retry and account isolation.
+    - Repairs oversized tool-call identifiers while preserving call/result pairing and unrelated history bytes.
+    - Corrects the Prompt name field's accessible label and expands regression coverage.
 
     ## 下载 / Download
 

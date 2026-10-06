@@ -9,12 +9,11 @@ use tauri::State;
 use tokio::io::AsyncReadExt;
 
 use crate::commands::extra_commands::{
-    get_text_app_setting, launch_preferred_terminal_impl, normalize_terminal_target,
-    read_all_config_profiles_from_conn, read_terminal_preferences_from_conn, read_tool_snapshot,
+    launch_preferred_terminal_impl, normalize_terminal_target, read_all_config_profiles_from_conn,
+    read_terminal_preferences_from_conn, read_tool_snapshot,
 };
 use crate::db::DbState;
 
-const MODELS_DEV_SYNC_KEY: &str = "models_dev_sync_config";
 const INIT_ERROR_KEY: &str = "init_error";
 const MIGRATION_RESULT_KEY: &str = "migration_result";
 const SKILLS_MIGRATION_RESULT_KEY: &str = "skills_migration_result";
@@ -74,7 +73,7 @@ fn normalize_model_keys(values: Vec<String>) -> Vec<String> {
     values
 }
 
-fn normalize_sync_config(mut config: ModelsDevSyncConfig) -> ModelsDevSyncConfig {
+pub(super) fn normalize_sync_config(mut config: ModelsDevSyncConfig) -> ModelsDevSyncConfig {
     config.selected_model_keys = normalize_model_keys(config.selected_model_keys);
     config.excluded_common_model_keys = normalize_model_keys(config.excluded_common_model_keys);
     config.last_sync_error = config.last_sync_error.and_then(|error| {
@@ -90,12 +89,8 @@ fn models_dev_sync_path() -> PathBuf {
 
 #[tauri::command]
 pub fn get_models_dev_sync_config(db: State<'_, DbState>) -> Result<ModelsDevSyncState, String> {
-    let mut conn = db.0.lock().map_err(|error| error.to_string())?;
-    crate::commands::model_pricing_file::sync_local_model_pricing(&mut conn)?;
-    let config = get_text_app_setting(&conn, MODELS_DEV_SYNC_KEY)?
-        .and_then(|raw| serde_json::from_str::<ModelsDevSyncConfig>(&raw).ok())
-        .map(normalize_sync_config)
-        .unwrap_or_default();
+    let conn = db.0.lock().map_err(|error| error.to_string())?;
+    let config = super::models_dev_sync::settings::read_config(&conn)?;
     Ok(ModelsDevSyncState {
         config,
         config_path: models_dev_sync_path().to_string_lossy().into_owned(),
@@ -105,18 +100,16 @@ pub fn get_models_dev_sync_config(db: State<'_, DbState>) -> Result<ModelsDevSyn
 #[tauri::command]
 pub fn save_models_dev_sync_config(
     config: ModelsDevSyncConfig,
+    expected_config: Option<ModelsDevSyncConfig>,
     db: State<'_, DbState>,
-) -> Result<(), String> {
-    let config = normalize_sync_config(config);
-    let payload = serde_json::to_string(&config).map_err(|error| error.to_string())?;
+) -> Result<ModelsDevSyncState, String> {
     let mut conn = db.0.lock().map_err(|error| error.to_string())?;
-    crate::commands::model_pricing_file::sync_local_model_pricing(&mut conn)?;
-    conn.execute(
-        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
-        rusqlite::params![MODELS_DEV_SYNC_KEY, payload],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
+    let config =
+        super::models_dev_sync::settings::save_preferences(&mut conn, config, expected_config)?;
+    Ok(ModelsDevSyncState {
+        config,
+        config_path: models_dev_sync_path().to_string_lossy().into_owned(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

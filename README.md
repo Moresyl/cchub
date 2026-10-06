@@ -103,6 +103,12 @@ This screenshot shows the actual quota component with isolated demonstration dat
 
 ### Usage analytics
 
+Model pricing preferences share one draft and save action. Status refresh and page changes retain unsaved selections; Save and sync persists the same choices before requesting prices. Common-model markers come from the backend's bounded selection, and the catalog supports search, provider filters and complete pagination. Errors offer retry guidance without showing internal details. Preference conflicts require review or an explicit discard and reload; saving does not replay older sync timestamps or errors.
+
+![CCHub model pricing sync](screenshots/model-pricing-sync.png)
+
+This screenshot shows the actual pricing component with isolated demonstration data, not native desktop acceptance evidence.
+
 Date, app, provider and model filters keep their controls available while loading. Late responses from older filters cannot replace the current results. Live request events are coalesced; a failed refresh retains the last successful result for the same filter with a recovery message. Rankings provide pagination, wrap long names and use compact cards in narrow panels. Zero-request days no longer display a nonzero trend bar.
 
 ![CCHub usage analytics](screenshots/usage-analytics.png)

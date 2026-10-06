@@ -1,0 +1,190 @@
+.pricing-sync {
+  display: grid;
+  gap: 16px;
+  container-type: inline-size;
+}
+.pricing-heading,
+.pricing-picker-toggle,
+.pricing-actions,
+.pricing-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pricing-heading > div,
+.pricing-search,
+.pricing-provider {
+  min-width: 0;
+}
+.pricing-heading {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.pricing-heading > div {
+  flex: 1;
+}
+.pricing-help,
+.pricing-status,
+.pricing-actions > span,
+.pricing-pagination {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pricing-help {
+  margin: 6px 0 0;
+}
+.pricing-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.pricing-status {
+  display: flex;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+}
+.pricing-status details {
+  min-width: 0;
+  max-width: 100%;
+}
+.pricing-status summary {
+  cursor: pointer;
+}
+.pricing-status code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+}
+.pricing-notice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pricing-picker {
+  display: grid;
+  gap: 12px;
+}
+.pricing-picker-filters {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pricing-search {
+  flex: 1 1 240px;
+}
+.pricing-provider {
+  flex: 0 1 210px;
+}
+.pricing-search label,
+.pricing-provider > span {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.pricing-provider > button {
+  width: 100%;
+}
+.pricing-model-list {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+}
+.pricing-model-list:focus-visible {
+  outline: 2px solid var(--control-border-focus);
+  outline-offset: 2px;
+}
+.pricing-model-row {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pricing-model-row:last-child {
+  border-bottom: 0;
+}
+.pricing-model-row > button {
+  margin-top: 1px;
+}
+.pricing-model-row[data-selected="true"] {
+  background: var(--accent-subtle);
+}
+.pricing-model-copy {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.pricing-model-name {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--font-weight-medium, 500);
+  cursor: pointer;
+}
+.pricing-model-copy .badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.pricing-model-details {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.pricing-model-prices {
+  display: flex;
+  gap: 2px 12px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.pricing-pagination > div,
+.pricing-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pricing-pagination > div > span {
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pricing-actions {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+}
+.pricing-actions > span {
+  flex: 1 1 180px;
+}
+@container (max-width: 480px) {
+  .pricing-options {
+    grid-template-columns: 1fr;
+  }
+  .pricing-provider {
+    flex-grow: 1;
+  }
+  .pricing-actions > div {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+@media (hover: hover) {
+  .pricing-model-row:not(:has(button:disabled)):hover {
+    background: var(--bg-card-hover);
+  }
+}

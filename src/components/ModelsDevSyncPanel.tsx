@@ -1,432 +1,262 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useId, useRef, useState, type MouseEvent } from "react";
 import { ChevronDown, ChevronUp, CloudDownload, RefreshCw, Save } from "lucide-react";
 import { getLocale } from "../lib/i18n";
-import { showToast } from "./Toast";
-import { Checkbox } from "./ui/checkbox";
+import { Button } from "./ui/button";
 import { CheckboxField } from "./ui/checkbox-field";
-import { Input } from "./ui/input";
-import { SimpleSelect } from "./ui/simple-select";
-
-interface SyncConfig {
-  autoSyncEnabled: boolean;
-  includeCommonModels: boolean;
-  selectedModelKeys: string[];
-  excludedCommonModelKeys: string[];
-  lastSyncAt: number | null;
-  lastSyncError: string | null;
-}
-
-interface SyncState {
-  config: SyncConfig;
-  configPath: string;
-}
-
-interface CatalogEntry {
-  key: string;
-  providerId: string;
-  providerName: string;
-  modelId: string;
-  modelName: string;
-  releaseDate: string;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
-
-interface SyncResult {
-  skipped: boolean;
-  selected: number;
-  imported: number;
-  changed: number;
-  syncedAt: number | null;
-}
-
-const MAX_VISIBLE_ENTRIES = 180;
-
-function isCommonEntry(entry: CatalogEntry) {
-  const prefixes: Record<string, string[]> = {
-    anthropic: ["claude-"],
-    openai: ["gpt-", "o1-", "o3-", "o4-"],
-    google: ["gemini-"],
-    xai: ["grok-"],
-    deepseek: ["deepseek-"],
-    alibaba: ["qwen"],
-    xiaomi: ["mimo-"],
-    longcat: ["longcat-"],
-    moonshotai: ["kimi-"],
-    "minimax-cn": ["minimax-m"],
-    zai: ["glm-"],
-  };
-  const modelId = entry.modelId.toLowerCase();
-  return (prefixes[entry.providerId] ?? []).some((prefix) => modelId.startsWith(prefix));
-}
-
-function formatPrice(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0";
-  return value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") || "0";
-}
+import ConfirmDialog from "./ConfirmDialog";
+import ErrorState from "./states/ErrorState";
+import LoadingState from "./states/LoadingState";
+import ModelPicker from "./models-dev-sync/ModelPicker";
+import { usePricingSettings } from "./models-dev-sync/usePricingSettings";
+import { selectModel } from "./models-dev-sync/types";
+import "./models-dev-sync/styles.css";
 
 export default function ModelsDevSyncPanel() {
   const locale = getLocale();
-  const uiText = useCallback(
+  const text = useCallback(
     (zh: string, en: string, ja?: string) => (locale === "zh" ? zh : locale === "ja" ? (ja ?? en) : en),
     [locale],
   );
-  const [state, setState] = useState<SyncState | null>(null);
-  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [excludedCommon, setExcludedCommon] = useState<Set<string>>(new Set());
-  const [search, setSearch] = useState("");
-  const [provider, setProvider] = useState("all");
-  const [showPicker, setShowPicker] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingCatalog, setLoadingCatalog] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  const loadState = useCallback(async () => {
-    setLoading(true);
-    try {
-      const next = await invoke<SyncState>("get_models_dev_sync_config");
-      setState(next);
-      setSelected(new Set(next.config.selectedModelKeys));
-      setExcludedCommon(new Set(next.config.excludedCommonModelKeys));
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  const settings = usePricingSettings();
+  const [open, setOpen] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const resetTrigger = useRef<HTMLButtonElement | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const openReset = (event: MouseEvent<HTMLButtonElement>) => {
+    resetTrigger.current = event.currentTarget;
+    setConfirmReset(true);
+  };
+  const id = useId();
   useEffect(() => {
-    void loadState();
-  }, [loadState]);
-
-  const openPicker = useCallback(async () => {
-    setShowPicker((open) => !open);
-    if (catalog.length > 0) return;
-    setLoadingCatalog(true);
-    try {
-      setCatalog(await invoke<CatalogEntry[]>("get_models_dev_catalog"));
-    } catch (error) {
-      showToast("error", String(error));
-    } finally {
-      setLoadingCatalog(false);
-    }
-  }, [catalog.length]);
-
-  const providers = useMemo(
-    () =>
-      Array.from(new Map(catalog.map((entry) => [entry.providerId, entry.providerName]))).sort((left, right) =>
-        left[1].localeCompare(right[1]),
-      ),
-    [catalog],
-  );
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return catalog
-      .filter((entry) => provider === "all" || entry.providerId === provider)
-      .filter(
-        (entry) => !query || `${entry.modelId} ${entry.modelName} ${entry.providerName}`.toLowerCase().includes(query),
-      );
-  }, [catalog, provider, search]);
-  const visible = filtered.slice(0, MAX_VISIBLE_ENTRIES);
-  const commonKeys = useMemo(() => new Set(catalog.filter(isCommonEntry).map((entry) => entry.key)), [catalog]);
-
-  const saveConfig = useCallback(
-    async (nextConfig: SyncConfig) => {
-      setBusy(true);
-      try {
-        await invoke("save_models_dev_sync_config", { config: nextConfig });
-        setState((current) => (current ? { ...current, config: nextConfig } : current));
-        showToast("success", uiText("同步设置已保存", "Sync settings saved", "同期設定を保存しました"));
-      } catch (error) {
-        showToast("error", String(error));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [uiText],
-  );
-
-  const saveSelection = useCallback(async () => {
-    if (!state) return;
-    await saveConfig({
-      ...state.config,
-      selectedModelKeys: Array.from(selected).sort(),
-      excludedCommonModelKeys: Array.from(excludedCommon).sort(),
-    });
-  }, [excludedCommon, saveConfig, selected, state]);
-
-  const syncNow = useCallback(async () => {
-    setBusy(true);
-    try {
-      const result = await invoke<SyncResult>("sync_models_dev_pricing", { force: true });
-      await loadState();
-      showToast(
-        "success",
-        uiText(
-          `已同步 ${result.imported} 个模型，更新 ${result.changed} 项`,
-          `Synced ${result.imported} models, changed ${result.changed}`,
-          `モデル ${result.imported} 件を同期、${result.changed} 件を更新`,
-        ),
-      );
-    } catch (error) {
-      showToast("error", String(error));
-      await loadState();
-    } finally {
-      setBusy(false);
-    }
-  }, [loadState, uiText]);
-
-  if (loading)
-    return (
-      <div className="section-card">
-        <div className="spinner" />
-      </div>
-    );
-  if (!state) return null;
-
-  const lastSync = state.config.lastSyncAt
-    ? new Date(state.config.lastSyncAt).toLocaleString()
-    : uiText("从未同步", "Never synced", "未同期");
-
+    const save = () => {
+      if (settings.dirty && !settings.blocked) void settings.save();
+    };
+    window.addEventListener("cchub-shortcut-save", save);
+    return () => window.removeEventListener("cchub-shortcut-save", save);
+  }, [settings]);
+  const config = settings.draft;
   return (
-    <div className="section-card" style={{ display: "grid", gap: 12 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
+    <section className="section-card pricing-sync" aria-labelledby={`${id}-title`}>
+      <div className="pricing-heading">
         <div>
-          <div className="section-card-title">
-            <CloudDownload size={16} />
-            {uiText("模型价格自动同步", "Automatic model pricing sync", "モデル価格の自動同期")}
+          <h2 ref={heading} tabIndex={-1} id={`${id}-title`} className="section-card-title">
+            <CloudDownload size={16} aria-hidden="true" />
+            {text("模型价格同步", "Model pricing sync", "モデル価格の同期")}
+          </h2>
+          <p className="pricing-help">
+            {text(
+              "从公开模型目录更新本地价格，用于代理成本统计。",
+              "Update local model prices for proxy cost reports.",
+              "公開モデルカタログの価格をプロキシのコスト集計に使用します。",
+            )}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          disabled={!!settings.busy || settings.loading}
+          onClick={() => void settings.refresh()}
+          aria-label={text("刷新同步状态", "Refresh sync status", "同期状態を更新")}
+          title={text("刷新同步状态", "Refresh sync status", "同期状態を更新")}
+        >
+          <RefreshCw size={15} />
+        </Button>
+      </div>
+      {settings.loading && !config && (
+        <div role="status">
+          <LoadingState label={text("正在读取同步设置", "Loading sync settings", "同期設定を読込中")} />
+        </div>
+      )}
+      {settings.failure === "read" && (
+        <ErrorState
+          title={text("同步设置读取失败", "Could not load sync settings", "同期設定を読み込めませんでした")}
+          message={text(
+            "已有更改已保留。重新读取成功后才能保存或同步。",
+            "Changes are retained. Reload settings before saving or syncing.",
+            "変更は保持されています。設定を再読込してから保存・同期してください。",
+          )}
+          retryLabel={text("重试", "Retry", "再試行")}
+          onRetry={settings.loading ? undefined : () => void settings.refresh()}
+        />
+      )}
+      {config && (
+        <>
+          <div className="pricing-options">
+            <CheckboxField
+              variant="surface"
+              checked={config.autoSyncEnabled}
+              disabled={!!settings.busy || settings.loading}
+              onCheckedChange={(checked) => settings.update((draft) => ({ ...draft, autoSyncEnabled: checked }))}
+              label={text("启动时自动同步", "Sync on startup", "起動時に同期")}
+              description={text("最多每 6 小时执行一次", "At most once every 6 hours", "最短 6 時間間隔")}
+            />
+            <CheckboxField
+              variant="surface"
+              checked={config.includeCommonModels}
+              disabled={!!settings.busy || settings.loading}
+              onCheckedChange={(checked) => settings.update((draft) => ({ ...draft, includeCommonModels: checked }))}
+              label={text("包含常用模型", "Include common models", "一般的なモデルを含める")}
+              description={text(
+                "每个常用供应商最多保留 6 个近期模型，可单独取消勾选。",
+                "Up to 6 recent models per common provider; deselect any individually.",
+                "一般的なProviderごとに最近の6モデルまで。個別に解除できます。",
+              )}
+            />
           </div>
-          <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 5 }}>
-            {uiText(
-              "从公开模型目录更新本地价格，代理成本统计会自动使用最新配置。",
-              "Refresh local pricing from the public model catalog for accurate proxy cost reports.",
-              "公開モデルカタログから価格を更新し、プロキシのコスト集計を最新化します。",
+          <div className="pricing-status">
+            <span>
+              {text("上次同步", "Last sync", "最終同期")}:{" "}
+              {settings.state?.config.lastSyncAt
+                ? new Date(settings.state.config.lastSyncAt).toLocaleString()
+                : text("从未同步", "Never synced", "未同期")}
+            </span>
+            {settings.state?.configPath && (
+              <details>
+                <summary>{text("本地价格文件", "Local pricing file", "ローカル価格ファイル")}</summary>
+                <code>{settings.state.configPath}</code>
+              </details>
             )}
           </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            type="button"
-            onClick={() => void loadState()}
-            disabled={busy}
-            title={uiText("刷新状态", "Refresh status", "状態を更新")}
-          >
-            <RefreshCw size={14} />
-          </button>
-          <button className="btn btn-primary btn-sm" type="button" onClick={() => void syncNow()} disabled={busy}>
-            <CloudDownload size={14} />
-            {uiText("立即同步", "Sync now", "今すぐ同期")}
-          </button>
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-        <CheckboxField
-          variant="surface"
-          checked={state.config.autoSyncEnabled}
-          disabled={busy}
-          onCheckedChange={(checked) => void saveConfig({ ...state.config, autoSyncEnabled: checked })}
-          label={uiText("启动时自动同步", "Sync on startup", "起動時に同期")}
-          description={uiText("最多每 6 小时执行一次", "At most once every 6 hours", "最短 6 時間間隔")}
-        />
-        <CheckboxField
-          variant="surface"
-          checked={state.config.includeCommonModels}
-          disabled={busy}
-          onCheckedChange={(checked) => void saveConfig({ ...state.config, includeCommonModels: checked })}
-          label={uiText("包含常用模型", "Include common models", "一般的なモデルを含める")}
-          description={uiText(
-            "每个模型族保留最近版本",
-            "Keep recent entries per model family",
-            "各モデル系列の最近の版を保持",
-          )}
-        />
-      </div>
-
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--text-muted)", fontSize: 11 }}>
-        <span>
-          {uiText("上次同步", "Last sync", "最終同期")}: {lastSync}
-        </span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }} title={state.configPath}>
-          {uiText("配置", "Config", "設定")}: {state.configPath}
-        </span>
-      </div>
-      {state.config.lastSyncError ? <div className="inline-error">{state.config.lastSyncError}</div> : null}
-
-      <div
-        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}
-      >
-        <span style={{ fontSize: 12 }}>
-          {uiText(`${selected.size} 个显式模型`, `${selected.size} explicit models`, `${selected.size} 件の明示モデル`)}
-        </span>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            type="button"
-            onClick={() => void openPicker()}
-            disabled={busy || loadingCatalog}
-          >
-            {showPicker ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            {showPicker
-              ? uiText("收起选择器", "Hide picker", "選択を閉じる")
-              : uiText("选择模型", "Choose models", "モデルを選択")}
-          </button>
-          {showPicker ? (
-            <button
-              className="btn btn-primary btn-sm"
-              type="button"
-              onClick={() => void saveSelection()}
-              disabled={busy}
-            >
-              <Save size={14} />
-              {uiText("保存选择", "Save selection", "選択を保存")}
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {showPicker ? (
-        <div style={{ display: "grid", gap: 10 }}>
-          {loadingCatalog ? (
-            <div className="empty-state">
-              <div className="spinner" />
+          {(settings.failure === "save" || settings.failure === "sync" || settings.failure === "conflict") && (
+            <div className="pricing-notice" role="alert">
+              {settings.failure === "conflict"
+                ? text(
+                    "设置已在其他操作中更改。你的草稿已保留；刷新状态后核对，或重新加载并放弃草稿。",
+                    "Settings changed elsewhere. Your draft is retained; refresh to review, or reload and discard it.",
+                    "別の操作で設定が変更されました。下書きを保持しています。確認するか、再読込して下書きを破棄してください。",
+                  )
+                : settings.failure === "save"
+                  ? text(
+                      "设置保存失败，草稿已保留。重试保存后再同步。",
+                      "Settings could not be saved. Your draft is retained; retry saving before syncing.",
+                      "保存できませんでした。下書きは保持されています。保存を再試行してください。",
+                    )
+                  : text(
+                      "价格同步失败，已保存的选择不受影响。检查网络后重试同步。",
+                      "Pricing sync failed. Saved selections are retained. Check the connection and retry.",
+                      "価格同期に失敗しました。保存済みの選択は保持されています。接続を確認して再試行してください。",
+                    )}
+              {settings.failure === "conflict" && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!!settings.busy || settings.loading}
+                  onClick={openReset}
+                >
+                  {text("重新加载", "Reload", "再読込")}
+                </Button>
+              )}
             </div>
-          ) : (
-            <>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Input
-                  style={{ flex: "1 1 240px" }}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={uiText("搜索模型或供应商", "Search models or providers", "モデル・Provider を検索")}
-                />
-                <SimpleSelect
-                  className="flex-[0_1_210px]"
-                  value={provider}
-                  onValueChange={setProvider}
-                  ariaLabel={uiText("供应商", "Provider", "Provider")}
-                  options={[
-                    { value: "all", label: uiText("全部供应商", "All providers", "すべての Provider") },
-                    ...providers.map(([value, label]) => ({ value, label })),
-                  ]}
-                />
-              </div>
-              <div
-                style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)", fontSize: 11 }}
-              >
-                <span>
-                  {uiText(
-                    `显示 ${visible.length} / ${filtered.length}`,
-                    `Showing ${visible.length} / ${filtered.length}`,
-                    `${visible.length} / ${filtered.length} 件を表示`,
-                  )}
-                </span>
-                <span>{uiText("勾选后保存选择", "Save after selecting", "選択後に保存")}</span>
-              </div>
-              <div
-                style={{ maxHeight: 360, overflowY: "auto", border: "1px solid var(--border-subtle)", borderRadius: 6 }}
-              >
-                {visible.map((entry) => {
-                  const common = commonKeys.has(entry.key);
-                  const checked =
-                    selected.has(entry.key) ||
-                    (state.config.includeCommonModels && common && !excludedCommon.has(entry.key));
-                  return (
-                    <label
-                      key={entry.key}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "20px minmax(0, 1fr) auto",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "8px 10px",
-                        borderBottom: "1px solid var(--border-subtle)",
-                        background: checked ? "var(--accent-subtle)" : undefined,
-                      }}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={() => {
-                          if (common && state.config.includeCommonModels) {
-                            setSelected((current) => {
-                              const next = new Set(current);
-                              next.delete(entry.key);
-                              return next;
-                            });
-                            setExcludedCommon((current) => {
-                              const next = new Set(current);
-                              if (next.has(entry.key)) next.delete(entry.key);
-                              else next.add(entry.key);
-                              return next;
-                            });
-                          } else {
-                            setSelected((current) => {
-                              const next = new Set(current);
-                              if (next.has(entry.key)) next.delete(entry.key);
-                              else next.add(entry.key);
-                              return next;
-                            });
-                          }
-                        }}
-                      />
-                      <span style={{ minWidth: 0 }}>
-                        <strong
-                          style={{
-                            display: "block",
-                            fontSize: 12,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {entry.modelName}{" "}
-                          {common ? (
-                            <span className="badge badge-muted">{uiText("常用", "Common", "共通")}</span>
-                          ) : null}
-                        </strong>
-                        <small
-                          style={{
-                            display: "block",
-                            color: "var(--text-muted)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {entry.providerName} · {entry.modelId}
-                        </small>
-                      </span>
-                      <span style={{ fontSize: 10, color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-                        ${formatPrice(entry.input)} / ${formatPrice(entry.output)}
-                      </span>
-                    </label>
-                  );
-                })}
-                {visible.length === 0 ? (
-                  <div className="empty-state">
-                    <div className="state-copy">
-                      {uiText("没有匹配模型", "No matching models", "一致するモデルがありません")}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </>
           )}
-        </div>
-      ) : null}
-    </div>
+          {!settings.failure && settings.state?.config.lastSyncError && (
+            <p className="pricing-notice">
+              {text(
+                "上次自动同步未完成，可手动重试。",
+                "The last automatic sync failed. Try a manual sync.",
+                "前回の自動同期は未完了です。手動で再試行できます。",
+              )}
+            </p>
+          )}
+          <div className="pricing-picker-toggle">
+            <span>
+              {text(
+                `${config.selectedModelKeys.length} 个显式模型`,
+                `${config.selectedModelKeys.length} explicit models`,
+                `${config.selectedModelKeys.length} 件の明示モデル`,
+              )}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setOpen(!open)}
+              aria-expanded={open}
+              aria-controls={`${id}-picker`}
+            >
+              {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {open
+                ? text("收起选择器", "Hide picker", "選択を閉じる")
+                : text("选择模型", "Choose models", "モデルを選択")}
+            </Button>
+          </div>
+          <div id={`${id}-picker`} hidden={!open}>
+            {open && (
+              <ModelPicker
+                config={config}
+                disabled={!!settings.busy || settings.loading}
+                text={text}
+                onSelect={(entry, checked) => settings.update((draft) => selectModel(entry, draft, checked))}
+              />
+            )}
+          </div>
+          <div className="pricing-actions">
+            <span role="status">
+              {settings.busy
+                ? text(
+                    settings.busy === "save" ? "正在保存设置…" : "正在同步价格…",
+                    settings.busy === "save" ? "Saving settings…" : "Syncing prices…",
+                    settings.busy === "save" ? "保存中…" : "価格を同期中…",
+                  )
+                : settings.dirty
+                  ? text(
+                      "更改尚未保存；切换页面后草稿会保留。",
+                      "Unsaved changes; your draft is retained across pages.",
+                      "未保存の変更はページ切替後も保持されます。",
+                    )
+                  : settings.result
+                    ? text(
+                        `已同步 ${settings.result.imported} 个模型，更新 ${settings.result.changed} 项`,
+                        `Synced ${settings.result.imported} models, changed ${settings.result.changed}`,
+                        `${settings.result.imported} 件を同期、${settings.result.changed} 件を更新`,
+                      )
+                    : text("设置已保存", "Settings saved", "設定は保存済み")}
+            </span>
+            <div>
+              <Button type="button" variant="ghost" disabled={settings.blocked || !settings.dirty} onClick={openReset}>
+                {text("放弃更改", "Discard changes", "変更を破棄")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={settings.blocked || !settings.dirty}
+                onClick={() => void settings.save()}
+              >
+                <Save size={14} />
+                {text("保存设置", "Save settings", "設定を保存")}
+              </Button>
+              <Button type="button" disabled={settings.blocked} onClick={() => void settings.sync()}>
+                <CloudDownload size={14} />
+                {settings.dirty
+                  ? text("保存并同步", "Save and sync", "保存して同期")
+                  : text("立即同步", "Sync now", "今すぐ同期")}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+      <ConfirmDialog
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const trigger = resetTrigger.current;
+          if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+          else heading.current?.focus();
+        }}
+        isOpen={confirmReset}
+        variant="info"
+        title={text("放弃未保存的更改？", "Discard unsaved changes?", "未保存の変更を破棄しますか？")}
+        message={text(
+          "重新读取已保存设置。读取失败时仍保留你的草稿。",
+          "Reload saved settings. If reloading fails, your draft is retained.",
+          "保存済み設定を再読込します。失敗した場合は下書きを保持します。",
+        )}
+        confirmText={text("放弃并重新加载", "Discard and reload", "破棄して再読込")}
+        cancelText={text("继续编辑", "Keep editing", "編集を続ける")}
+        onConfirm={() => {
+          setConfirmReset(false);
+          void settings.refresh(true);
+        }}
+        onCancel={() => setConfirmReset(false)}
+      />
+    </section>
   );
 }

@@ -95,6 +95,7 @@ async fn cancellation_retains_observed_first_output_without_turning_it_into_succ
     let mut body = response.into_body().into_data_stream();
     assert!(body.next().await.unwrap().is_ok());
     drop(body);
+    drain_accounting();
     let rows = crate::commands::usage_commands::get_recent_proxy_request_logs(
         None,
         app.state::<DbState>(),

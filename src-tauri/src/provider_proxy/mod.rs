@@ -335,6 +335,8 @@ pub(crate) fn init_local_provider_proxy_runtime(app_handle: &AppHandle) {
     ))));
 }
 
+pub(crate) use cost::handle_accounting_exit;
+
 pub(super) fn current_profile_setting_key(tool_id: &str) -> String {
     format!("current_profile_{tool_id}")
 }

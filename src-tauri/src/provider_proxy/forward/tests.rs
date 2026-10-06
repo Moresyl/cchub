@@ -16,6 +16,8 @@ use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use tauri::{App, AppHandle, Manager};
 use tokio::sync::Notify;
 
+#[path = "accounting_tests.rs"]
+mod accounting_tests;
 #[path = "admission_tests.rs"]
 mod admission_tests;
 #[path = "affinity_tests.rs"]
@@ -185,6 +187,10 @@ fn profile(app: &App<MockRuntime>, id: &str) -> EndpointCircuitState {
         .get(&profile_circuit_key("claude", id))
         .unwrap()
         .clone()
+}
+
+fn drain_accounting() {
+    crate::provider_proxy::cost::drain_accounting(Duration::from_secs(5)).unwrap();
 }
 
 fn endpoint(app: &App<MockRuntime>, id: &str, url: &str) -> EndpointCircuitState {

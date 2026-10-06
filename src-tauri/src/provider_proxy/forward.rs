@@ -19,6 +19,9 @@ mod admission;
 mod body;
 #[path = "forward/context.rs"]
 mod context;
+#[path = "forward/entry.rs"]
+mod entry;
+use entry::forward_proxy_request_with_client;
 #[path = "forward/model_request.rs"]
 mod model_request;
 #[path = "forward/quota.rs"]
@@ -65,7 +68,7 @@ pub(super) async fn forward_proxy_request<R: tauri::Runtime>(
     forward_proxy_request_with_client(app_handle, tool_id, relative_path, request, None).await
 }
 
-async fn forward_proxy_request_with_client<R: tauri::Runtime>(
+async fn forward_proxy_request_inner<R: tauri::Runtime>(
     app_handle: AppHandle<R>,
     tool_id: String,
     relative_path: String,
@@ -711,6 +714,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                 health.clone(),
                                 started_at,
                                 budget.first,
+                                accounting.clone(),
                             )
                             .await;
                             let body = match body {

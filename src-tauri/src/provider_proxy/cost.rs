@@ -14,7 +14,14 @@ use super::{ClaudeApiFormat, ProxyRequestInsights, ProxyUsageMetrics, UpstreamTa
 mod attempts;
 pub(crate) use attempts::StreamAttempt;
 mod dispatch;
+mod lifecycle;
+mod shutdown;
+mod worker;
+pub(super) use dispatch::drain as drain_accounting;
 pub(super) use dispatch::{reserve as reserve_accounting, AccountingLease};
+pub(super) use lifecycle::lifecycle;
+pub(super) use lifecycle::Lifecycle;
+pub(crate) use shutdown::handle_exit as handle_accounting_exit;
 mod pending;
 use pending::PendingRecord;
 
@@ -287,37 +294,6 @@ impl<R: tauri::Runtime> AttemptLog<'_, R> {
             error,
             self.lease,
         )
-    }
-}
-
-// Stream cancellation has no async caller; this path is kept separate from
-// awaited response accounting until final stream records have a drainable queue.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn log_proxy_request_sync<R: tauri::Runtime>(
-    app_handle: &AppHandle<R>,
-    request_id: &str,
-    tool_id: &str,
-    upstream: &UpstreamTarget,
-    insights: &ProxyRequestInsights,
-    usage: Option<&ProxyUsageMetrics>,
-    timing: Option<&super::usage::StreamTiming>,
-    latency_ms: u64,
-    status_code: u16,
-    error_message: Option<&str>,
-) {
-    let record = PendingRecord::new(
-        request_id,
-        tool_id,
-        upstream,
-        insights,
-        usage,
-        timing,
-        latency_ms,
-        status_code,
-        error_message,
-    );
-    if let Err(error) = record.persist(app_handle) {
-        warn_accounting(&error);
     }
 }
 

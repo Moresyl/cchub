@@ -42,6 +42,7 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
     health: StreamHealth,
     started_at: std::time::Instant,
     first_deadline: Deadline,
+    accounting: crate::provider_proxy::cost::AccountingLease,
 ) -> Result<Body, super::streaming_preflight::Failure> {
     let upstream_status = response.status().as_u16();
     let is_sse = response
@@ -113,6 +114,7 @@ pub(super) async fn streaming_body<R: tauri::Runtime>(
         health,
         capture,
         timing,
+        accounting,
     ));
     if is_desktop {
         Ok(Body::from_stream(desktop::restore_stream_model(

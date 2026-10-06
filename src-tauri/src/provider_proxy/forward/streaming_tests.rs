@@ -33,6 +33,7 @@ pub(super) async fn split_server_with_pending(frame: &'static str, pending: bool
 }
 
 pub(super) fn assert_single_outcome(app: &App<MockRuntime>, status: u16, success: i64, input: i64) {
+    drain_accounting();
     let db = app.state::<DbState>();
     let conn = db.0.lock().unwrap();
     let count: i64 = conn

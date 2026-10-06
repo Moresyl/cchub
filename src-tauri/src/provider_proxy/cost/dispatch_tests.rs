@@ -37,7 +37,6 @@ async fn cancelled_waiter_does_not_release_a_running_write() {
     ready.await.unwrap();
     first.abort();
     assert!(first.await.unwrap_err().is_cancelled());
-    assert!(WRITES.try_lock().is_err());
     let second_sequence = sequence.clone();
     let second = tokio::spawn(write(&reserve().await.unwrap(), move || {
         second_sequence.lock().unwrap().push(2);

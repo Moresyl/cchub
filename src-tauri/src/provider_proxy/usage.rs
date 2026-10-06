@@ -234,13 +234,14 @@ pub(super) fn create_usage_tracking_stream<R: tauri::Runtime, S, E>(
     health: super::forward::streaming_health::StreamHealth,
     capture: UsageCapture,
     timing: StreamTimingCapture,
+    accounting: super::cost::AccountingLease,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send
 where
     S: Stream<Item = Result<Bytes, E>> + Send + 'static,
     E: std::error::Error + Send + 'static,
 {
     // Created outside the generator so an unpolled body also records cancellation.
-    let log = stream_log::StreamRequestLog {
+    let log = stream_log::StreamRequestLog::new(stream_log::StreamRecord {
         app_handle,
         request_id,
         tool_id,
@@ -254,12 +255,21 @@ where
         health: health.clone(),
         capture,
         timing,
-    };
+        accounting: Some(accounting),
+    });
     async_stream::stream! {
-        let mut log = log;
+        let log = log;
+        let mut closing = super::cost::lifecycle().subscribe();
+        let mut stopped = false;
         tokio::pin!(stream);
         loop {
-            match stream.next().await {
+            if *closing.borrow() { stopped = true; break; }
+            let chunk = tokio::select! {
+                biased;
+                _ = closing.changed() => { stopped = true; None },
+                chunk = stream.next() => chunk,
+            };
+            match chunk {
                 Some(Ok(bytes)) => {
                     if health.failed() { log.fail("Upstream returned a streaming error".into()); }
                     yield Ok(bytes);
@@ -267,12 +277,14 @@ where
                 Some(Err(error)) => {
                     log.fail(error.to_string());
                     yield Err(std::io::Error::other(error.to_string()));
+                    log.submit().await;
                     return;
                 }
                 None => break,
             }
         }
         if health.failed() { log.fail("Upstream returned a streaming error".into()); }
-        else { log.complete(); }
+        else if !stopped { log.complete(); }
+        log.submit().await;
     }
 }

@@ -245,7 +245,7 @@ pub fn run() {
                         let _ = show_or_create_main_window(&handle, true);
                     }
                     "quit" => {
-                        std::process::exit(0);
+                        handle.exit(0);
                     }
                     id if id.starts_with("profile:") => {
                         let profile_id = id.trim_start_matches("profile:");
@@ -868,6 +868,7 @@ pub fn run() {
             commands::openclaw_commands::get_openclaw_live_provider,
             commands::openclaw_commands::remove_provider_from_live_config,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(provider_proxy::handle_accounting_exit);
 }

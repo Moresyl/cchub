@@ -1,8 +1,15 @@
 //! Serialize accounting work without holding a runtime worker across SQLite IO.
-static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 // Match the proxy's existing global active-request ceiling. Reserving before
 // upstream work bounds detached records even when clients repeatedly disconnect.
 static REQUESTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8192);
+
+pub(super) fn close_requests() {
+    REQUESTS.close();
+}
+
+pub(super) fn active_requests() -> usize {
+    8192 - REQUESTS.available_permits()
+}
 
 #[derive(Clone)]
 pub(in crate::provider_proxy) struct AccountingLease {
@@ -30,22 +37,23 @@ pub(super) fn write<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> impl std::future::Future<Output = Result<T, String>> + Send + 'static {
     let lease = lease.clone();
-    // Enqueue immediately, before the first await. Cancellation while waiting
-    // for the writer must retain a paid record just like cancellation during IO.
-    let task = tokio::spawn(async move {
-        let permit = WRITES.lock().await;
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
+    // Enqueue before returning the future. The thread and its records survive
+    // cancellation and teardown of the async runtime that submitted the work.
+    let submitted = super::worker::writer().and_then(|writer| {
+        writer.submit(move || {
             let _lease = lease;
             work()
         })
-        .await
-        .map_err(|_| "Proxy accounting worker could not complete".to_string())?
     });
     async move {
-        task.await
+        submitted?
+            .await
             .map_err(|_| "Proxy accounting task could not complete".to_string())?
     }
+}
+
+pub(in crate::provider_proxy) fn drain(timeout: std::time::Duration) -> Result<(), String> {
+    super::worker::writer()?.drain(timeout)
 }
 
 #[cfg(test)]

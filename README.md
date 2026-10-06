@@ -101,6 +101,14 @@ This screenshot shows the actual quota component with isolated demonstration dat
 | **Native Configs**   | OpenCode switching preserves JSONC comments, MCP, plugins, and other providers                 |
 | **Sessions & Usage** | Browse native sessions and import output, reasoning, and cache usage without duplicate billing |
 
+### Usage analytics
+
+Date, app, provider and model filters keep their controls available while loading. Late responses from older filters cannot replace the current results. Live request events are coalesced; a failed refresh retains the last successful result for the same filter with a recovery message. Rankings provide pagination, wrap long names and use compact cards in narrow panels. Zero-request days no longer display a nonzero trend bar.
+
+![CCHub usage analytics](screenshots/usage-analytics.png)
+
+This screenshot shows the actual page component with isolated demonstration data, not a native desktop acceptance result.
+
 ### Sessions and recovery
 
 Codex session browsing, details and usage imports support both `.jsonl` and compressed `.jsonl.zst` logs. The plain file takes precedence while both forms exist. Selection and record IDs survive compression, so repeated imports do not bill the format change twice. Damaged archives or decoding-limit errors discard that file's staged import results.

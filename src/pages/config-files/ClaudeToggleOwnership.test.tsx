@@ -114,6 +114,7 @@ describe("Claude quick toggle write ownership", () => {
       expect(invoke).toHaveBeenCalledWith("write_config_file_content", {
         path: "C:/fixture/settings.local.json",
         content: '{"new":"draft"}',
+        expectedContent: original,
       }),
     );
   });

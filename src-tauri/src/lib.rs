@@ -394,6 +394,8 @@ pub fn run() {
             commands::config_files_commands::get_config_file_tree,
             commands::config_files_commands::read_config_file_content,
             commands::config_files_commands::write_config_file_content,
+            commands::config_files_commands::parse_openclaw_config_content,
+            commands::config_files_commands::edit_openclaw_config_content,
             extra_commands::read_codex_toml_structured,
             extra_commands::write_codex_toml_structured,
             extra_commands::sync_config_profiles,

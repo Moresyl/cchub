@@ -78,8 +78,8 @@ pub(crate) fn parse_json_object(source: &str) -> Result<Value, String> {
     parse(source).map(|(_, value)| value)
 }
 
-pub(crate) fn parse_json5_object(source: &str) -> Result<Value, String> {
-    let options = ParseOptions {
+fn json5_options() -> ParseOptions {
+    ParseOptions {
         allow_loose_object_property_names: true,
         allow_single_quoted_strings: true,
         allow_hexadecimal_numbers: true,
@@ -88,8 +88,11 @@ pub(crate) fn parse_json5_object(source: &str) -> Result<Value, String> {
         allow_non_finite_numbers: true,
         allow_extended_string_escapes: true,
         ..options()
-    };
-    parse_with_options(source, &options)
+    }
+}
+
+pub(crate) fn parse_json5_object(source: &str) -> Result<Value, String> {
+    parse_with_options(source, &json5_options())
         .map(|(_, value)| value)
         .map_err(|_| {
             "Invalid JSON5 object; check syntax and duplicate fields before switching".into()
@@ -147,6 +150,7 @@ fn render(
     root: &CstRootNode,
     before: &Value,
     desired: &Value,
+    json5: bool,
 ) -> Result<String, String> {
     let desired = desired
         .as_object()
@@ -160,7 +164,12 @@ fn render(
     if source.starts_with('\u{feff}') {
         output.insert(0, '\u{feff}');
     }
-    if parse_json_object(&output)? != Value::Object(desired.clone()) {
+    let rendered = if json5 {
+        parse_json5_object(&output)?
+    } else {
+        parse_json_object(&output)?
+    };
+    if rendered != Value::Object(desired.clone()) {
         return Err(
             "Configuration serialization did not match the intended update; no file was written"
                 .into(),
@@ -209,7 +218,19 @@ pub(crate) fn edit_json_text(
     if before == desired {
         return Ok(source.to_string());
     }
-    render(source, &root, &before, &desired)
+    render(source, &root, &before, &desired, false)
+}
+
+/// Retain JSON5 comments, unchanged nodes and extensions while editing a draft.
+pub(crate) fn edit_json5_text(source: &str, desired: &Value) -> Result<String, String> {
+    let (root, before) = parse_with_options(source, &json5_options())?;
+    if !desired.is_object() {
+        return Err("Configuration root must remain a JSON object".into());
+    }
+    if &before == desired {
+        return Ok(source.to_owned());
+    }
+    render(source, &root, &before, desired, true)
 }
 
 #[cfg(test)]

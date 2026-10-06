@@ -233,6 +233,14 @@ Edit environment variables, tools and agent settings in separate tabs. Tab chang
 
 This screenshot shows actual page components with isolated demonstration data, not native desktop acceptance.
 
+The Config Files page opens the configured OpenClaw native file. Provider, model, alias and default-model fields share one draft and save action with the JSON5 editor. Switching editor modes does not write the file. Field edits retain comments, unchanged text, credential references and extension fields; memory searches do not reload or replace the draft. Saving checks the loaded file contents, stops on external changes or deletion, and retains the draft for review. This protection is not a cross-process or power-loss transaction.
+
+![CCHub OpenClaw native file editor](screenshots/openclaw-native-file.png)
+
+![CCHub memory and journal](screenshots/openclaw-memory.png)
+
+These screenshots show actual configuration-file and memory components with isolated demonstration data, not real user files or native desktop acceptance.
+
 ### Native configuration and usage sync
 
 OpenCode uses the existing `opencode.jsonc` or `opencode.json`. Profiles retain the native provider ID and selected model, SDK extension options, and other model definitions. Applying a profile updates its provider and default model. Invalid syntax, duplicate fields, or an external change detected before writing stops the update with an actionable error.

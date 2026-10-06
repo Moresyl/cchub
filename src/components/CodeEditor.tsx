@@ -7,6 +7,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { yaml } from "@codemirror/lang-yaml";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
+import { javascript } from "@codemirror/legacy-modes/mode/javascript";
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { EditorView as CodeMirrorView, ViewUpdate, placeholder as editorPlaceholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
@@ -16,7 +17,7 @@ import { getLocale } from "../lib/i18n";
 export interface CodeEditorProps {
   value: string;
   onChange?: (value: string) => void;
-  language?: "json" | "markdown" | "yaml" | "toml" | "text";
+  language?: "json" | "json5" | "markdown" | "yaml" | "toml" | "text";
   readOnly?: boolean;
   minHeight?: number;
   maxHeight?: number;
@@ -143,6 +144,8 @@ function getThemeExtensions() {
 
 function getLangExtension(language: string) {
   switch (language) {
+    case "json5":
+      return [StreamLanguage.define(javascript)];
     case "json":
       return [json(), jsonLinter];
     case "yaml":

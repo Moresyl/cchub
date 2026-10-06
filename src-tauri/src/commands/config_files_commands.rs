@@ -10,6 +10,7 @@ pub struct ConfigRoot {
     pub name: String,
     pub path: String,
     pub exists: bool,
+    pub config_file: Option<String>,
 }
 
 struct ConfigRootCandidate {
@@ -101,11 +102,21 @@ fn roots_from_conn(conn: &rusqlite::Connection) -> Result<Vec<ConfigRoot>, Strin
         .into_iter()
         .map(|(id, name, path)| {
             let has_mcp = mcp_file_for_root(conn, &id)?.is_some_and(|file| file.is_file());
+            let config_file = if id == "openclaw" {
+                Some(
+                    crate::commands::extra_commands::resolve_tool_config_path(conn, &id)?
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            } else {
+                None
+            };
             Ok(ConfigRoot {
                 id,
                 name,
                 exists: path.exists() || has_mcp,
                 path: path.to_string_lossy().into_owned(),
+                config_file,
             })
         })
         .collect()
@@ -265,10 +276,36 @@ pub fn read_config_file_content(path: String, db: State<'_, DbState>) -> Result<
 pub fn write_config_file_content(
     path: String,
     content: String,
+    expected_content: Option<String>,
     db: State<'_, DbState>,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let file_path = ensure_allowed_file(&conn, &path)?;
-    crate::utils::atomic_write_string(&file_path, &content)
-        .map_err(|e| format!("Failed to write {}: {}", file_path.display(), e))
+    write_checked_content(&file_path, &content, expected_content.as_deref())
+}
+
+fn write_checked_content(path: &Path, content: &str, expected: Option<&str>) -> Result<(), String> {
+    let _guard = crate::json_config::write_lock()?;
+    let original = crate::config_write::read(path)?;
+    if expected.is_some_and(|expected| original.as_deref() != Some(expected.as_bytes())) {
+        return Err("Configuration changed externally; reload and review it before saving. Your draft is retained.".into());
+    }
+    crate::config_write::commit(vec![crate::config_write::FileUpdate {
+        path: path.to_path_buf(),
+        original,
+        desired: content.as_bytes().to_vec(),
+    }])
+}
+
+#[tauri::command]
+pub fn parse_openclaw_config_content(content: String) -> Result<serde_json::Value, String> {
+    crate::json_config::parse_json5_object(&content)
+}
+
+#[tauri::command]
+pub fn edit_openclaw_config_content(
+    content: String,
+    desired: serde_json::Value,
+) -> Result<String, String> {
+    crate::json_config::edit_json5_text(&content, &desired)
 }

@@ -17,6 +17,8 @@ import { useConfigFiles } from "../hooks/queries";
 import { isCodexConfigToml, type CodexStructuredConfig } from "../lib/codexConfig";
 import { useCodexEditor } from "./config-files/useCodexEditor";
 import CodexStructuredFields from "./config-files/CodexStructuredFields";
+import { isOpenClawConfigFile, useOpenClawEditor } from "./config-files/useOpenClawEditor";
+import OpenClawNativeFields from "./config-files/OpenClawNativeFields";
 
 import CodeEditor from "../components/DeferredCodeEditor";
 
@@ -27,6 +29,7 @@ interface ConfigRoot {
   name: string;
   path: string;
   exists: boolean;
+  config_file?: string;
 }
 
 interface ClaudeConfigToggles {
@@ -99,6 +102,16 @@ export default function ConfigFiles() {
   const [claudeToggles, setClaudeToggles] = useState<ClaudeConfigToggles | null>(null);
   const [loadingClaudeToggles, setLoadingClaudeToggles] = useState(false);
   const [writingClaudeToggleKey, setWritingClaudeToggleKey] = useState<string | null>(null);
+  const openClawFile = isOpenClawConfigFile(
+    activeRoot,
+    activeFile,
+    roots.find((root) => root.id === "openclaw")?.config_file,
+  );
+  const openClawEditor = useOpenClawEditor(content, `${activeRoot}:${activeFile}`, openClawFile && !loadingFile);
+  const openClawBlocked =
+    openClawFile &&
+    (openClawEditor.loading || openClawEditor.error || openClawEditor.busy || openClawEditor.invalidNumber);
+  const editorGeneration = fileGeneration.current;
   const {
     data: tree,
     isLoading: loadingTree,
@@ -118,6 +131,7 @@ export default function ConfigFiles() {
     codexEditor.error || codexValidation?.errors.length || codexStructuredConfig?.malformedMcpServers,
   );
   const hasChanges =
+    openClawEditor.hasPendingDraft ||
     codexEditor.hasPendingDraft ||
     content !== originalContent ||
     (isCodexConfigToml(activeRoot, activeFile) && codexApiKey !== originalCodexApiKey);
@@ -139,6 +153,7 @@ export default function ConfigFiles() {
   const openFile = useCallback(
     async (path: string) => {
       codexEditor.reset();
+      openClawEditor.reset();
       const generation = ++fileGeneration.current;
       setLoadingFile(true);
       setActiveFile(path);
@@ -237,6 +252,7 @@ export default function ConfigFiles() {
   useEffect(() => {
     fileGeneration.current++;
     codexEditor.reset();
+    openClawEditor.reset();
     setActiveFile(null);
     setContent("");
     setOriginalContent("");
@@ -277,6 +293,7 @@ export default function ConfigFiles() {
     codexBlocked,
     writingClaudeToggleKey,
     needsReload,
+    openClawEditor,
   ]);
 
   async function loadRoots() {
@@ -307,7 +324,7 @@ export default function ConfigFiles() {
   }
 
   async function saveFile() {
-    if (!activeFile || loadingFile || saveInFlight.current || codexBlocked || needsReload) return;
+    if (!activeFile || loadingFile || saveInFlight.current || codexBlocked || openClawBlocked || needsReload) return;
     const generation = fileGeneration.current;
     saveInFlight.current = true;
     setSaving(true);
@@ -326,9 +343,17 @@ export default function ConfigFiles() {
         setOriginalCodexApiKey(codexApiKey);
         setCodexFileRevision(written.fileRevision);
       } else {
-        await invoke("write_config_file_content", { path: activeFile, content });
+        const desired = openClawFile ? await openClawEditor.prepare() : content;
         if (fileGeneration.current !== generation) return;
-        setOriginalContent(content);
+        if (desired !== content) setContent(desired);
+        await invoke("write_config_file_content", {
+          path: activeFile,
+          content: desired,
+          expectedContent: originalContent,
+        });
+        if (fileGeneration.current !== generation) return;
+        setOriginalContent(desired);
+        if (openClawFile) openClawEditor.reset();
         if (claudeQuickToggleFile) {
           try {
             const refreshed = await invoke<ClaudeConfigToggles>("read_claude_config_toggles");
@@ -342,6 +367,26 @@ export default function ConfigFiles() {
       showToast("success", zh ? "已保存" : "Saved");
     } catch (error) {
       if (fileGeneration.current !== generation) return;
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith("Configuration changed externally")) {
+        setNeedsReload(true);
+        showToast(
+          "error",
+          zh
+            ? "文件已被其他程序修改，草稿已保留。请重新加载并核对后保存。"
+            : "The file changed externally. Your draft is retained. Reload and review it before saving.",
+        );
+        return;
+      }
+      if (openClawFile) {
+        showToast(
+          "error",
+          zh
+            ? "保存失败，配置草稿已保留。请检查文件权限与原始配置后重试。"
+            : "Saving failed. Your draft is retained. Check file permissions and the raw configuration, then retry.",
+        );
+        return;
+      }
       console.error(error);
       showToast("error", String(error));
     } finally {
@@ -434,7 +479,10 @@ export default function ConfigFiles() {
   }
 
   const fillCodeEditor =
-    !(structuredCodexFile && codexStructuredConfig) && !claudeQuickToggleFile && activeLanguage !== "markdown";
+    !openClawFile &&
+    !(structuredCodexFile && codexStructuredConfig) &&
+    !claudeQuickToggleFile &&
+    activeLanguage !== "markdown";
 
   return (
     <div className="animate-in" style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -463,6 +511,7 @@ export default function ConfigFiles() {
               loadingFile ||
               !!writingClaudeToggleKey ||
               codexBlocked ||
+              openClawBlocked ||
               needsReload
             }
           >
@@ -475,7 +524,9 @@ export default function ConfigFiles() {
       <ConfigFilesRootTabs roots={visibleRoots} activeRoot={activeRoot} onSelectRoot={requestSwitchRoot} />
 
       {activeRoot === "opencode" && <OmoConfigSection />}
-      {activeRoot === "openclaw" && <OpenClawConfigSection />}
+      {activeRoot === "openclaw" && (
+        <OpenClawConfigSection configFile={activeRootMeta?.config_file} onOpenFile={requestOpenFile} />
+      )}
       {activeRoot === "hermes" && <HermesConfigSection />}
 
       <div className="config-files-workspace">
@@ -536,10 +587,11 @@ export default function ConfigFiles() {
                 variant="secondary"
                 onClick={() => {
                   codexEditor.reset();
+                  openClawEditor.reset();
                   setContent(originalContent);
                   setCodexApiKey(originalCodexApiKey);
                 }}
-                disabled={!hasChanges}
+                disabled={!hasChanges || saving || openClawEditor.busy}
               >
                 <RotateCcw size={14} />
                 {i.configFiles.revert}
@@ -551,8 +603,8 @@ export default function ConfigFiles() {
             {needsReload && activeFile && (
               <div role="alert" className="card" style={{ padding: 12, marginBottom: 16, fontSize: 12 }}>
                 {zh
-                  ? "文件操作后未能重新读取配置。请重新加载并核对磁盘内容，再继续修改。当前草稿已保留。"
-                  : "The configuration could not be re-read after the file operation. Reload and review the file before continuing. Your draft has been retained."}
+                  ? "当前磁盘内容需要重新核对。请重新加载配置后再继续保存；当前草稿已保留。"
+                  : "Reload and review the current file contents before saving again. Your draft has been retained."}
                 <Button variant="secondary" onClick={() => requestOpenFile(activeFile)} style={{ marginTop: 8 }}>
                   <RefreshCw size={14} />
                   {zh ? "重新加载配置" : "Reload configuration"}
@@ -587,6 +639,16 @@ export default function ConfigFiles() {
               <div className="loading-center" style={{ height: "100%" }}>
                 <div className="spinner" />
               </div>
+            ) : openClawFile ? (
+              <OpenClawNativeFields
+                key={activeFile}
+                editor={openClawEditor}
+                content={content}
+                onChange={(value) => {
+                  if (fileGeneration.current === editorGeneration) setContent(value);
+                }}
+                disabled={saving || needsReload}
+              />
             ) : structuredCodexFile && codexStructuredConfig ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <CodexStructuredFields

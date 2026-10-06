@@ -99,7 +99,11 @@ describe("configuration editor ownership", () => {
     fireEvent.change(raw(), { target: { value: "updated = true\n" } });
     fireEvent.click(saveButton());
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("write_config_file_content", { path, content: "updated = true\n" }),
+      expect(invoke).toHaveBeenCalledWith("write_config_file_content", {
+        path,
+        content: "updated = true\n",
+        expectedContent: "original = true\n",
+      }),
     );
     expect(invoke).toHaveBeenCalledWith("read_config_file_content", { path });
     expect(invoke).not.toHaveBeenCalledWith("write_codex_toml_structured", expect.anything());
@@ -275,10 +279,11 @@ describe("configuration editor ownership", () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error("Configuration changed externally"));
     fireEvent.change(key(), { target: { value: "draft-key" } });
     fireEvent.click(saveButton());
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith("error", expect.stringContaining("externally")));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("error", expect.stringContaining("草稿已保留")));
     expect(key().value).toBe("draft-key");
     expect(raw().value).toBe(content);
-    expect(saveButton().disabled).toBe(false);
+    expect(saveButton().disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "重新加载配置" })).toBeTruthy();
   });
 
   it("ignores a save acknowledgement after the user confirms opening another file", async () => {

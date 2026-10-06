@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 async fn search_history_server() -> (Upstream, Arc<Mutex<Vec<(String, Value)>>>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -14,7 +15,8 @@ async fn search_history_server() -> (Upstream, Arc<Mutex<Vec<(String, Value)>>>)
             let path = request.uri().to_string();
             let value: Value = serde_json::from_slice(&to_bytes(request.into_body(), 65536).await.unwrap()).unwrap();
             let valid = value["input"].as_array().unwrap().iter().all(|item| {
-                item["type"] != "tool_search_call" || item["id"].as_str().is_none_or(|id| id.starts_with("tsc_"))
+                (item["type"] != "tool_search_call" || item["id"].as_str().is_none_or(|id| id.starts_with("tsc_")))
+                    && item["call_id"].as_str().is_none_or(|id| id.chars().count() <= 64)
             });
             saved.lock().unwrap().push((path, value));
             Response::builder().status(if valid { StatusCode::OK } else { StatusCode::BAD_REQUEST })
@@ -31,10 +33,13 @@ async fn search_history_server() -> (Upstream, Arc<Mutex<Vec<(String, Value)>>>)
 
 #[tokio::test]
 async fn responses_search_history_is_repaired_for_native_turns_and_compaction_after_overrides() {
-    for (path, stripping) in [
-        ("v1/responses", false),
-        ("v1/responses/compact", false),
-        ("responses", true),
+    for (path, stripping, long_links) in [
+        ("v1/responses", false, false),
+        ("v1/responses/compact", false, false),
+        ("responses", true, false),
+        ("v1/responses", false, true),
+        ("v1/responses/compact", false, true),
+        ("responses", true, true),
     ] {
         let (upstream, requests) = search_history_server().await;
         let app = app(
@@ -44,13 +49,23 @@ async fn responses_search_history_is_repaired_for_native_turns_and_compaction_af
                 ..Default::default()
             },
         );
+        let search_link = if long_links {
+            "search-original-".repeat(6)
+        } else {
+            "search-original".into()
+        };
+        let shell_link = if long_links {
+            "shell-original-".repeat(6)
+        } else {
+            "shell-original".into()
+        };
         let input = json!([
             {"type":"message","role":"user","content":[{"type":"input_text","text":"find tools"}]},
-            {"type":"tool_search_call","id":"fc_history","call_id":"search-original","status":"completed","execution":"client","arguments":{"query":"calendar"}},
-            {"type":"tool_search_output","call_id":"search-original","status":"completed","execution":"client","tools":[{"type":"function","name":"calendar","parameters":{"type":"object"}}]},
+            {"type":"tool_search_call","id":"fc_history","call_id":search_link,"status":"completed","execution":"client","arguments":{"query":"calendar"}},
+            {"type":"tool_search_output","call_id":search_link,"status":"completed","execution":"client","tools":[{"type":"function","name":"calendar","parameters":{"type":"object"}}]},
             {"type":"tool_search_call","id":"tsc_existing","call_id":"search-other","arguments":{"query":"mail"}},
-            {"type":"function_call","id":"fc_shell","call_id":"shell-original","name":"shell","arguments":"{}"},
-            {"type":"function_call_output","call_id":"shell-original","output":"ok"},
+            {"type":"function_call","id":"fc_shell","call_id":shell_link,"name":"shell","arguments":"{}"},
+            {"type":"function_call_output","call_id":shell_link,"output":"ok"},
             {"type":"reasoning","id":"rs_original","encrypted_content":"ciphertext+opaque=="}
         ]);
         {
@@ -106,6 +121,16 @@ async fn responses_search_history_is_repaired_for_native_turns_and_compaction_af
         assert_eq!(saved[0].1["model"], "wire-model");
         let mut expected = input;
         expected[1]["id"] = json!("tsc_history");
+        if long_links {
+            for index in [1, 2] {
+                expected[index]["call_id"] =
+                    json!(format!("{:x}", Sha256::digest(search_link.as_bytes())));
+            }
+            for index in [4, 5] {
+                expected[index]["call_id"] =
+                    json!(format!("{:x}", Sha256::digest(shell_link.as_bytes())));
+            }
+        }
         assert_eq!(saved[0].1["input"], expected);
     }
 }

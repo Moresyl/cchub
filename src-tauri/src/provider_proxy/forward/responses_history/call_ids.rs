@@ -4,9 +4,6 @@ use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
-#[path = "responses_history/call_ids.rs"]
-mod call_ids;
-
 #[derive(Deserialize)]
 struct History<'a> {
     #[serde(borrow)]
@@ -14,72 +11,64 @@ struct History<'a> {
 }
 
 #[derive(Deserialize)]
-struct Item<'a> {
+struct Call<'a> {
     #[serde(rename = "type")]
     kind: Option<String>,
     #[serde(borrow)]
-    id: Option<&'a RawValue>,
+    call_id: Option<&'a RawValue>,
 }
 
-pub(super) fn repair(path: &str, body: Bytes) -> Bytes {
-    if !matches!(
-        path.trim_matches('/'),
-        "responses" | "v1/responses" | "responses/compact" | "v1/responses/compact"
-    ) {
-        return body;
-    }
-    let body = repaired(&body).unwrap_or(body);
-    call_ids::repair(body)
+pub(super) fn repair(body: Bytes) -> Bytes {
+    bounded(&body).unwrap_or(body)
 }
 
-/// Replace only the item ID's JSON string. Opaque history, number spellings,
-/// whitespace and call_id links retain their original bytes.
-fn repaired(body: &Bytes) -> Option<Bytes> {
+// Replace only oversized link strings; preserve all other history bytes,
+// including encrypted reasoning and numeric spellings from other providers.
+fn bounded(body: &Bytes) -> Option<Bytes> {
     let source = std::str::from_utf8(body).ok()?;
     let history: History<'_> = serde_json::from_str(source).ok()?;
     let entries: Vec<&RawValue> = serde_json::from_str(history.input?.get()).ok()?;
-    let mut occupied = HashSet::new();
     let mut candidates = Vec::new();
+    let mut occupied = HashSet::new();
     for entry in entries {
-        let Ok(item) = serde_json::from_str::<Item<'_>>(entry.get()) else {
+        let Ok(call) = serde_json::from_str::<Call<'_>>(entry.get()) else {
             continue;
         };
-        let Some(raw) = item.id.filter(|raw| raw.get().len() <= 6 * 1028 + 2) else {
+        if !matches!(
+            call.kind.as_deref(),
+            Some(
+                "function_call"
+                    | "function_call_output"
+                    | "tool_search_call"
+                    | "tool_search_output"
+                    | "custom_tool_call"
+                    | "custom_tool_call_output"
+            )
+        ) {
             continue;
-        };
+        }
+        let Some(raw) = call.call_id else { continue };
         let Ok(id) = serde_json::from_str::<String>(raw.get()) else {
             continue;
         };
-        if id.starts_with("tsc_") && id.len() <= 1028 {
-            occupied.insert(id);
-        } else if item.kind.as_deref() == Some("tool_search_call")
-            && !id.is_empty()
-            && id.len() <= 1024
-        {
+        if id.chars().count() > 64 {
             candidates.push((raw, id));
+        } else {
+            occupied.insert(id);
         }
     }
     if candidates.is_empty() {
         return None;
     }
-    let mut assigned = HashMap::<String, String>::new();
+    let mut assigned = HashMap::new();
     let mut replacements = Vec::new();
     for (raw, id) in candidates {
         let next = assigned.entry(id.clone()).or_insert_with(|| {
-            let suffix = id
-                .split_once('_')
-                .map(|(_, rest)| rest)
-                .filter(|rest| !rest.is_empty())
-                .unwrap_or(&id);
-            let mut next = format!("tsc_{suffix}");
-            if occupied.contains(&next) {
-                let stable = format!("tsc_{:x}", Sha256::digest(id.as_bytes()));
-                next = stable.clone();
-                let mut index = 1usize;
-                while occupied.contains(&next) {
-                    next = format!("{stable}_{index}");
-                    index += 1;
-                }
+            let mut next = format!("{:x}", Sha256::digest(id.as_bytes()));
+            let mut nonce = 0usize;
+            while occupied.contains(&next) {
+                nonce += 1;
+                next = format!("{:x}", Sha256::digest(format!("{id}\0{nonce}").as_bytes()));
             }
             occupied.insert(next.clone());
             next
@@ -107,5 +96,5 @@ fn repaired(body: &Bytes) -> Option<Bytes> {
 }
 
 #[cfg(test)]
-#[path = "responses_history/tests.rs"]
+#[path = "call_ids/tests.rs"]
 mod tests;

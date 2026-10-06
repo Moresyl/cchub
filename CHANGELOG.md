@@ -1,6 +1,6 @@
 # 版本记录
 
-## 未发布
+## 1.7.5
 
 ### 新增 / 更新
 
@@ -8,12 +8,29 @@
 - 记忆与日志使用独立搜索和全文预览窗口，支持错误重试与窄窗口布局。
 - 更新中英文配置文件说明与实际组件演示截图。
 
+### 变更与安全
+
+- 原生文件解析与字段合并只更新当前草稿，通过统一保存入口写入；保存失败的提示不显示内部配置详情。
+- 无效 JSON5、重复字段与非法数值会阻止保存，避免写入空的默认配置。
+
 ### 问题修复
 
 - 修复快捷表单按配置片段重建整份原生文件而丢失无关配置的问题；字段编辑保留 JSON5 注释、原有格式、凭据引用及扩展字段。
 - 修复记忆搜索和记录选择重读配置、覆盖未保存修改的问题，忽略过期搜索和读取结果。
 - 文件保存核对加载时的原始内容；外部修改或删除时停止覆盖，保留草稿并提示重新加载核对。
 - 修复模型数组内的字段编辑、删除模型后的数值路径及空白数值覆盖；无效容器和数值不会静默转换或覆盖原值。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Adds shared native OpenClaw fields and a JSON5 editor with one draft and save action.
+- Separates memory search and preview from configuration loading, preserving drafts and rejecting stale results.
+- Retains comments, credential references and extension fields, and checks the original file contents before saving.
+- Improves numeric-field validation, array edits, save-conflict recovery, bilingual documentation and screenshots.
 
 ## 1.7.4
 

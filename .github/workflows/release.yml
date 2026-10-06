@@ -14,31 +14,32 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 重整 OpenClaw 配置工作区，统一输入、选择器、标签页和底部保存栏
-    - 支持模型别名编辑、撤销修改和方向键标签导航
-    - 更新中英文配置工作区说明与实际页面演示截图
+    - 配置文件页支持 OpenClaw 原生供应商、模型、别名及主模型与回退模型编辑
+    - 结构化字段与 JSON5 高亮编辑器共用文件草稿和保存入口，切换编辑方式不会直接写入文件
+    - 记忆与日志使用独立搜索、全文预览与错误重试窗口，优化窄窗口布局
+    - 更新中英文配置文件说明与两张实际组件演示截图
 
     ### 变更与安全
-    - 配置读取失败时阻止保存空默认值，避免覆盖已有设置
-    - 保存期间锁定编辑和重复提交；错误提示不展示内部配置详情
-    - 校验空变量名、重复变量名和结构化设置冲突，避免重名覆盖
+    - 字段编辑保留 JSON5 注释、原有格式、凭据引用及扩展字段
+    - 保存前核对加载时的原始文件内容；外部修改或删除时停止覆盖，保留草稿并要求重新加载核对
+    - JSON5 解析失败、重复字段与非法数值阻止保存；保存错误不回显内部配置详情
 
     ### 问题修复与打磨
-    - 区分配置读取失败、健康检查失败和未检测到配置文件，提供独立重试
-    - 保存失败和标签切换后保留草稿；状态检查暂时失败时保留已经加载的配置
-    - 保留结构化环境设置的原始类型，以及工具、Agent 和模型配置中的扩展字段
-    - 修复工具权限条目重复添加，输入法组合期间不提交条目
-    - 补充配置草稿、读取和保存失败、扩展字段、变量校验与键盘交互回归测试
+    - 修复快捷表单按配置片段重建整份原生文件而丢失无关配置的问题
+    - 修复记忆搜索与记录选择重读配置、覆盖未保存修改的问题，忽略过期搜索和读取结果
+    - 修复模型数组内的字段编辑、删除模型后的数值路径及空白数值被转换为零的问题
+    - 保存失败保留草稿供重试，切换文件时的过期序列化结果不会写入其他文件
+    - 补充原生字段保留、文件冲突、草稿所有权与记忆交互回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Refines the OpenClaw workspace with consistent controls, model aliases, undo and keyboard tab navigation.
-    - Preserves drafts across tab changes and failed saves, with independent configuration and health-check retries.
-    - Retains structured environment values and extension fields, validates duplicate keys and prevents duplicate saves.
-    - Updates bilingual documentation, the workspace screenshot and interaction regression coverage.
+    - Adds shared native OpenClaw fields and a JSON5 editor with one draft and save action.
+    - Separates memory search and preview from configuration loading, preserving drafts and rejecting stale results.
+    - Retains comments, credential references and extension fields, and checks original file contents before saving.
+    - Improves numeric validation, array edits, save-conflict recovery, bilingual documentation and screenshots.
 
     ## 下载 / Download
 

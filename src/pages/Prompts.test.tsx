@@ -71,7 +71,8 @@ describe("prompt page interactions", () => {
   it("keeps readable library data when the live file cannot be read and blocks activation", async () => {
     vi.mocked(invoke).mockResolvedValue(snapshot({ live: null, liveError: "fixture permission error" }));
     await loaded();
-    expect(screen.getByRole("alert").textContent).toContain("fixture permission");
+    expect(screen.getByRole("alert").textContent).toContain("重新加载最新状态");
+    expect(screen.getByRole("alert").textContent).not.toContain("fixture permission");
     expect(screen.getByRole("button", { name: "启用" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     fireEvent.change(screen.getByRole("textbox", { name: "名称" }), { target: { value: "Draft" } });
@@ -129,6 +130,39 @@ describe("prompt page interactions", () => {
       window.dispatchEvent(new Event("cchub-shortcut-save"));
     });
     expect(calls("upsert_prompt")).toHaveLength(0);
+  });
+
+  it("marks an oversized stored description invalid and enables saving only after repair", async () => {
+    vi.mocked(invoke).mockResolvedValue(
+      snapshot({ prompts: { [record().id]: record({ description: "d".repeat(2001) }) } }),
+    );
+    await edit();
+    const description = screen.getByRole("textbox", { name: "说明（可选）" });
+    expect(description.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByRole("button", { name: "保存" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "保存并启用" }).hasAttribute("disabled")).toBe(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("cchub-shortcut-save"));
+    });
+    expect(calls("upsert_prompt")).toHaveLength(0);
+    fireEvent.change(description, { target: { value: "😀".repeat(2000) } });
+    expect(description.getAttribute("aria-invalid")).toBeNull();
+    expect((description as HTMLInputElement).maxLength).toBe(4000);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(calls("upsert_prompt")).toHaveLength(1));
+    expect(calls("upsert_prompt")[0][1]).toMatchObject({ prompt: { description: "😀".repeat(2000) } });
+  });
+
+  it("explains a file conflict without echoing internal failure details and retains the draft", async () => {
+    await edit();
+    fireEvent.change(screen.getByRole("textbox", { name: "名称" }), { target: { value: "Retained" } });
+    vi.mocked(invoke).mockRejectedValueOnce("Prompt file changed externally; PRIVATE_VALUE");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("已被外部修改");
+    expect(alert.textContent).not.toContain("PRIVATE_VALUE");
+    expect((screen.getByRole("textbox", { name: "名称" }) as HTMLInputElement).value).toBe("Retained");
+    expect(screen.getByRole("button", { name: "保存" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("preserves a rejected draft and retries only after explicit reload with new revisions", async () => {

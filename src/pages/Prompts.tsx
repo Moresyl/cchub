@@ -31,7 +31,8 @@ import {
   type PromptDraft,
   type PromptRecord,
 } from "./prompts/types";
-import { READBACK_ERROR, usePromptLibrary } from "./prompts/usePromptLibrary";
+import { usePromptLibrary } from "./prompts/usePromptLibrary";
+import { promptErrorText } from "./prompts/errors";
 
 type DraftSession = { value: PromptDraft; original: PromptDraft; libraryRevision: string; liveRevision?: string };
 export default function Prompts() {
@@ -69,13 +70,8 @@ export default function Prompts() {
   const active = Object.values(snapshot?.prompts ?? {}).find((record) => record.enabled);
   const matchesLive = !!active && snapshot?.live?.content === active.content;
   const storedDraft = draft ? snapshot?.prompts[draft.value.id] : undefined;
-  const errorMessage =
-    error === READBACK_ERROR
-      ? text(
-          "修改已保存，但暂时无法读取最新状态。请重新加载后再继续。",
-          "The change was saved. Reload to read its current state before continuing.",
-        )
-      : error;
+  const failure = error ?? snapshot?.liveError;
+  const errorMessage = failure ? promptErrorText(failure, text) : null;
 
   useEffect(() => {
     let owns = true;
@@ -288,7 +284,7 @@ export default function Prompts() {
             <p className="font-semibold">
               {text("已保留当前内容，请检查后重试", "Current content retained. Review before retrying.")}
             </p>
-            <p className="break-words text-muted-foreground">{errorMessage ?? snapshot.liveError}</p>
+            <p className="break-words text-muted-foreground">{errorMessage}</p>
           </div>
           <Button variant="secondary" disabled={writing || loading} onClick={() => void reload()}>
             {text("重新加载", "Reload", "再読み込み")}
@@ -426,7 +422,13 @@ export default function Prompts() {
             </div>
           </DialogHeader>
           <DialogBody>
-            <CodeEditor value={snapshot.live?.content ?? ""} language="markdown" readOnly minHeight={200} />
+            <CodeEditor
+              value={snapshot.live?.content ?? ""}
+              language="markdown"
+              ariaLabel={text("当前指令文件内容", "Live instruction file contents", "現在の指示ファイルの内容")}
+              readOnly
+              minHeight={200}
+            />
           </DialogBody>
         </DialogContent>
       </Dialog>
@@ -439,7 +441,13 @@ export default function Prompts() {
             </div>
           </DialogHeader>
           <DialogBody>
-            <CodeEditor value={storedDraft?.content ?? ""} language="markdown" readOnly minHeight={200} />
+            <CodeEditor
+              value={storedDraft?.content ?? ""}
+              language="markdown"
+              ariaLabel={text("库内指令内容", "Stored instructions", "保存済みの指示内容")}
+              readOnly
+              minHeight={200}
+            />
           </DialogBody>
         </DialogContent>
       </Dialog>

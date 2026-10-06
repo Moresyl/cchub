@@ -1,5 +1,6 @@
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { previewComponents } from "./components";
 
 interface MarkdownPreviewImplProps {
   content: string;
@@ -8,8 +9,10 @@ interface MarkdownPreviewImplProps {
 
 export default function MarkdownPreviewImpl({ content, components }: MarkdownPreviewImplProps) {
   return (
-    <Markdown remarkPlugins={[remarkGfm]} components={components}>
-      {content}
-    </Markdown>
+    <div className="markdown-content">
+      <Markdown remarkPlugins={[remarkGfm]} components={{ ...previewComponents, ...components }}>
+        {content}
+      </Markdown>
+    </div>
   );
 }

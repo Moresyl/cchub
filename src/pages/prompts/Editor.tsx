@@ -31,8 +31,14 @@ export default function PromptEditor({
   const [nameTouched, setNameTouched] = useState(false);
   const nameLabelId = useId();
   const nameHintId = useId();
+  const descriptionLabelId = useId();
+  const descriptionHintId = useId();
+  const contentLabelId = useId();
   const invalidName = !draft.name.trim() || [...draft.name.trim()].length > 120;
+  const nameError = invalidName && (nameTouched || !!draft.name);
+  const invalidDescription = [...draft.description].length > 2000;
   const invalidContent = new TextEncoder().encode(draft.content).length > 1024 * 1024;
+  const invalid = invalidName || invalidDescription || invalidContent;
   return (
     <Card className="flex min-w-0 flex-col overflow-clip">
       <div className="grid items-start gap-4 border-b border-border p-4 sm:grid-cols-2">
@@ -44,30 +50,42 @@ export default function PromptEditor({
             value={draft.name}
             disabled={writing}
             aria-labelledby={nameLabelId}
-            aria-invalid={(nameTouched && invalidName) || undefined}
+            aria-invalid={nameError || undefined}
             aria-describedby={nameHintId}
             onBlur={() => setNameTouched(true)}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
           />
-          <span
-            id={nameHintId}
-            className={nameTouched && invalidName ? "text-[var(--danger)]" : "text-muted-foreground"}
-          >
+          <span id={nameHintId} className={nameError ? "text-[var(--danger)]" : "text-muted-foreground"}>
             {text("必填，最多 120 个字符", "Required, up to 120 characters", "必須、120 文字以内")}
           </span>
         </label>
         <label className="grid min-w-0 gap-1.5 text-xs font-medium">
-          {text("说明（可选）", "Description (optional)", "説明（任意）")}
+          <span id={descriptionLabelId}>{text("说明（可选）", "Description (optional)", "説明（任意）")}</span>
           <Input
-            maxLength={2000}
+            maxLength={4000}
             value={draft.description}
             disabled={writing}
+            aria-labelledby={descriptionLabelId}
+            aria-invalid={invalidDescription || undefined}
+            aria-describedby={descriptionHintId}
             onChange={(event) => onChange({ ...draft, description: event.target.value })}
           />
+          <span
+            id={descriptionHintId}
+            className={invalidDescription ? "text-[var(--danger)]" : "text-muted-foreground"}
+          >
+            {invalidDescription
+              ? text(
+                  "说明超过 2000 个字符，请缩短后再保存。",
+                  "Description exceeds 2000 characters. Shorten it before saving.",
+                  "説明が 2000 文字を超えています。短くしてから保存してください。",
+                )
+              : text("最多 2000 个字符", "Up to 2000 characters", "2000 文字以内")}
+          </span>
         </label>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-        <span id="prompt-content-label" className="text-xs font-medium">
+        <span id={contentLabelId} className="text-xs font-medium">
           {text("指令内容", "Instructions", "指示内容")}
         </span>
         <Button variant="ghost" onClick={() => setPreview(!preview)} aria-pressed={preview}>
@@ -75,7 +93,7 @@ export default function PromptEditor({
           {preview ? text("返回编辑", "Edit", "編集") : text("预览", "Preview", "プレビュー")}
         </Button>
       </div>
-      <div className="min-w-0 px-4 pb-4" role="group" aria-labelledby="prompt-content-label">
+      <div className="min-w-0 px-4 pb-4" role="group" aria-labelledby={contentLabelId}>
         {preview ? (
           <div className="markdown-preview min-h-[280px] break-words">
             <MarkdownPreview content={draft.content} loadingLabel={text("正在加载预览…", "Loading preview…")} />
@@ -84,6 +102,7 @@ export default function PromptEditor({
           <CodeEditor
             value={draft.content}
             language="markdown"
+            ariaLabel={text("指令内容", "Instructions", "指示内容")}
             minHeight={280}
             maxHeight={480}
             readOnly={writing}
@@ -102,16 +121,13 @@ export default function PromptEditor({
         </Button>
         <Button
           variant="secondary"
-          disabled={writing || blocked || invalidName || invalidContent || (draft.enabled && !canWriteLive)}
+          disabled={writing || blocked || invalid || (draft.enabled && !canWriteLive)}
           onClick={() => onSave(false)}
         >
           <Save size={14} />
           {text("保存", "Save", "保存")}
         </Button>
-        <Button
-          disabled={writing || blocked || invalidName || invalidContent || !canWriteLive}
-          onClick={() => onSave(true)}
-        >
+        <Button disabled={writing || blocked || invalid || !canWriteLive} onClick={() => onSave(true)}>
           <FileText size={14} />
           {text("保存并启用", "Save & activate", "保存して有効化")}
         </Button>

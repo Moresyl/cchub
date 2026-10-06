@@ -7,6 +7,7 @@
 @import "./_tokens.css";
 @import "./_layout.css";
 @import "./_components.css";
+@import "./_markdown.css";
 @import "./_content.css";
 @import "./_utilities.css";
 @import "./_mdxeditor.css";

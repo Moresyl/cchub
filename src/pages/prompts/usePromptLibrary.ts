@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseSnapshot, type LibrarySnapshot, type PromptApp } from "./types";
+import { READBACK_ERROR } from "./errors";
 
-export const READBACK_ERROR =
-  "The change was saved, but its current state could not be read. Reload before continuing.";
+export { READBACK_ERROR };
 
 export function usePromptLibrary(app: PromptApp) {
   const [snapshot, setSnapshot] = useState<{ app: PromptApp; value: LibrarySnapshot } | null>(null);

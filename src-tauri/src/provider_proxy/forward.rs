@@ -8,11 +8,9 @@ use tauri::{AppHandle, Manager};
 use crate::db::DbState;
 use crate::provider_proxy_transform::openai_error_to_anthropic;
 
-use super::circuits::{
-    profile_available, retry_after_seconds, track_body, CircuitLease, CircuitScope,
-};
+use super::circuits::{profile_available, track_body, CircuitLease, CircuitScope};
 use super::cost::{
-    extract_error_message_from_response, log_proxy_request, transform_claude_response_body,
+    extract_error_message_from_response, transform_claude_response_body, AttemptLog,
 };
 use super::desktop;
 #[path = "forward/admission.rs"]
@@ -74,6 +72,10 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     mut request: Request<Body>,
     client: Option<reqwest::Client>,
 ) -> Response<Body> {
+    let accounting = match super::cost::reserve_accounting().await {
+        Ok(lease) => lease,
+        Err(error) => return build_proxy_error(StatusCode::SERVICE_UNAVAILABLE, error),
+    };
     let is_desktop = tool_id == "claude-desktop";
     let proxy_url = match context::setup(&app_handle, &tool_id, &mut request) {
         Ok(proxy_url) => proxy_url,
@@ -234,9 +236,16 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                     );
                     continue;
                 }
-                return last_response
-                    .map(|reply| reply.finish(&app_handle, &request_id, &tool_id, started_at))
-                    .unwrap_or_else(|| build_proxy_error(StatusCode::BAD_GATEWAY, error));
+                return body::finish_or_error(
+                    last_response,
+                    &app_handle,
+                    &request_id,
+                    &tool_id,
+                    started_at,
+                    error,
+                    &accounting,
+                )
+                .await;
             }
         };
         if let Some(affinity) = &affinity {
@@ -286,21 +295,15 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                 continue;
             }
         }
-        let log_attempt =
-            |usage: Option<&super::ProxyUsageMetrics>, status: u16, error: Option<&str>| {
-                log_proxy_request(
-                    &app_handle,
-                    &request_id,
-                    &tool_id,
-                    &upstream,
-                    &request_insights,
-                    usage,
-                    None,
-                    started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-                    status,
-                    error,
-                );
-            };
+        let log_attempt = AttemptLog {
+            app: &app_handle,
+            request_id: &request_id,
+            tool_id: &tool_id,
+            upstream: &upstream,
+            insights: &request_insights,
+            started_at,
+            lease: &accounting,
+        };
         let ordered_base_urls = ordered_upstream_base_urls(&app_handle, &upstream);
         let attempt_count = ordered_base_urls.len();
         let (effective_headers, admission_permit) = match admission::prepare(
@@ -475,7 +478,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         endpoint_lease.failure();
                                         endpoint_failed = true;
                                         last_error = Some(message.to_string());
-                                        log_attempt(None, 502, last_error.as_deref());
+                                        log_attempt.log(None, 502, last_error.as_deref()).await;
                                         if claude_transform.is_some() && last_response.is_none() {
                                             last_response =
                                                 Some(body::RetainedReply::conversion_failed(
@@ -535,11 +538,13 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                         "Failed to transform upstream response for {} ({}/{}): {error}",
                                                         upstream.profile_name, tool_id, upstream.profile_id
                                                     );
-                                                    log_attempt(
-                                                        transform_usage.as_ref(),
-                                                        StatusCode::BAD_GATEWAY.as_u16(),
-                                                        Some(&message),
-                                                    );
+                                                    log_attempt
+                                                        .log(
+                                                            transform_usage.as_ref(),
+                                                            StatusCode::BAD_GATEWAY.as_u16(),
+                                                            Some(&message),
+                                                        )
+                                                        .await;
                                                     endpoint_lease.failure();
                                                     endpoint_failed = true;
                                                     if last_response.is_none() {
@@ -562,11 +567,13 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                                 "Upstream returned a non-JSON success body for transformed Claude request: {} ({}/{})",
                                                 upstream.profile_name, tool_id, upstream.profile_id
                                             );
-                                            log_attempt(
-                                                None,
-                                                StatusCode::BAD_GATEWAY.as_u16(),
-                                                Some(&message),
-                                            );
+                                            log_attempt
+                                                .log(
+                                                    None,
+                                                    StatusCode::BAD_GATEWAY.as_u16(),
+                                                    Some(&message),
+                                                )
+                                                .await;
                                             endpoint_lease.failure();
                                             endpoint_failed = true;
                                             last_error = Some(message);
@@ -618,11 +625,13 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                             .and_then(extract_error_message_from_response)
                                             .or(upstream_error_message)
                                     };
-                                    log_attempt(
-                                        usage.as_ref(),
-                                        status.as_u16(),
-                                        error_message.as_deref(),
-                                    );
+                                    log_attempt
+                                        .log(
+                                            usage.as_ref(),
+                                            status.as_u16(),
+                                            error_message.as_deref(),
+                                        )
+                                        .await;
                                     return body::finish_json_response(
                                         status,
                                         &headers,
@@ -638,11 +647,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                         "Failed to read upstream response body for {} ({}/{}): {error}",
                                         upstream.profile_name, tool_id, upstream.profile_id
                                     );
-                                    log_attempt(
-                                        None,
-                                        StatusCode::BAD_GATEWAY.as_u16(),
-                                        Some(&message),
-                                    );
+                                    log_attempt
+                                        .log(None, StatusCode::BAD_GATEWAY.as_u16(), Some(&message))
+                                        .await;
                                     endpoint_lease.failure();
                                     endpoint_failed = true;
                                     last_error = Some(message);
@@ -709,19 +716,21 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             let body = match body {
                                 Ok(body) => body,
                                 Err(error) => {
-                                    log_attempt(
-                                        error.usage.as_ref(),
-                                        error.status.as_u16(),
-                                        Some(&error.message),
-                                    );
-                                    if let Err(message) = super::cost::record_stream_attempt(
+                                    if let Err(message) = super::cost::log_failed_stream_attempt(
                                         &app_handle,
                                         &request_id,
+                                        &tool_id,
                                         &upstream,
                                         &request_insights,
-                                        error.status.as_u16(),
                                         error.usage.as_ref(),
-                                    ) {
+                                        started_at.elapsed().as_millis().min(u128::from(u64::MAX))
+                                            as u64,
+                                        error.status.as_u16(),
+                                        &error.message,
+                                        &accounting,
+                                    )
+                                    .await
+                                    {
                                         return build_proxy_error(
                                             StatusCode::INTERNAL_SERVER_ERROR,
                                             message,
@@ -775,7 +784,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                         .await
                         {
                             Ok((status, headers, bytes)) => {
-                                log_attempt(None, status.as_u16(), error_message.as_deref());
+                                log_attempt
+                                    .log(None, status.as_u16(), error_message.as_deref())
+                                    .await;
                                 if status.is_success() {
                                     let endpoint_accepted = endpoint_lease.success();
                                     let profile_accepted = profile_lease.success();
@@ -801,7 +812,9 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                                     "Failed to read upstream response body for {} ({}/{}): {error}",
                                     upstream.profile_name, tool_id, upstream.profile_id
                                 );
-                                log_attempt(None, StatusCode::BAD_GATEWAY.as_u16(), Some(&message));
+                                log_attempt
+                                    .log(None, StatusCode::BAD_GATEWAY.as_u16(), Some(&message))
+                                    .await;
                                 endpoint_lease.failure();
                                 endpoint_failed = true;
                                 last_error = Some(message);
@@ -815,7 +828,7 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                             upstream.profile_name, tool_id, upstream.profile_id, base_url
                         );
                         last_error = Some(message.clone());
-                        log_attempt(None, 502, Some(&message));
+                        log_attempt.log(None, 502, Some(&message)).await;
                         endpoint_lease.failure();
                         endpoint_failed = true;
                         if index + 1 < attempt_count {
@@ -835,13 +848,16 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
                         }
 
                         crate::utils::append_runtime_log("warn", "provider_proxy", &message);
-                        return last_response
-                            .map(|reply| {
-                                reply.finish(&app_handle, &request_id, &tool_id, started_at)
-                            })
-                            .unwrap_or_else(|| {
-                                build_proxy_error(StatusCode::BAD_GATEWAY, message)
-                            });
+                        return body::finish_or_error(
+                            last_response,
+                            &app_handle,
+                            &request_id,
+                            &tool_id,
+                            started_at,
+                            message,
+                            &accounting,
+                        )
+                        .await;
                     }
                 }
             }
@@ -852,30 +868,14 @@ async fn forward_proxy_request_with_client<R: tauri::Runtime>(
     }
 
     if let Some(response) = last_response {
-        return response.finish(&app_handle, &request_id, &tool_id, started_at);
+        return response
+            .finish(&app_handle, &request_id, &tool_id, started_at, &accounting)
+            .await;
     }
     if let Some(response) = attempts.exhausted_response(profile_candidate_count) {
         return response;
     }
-    let unavailable = last_error.is_none();
-    let mut response = build_proxy_error(
-        if last_error.is_some() {
-            StatusCode::BAD_GATEWAY
-        } else {
-            StatusCode::SERVICE_UNAVAILABLE
-        },
-        last_error.unwrap_or_else(|| format!("No upstream provider available for {tool_id}")),
-    );
-    if unavailable {
-        if let Ok(value) = axum::http::HeaderValue::from_str(
-            &retry_after_seconds(&runtime, &tool_id, &profile_ids).to_string(),
-        ) {
-            response
-                .headers_mut()
-                .insert(axum::http::header::RETRY_AFTER, value);
-        }
-    }
-    response
+    body::exhausted_response(&runtime, &tool_id, &profile_ids, last_error)
 }
 
 #[cfg(test)]

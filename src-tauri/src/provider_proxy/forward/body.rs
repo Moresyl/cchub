@@ -21,6 +21,55 @@ pub(super) struct RetainedReply {
     pub usage: Option<crate::provider_proxy::ProxyUsageMetrics>,
 }
 
+pub(super) async fn finish_or_error<R: tauri::Runtime>(
+    reply: Option<RetainedReply>,
+    app: &tauri::AppHandle<R>,
+    request_id: &str,
+    tool_id: &str,
+    started_at: std::time::Instant,
+    error: String,
+    lease: &crate::provider_proxy::cost::AccountingLease,
+) -> Response<Body> {
+    match reply {
+        Some(reply) => {
+            reply
+                .finish(app, request_id, tool_id, started_at, lease)
+                .await
+        }
+        None => crate::provider_proxy::build_proxy_error(StatusCode::BAD_GATEWAY, error),
+    }
+}
+
+pub(super) fn exhausted_response(
+    runtime: &std::sync::Arc<
+        std::sync::Mutex<crate::provider_proxy::LocalProviderProxyRuntimeInner>,
+    >,
+    tool_id: &str,
+    profile_ids: &[String],
+    last_error: Option<String>,
+) -> Response<Body> {
+    let unavailable = last_error.is_none();
+    let mut response = crate::provider_proxy::build_proxy_error(
+        if unavailable {
+            StatusCode::SERVICE_UNAVAILABLE
+        } else {
+            StatusCode::BAD_GATEWAY
+        },
+        last_error.unwrap_or_else(|| format!("No upstream provider available for {tool_id}")),
+    );
+    if unavailable {
+        if let Ok(value) = axum::http::HeaderValue::from_str(
+            &crate::provider_proxy::circuits::retry_after_seconds(runtime, tool_id, profile_ids)
+                .to_string(),
+        ) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+    }
+    response
+}
+
 impl RetainedReply {
     pub(super) fn conversion_failed(
         upstream: crate::provider_proxy::UpstreamTarget,
@@ -40,12 +89,13 @@ impl RetainedReply {
         }
     }
 
-    pub(super) fn finish<R: tauri::Runtime>(
+    pub(super) async fn finish<R: tauri::Runtime>(
         self,
         app: &tauri::AppHandle<R>,
         request_id: &str,
         tool_id: &str,
         started_at: std::time::Instant,
+        lease: &crate::provider_proxy::cost::AccountingLease,
     ) -> Response<Body> {
         crate::provider_proxy::cost::log_proxy_request(
             app,
@@ -58,7 +108,9 @@ impl RetainedReply {
             started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
             self.response.status().as_u16(),
             Some(&self.error_message),
-        );
+            lease,
+        )
+        .await;
         self.response
     }
 }

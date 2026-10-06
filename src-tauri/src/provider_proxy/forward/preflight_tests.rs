@@ -214,6 +214,36 @@ async fn accounting_failure_stops_before_requesting_another_provider_and_keeps_l
 }
 
 #[tokio::test]
+async fn parent_accounting_failure_stops_before_requesting_another_provider() {
+    let (first, _) = held_server(format!(
+        "data: {{\"usage\":{{\"prompt_tokens\":7}}}}\n\n{RATE_LIMIT}"
+    ))
+    .await;
+    let last = server(StatusCode::OK, "text/event-stream", ANSWER).await;
+    let app = app(
+        &[("p1", &first.url, vec![]), ("p2", &last.url, vec![])],
+        OptimizerConfig::default(),
+    );
+    app.state::<DbState>().0.lock().unwrap().execute_batch(
+        "CREATE TRIGGER fail_parent BEFORE INSERT ON proxy_request_logs BEGIN SELECT RAISE(ABORT,'private parent storage secret'); END;"
+    ).unwrap();
+    let response = request_path(&app, "v1/chat/completions").await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = to_bytes(response.into_body(), 8192).await.unwrap();
+    assert!(!String::from_utf8_lossy(&body).contains("private parent storage secret"));
+    assert_eq!(first.hits.load(Ordering::SeqCst), 1);
+    assert_eq!(last.hits.load(Ordering::SeqCst), 0);
+    let db = app.state::<DbState>();
+    let conn = db.0.lock().unwrap();
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn retry_attempt_ledger_survives_sql_backup_and_is_removed_with_its_request() {
     let (first, _) = held_server(format!(
         "data: {{\"usage\":{{\"prompt_tokens\":7}}}}\n\n{RATE_LIMIT}"

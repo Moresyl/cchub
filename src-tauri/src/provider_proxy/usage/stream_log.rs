@@ -1,7 +1,7 @@
 use std::time::Instant;
 use tauri::AppHandle;
 
-use crate::provider_proxy::cost::log_proxy_request;
+use crate::provider_proxy::cost::log_proxy_request_sync;
 use crate::provider_proxy::{ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
 
 pub(super) struct StreamRequestLog<R: tauri::Runtime> {
@@ -51,7 +51,7 @@ impl<R: tauri::Runtime> Drop for StreamRequestLog<R> {
         } else if self.health.delivered_successfully() {
             self.complete();
         }
-        log_proxy_request(
+        log_proxy_request_sync(
             &self.app_handle,
             &self.request_id,
             &self.tool_id,

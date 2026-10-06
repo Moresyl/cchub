@@ -12,8 +12,11 @@ use crate::provider_proxy_transform::{
 use super::{ClaudeApiFormat, ProxyRequestInsights, ProxyUsageMetrics, UpstreamTarget};
 
 mod attempts;
-pub(super) use attempts::record_stream_attempt;
 pub(crate) use attempts::StreamAttempt;
+mod dispatch;
+pub(super) use dispatch::{reserve as reserve_accounting, AccountingLease};
+mod pending;
+use pending::PendingRecord;
 
 pub(super) fn extract_error_message_from_response(body: &Value) -> Option<String> {
     body.get("error")
@@ -165,45 +168,208 @@ pub(super) fn log_proxy_request<R: tauri::Runtime>(
     latency_ms: u64,
     status_code: u16,
     error_message: Option<&str>,
-) {
-    let db = app_handle.state::<DbState>();
-    let Ok(conn) = db.0.lock() else {
-        crate::utils::append_runtime_log(
-            "warn",
-            "provider_proxy",
-            "Failed to acquire database lock while logging proxy request",
-        );
-        return;
-    };
-    let usage = usage.cloned().unwrap_or_default();
-    let created_at = chrono::Utc::now().to_rfc3339();
-    let record = accounting::RequestRecord {
+    lease: &AccountingLease,
+) -> impl std::future::Future<Output = ()> + Send + 'static {
+    let app = app_handle.clone();
+    let record = PendingRecord::new(
         request_id,
         tool_id,
         upstream,
         insights,
-        usage: &usage,
-        timing: timing.copied().unwrap_or_default(),
+        usage,
+        timing,
         latency_ms,
         status_code,
         error_message,
-        created_at: &created_at,
-        total_cost_usd: calculate_proxy_total_cost(&conn, upstream, insights, &usage),
-    };
-    if let Err(error) = accounting::persist_request(&conn, &record) {
-        crate::utils::append_runtime_log(
-            "warn",
-            "provider_proxy",
-            &format!("Failed to persist proxy accounting: {error}"),
-        );
-        return;
+    );
+    let writing = dispatch::write(lease, move || {
+        let result = record.persist(&app);
+        if let Err(error) = &result {
+            warn_accounting(error);
+        }
+        result
+    });
+    async move {
+        if let Err(error) = writing.await {
+            warn_accounting(&error);
+        }
     }
-    if (200..300).contains(&status_code) {
-        super::affinity::commit(app_handle, &conn, tool_id, upstream, &usage);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn log_failed_stream_attempt<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+    request_id: &str,
+    tool_id: &str,
+    upstream: &UpstreamTarget,
+    insights: &ProxyRequestInsights,
+    usage: Option<&ProxyUsageMetrics>,
+    latency_ms: u64,
+    status_code: u16,
+    error_message: &str,
+    lease: &AccountingLease,
+) -> impl std::future::Future<Output = Result<(), String>> + Send + 'static {
+    let app = app_handle.clone();
+    let has_usage = usage.is_some();
+    let record = PendingRecord::new(
+        request_id,
+        tool_id,
+        upstream,
+        insights,
+        usage,
+        None,
+        latency_ms,
+        status_code,
+        Some(error_message),
+    );
+    let writing = dispatch::write(lease, move || {
+        let result: Result<(), String> = (|| {
+            // Both steps survive cancellation of the request. A failed parent
+            // write must never append usage to an earlier attempt's record.
+            record.persist(&app)?;
+            if has_usage {
+                attempts::record_stream_attempt(
+                    &app,
+                    &record.request_id,
+                    &record.upstream,
+                    &record.insights,
+                    record.status_code,
+                    Some(&record.usage),
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = &result {
+            warn_accounting(error);
+        }
+        result
+    });
+    async move {
+        let result = writing.await;
+        result.map_err(|error| {
+            warn_accounting(&error);
+            "Failed stream accounting could not be retained; no further provider was requested"
+                .into()
+        })
+    }
+}
+
+pub(super) struct AttemptLog<'a, R: tauri::Runtime> {
+    pub app: &'a AppHandle<R>,
+    pub request_id: &'a str,
+    pub tool_id: &'a str,
+    pub upstream: &'a UpstreamTarget,
+    pub insights: &'a ProxyRequestInsights,
+    pub started_at: std::time::Instant,
+    pub lease: &'a AccountingLease,
+}
+
+impl<R: tauri::Runtime> AttemptLog<'_, R> {
+    pub(super) fn log(
+        &self,
+        usage: Option<&ProxyUsageMetrics>,
+        status: u16,
+        error: Option<&str>,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static {
+        log_proxy_request(
+            self.app,
+            self.request_id,
+            self.tool_id,
+            self.upstream,
+            self.insights,
+            usage,
+            None,
+            self.started_at
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64,
+            status,
+            error,
+            self.lease,
+        )
+    }
+}
+
+// Stream cancellation has no async caller; this path is kept separate from
+// awaited response accounting until final stream records have a drainable queue.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn log_proxy_request_sync<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+    request_id: &str,
+    tool_id: &str,
+    upstream: &UpstreamTarget,
+    insights: &ProxyRequestInsights,
+    usage: Option<&ProxyUsageMetrics>,
+    timing: Option<&super::usage::StreamTiming>,
+    latency_ms: u64,
+    status_code: u16,
+    error_message: Option<&str>,
+) {
+    let record = PendingRecord::new(
+        request_id,
+        tool_id,
+        upstream,
+        insights,
+        usage,
+        timing,
+        latency_ms,
+        status_code,
+        error_message,
+    );
+    if let Err(error) = record.persist(app_handle) {
+        warn_accounting(&error);
+    }
+}
+
+fn warn_accounting(error: &str) {
+    crate::utils::append_runtime_log(
+        "warn",
+        "provider_proxy",
+        &format!("Failed to persist proxy accounting: {error}"),
+    );
+}
+
+fn persist_record<R: tauri::Runtime>(
+    app_handle: &AppHandle<R>,
+    pending: &PendingRecord,
+) -> Result<(), String> {
+    let db = app_handle.state::<DbState>();
+    let conn =
+        db.0.lock()
+            .map_err(|_| "Could not acquire proxy accounting database")?;
+    let record = accounting::RequestRecord {
+        request_id: &pending.request_id,
+        tool_id: &pending.tool_id,
+        upstream: &pending.upstream,
+        insights: &pending.insights,
+        usage: &pending.usage,
+        timing: pending.timing,
+        latency_ms: pending.latency_ms,
+        status_code: pending.status_code,
+        error_message: pending.error_message.as_deref(),
+        created_at: &pending.created_at,
+        total_cost_usd: calculate_proxy_total_cost(
+            &conn,
+            &pending.upstream,
+            &pending.insights,
+            &pending.usage,
+        ),
+    };
+    accounting::persist_request(&conn, &record)
+        .map_err(|_| "Could not persist proxy accounting")?;
+    if (200..300).contains(&pending.status_code) {
+        super::affinity::commit(
+            app_handle,
+            &conn,
+            &pending.tool_id,
+            &pending.upstream,
+            &pending.usage,
+        );
     }
     drop(conn);
     let _ = app_handle.emit(
         "usage-log-recorded",
-        serde_json::json!({ "toolId": tool_id, "statusCode": status_code }),
+        serde_json::json!({ "toolId": pending.tool_id, "statusCode": pending.status_code }),
     );
+    Ok(())
 }

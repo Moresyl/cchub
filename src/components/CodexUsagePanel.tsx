@@ -52,7 +52,7 @@ export default function CodexUsagePanel({ localeText: text }: { localeText: Loca
           className="min-w-0 space-y-2 border-t border-border pt-4"
           aria-label={text("Codex 模型目录", "Codex model catalog", "Codex モデル一覧")}
         >
-          <h4 className="font-[590]">{text("Codex 模型目录", "Codex model catalog", "Codex モデル一覧")}</h4>
+          <h4 className="font-semibold">{text("Codex 模型目录", "Codex model catalog", "Codex モデル一覧")}</h4>
           {models.status === "loading" && (
             <p role="status" className="text-muted-foreground">
               {text("正在读取目录…", "Reading catalog…", "一覧を読み込み中…")}

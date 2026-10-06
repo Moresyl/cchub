@@ -30,7 +30,7 @@ export default function PromptCard({
       <div className="flex items-start gap-2">
         <FileText size={16} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <h2 className="break-words text-sm font-[590]">{prompt.name}</h2>
+          <h2 className="break-words text-sm font-semibold">{prompt.name}</h2>
           {prompt.description && <p className="mt-1 break-words text-xs text-muted-foreground">{prompt.description}</p>}
         </div>
         <Button
@@ -58,7 +58,7 @@ export default function PromptCard({
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
         <div className="min-w-0 text-[11px] text-muted-foreground">
           {prompt.enabled && (
-            <p className="font-[510] text-foreground">
+            <p className="font-medium text-foreground">
               {matchesLive ? text("当前启用", "Active", "有効") : text("文件内容不同", "Live file differs")}
             </p>
           )}

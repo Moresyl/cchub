@@ -54,7 +54,7 @@ export default function DraftModelTestPanel({
 
   return (
     <section aria-labelledby={headingId} className="min-w-0 rounded-lg border border-border bg-card p-3">
-      <h3 id={headingId} className="mb-1 flex items-center gap-2 text-xs font-[590]">
+      <h3 id={headingId} className="mb-1 flex items-center gap-2 text-xs font-semibold">
         <FlaskConical size={14} aria-hidden="true" />{" "}
         {localeText("测试当前草稿", "Test current draft", "現在の下書きをテスト")}
       </h3>

@@ -47,7 +47,7 @@ export default function DetailsHeader({ session, query, locale, deleting, onDele
           </Button>
         </div>
       </div>
-      <h3 className="line-clamp-2 break-words text-base font-[590] leading-snug" title={session.title}>
+      <h3 className="line-clamp-2 break-words text-base font-semibold leading-snug" title={session.title}>
         <HighlightedText text={session.title} query={query} />
       </h3>
       {stats.length > 0 && <p className="text-[11px] leading-relaxed text-muted-foreground">{stats.join(" · ")}</p>}

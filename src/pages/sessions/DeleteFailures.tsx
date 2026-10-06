@@ -47,7 +47,7 @@ export default function DeleteFailures({
       <ul className="mt-3 max-h-40 space-y-2 overflow-y-auto text-[12px]">
         {failures.map(({ session, error }) => (
           <li key={`${session.tool_id}:${session.source_path}`} className="break-words">
-            <span className="font-[510]">{session.title}</span>
+            <span className="font-medium">{session.title}</span>
             <span className="ml-2 text-muted-foreground">{error}</span>
           </li>
         ))}

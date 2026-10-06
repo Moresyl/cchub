@@ -76,7 +76,7 @@ export default function CodexTab({ uiText }: { uiText: UiText }) {
       </p>
       {saveError && (
         <Card className="space-y-2 border-[var(--warning)] p-4" role="alert">
-          <p className="text-sm font-[590]">
+          <p className="text-sm font-semibold">
             {uiText("设置未保存", "Settings were not saved", "設定を保存できませんでした")}
           </p>
           <p className="text-xs text-muted-foreground">
@@ -89,7 +89,7 @@ export default function CodexTab({ uiText }: { uiText: UiText }) {
         </Card>
       )}
       <Card className="min-w-0 space-y-3 p-4">
-        <h4 className="text-sm font-[590]">{uiText("权限模式", "Permissions", "権限モード")}</h4>
+        <h4 className="text-sm font-semibold">{uiText("权限模式", "Permissions", "権限モード")}</h4>
         <p className="text-xs text-muted-foreground">
           {uiText(
             "同时设置沙箱范围与审批策略。完全访问允许在工作区外执行操作，且不请求审批。",
@@ -127,7 +127,7 @@ export default function CodexTab({ uiText }: { uiText: UiText }) {
         )}
       </Card>
       <Card className="space-y-3 p-4">
-        <h4 className="text-sm font-[590]">{uiText("推理强度", "Reasoning effort", "推論強度")}</h4>
+        <h4 className="text-sm font-semibold">{uiText("推理强度", "Reasoning effort", "推論強度")}</h4>
         <fieldset disabled={disabled} className="min-w-0 border-0 p-0">
           <ReasoningEffortSelect
             value={settings.reasoning_effort}
@@ -138,7 +138,9 @@ export default function CodexTab({ uiText }: { uiText: UiText }) {
       </Card>
       <Card className="flex items-start justify-between gap-4 p-4">
         <div className="min-w-0 space-y-1">
-          <h4 className="text-sm font-[590]">{uiText("1M 上下文上限", "1M context limit", "1M コンテキスト上限")}</h4>
+          <h4 className="text-sm font-semibold">
+            {uiText("1M 上下文上限", "1M context limit", "1M コンテキスト上限")}
+          </h4>
           <p className="text-xs text-muted-foreground">
             {uiText(
               "将客户端上限设为 1,000,000 token，仍需模型和服务支持。关闭仅移除此 1M 设置，保留其他自定义上限。",
@@ -161,7 +163,7 @@ export default function CodexTab({ uiText }: { uiText: UiText }) {
       </Card>
       <Card className="flex items-start justify-between gap-4 p-4">
         <div className="min-w-0 space-y-1">
-          <h4 className="text-sm font-[590]">
+          <h4 className="text-sm font-semibold">
             {uiText("响应存储兼容设置", "Response storage compatibility", "応答保存の互換設定")}
           </h4>
           <p className="text-xs text-muted-foreground">

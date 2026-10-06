@@ -10,7 +10,7 @@
   font-family: "CCHub Sans";
   src: url("../assets/fonts/cchub-sans-medium.woff2") format("woff2");
   font-style: normal;
-  font-weight: 510;
+  font-weight: 500;
   font-display: swap;
 }
 
@@ -18,6 +18,6 @@
   font-family: "CCHub Sans";
   src: url("../assets/fonts/cchub-sans-semibold.woff2") format("woff2");
   font-style: normal;
-  font-weight: 590;
+  font-weight: 600;
   font-display: swap;
 }

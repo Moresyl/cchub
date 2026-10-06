@@ -123,7 +123,7 @@ function SessionListItemComponent({
               overflow: "hidden",
               overflowWrap: "anywhere",
               fontSize: 14,
-              fontWeight: 590,
+              fontWeight: 600,
               color: "var(--text-primary)",
               lineHeight: 1.35,
             }}

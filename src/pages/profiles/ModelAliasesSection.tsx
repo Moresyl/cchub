@@ -34,7 +34,7 @@ export function ModelAliasesSection({ fields, localeText: t, onChange }: Props) 
   return (
     <div className="mt-4 space-y-3 border-t border-[var(--border-subtle)] pt-4" aria-labelledby={`${id}-title`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 id={`${id}-title`} className="text-xs font-[590]">
+        <h4 id={`${id}-title`} className="text-xs font-semibold">
           {t("模型别名 · 本地代理", "Model aliases · Local proxy", "モデル別名 · ローカルプロキシ")}
         </h4>
         {fields.localProxyModelAliasesRaw === undefined && (

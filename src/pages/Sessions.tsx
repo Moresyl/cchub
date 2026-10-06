@@ -423,7 +423,7 @@ export default function Sessions() {
                 <span
                   style={{
                     fontSize: 12,
-                    fontWeight: 590,
+                    fontWeight: 600,
                     color: "var(--text-muted)",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",

@@ -152,7 +152,7 @@ export default function SettingsCodexHistoryRestore({
   return (
     <div className="space-y-4 border-t border-[var(--border-subtle)] pt-4">
       <div className="space-y-2">
-        <h3 className="text-sm font-[590]">恢复迁移前的配置归属</h3>
+        <h3 className="text-sm font-semibold">恢复迁移前的配置归属</h3>
         <p className="text-xs leading-relaxed text-muted-foreground">
           从当前配置目录的迁移备份中选择会话。仅还原分桶标识，保留后来新增的消息、最新标题和其他状态记录。
           同一会话的日志与状态一起恢复；存在冲突时不能选择。请先关闭 Codex 客户端。

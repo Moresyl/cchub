@@ -29,19 +29,21 @@ export default function PromptEditor({
 }: Props) {
   const [preview, setPreview] = useState(false);
   const [nameTouched, setNameTouched] = useState(false);
+  const nameLabelId = useId();
   const nameHintId = useId();
   const invalidName = !draft.name.trim() || [...draft.name.trim()].length > 120;
   const invalidContent = new TextEncoder().encode(draft.content).length > 1024 * 1024;
   return (
     <Card className="flex min-w-0 flex-col overflow-clip">
       <div className="grid items-start gap-4 border-b border-border p-4 sm:grid-cols-2">
-        <label className="grid min-w-0 gap-1.5 text-xs font-[510]">
-          {text("名称", "Name", "名前")}
+        <label className="grid min-w-0 gap-1.5 text-xs font-medium">
+          <span id={nameLabelId}>{text("名称", "Name", "名前")}</span>
           <Input
             autoFocus
             maxLength={240}
             value={draft.name}
             disabled={writing}
+            aria-labelledby={nameLabelId}
             aria-invalid={(nameTouched && invalidName) || undefined}
             aria-describedby={nameHintId}
             onBlur={() => setNameTouched(true)}
@@ -54,7 +56,7 @@ export default function PromptEditor({
             {text("必填，最多 120 个字符", "Required, up to 120 characters", "必須、120 文字以内")}
           </span>
         </label>
-        <label className="grid min-w-0 gap-1.5 text-xs font-[510]">
+        <label className="grid min-w-0 gap-1.5 text-xs font-medium">
           {text("说明（可选）", "Description (optional)", "説明（任意）")}
           <Input
             maxLength={2000}
@@ -65,7 +67,7 @@ export default function PromptEditor({
         </label>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-        <span id="prompt-content-label" className="text-xs font-[510]">
+        <span id="prompt-content-label" className="text-xs font-medium">
           {text("指令内容", "Instructions", "指示内容")}
         </span>
         <Button variant="ghost" onClick={() => setPreview(!preview)} aria-pressed={preview}>

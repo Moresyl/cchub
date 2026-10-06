@@ -318,8 +318,9 @@ export default memo(function CodexOAuthAuthSection({ localeText }: Props) {
               </p>
             ) : (
               <AccountQuota
-                key={`${account.id}:${quotaEpoch}`}
+                key={`${account.id}:${account.authenticatedAt}`}
                 accountId={account.id}
+                refreshKey={quotaEpoch}
                 localeText={localeText}
                 onFailure={refreshHealth}
               />

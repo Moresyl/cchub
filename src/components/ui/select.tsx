@@ -18,7 +18,7 @@ export const SelectTrigger = forwardRef<ElementRef<typeof SelectPrimitive.Trigge
       data-slot="select-trigger"
       data-control-size={controlSize}
       className={cn(
-        "flex h-[var(--control-size)] w-full items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2 text-xs font-[510] text-foreground outline-none transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--control-border-focus)] data-[state=open]:border-[var(--control-border-focus)] data-[state=open]:bg-[var(--control-background-hover)] disabled:cursor-default disabled:opacity-25 [&>span]:truncate",
+        "flex h-[var(--control-size)] w-full min-w-0 items-center justify-between gap-1 rounded-[var(--control-radius)] border border-[var(--control-border)] bg-[var(--control-background)] px-2 text-xs font-medium text-foreground outline-none transition-[background-color,border-color,box-shadow,color,opacity] duration-150 placeholder:text-muted-foreground hover:border-[var(--control-border-hover)] hover:bg-[var(--control-background-hover)] focus-visible:border-[var(--control-border-focus)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--control-border-focus)] data-[state=open]:border-[var(--control-border-focus)] data-[state=open]:bg-[var(--control-background-hover)] disabled:cursor-default disabled:opacity-25 [&>span:first-child]:min-w-0 [&>span:first-child]:truncate [&>span:first-child]:text-left",
         className,
       )}
       {...props}
@@ -104,7 +104,7 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex min-h-9 w-full cursor-default select-none items-center gap-1.5 rounded-lg py-2 pl-8 pr-3 text-sm text-secondary-foreground outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[var(--bg-card-hover)] data-[highlighted]:text-foreground data-[state=checked]:font-[590] data-[disabled]:opacity-25",
+      "relative flex min-h-9 w-full cursor-default select-none items-center gap-1.5 rounded-lg py-2 pl-8 pr-3 text-sm text-secondary-foreground outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[var(--bg-card-hover)] data-[highlighted]:text-foreground data-[state=checked]:font-semibold data-[disabled]:opacity-25",
       className,
     )}
     {...props}

@@ -89,7 +89,7 @@ export default function ClaudeSettingsSection({ uiText }: { uiText: UiText }) {
       </p>
       {saveError && (
         <Card role="alert" className="space-y-2 border-[var(--warning)] p-4">
-          <p className="text-sm font-[590]">{uiText("设置未保存", "Settings were not saved")}</p>
+          <p className="text-sm font-semibold">{uiText("设置未保存", "Settings were not saved")}</p>
           <p className="text-xs text-muted-foreground">
             {uiText(
               "文件或目录可能已变更，或写入失败。保留上次确认值，请重新读取后再修改。",
@@ -99,7 +99,7 @@ export default function ClaudeSettingsSection({ uiText }: { uiText: UiText }) {
         </Card>
       )}
       <Card className="min-w-0 space-y-3 p-4">
-        <h4 className="text-sm font-[590]">{uiText("权限模式", "Permissions")}</h4>
+        <h4 className="text-sm font-semibold">{uiText("权限模式", "Permissions")}</h4>
         <p className="text-xs text-muted-foreground">
           {uiText(
             "只修改默认模式，保留所有允许、询问和拒绝规则。绕过模式不询问权限，已有拒绝规则仍保留。自动模式和手动别名需要客户端版本支持。",
@@ -129,7 +129,7 @@ export default function ClaudeSettingsSection({ uiText }: { uiText: UiText }) {
         </p>
       </Card>
       <Card className="min-w-0 space-y-3 p-4">
-        <h4 className="text-sm font-[590]">{uiText("自动更新", "Auto updates")}</h4>
+        <h4 className="text-sm font-semibold">{uiText("自动更新", "Auto updates")}</h4>
         <p className="text-xs text-muted-foreground">
           {uiText(
             "关闭只禁用后台自动更新，仍可手动更新。系统包管理器和其他更新策略可能覆盖此设置。",
@@ -145,7 +145,7 @@ export default function ClaudeSettingsSection({ uiText }: { uiText: UiText }) {
         />
       </Card>
       <Card className="min-w-0 space-y-3 p-4">
-        <h4 className="text-sm font-[590]">{uiText("默认模型", "Default model")}</h4>
+        <h4 className="text-sm font-semibold">{uiText("默认模型", "Default model")}</h4>
         <p className="text-xs text-muted-foreground">
           {uiText(
             "选择模型别名，或搜索框中输入完整模型 ID；清除后由客户端决定。保留已有自定义模型 ID。",
@@ -162,7 +162,7 @@ export default function ClaudeSettingsSection({ uiText }: { uiText: UiText }) {
         />
       </Card>
       <Card className="min-w-0 space-y-3 p-4">
-        <h4 className="text-sm font-[590]">Tool Search</h4>
+        <h4 className="text-sm font-semibold">Tool Search</h4>
         <p className="text-xs text-muted-foreground">
           {uiText(
             "启用需要模型和服务支持工具引用。使用代理时请确认兼容；其他环境设置可能覆盖该值。",

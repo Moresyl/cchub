@@ -46,7 +46,7 @@ export default function QuotaSection({
             );
   return (
     <section aria-labelledby={heading} className="min-w-0 space-y-3">
-      <h4 id={heading} className="text-xs font-[590]">
+      <h4 id={heading} className="text-xs font-semibold">
         {tool} {text("订阅用量", "subscription usage", "利用量")}
       </h4>
       {resource.status === "loading" && (

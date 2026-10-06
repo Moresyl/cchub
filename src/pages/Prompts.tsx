@@ -204,7 +204,7 @@ export default function Prompts() {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <FileText size={19} />
-            <h1 className="text-xl font-[590]">
+            <h1 className="text-xl font-semibold">
               {draft
                 ? storedDraft
                   ? text("编辑 Prompt", "Edit prompt", "Prompt を編集")
@@ -260,7 +260,7 @@ export default function Prompts() {
         />
         <div className="min-w-0 flex-1 text-xs">
           <p className="break-all text-muted-foreground">{option.file}</p>
-          <p className="mt-1 break-words font-[510]">{liveStatus}</p>
+          <p className="mt-1 break-words font-medium">{liveStatus}</p>
         </div>
         <div className="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-1">
           <Button
@@ -285,7 +285,7 @@ export default function Prompts() {
       {(error || snapshot.liveError) && (
         <Card role="alert" className="flex flex-wrap items-center gap-3 p-3 text-xs">
           <div className="min-w-0 flex-1">
-            <p className="font-[590]">
+            <p className="font-semibold">
               {text("已保留当前内容，请检查后重试", "Current content retained. Review before retrying.")}
             </p>
             <p className="break-words text-muted-foreground">{errorMessage ?? snapshot.liveError}</p>

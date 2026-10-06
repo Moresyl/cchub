@@ -68,7 +68,7 @@
 .entity-detail-title {
   overflow: hidden;
   font-size: 14px;
-  font-weight: 590;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -111,7 +111,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 11px;
-  font-weight: 510;
+  font-weight: 500;
   transition:
     background-color 0.15s ease,
     color 0.15s ease;

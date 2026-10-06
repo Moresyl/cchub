@@ -270,7 +270,7 @@ export default function TrashDialog({
               <Card key={item.key} className="p-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                   <div className="min-w-0 flex-1">
-                    <p className="break-words text-[12px] font-[510]">{item.title || item.sessionId}</p>
+                    <p className="break-words text-[12px] font-medium">{item.title || item.sessionId}</p>
                     <p title={item.sourcePath} className="mt-1 truncate text-[11px] text-muted-foreground">
                       {item.sourcePath}
                     </p>
@@ -333,7 +333,7 @@ export default function TrashDialog({
               .filter((failure) => !items.some((item) => item.key === failure.key))
               .map((failure) => (
                 <Card key={failure.key} className="space-y-2 p-3">
-                  <p className="break-words text-[12px] font-[510]">{failure.title}</p>
+                  <p className="break-words text-[12px] font-medium">{failure.title}</p>
                   <p role="alert" className="break-words text-[12px] text-[var(--danger)]">
                     {restoreErrors[failure.key]}
                   </p>

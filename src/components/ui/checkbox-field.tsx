@@ -28,10 +28,11 @@ export function CheckboxField({
     <label
       htmlFor={id}
       className={cn(
-        "flex min-w-0 cursor-pointer items-start gap-2.5 text-[13px] text-foreground disabled:cursor-not-allowed",
+        "flex min-w-0 cursor-pointer items-start gap-2 text-[14px] leading-5 text-foreground",
         variant === "surface" &&
-          "min-h-14 rounded-md border border-border bg-[var(--bg-elevated)]/55 px-3 py-2.5 transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-card-hover)]",
-        disabled && "cursor-not-allowed opacity-55",
+          "min-h-14 rounded-md border border-border bg-[var(--bg-elevated)]/55 px-3 py-2.5 transition-colors",
+        variant === "surface" && !disabled && "hover:border-[var(--border-strong)] hover:bg-[var(--bg-card-hover)]",
+        disabled && "cursor-not-allowed text-muted-foreground",
         className,
       )}
     >
@@ -42,7 +43,7 @@ export function CheckboxField({
         checked={checked}
         disabled={disabled}
         onCheckedChange={(value) => onCheckedChange(value === true)}
-        className="mt-0.5"
+        className="mt-px"
       />
       <span className="min-w-0">
         <span id={labelId} className="block font-medium leading-5">

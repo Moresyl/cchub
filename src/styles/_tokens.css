@@ -6,8 +6,8 @@
     "CCHub Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
   --font-code: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --font-weight-normal: 400;
-  --font-weight-medium: 510;
-  --font-weight-semibold: 590;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
   --bg-window: #000000;
   --bg-app: #181818;
   --bg-sidebar: #000000;
@@ -49,7 +49,7 @@
   --control-radius: 6px;
   --control-height-sm: 28px;
   --control-height-md: 32px;
-  --control-height-lg: 40px;
+  --control-height-lg: 36px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;
@@ -65,6 +65,14 @@
   --switch-track: #5d5d5d;
   --switch-track-hover: #6b6b6b;
   --switch-track-checked: #0285ff;
+  --checkbox-border: #5d5d5d;
+  --checkbox-border-hover: #8f8f8f;
+  --checkbox-checked: #ededed;
+  --checkbox-indicator: #0d0d0d;
+  --checkbox-disabled-border: #303030;
+  --checkbox-disabled-background: #212121;
+  --checkbox-disabled-checked: #212121;
+  --checkbox-disabled-indicator: #8f8f8f;
 }
 
 /* Light theme */
@@ -114,6 +122,14 @@
   --switch-track: #dfdfdf;
   --switch-track-hover: #cdcdcd;
   --switch-track-checked: #0169cc;
+  --checkbox-border: #cdcdcd;
+  --checkbox-border-hover: #afafaf;
+  --checkbox-checked: #181818;
+  --checkbox-indicator: #ffffff;
+  --checkbox-disabled-border: #dfdfdf;
+  --checkbox-disabled-background: #fcfcfc;
+  --checkbox-disabled-checked: #afafaf;
+  --checkbox-disabled-indicator: #ffffff;
 }
 
 /* ── Tailwind Theme Integration ── */

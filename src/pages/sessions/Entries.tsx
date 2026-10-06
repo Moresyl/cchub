@@ -23,7 +23,7 @@ export default function SessionEntries({ entries, query, emptyLabel }: SessionEn
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className={`badge ${entryBadgeColor(entry.kind)} text-[11px]`}>{entry.kind}</span>
-                  <span className="min-w-0 truncate text-[12px] font-[590]" title={entry.title}>
+                  <span className="min-w-0 truncate text-[12px] font-semibold" title={entry.title}>
                     <HighlightedText text={entry.title} query={query} />
                   </span>
                 </div>

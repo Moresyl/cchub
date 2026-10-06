@@ -67,7 +67,7 @@ function ProxyRequestRowComponent({
           <span
             style={{
               fontSize: 14,
-              fontWeight: 510,
+              fontWeight: 500,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",

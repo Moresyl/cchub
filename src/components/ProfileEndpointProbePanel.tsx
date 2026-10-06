@@ -76,7 +76,7 @@ export default function ProfileEndpointProbePanel({
 
   return (
     <section aria-labelledby={headingId} className="min-w-0 rounded-lg border border-border bg-card p-3">
-      <h3 id={headingId} className="mb-1 flex items-center gap-2 text-xs font-[590]">
+      <h3 id={headingId} className="mb-1 flex items-center gap-2 text-xs font-semibold">
         <Gauge size={14} aria-hidden="true" />
         {localeText("端点测速", "Endpoint probe", "エンドポイント測定")}
       </h3>

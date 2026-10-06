@@ -1,11 +1,15 @@
 # 版本记录
 
-## 未发布
+## 1.7.4
 
 ### 新增 / 更新
 
 - 重整 OpenClaw 配置工作区，统一输入、选择器、标签页和底部保存栏；支持模型别名、撤销修改和键盘标签导航。
 - 更新中英文配置工作区说明与实际页面演示截图。
+
+### 变更与安全
+
+- 读取失败时阻止保存空默认值；保存期间锁定编辑和重复提交，错误提示不展示内部配置详情。
 
 ### 问题修复
 
@@ -13,6 +17,18 @@
 - 配置读取失败后禁止保存空默认值，保存失败和标签切换后保留草稿。
 - 保留结构化环境设置的原始类型，以及工具、Agent 和模型配置中的扩展字段。
 - 避免变量重名覆盖已有设置，防止保存中重复提交及修改；检查状态时配置暂时不可用也保留草稿。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Refines the OpenClaw workspace with consistent controls, model aliases, undo and keyboard tab navigation.
+- Preserves drafts across tab changes and failed saves, and separates configuration and health-check failures with retries.
+- Preserves structured environment values and extension fields, validates duplicate keys and prevents duplicate saves.
+- Updates bilingual documentation and the workspace screenshot.
 
 ## 1.7.3
 

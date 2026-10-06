@@ -14,33 +14,31 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - OpenCode 同时兼容新版 providers 与旧版 provider，支持原生设置、数组模型变体和对象模型选择
-    - 原生配置通过语法高亮编辑器保留扩展字段；卡片显示选中模型、变体和对应连接地址
-    - 更新中英文原生配置说明和编辑器演示截图
+    - 重整 OpenClaw 配置工作区，统一输入、选择器、标签页和底部保存栏
+    - 支持模型别名编辑、撤销修改和方向键标签导航
+    - 更新中英文配置工作区说明与实际页面演示截图
 
     ### 变更与安全
-    - 保存前校验原生字段，共享组包含无效配置时停止入库，避免部分成员被保存
-    - 连接检查、用量凭据与代理转发统一解析选中模型和变体的设置、请求头与参数
-    - 代理接管清除模型和变体的地址、认证覆盖，避免绕过本地端点
-    - 最小流式检查保留测试模型、提示词和输出上限，避免配置覆盖放大测试请求
+    - 配置读取失败时阻止保存空默认值，避免覆盖已有设置
+    - 保存期间锁定编辑和重复提交；错误提示不展示内部配置详情
+    - 校验空变量名、重复变量名和结构化设置冲突，避免重名覆盖
 
     ### 问题修复与打磨
-    - 修复原生配置被旧版表单重建后丢失变体与扩展字段的问题
-    - 编辑原生共享配置时保留其他工具的配置内容，失败草稿可继续重试
-    - 保留供应商 ID 原值，修复裁剪 ID 后产生重复条目的问题
-    - 修复有效原生条目的优先级、无效条目回退及被遮蔽旧配置的写入提示
-    - 关联配置名称与工具选择的无障碍标签，锁定已保存原生配置的工具类型
-    - 补充文件往返、实际数据库保存、四协议 HTTP 流式检查、代理接管和编辑交互回归测试
+    - 区分配置读取失败、健康检查失败和未检测到配置文件，提供独立重试
+    - 保存失败和标签切换后保留草稿；状态检查暂时失败时保留已经加载的配置
+    - 保留结构化环境设置的原始类型，以及工具、Agent 和模型配置中的扩展字段
+    - 修复工具权限条目重复添加，输入法组合期间不提交条目
+    - 补充配置草稿、读取和保存失败、扩展字段、变量校验与键盘交互回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Supports native OpenCode settings, model variants and object model selection alongside legacy profiles.
-    - Preserves extensions and other shared tools' configuration contents during editing, with retained drafts on failure.
-    - Resolves selected-model connection overlays consistently and prevents overrides from bypassing local proxy takeover.
-    - Corrects exact provider IDs and accessible editor labels; updates documentation, screenshots and regression coverage.
+    - Refines the OpenClaw workspace with consistent controls, model aliases, undo and keyboard tab navigation.
+    - Preserves drafts across tab changes and failed saves, with independent configuration and health-check retries.
+    - Retains structured environment values and extension fields, validates duplicate keys and prevents duplicate saves.
+    - Updates bilingual documentation, the workspace screenshot and interaction regression coverage.
 
     ## 下载 / Download
 

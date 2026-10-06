@@ -1,605 +1,169 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { AlertTriangle, Bot, Loader2, Plus, Save, Settings2, Shield, Trash2, Wrench, X } from "lucide-react";
+import { AlertTriangle, Bot, RefreshCw, Settings2, Shield, Wrench } from "lucide-react";
 import { t } from "../lib/i18n";
-import { showToast } from "../components/Toast";
+import { useAsyncResource } from "../lib/asyncState";
 import LoadingState from "../components/states/LoadingState";
-import {
-  useSetOpenClawAgentsDefaultsMutation,
-  useSetOpenClawEnvMutation,
-  useSetOpenClawToolsMutation,
-} from "../hooks/mutations";
-import { SimpleSelect } from "../components/ui/simple-select";
-
-type Tab = "env" | "tools" | "agents";
+import ErrorState from "../components/states/ErrorState";
+import EmptyState from "../components/states/EmptyState";
+import { Button } from "../components/ui/button";
+import EnvPanel from "./OpenClaw/EnvPanel";
+import ToolsPanel from "./OpenClaw/ToolsPanel";
+import AgentsPanel from "./OpenClaw/AgentsPanel";
 
 interface OpenClawStatus {
   installed: boolean;
   configPath: string;
 }
-
 interface HealthWarning {
   code: string;
   message: string;
-  path: string | null;
+  path?: string | null;
 }
+type Tab = "env" | "tools" | "agents";
 
-interface EnvConfig {
-  [key: string]: unknown;
-}
-
-interface ToolsConfig {
-  profile: string | null;
-  allow: string[];
-  deny: string[];
-}
-
-interface AgentsDefaults {
-  model: { primary: string; fallbacks: string[] } | null;
-  models: Record<string, { alias: string | null }> | null;
-}
-
-const TOOL_PROFILES = ["minimal", "coding", "messaging", "full"];
-
-function OpenClaw() {
-  const i = t();
+export default function OpenClaw() {
+  const i = t().openClaw;
+  const id = useId();
   const [tab, setTab] = useState<Tab>("env");
-  const [status, setStatus] = useState<OpenClawStatus | null>(null);
-  const [warnings, setWarnings] = useState<HealthWarning[]>([]);
-  const [loading, setLoading] = useState(true);
-
+  const [opened, setOpened] = useState(false);
+  const status = useAsyncResource(() => invoke<OpenClawStatus>("get_openclaw_status"));
+  const health = useAsyncResource(() => invoke<HealthWarning[]>("scan_openclaw_health"));
   useEffect(() => {
-    void loadStatus();
-  }, []);
-
-  async function loadStatus() {
-    try {
-      const [s, w] = await Promise.all([
-        invoke<OpenClawStatus>("get_openclaw_status"),
-        invoke<HealthWarning[]>("scan_openclaw_health"),
-      ]);
-      setStatus(s);
-      setWarnings(w);
-    } catch {
-      setStatus({ installed: false, configPath: "" });
-    } finally {
-      setLoading(false);
-    }
+    if (status.data?.installed) setOpened(true);
+  }, [status.data?.installed]);
+  const tabs = [
+    { key: "env" as const, icon: Settings2, label: i.envTab, panel: EnvPanel },
+    { key: "tools" as const, icon: Wrench, label: i.toolsTab, panel: ToolsPanel },
+    { key: "agents" as const, icon: Shield, label: i.agentsTab, panel: AgentsPanel },
+  ];
+  function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const next =
+      event.key === "ArrowRight"
+        ? (index + 1) % tabs.length
+        : event.key === "ArrowLeft"
+          ? (index + tabs.length - 1) % tabs.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? tabs.length - 1
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    setTab(tabs[next].key);
+    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
   }
-
-  if (loading) {
-    return <LoadingState label={i.openClaw.loading} />;
-  }
-
-  if (!status?.installed) {
-    return (
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 12,
-        }}
-      >
-        <Bot size={40} style={{ color: "var(--text-muted)" }} />
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{i.openClaw.notInstalled}</div>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: 400, textAlign: "center" }}>
-          {i.openClaw.notInstalledDesc}
-        </div>
-      </div>
+  if (!status.data)
+    return status.loading ? (
+      <LoadingState label={i.loading} />
+    ) : (
+      <ErrorState title={i.readFailed} message={i.readFailedDesc} retryLabel={i.retry} onRetry={status.reload} />
     );
-  }
-
+  const installed = status.data.installed;
+  if (!installed && !opened)
+    return (
+      <EmptyState
+        title={i.notInstalled}
+        description={i.notInstalledDesc}
+        icon={<Bot size={26} />}
+        action={
+          <Button variant="secondary" disabled={status.loading} onClick={status.reload}>
+            <RefreshCw size={14} aria-hidden="true" />
+            {i.checkAgain}
+          </Button>
+        }
+      />
+    );
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 0 }}>
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <h2 className="page-title">{i.openClaw.title}</h2>
-          <p className="page-subtitle">{i.openClaw.subtitle}</p>
+    <div className="page-enter flex min-h-full min-w-0 flex-col">
+      <header className="page-header">
+        <div className="min-w-0">
+          <h2 className="page-title">{i.title}</h2>
+          <p className="page-subtitle">{i.subtitle}</p>
+          <p className="mt-2 break-all text-xs text-[var(--text-muted)]">{status.data.configPath}</p>
         </div>
-      </div>
-
-      {/* Health warnings */}
-      {warnings.length > 0 && (
-        <div style={{ padding: "0 20px 12px" }}>
-          {warnings.map((w, idx) => (
+        <Button
+          variant="secondary"
+          disabled={status.loading || health.loading}
+          onClick={() => {
+            status.reload();
+            health.reload();
+          }}
+        >
+          <RefreshCw size={14} aria-hidden="true" />
+          {i.checkAgain}
+        </Button>
+      </header>
+      {status.error && (
+        <ErrorState title={i.readFailed} message={i.readFailedDesc} retryLabel={i.retry} onRetry={status.reload} />
+      )}
+      {!installed && (
+        <p
+          role="alert"
+          className="mb-4 rounded-lg border border-border bg-card p-3 text-xs text-[var(--text-secondary)]"
+        >
+          {i.configMissing}
+        </p>
+      )}
+      {health.error && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3"
+        >
+          <AlertTriangle size={16} className="shrink-0 text-[var(--warning)]" aria-hidden="true" />
+          <p className="min-w-0 flex-1 basis-48 text-xs text-[var(--text-secondary)]">{i.healthFailed}</p>
+          <Button variant="secondary" disabled={health.loading} onClick={health.reload}>
+            {i.retryHealth}
+          </Button>
+        </div>
+      )}
+      {health.data && health.data.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {health.data.map((warning, index) => (
             <div
-              key={idx}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 10px",
-                borderRadius: 6,
-                background: "var(--warning-bg, rgba(234, 179, 8, 0.08))",
-                border: "1px solid var(--warning, #eab308)",
-                marginBottom: 6,
-                fontSize: 12,
-              }}
+              key={`${warning.code}-${index}`}
+              className="flex items-start gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--warning-subtle)] p-3 text-xs"
             >
-              <AlertTriangle size={13} style={{ color: "var(--warning)", flexShrink: 0 }} />
-              <span style={{ color: "var(--text-secondary)" }}>{w.message}</span>
-              {w.path && <code style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: "auto" }}>{w.path}</code>}
+              <AlertTriangle size={15} className="shrink-0 text-[var(--warning)]" aria-hidden="true" />
+              <div className="min-w-0 flex-1 break-words text-[var(--text-secondary)]">
+                <p>{warning.message}</p>
+                {warning.path && <p className="mt-1 break-all font-mono text-[var(--text-muted)]">{warning.path}</p>}
+              </div>
             </div>
           ))}
         </div>
       )}
-
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, padding: "0 20px 12px", borderBottom: "1px solid var(--border-default)" }}>
-        {[
-          { key: "env" as Tab, icon: Settings2, label: i.openClaw.envTab },
-          { key: "tools" as Tab, icon: Wrench, label: i.openClaw.toolsTab },
-          { key: "agents" as Tab, icon: Shield, label: i.openClaw.agentsTab },
-        ].map(({ key, icon: Icon, label }) => (
-          <button
+      <div className="entity-detail-tabs mb-5 !px-0" role="tablist" aria-label={i.title}>
+        {tabs.map(({ key, icon: Icon, label }, index) => (
+          <Button
             key={key}
+            variant="ghost"
+            role="tab"
+            id={`${id}-${key}-tab`}
+            aria-controls={`${id}-${key}-panel`}
+            aria-selected={tab === key}
+            tabIndex={tab === key ? 0 : -1}
+            className={`entity-detail-tab ${tab === key ? "entity-detail-tab-active" : ""}`}
             onClick={() => setTab(key)}
-            className={`btn btn-sm ${tab === key ? "btn-primary" : "btn-ghost"}`}
-            style={{ display: "flex", alignItems: "center", gap: 5 }}
+            onKeyDown={(event) => navigateTabs(event, index)}
           >
-            <Icon size={13} />
+            <Icon size={14} aria-hidden="true" />
             {label}
-          </button>
+          </Button>
         ))}
       </div>
-
-      {/* Tab content */}
-      <div style={{ flex: 1, overflow: "auto", padding: "16px 20px" }}>
-        {tab === "env" && <EnvPanel />}
-        {tab === "tools" && <ToolsPanel />}
-        {tab === "agents" && <AgentsPanel />}
-      </div>
-    </div>
-  );
-}
-
-// ── Env Panel ──
-
-function EnvPanel() {
-  const i = t();
-  const [vars, setVars] = useState<Array<{ key: string; value: string }>>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const setOpenClawEnvMutation = useSetOpenClawEnvMutation();
-
-  useEffect(() => {
-    void loadEnv();
-  }, []);
-
-  async function loadEnv() {
-    try {
-      const data = await invoke<EnvConfig>("get_openclaw_env");
-      const entries = Object.entries(data).map(([key, value]) => ({
-        key,
-        value: typeof value === "string" ? value : JSON.stringify(value),
-      }));
-      setVars(entries);
-    } catch {
-      setVars([]);
-    } finally {
-      setLoaded(true);
-    }
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      const envObj: Record<string, string> = {};
-      for (const { key, value } of vars) {
-        if (key.trim()) envObj[key.trim()] = value;
-      }
-      await setOpenClawEnvMutation.mutateAsync({ env: envObj });
-      showToast("success", i.openClaw.saveSuccess);
-    } catch (e) {
-      showToast("error", `${i.openClaw.saveFailed}: ${e}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function addVar() {
-    setVars([...vars, { key: "", value: "" }]);
-  }
-
-  function removeVar(idx: number) {
-    setVars(vars.filter((_, i) => i !== idx));
-  }
-
-  function updateVar(idx: number, field: "key" | "value", val: string) {
-    setVars(vars.map((v, i) => (i === idx ? { ...v, [field]: val } : v)));
-  }
-
-  if (!loaded) return <LoadingSpinner />;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>{i.openClaw.envDesc}</div>
-
-      {vars.map((v, idx) => (
-        <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            className="input input-sm"
-            style={{ flex: 1 }}
-            placeholder="KEY"
-            value={v.key}
-            onChange={(e) => updateVar(idx, "key", e.target.value)}
-          />
-          <input
-            className="input input-sm"
-            style={{ flex: 2 }}
-            placeholder="value"
-            value={v.value}
-            onChange={(e) => updateVar(idx, "value", e.target.value)}
-          />
-          <button className="btn btn-ghost btn-icon-sm" onClick={() => removeVar(idx)}>
-            <Trash2 size={13} />
-          </button>
+      {tabs.map(({ key, panel: Panel }) => (
+        <div
+          key={key}
+          role="tabpanel"
+          id={`${id}-${key}-panel`}
+          aria-labelledby={`${id}-${key}-tab`}
+          hidden={tab !== key}
+          className="min-w-0"
+        >
+          <Panel blocked={status.loading || Boolean(status.error) || !installed} />
         </div>
       ))}
-
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={addVar}
-          style={{ display: "flex", alignItems: "center", gap: 5 }}
-        >
-          <Plus size={13} />
-          {i.openClaw.addVar}
-        </button>
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: "auto" }}
-        >
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-          {i.openClaw.save}
-        </button>
-      </div>
     </div>
   );
 }
-
-// ── Tools Panel ──
-
-function ToolsPanel() {
-  const i = t();
-  const [config, setConfig] = useState<ToolsConfig>({ profile: null, allow: [], deny: [] });
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [newAllow, setNewAllow] = useState("");
-  const [newDeny, setNewDeny] = useState("");
-  const setOpenClawToolsMutation = useSetOpenClawToolsMutation();
-
-  useEffect(() => {
-    void loadTools();
-  }, []);
-
-  async function loadTools() {
-    try {
-      const data = await invoke<ToolsConfig>("get_openclaw_tools");
-      // Backend uses skip_serializing_if = "Vec::is_empty", so allow/deny may
-      // be undefined when empty. Normalize to empty arrays.
-      setConfig({
-        profile: data?.profile ?? null,
-        allow: data?.allow ?? [],
-        deny: data?.deny ?? [],
-      });
-    } catch {
-      // keep defaults
-    } finally {
-      setLoaded(true);
-    }
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      await setOpenClawToolsMutation.mutateAsync({ tools: config });
-      showToast("success", i.openClaw.saveSuccess);
-    } catch (e) {
-      showToast("error", `${i.openClaw.saveFailed}: ${e}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!loaded) return <LoadingSpinner />;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Profile select */}
-      <div>
-        <label
-          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
-        >
-          {i.openClaw.toolProfile}
-        </label>
-        <SimpleSelect
-          className="h-7 w-[200px]"
-          value={config.profile ?? "none"}
-          ariaLabel={i.openClaw.toolProfile}
-          options={[
-            { value: "none", label: i.openClaw.noProfile },
-            ...TOOL_PROFILES.map((profile) => ({ value: profile, label: profile })),
-          ]}
-          onValueChange={(value) => setConfig({ ...config, profile: value === "none" ? null : value })}
-        />
-      </div>
-
-      {/* Allow list */}
-      <div>
-        <label
-          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
-        >
-          {i.openClaw.allowList}
-        </label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-          {config.allow.map((item, idx) => (
-            <span
-              key={idx}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "2px 8px",
-                borderRadius: 12,
-                background: "var(--bg-app)",
-                border: "1px solid var(--border-default)",
-                fontSize: 11,
-              }}
-            >
-              {item}
-              <button
-                style={{
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  padding: 0,
-                  color: "var(--text-muted)",
-                }}
-                onClick={() => setConfig({ ...config, allow: config.allow.filter((_, i) => i !== idx) })}
-              >
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input
-            className="input input-sm"
-            style={{ width: 200 }}
-            placeholder={i.openClaw.toolName}
-            value={newAllow}
-            onChange={(e) => setNewAllow(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && newAllow.trim()) {
-                setConfig({ ...config, allow: [...config.allow, newAllow.trim()] });
-                setNewAllow("");
-              }
-            }}
-          />
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              if (newAllow.trim()) {
-                setConfig({ ...config, allow: [...config.allow, newAllow.trim()] });
-                setNewAllow("");
-              }
-            }}
-          >
-            <Plus size={13} />
-          </button>
-        </div>
-      </div>
-
-      {/* Deny list */}
-      <div>
-        <label
-          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
-        >
-          {i.openClaw.denyList}
-        </label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-          {config.deny.map((item, idx) => (
-            <span
-              key={idx}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "2px 8px",
-                borderRadius: 12,
-                background: "var(--bg-app)",
-                border: "1px solid var(--error, #ef4444)",
-                fontSize: 11,
-              }}
-            >
-              {item}
-              <button
-                style={{
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  padding: 0,
-                  color: "var(--text-muted)",
-                }}
-                onClick={() => setConfig({ ...config, deny: config.deny.filter((_, i) => i !== idx) })}
-              >
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input
-            className="input input-sm"
-            style={{ width: 200 }}
-            placeholder={i.openClaw.toolName}
-            value={newDeny}
-            onChange={(e) => setNewDeny(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && newDeny.trim()) {
-                setConfig({ ...config, deny: [...config.deny, newDeny.trim()] });
-                setNewDeny("");
-              }
-            }}
-          />
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              if (newDeny.trim()) {
-                setConfig({ ...config, deny: [...config.deny, newDeny.trim()] });
-                setNewDeny("");
-              }
-            }}
-          >
-            <Plus size={13} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          style={{ display: "flex", alignItems: "center", gap: 5 }}
-        >
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-          {i.openClaw.save}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Agents Panel ──
-
-function AgentsPanel() {
-  const i = t();
-  const [defaults, setDefaults] = useState<AgentsDefaults>({ model: null, models: null });
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const setOpenClawAgentsDefaultsMutation = useSetOpenClawAgentsDefaultsMutation();
-
-  useEffect(() => {
-    void loadAgents();
-  }, []);
-
-  async function loadAgents() {
-    try {
-      const data = await invoke<AgentsDefaults>("get_openclaw_agents_defaults");
-      // Normalize: model.fallbacks may be undefined due to backend's
-      // skip_serializing_if = "Vec::is_empty"; ensure it's at least [].
-      setDefaults({
-        model: data?.model ? { primary: data.model.primary ?? "", fallbacks: data.model.fallbacks ?? [] } : null,
-        models: data?.models ?? null,
-      });
-    } catch {
-      // keep defaults
-    } finally {
-      setLoaded(true);
-    }
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      await setOpenClawAgentsDefaultsMutation.mutateAsync({ defaults });
-      showToast("success", i.openClaw.saveSuccess);
-    } catch (e) {
-      showToast("error", `${i.openClaw.saveFailed}: ${e}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!loaded) return <LoadingSpinner />;
-
-  const model = defaults.model ?? { primary: "", fallbacks: [] };
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Primary model */}
-      <div>
-        <label
-          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
-        >
-          {i.openClaw.primaryModel}
-        </label>
-        <input
-          className="input input-sm"
-          style={{ width: 320 }}
-          placeholder="claude-sonnet-4-20250514"
-          value={model.primary}
-          onChange={(e) => setDefaults({ ...defaults, model: { ...model, primary: e.target.value } })}
-        />
-      </div>
-
-      {/* Fallbacks */}
-      <div>
-        <label
-          style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}
-        >
-          {i.openClaw.fallbackModels}
-        </label>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {model.fallbacks.map((fb, idx) => (
-            <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                className="input input-sm"
-                style={{ width: 280 }}
-                value={fb}
-                onChange={(e) => {
-                  const newFallbacks = [...model.fallbacks];
-                  newFallbacks[idx] = e.target.value;
-                  setDefaults({ ...defaults, model: { ...model, fallbacks: newFallbacks } });
-                }}
-              />
-              <button
-                className="btn btn-ghost btn-icon-sm"
-                onClick={() => {
-                  const newFallbacks = model.fallbacks.filter((_, i) => i !== idx);
-                  setDefaults({ ...defaults, model: { ...model, fallbacks: newFallbacks } });
-                }}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-          <button
-            className="btn btn-secondary btn-sm"
-            style={{ width: "fit-content", display: "flex", alignItems: "center", gap: 5 }}
-            onClick={() => setDefaults({ ...defaults, model: { ...model, fallbacks: [...model.fallbacks, ""] } })}
-          >
-            <Plus size={13} />
-            {i.openClaw.addFallback}
-          </button>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          style={{ display: "flex", alignItems: "center", gap: 5 }}
-        >
-          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-          {i.openClaw.save}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LoadingSpinner() {
-  return <LoadingState />;
-}
-
-export default OpenClaw;

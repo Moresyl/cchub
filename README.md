@@ -225,6 +225,14 @@ Stream interruption and timeout errors identify the connection failure in the cl
 
 Request deadlines are configured in the advanced proxy settings. Ordinary responses have a per-attempt total deadline covering request transmission, headers, and body (600 seconds by default). Streaming requests allow 60 seconds from transmission to the first raw byte and 120 seconds of upstream inactivity; heartbeats keep the stream alive. A stalled endpoint can fail over before client headers are committed. Set a timeout to `0` to disable it; values above 86400 seconds are rejected. These deadlines do not include credential acquisition or reading the incoming client body.
 
+### OpenClaw configuration workspace
+
+Edit environment variables, tools and agent settings in separate tabs. Tab changes and status checks retain drafts. Failed reads offer a retry and prevent saving empty defaults; failed saves retain changes for another attempt. Structured environment values keep their original types, while tool and model extensions are preserved. Model aliases, undoing changes and keyboard tab navigation are supported.
+
+![CCHub OpenClaw configuration workspace](screenshots/openclaw-settings.png)
+
+This screenshot shows actual page components with isolated demonstration data, not native desktop acceptance.
+
 ### Native configuration and usage sync
 
 OpenCode uses the existing `opencode.jsonc` or `opencode.json`. Profiles retain the native provider ID and selected model, SDK extension options, and other model definitions. Applying a profile updates its provider and default model. Invalid syntax, duplicate fields, or an external change detected before writing stops the update with an actionable error.

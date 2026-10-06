@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { queryKeys } from "../queries";
 
 export interface SetOpenClawEnvInput {
-  env: Record<string, string>;
+  env: Record<string, unknown>;
 }
 
 export interface SetOpenClawToolsInput {

@@ -1,5 +1,37 @@
 # 版本记录
 
+## 1.7.9
+
+### 新增 / 更新
+
+- 价格设置冲突增加应用内核对窗口，对照最初载入、已保存设置、我的草稿及核对结果。
+- 不同模型的修改自动合并，同一模型的不同修改提供保留草稿或已保存设置的选择。
+- 模型更改支持搜索、冲突筛选和完整分页，更新中英文说明与实际组件演示截图。
+
+### 变更与安全
+
+- 核对读取最新设置，应用结果后仍需保存；保存再次核对版本，期间再次变化时停止覆盖并保留草稿。
+- 读取失败保留草稿并提供安全重试，取消、重试及离开页面后忽略旧读取结果。
+- 合并超出选项上限时阻止应用，不静默截断选择。
+
+### 问题修复与打磨
+
+- 设置冲突可以核对合并，不再只能放弃草稿后重载。
+- 核对窗口采用统一卡片、输入框、选择框与弹窗，窄窗口使用双列对照和完整高度布局。
+- 应用或取消后恢复编辑焦点；冲突筛选保留已解决条目，方便再次调整并避免操作控件消失。
+- 补充三方合并、读取所有权、冲突后保存、长标识分页与键盘选择回归测试。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Adds pricing preference review with initial, saved, draft and resulting values; independent model changes merge automatically and conflicts require a choice.
+- Supports search, conflict filtering and complete pagination, with shared controls and a compact comparison layout.
+- Rechecks settings when saving, retains drafts after failures or repeated conflicts, rejects stale reads and oversized merges, and updates documentation, the screenshot and regression tests.
+
 ## 1.7.8
 
 ### 新增 / 更新

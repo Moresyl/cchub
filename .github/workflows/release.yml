@@ -14,32 +14,29 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 模型价格设置使用统一草稿，提供明确的保存设置与保存后同步入口
-    - 刷新状态和切换页面保留未保存选项，放弃草稿需通过应用内确认弹窗
-    - 模型目录增加完整分页、独立字段标签、价格单位说明与长名称换行，展示输入、输出及可用的缓存价格
-    - 更新中英文价格设置说明与实际组件演示截图
+    - 价格设置冲突增加应用内核对窗口，对照最初载入、已保存设置、我的草稿及核对结果
+    - 不同模型的修改自动合并，同一模型的不同修改提供保留草稿或已保存设置的选择
+    - 模型更改支持搜索、冲突筛选和完整分页，更新中英文说明与实际组件演示截图
 
     ### 变更与安全
-    - 读取价格设置不再触发价格文件同步；读取失败时阻止保存默认值
-    - 保存核对加载时的选项，同步请求完成后再次核对；发生设置冲突时停止覆盖并保留草稿
-    - 读取、保存及同步失败使用安全的恢复提示，不回显内部错误
+    - 核对读取最新设置，应用结果后仍需保存；保存再次核对版本，期间再次变化时停止覆盖并保留草稿
+    - 读取失败保留草稿并提供安全重试，取消、重试及离开页面后忽略旧读取结果
+    - 合并超出选项上限时阻止应用，不静默截断选择
 
     ### 问题修复与打磨
-    - 常用模型标记由后端提供，修复界面勾选范围与实际同步范围不一致的问题
-    - 保存保留较新的同步时间和错误状态；同步失败不会恢复旧选项
-    - 同步统一选择重复价格标识的条目，文件与数据库使用相同价格，导入数量按实际唯一模型计算
-    - 读取或保存失败保留草稿；确认放弃后仅在重新读取成功时替换
-    - 修复关闭确认弹窗后的焦点丢失，补充价格选择、保存顺序、异步结果和设置冲突回归测试
+    - 设置冲突可以核对合并，不再只能放弃草稿后重载
+    - 核对窗口采用统一卡片、输入框、选择框与弹窗，窄窗口使用双列对照和完整高度布局
+    - 应用或取消后恢复编辑焦点；冲突筛选保留已解决条目，方便再次调整并避免操作控件消失
+    - 补充三方合并、读取所有权、冲突后保存、长标识分页与键盘选择回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Preserves pricing drafts across refreshes and page changes, with explicit save and save-and-sync actions.
-    - Adds complete catalog pagination, clear field labels, price units and wrapped model names.
-    - Uses backend common-model markers, rejects changed settings before writes, preserves newer sync status and consistently deduplicates imported prices.
-    - Keeps drafts after failures, restores confirmation-dialog focus, and updates bilingual documentation, the screenshot and regression tests.
+    - Adds pricing preference review with initial, saved, draft and resulting values; independent model changes merge automatically and conflicts require a choice.
+    - Supports search, conflict filtering and complete pagination, with shared controls and a compact comparison layout.
+    - Rechecks settings when saving, retains drafts after failures or repeated conflicts, rejects stale reads and oversized merges, and updates documentation, the screenshot and regression tests.
 
     ## 下载 / Download
 

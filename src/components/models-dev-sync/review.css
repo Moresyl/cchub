@@ -1,0 +1,95 @@
+.pricing-review {
+  max-width: 800px;
+  max-height: min(760px, calc(100dvh - 40px));
+}
+.pricing-review-body {
+  display: grid;
+  gap: 16px;
+  container-type: inline-size;
+}
+.pricing-review-options,
+.pricing-review-models {
+  display: grid;
+  gap: 12px;
+}
+.pricing-review-row {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  background: var(--bg-elevated);
+}
+.pricing-review-row h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: var(--font-weight-medium, 500);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.pricing-review-values {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pricing-review-values dt {
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.pricing-review-values dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.pricing-review-row[data-conflict="true"] {
+  border-color: var(--warning);
+}
+.pricing-review-filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pricing-review-filters > div {
+  min-width: 0;
+  flex: 1 1 200px;
+}
+.pricing-review-filters label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.pricing-review-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.pricing-review-footer {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pricing-review-footer > span {
+  flex: 1 1 200px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.pricing-review-footer > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@container (max-width: 540px) {
+  .pricing-review-values {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 767px) {
+  .pricing-review {
+    max-height: 100dvh;
+    height: 100dvh;
+  }
+}

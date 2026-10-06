@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { rememberDraft, readDraft } from "./draft";
+import { mergePricingReview, type PricingReview, type ReviewChoices } from "./review";
 import { samePreferences, validConfig, type SyncConfig, type SyncResult, type SyncState } from "./types";
 
 type Failure = "read" | "save" | "sync" | "conflict" | null;
@@ -12,6 +13,7 @@ interface View {
   busy: "save" | "sync" | null;
   failure: Failure;
   result: SyncResult | null;
+  review: PricingReview | null;
 }
 function checkedState(value: SyncState): SyncState {
   if (!value || !validConfig(value.config) || typeof value.configPath !== "string") throw new Error("Invalid settings");
@@ -26,6 +28,7 @@ export function usePricingSettings() {
     busy: null,
     failure: null,
     result: null,
+    review: null,
   });
   const current = useRef(view);
   const owner = useRef({ mounted: false, request: 0, reading: false, writing: false });
@@ -37,7 +40,7 @@ export function usePricingSettings() {
   const refresh = useCallback(
     async (discardDraft = false) => {
       const active = owner.current;
-      if (!active.mounted || active.writing || active.reading) return;
+      if (!active.mounted || active.writing || active.reading || current.current.review) return;
       active.reading = true;
       const request = ++active.request;
       commit({ ...current.current, loading: true });
@@ -78,7 +81,14 @@ export function usePricingSettings() {
   }, [refresh]);
   const update = useCallback(
     (change: (draft: SyncConfig) => SyncConfig) => {
-      if (!owner.current.mounted || owner.current.writing || owner.current.reading || !current.current.draft) return;
+      if (
+        !owner.current.mounted ||
+        owner.current.writing ||
+        owner.current.reading ||
+        current.current.review ||
+        !current.current.draft
+      )
+        return;
       const prior = current.current;
       commit({
         ...prior,
@@ -99,6 +109,7 @@ export function usePricingSettings() {
         prior.loading ||
         !prior.baseline ||
         !prior.draft ||
+        prior.review ||
         prior.failure === "conflict" ||
         prior.failure === "read"
       )
@@ -145,7 +156,72 @@ export function usePricingSettings() {
     },
     [commit],
   );
+  const reviewChanges = useCallback(async () => {
+    const active = owner.current;
+    const prior = current.current;
+    if (!active.mounted || active.writing || active.reading || prior.loading || !prior.baseline || !prior.draft) return;
+    active.reading = true;
+    const request = ++active.request;
+    const review: PricingReview = {
+      id: request,
+      baseline: prior.baseline,
+      draft: prior.draft,
+      latest: null,
+      loading: true,
+      error: false,
+    };
+    commit({ ...prior, review });
+    try {
+      const latest = checkedState(await invoke<SyncState>("get_models_dev_sync_config"));
+      if (!active.mounted || active.request !== request) return;
+      commit({ ...current.current, state: latest, review: { ...review, latest, loading: false } });
+    } catch {
+      if (active.mounted && active.request === request)
+        commit({ ...current.current, review: { ...review, loading: false, error: true } });
+    } finally {
+      if (active.request === request) active.reading = false;
+    }
+  }, [commit]);
+  const cancelReview = useCallback(() => {
+    if (!owner.current.mounted || !current.current.review) return;
+    ++owner.current.request;
+    owner.current.reading = false;
+    commit({ ...current.current, review: null });
+  }, [commit]);
+  const applyReview = useCallback(
+    (id: number, choices: ReviewChoices) => {
+      const prior = current.current;
+      if (!owner.current.mounted || owner.current.writing || owner.current.reading || prior.review?.id !== id)
+        return false;
+      const draft = mergePricingReview(prior.review, choices);
+      if (!draft || !prior.review.latest) return false;
+      ++owner.current.request;
+      commit({
+        ...prior,
+        state: prior.review.latest,
+        baseline: prior.review.latest.config,
+        draft,
+        failure: null,
+        result: null,
+        review: null,
+      });
+      return true;
+    },
+    [commit],
+  );
   const dirty = !!view.baseline && !!view.draft && !samePreferences(view.baseline, view.draft);
-  const blocked = !!view.busy || view.loading || view.failure === "conflict" || view.failure === "read";
-  return { ...view, dirty, blocked, refresh, update, save: () => run(false), sync: () => run(true) };
+  const blocked =
+    !!view.busy || view.loading || !!view.review || view.failure === "conflict" || view.failure === "read";
+  return {
+    ...view,
+    dirty,
+    blocked,
+    refresh,
+    update,
+    reviewChanges,
+    cancelReview,
+    applyReview,
+    save: () => run(false),
+    sync: () => run(true),
+  };
 }

@@ -7,6 +7,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import ErrorState from "./states/ErrorState";
 import LoadingState from "./states/LoadingState";
 import ModelPicker from "./models-dev-sync/ModelPicker";
+import PricingReviewDialog from "./models-dev-sync/PricingReviewDialog";
 import { usePricingSettings } from "./models-dev-sync/usePricingSettings";
 import { selectModel } from "./models-dev-sync/types";
 import "./models-dev-sync/styles.css";
@@ -22,6 +23,9 @@ export default function ModelsDevSyncPanel() {
   const [confirmReset, setConfirmReset] = useState(false);
   const resetTrigger = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const reviewTrigger = useRef<HTMLButtonElement | null>(null);
+  const reviewOpen = useRef(false);
+  reviewOpen.current = !!settings.review;
   const openReset = (event: MouseEvent<HTMLButtonElement>) => {
     resetTrigger.current = event.currentTarget;
     setConfirmReset(true);
@@ -122,8 +126,8 @@ export default function ModelsDevSyncPanel() {
             <div className="pricing-notice" role="alert">
               {settings.failure === "conflict"
                 ? text(
-                    "设置已在其他操作中更改。你的草稿已保留；刷新状态后核对，或重新加载并放弃草稿。",
-                    "Settings changed elsewhere. Your draft is retained; refresh to review, or reload and discard it.",
+                    "设置已在其他操作中更改。草稿已保留，可以核对双方修改后继续保存。",
+                    "Settings changed elsewhere. Your draft is retained; review changes from both sides before saving.",
                     "別の操作で設定が変更されました。下書きを保持しています。確認するか、再読込して下書きを破棄してください。",
                   )
                 : settings.failure === "save"
@@ -138,14 +142,27 @@ export default function ModelsDevSyncPanel() {
                       "価格同期に失敗しました。保存済みの選択は保持されています。接続を確認して再試行してください。",
                     )}
               {settings.failure === "conflict" && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!!settings.busy || settings.loading}
-                  onClick={openReset}
-                >
-                  {text("重新加载", "Reload", "再読込")}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!!settings.busy || settings.loading}
+                    onClick={(event) => {
+                      reviewTrigger.current = event.currentTarget;
+                      void settings.reviewChanges();
+                    }}
+                  >
+                    {text("核对更改", "Review changes", "変更を確認")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!!settings.busy || settings.loading}
+                    onClick={openReset}
+                  >
+                    {text("重新加载", "Reload", "再読込")}
+                  </Button>
+                </>
               )}
             </div>
           )}
@@ -257,6 +274,23 @@ export default function ModelsDevSyncPanel() {
         }}
         onCancel={() => setConfirmReset(false)}
       />
+      {settings.review && (
+        <PricingReviewDialog
+          key={settings.review.id}
+          review={settings.review}
+          text={text}
+          onCancel={settings.cancelReview}
+          onRetry={() => void settings.reviewChanges()}
+          onApply={settings.applyReview}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (reviewOpen.current) return;
+            const trigger = reviewTrigger.current;
+            if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+            else heading.current?.focus();
+          }}
+        />
+      )}
     </section>
   );
 }

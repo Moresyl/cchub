@@ -109,6 +109,12 @@ Model pricing preferences share one draft and save action. Status refresh and pa
 
 This screenshot shows the actual pricing component with isolated demonstration data, not native desktop acceptance evidence.
 
+When saved preferences change outside the current draft, **Review changes** compares the initially loaded settings, saved settings, your draft and the result. Independent model changes merge automatically; conflicting changes to the same model require a choice. Search, conflict filtering and pagination cover every changed model. Applying returns to editing; saving checks the reviewed version again and retains the draft if settings change once more.
+
+![CCHub pricing change review](screenshots/model-pricing-review.png)
+
+This screenshot uses the actual review component with isolated demonstration data.
+
 Date, app, provider and model filters keep their controls available while loading. Late responses from older filters cannot replace the current results. Live request events are coalesced; a failed refresh retains the last successful result for the same filter with a recovery message. Rankings provide pagination, wrap long names and use compact cards in narrow panels. Zero-request days no longer display a nonzero trend bar.
 
 ![CCHub usage analytics](screenshots/usage-analytics.png)

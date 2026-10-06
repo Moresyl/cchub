@@ -14,30 +14,32 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 用量供应商与模型排名增加分页，超过十二条的记录可以继续查看
-    - 窄区域以卡片完整展示排名指标，宽区域保留表格；长名称自动换行
-    - 每日趋势限制滚动高度，摘要数字统一半粗字重
-    - 更新中英文用量分析说明及实际页面组件演示截图
+    - 模型价格设置使用统一草稿，提供明确的保存设置与保存后同步入口
+    - 刷新状态和切换页面保留未保存选项，放弃草稿需通过应用内确认弹窗
+    - 模型目录增加完整分页、独立字段标签、价格单位说明与长名称换行，展示输入、输出及可用的缓存价格
+    - 更新中英文价格设置说明与实际组件演示截图
 
     ### 变更与安全
-    - 用量读取失败提供本地化恢复提示，不回显内部错误
-    - 刷新失败保留同一筛选下的上次成功数据，并明确提示数据尚未更新
+    - 读取价格设置不再触发价格文件同步；读取失败时阻止保存默认值
+    - 保存核对加载时的选项，同步请求完成后再次核对；发生设置冲突时停止覆盖并保留草稿
+    - 读取、保存及同步失败使用安全的恢复提示，不回显内部错误
 
     ### 问题修复与打磨
-    - 修复快速切换筛选时旧响应覆盖当前结果，以及加载时筛选栏消失的问题
-    - 合并连续用量事件，避免同一筛选重复并发刷新；离开页面后清理延迟刷新和事件监听
-    - 事件监听不可用时仍可手动刷新，首次读取失败可直接重试
-    - 保留较宽范围的供应商和模型选项，避免选择一项后其他选项消失；切换应用或时间范围不会沿用旧范围选项
-    - 无请求的日期不再显示非零趋势条；补充响应顺序、刷新恢复、事件清理和分页回归测试
+    - 常用模型标记由后端提供，修复界面勾选范围与实际同步范围不一致的问题
+    - 保存保留较新的同步时间和错误状态；同步失败不会恢复旧选项
+    - 同步统一选择重复价格标识的条目，文件与数据库使用相同价格，导入数量按实际唯一模型计算
+    - 读取或保存失败保留草稿；确认放弃后仅在重新读取成功时替换
+    - 修复关闭确认弹窗后的焦点丢失，补充价格选择、保存顺序、异步结果和设置冲突回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Adds usage ranking pagination, compact cards for narrow panels, wrapped names and a bounded trend area.
-    - Rejects stale filter responses, keeps controls available while loading, preserves broader filter choices and coalesces live refreshes.
-    - Retains same-filter results after refresh failures, supports manual recovery when live updates are unavailable, and updates bilingual documentation and the screenshot.
+    - Preserves pricing drafts across refreshes and page changes, with explicit save and save-and-sync actions.
+    - Adds complete catalog pagination, clear field labels, price units and wrapped model names.
+    - Uses backend common-model markers, rejects changed settings before writes, preserves newer sync status and consistently deduplicates imported prices.
+    - Keeps drafts after failures, restores confirmation-dialog focus, and updates bilingual documentation, the screenshot and regression tests.
 
     ## 下载 / Download
 

@@ -1,6 +1,6 @@
 # 版本记录
 
-## 待发布
+## 1.7.8
 
 ### 新增 / 更新
 
@@ -15,6 +15,23 @@
 - 同步统一选择重复价格标识的条目，导入数量按实际唯一模型计算，不再在文件与数据库中采用不同价格。
 - 读取或保存失败保留草稿，提供安全的重试提示；确认放弃草稿后仅在重新读取成功时替换。
 - 修复关闭确认弹窗后的焦点丢失，补充价格选择、保存顺序、异步结果和设置冲突回归测试。
+
+### 变更与安全
+
+- 读取价格设置不再触发价格文件同步；设置读取失败时阻止保存默认值，错误提示不回显内部详情。
+- 保存和同步均核对已加载的设置，发生冲突时停止覆盖并保留草稿。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Preserves pricing drafts across refreshes and page changes, with explicit save and save-and-sync actions.
+- Adds complete catalog pagination, clear field labels, price units and wrapped model names.
+- Uses backend common-model markers, rejects changed settings before writes, preserves newer sync status and consistently deduplicates imported prices.
+- Keeps drafts after failures, restores confirmation-dialog focus, and updates bilingual documentation, the screenshot and regression tests.
 
 ## 1.7.7
 

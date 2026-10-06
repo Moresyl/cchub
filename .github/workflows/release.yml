@@ -14,29 +14,30 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 指令、记忆与发布说明共用 Markdown 正文样式，统一标题、列表、引用、代码与表格层次
-    - 只读任务列表使用统一勾选框，表格增加带标签的键盘滚动区域
-    - 更新中英文指令预览说明与实际组件演示截图
+    - 用量供应商与模型排名增加分页，超过十二条的记录可以继续查看
+    - 窄区域以卡片完整展示排名指标，宽区域保留表格；长名称自动换行
+    - 每日趋势限制滚动高度，摘要数字统一半粗字重
+    - 更新中英文用量分析说明及实际页面组件演示截图
 
     ### 变更与安全
-    - Prompt 文件冲突、编码与权限错误使用本地化恢复提示，不回显原始内部错误
-    - 冲突与保存失败继续保留草稿，重新加载核对后再保存
+    - 用量读取失败提供本地化恢复提示，不回显内部错误
+    - 刷新失败保留同一筛选下的上次成功数据，并明确提示数据尚未更新
 
     ### 问题修复与打磨
-    - 修复记忆正文缺少 Markdown 样式、标题与列表退化为普通文本的问题
-    - 修复已有超长说明仍可点击保存却没有反馈的问题，明确标记错误并阻止按钮和快捷键提交
-    - 修复说明输入的 UTF-16 长度上限提前截断补充 Unicode 字符的问题，按字符数与后端保持一致
-    - 修复说明字段辅助提示被包含在无障碍名称中的问题；补充编辑器及只读预览标签
-    - 补充 Markdown 语义、自定义渲染、安全链接、说明长度与文件冲突回归测试
+    - 修复快速切换筛选时旧响应覆盖当前结果，以及加载时筛选栏消失的问题
+    - 合并连续用量事件，避免同一筛选重复并发刷新；离开页面后清理延迟刷新和事件监听
+    - 事件监听不可用时仍可手动刷新，首次读取失败可直接重试
+    - 保留较宽范围的供应商和模型选项，避免选择一项后其他选项消失；切换应用或时间范围不会沿用旧范围选项
+    - 无请求的日期不再显示非零趋势条；补充响应顺序、刷新恢复、事件清理和分页回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Unifies Markdown typography across instructions, memory and release notes, with shared task checkboxes and keyboard-focusable tables.
-    - Validates description limits before saving, handles supplementary Unicode characters and improves accessible field labels.
-    - Localizes conflict and file-error recovery without exposing internal details, and updates bilingual documentation and screenshots.
+    - Adds usage ranking pagination, compact cards for narrow panels, wrapped names and a bounded trend area.
+    - Rejects stale filter responses, keeps controls available while loading, preserves broader filter choices and coalesces live refreshes.
+    - Retains same-filter results after refresh failures, supports manual recovery when live updates are unavailable, and updates bilingual documentation and the screenshot.
 
     ## 下载 / Download
 

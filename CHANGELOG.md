@@ -1,5 +1,32 @@
 # 版本记录
 
+## 1.7.7
+
+### 新增 / 更新
+
+- 用量供应商与模型排名增加分页；窄区域用卡片完整展示指标，宽区域保留表格。
+- 每日趋势限制滚动高度，长名称换行，摘要数字统一半粗字重。
+- 更新中英文用量分析说明及实际页面组件演示截图。
+
+### 问题修复
+
+- 修复快速切换筛选时旧响应覆盖当前结果，以及加载时筛选栏消失的问题。
+- 合并连续用量事件，避免同一筛选重复并发刷新；离开页面后清理延迟刷新和事件监听。
+- 刷新失败保留同一筛选下的上次成功数据，提供安全的恢复提示；事件监听不可用时仍可手动刷新。
+- 保留较宽范围的供应商和模型选项，避免选择一项后其他选项消失；切换应用或时间范围不会沿用旧范围选项。
+- 无请求的日期不再显示非零趋势条，超过十二条的排名不再被静默隐藏。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Adds ranking pagination and compact cards for narrow panels, with wrapped names and a bounded trend area.
+- Rejects stale filter responses, keeps filters available while loading, and coalesces live refreshes.
+- Preserves same-filter results after refresh failures, handles unavailable event listeners, and updates bilingual documentation and the screenshot.
+
 ## 1.7.6
 
 ### 新增 / 更新

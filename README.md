@@ -129,6 +129,12 @@ This screenshot shows the actual page component with isolated demonstration data
 
 ### Prompt library
 
+Markdown previews share heading, list, quote, code and table typography across instructions, memory records and release notes. Read-only task lists use the shared checkbox component; tables have a labelled, keyboard-focusable scrolling region. Description fields validate the 2,000-character limit before saving, including supplementary Unicode characters. File conflicts and read failures provide localized recovery guidance without displaying raw internal errors.
+
+![CCHub instruction preview](screenshots/prompt-preview.png)
+
+This screenshot shows the actual page with isolated demonstration data, not native desktop acceptance evidence.
+
 Manage instruction versions for Claude, Codex, Gemini, OpenCode, OpenClaw, Hermes and Pi with Markdown editing, preview and search. Importing retains the file's exact contents; replacing live instructions retains the previous contents as another library entry. Deleting an entry preserves the tool's live file. The page reports file-read errors and mismatches instead of treating unreadable content as an empty file or claiming a mismatched version is active.
 
 Saves check the loaded library and file revisions. Conflicts retain the draft until you reload and review the current file or stored version. Writes are serialized, and late responses cannot replace another tool's state. Reported database commit failures roll back file writes still owned by the save; newer external edits are preserved. This recovery does not cover a crash or power loss.

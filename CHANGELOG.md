@@ -1,5 +1,36 @@
 # 版本记录
 
+## 1.7.6
+
+### 新增 / 更新
+
+- 指令、记忆与发布说明共用 Markdown 正文样式，统一标题、列表、引用、代码与表格层次。
+- 只读任务列表使用统一勾选框，表格增加带标签的键盘滚动区域。
+- 更新中英文指令预览说明与实际组件演示截图。
+
+### 变更与安全
+
+- Prompt 文件冲突、编码与权限错误使用本地化恢复提示，不回显原始内部错误。
+
+### 问题修复与打磨
+
+- 修复记忆正文缺少 Markdown 样式、标题与列表退化为普通文本的问题。
+- 修复已有超长说明仍可点击保存却没有反馈的问题，明确标记错误并阻止按钮和快捷键提交。
+- 修复说明输入的 UTF-16 长度上限提前截断补充 Unicode 字符的问题，按字符数与后端保持一致。
+- 修复说明字段辅助提示被包含在无障碍名称中的问题，关联独立名称与说明；补充指令编辑器及只读预览标签。
+- 补充 Markdown 语义、自定义渲染、安全链接、说明长度与文件冲突回归测试。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Unifies Markdown typography across instructions, memory and release notes, with shared task checkboxes and keyboard-focusable tables.
+- Validates description limits before saving, handles supplementary Unicode characters and improves accessible field labels.
+- Localizes conflict and file-error recovery without exposing internal details, and updates bilingual documentation and screenshots.
+
 ## 1.7.5
 
 ### 新增 / 更新

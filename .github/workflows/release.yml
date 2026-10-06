@@ -14,32 +14,29 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 配置文件页支持 OpenClaw 原生供应商、模型、别名及主模型与回退模型编辑
-    - 结构化字段与 JSON5 高亮编辑器共用文件草稿和保存入口，切换编辑方式不会直接写入文件
-    - 记忆与日志使用独立搜索、全文预览与错误重试窗口，优化窄窗口布局
-    - 更新中英文配置文件说明与两张实际组件演示截图
+    - 指令、记忆与发布说明共用 Markdown 正文样式，统一标题、列表、引用、代码与表格层次
+    - 只读任务列表使用统一勾选框，表格增加带标签的键盘滚动区域
+    - 更新中英文指令预览说明与实际组件演示截图
 
     ### 变更与安全
-    - 字段编辑保留 JSON5 注释、原有格式、凭据引用及扩展字段
-    - 保存前核对加载时的原始文件内容；外部修改或删除时停止覆盖，保留草稿并要求重新加载核对
-    - JSON5 解析失败、重复字段与非法数值阻止保存；保存错误不回显内部配置详情
+    - Prompt 文件冲突、编码与权限错误使用本地化恢复提示，不回显原始内部错误
+    - 冲突与保存失败继续保留草稿，重新加载核对后再保存
 
     ### 问题修复与打磨
-    - 修复快捷表单按配置片段重建整份原生文件而丢失无关配置的问题
-    - 修复记忆搜索与记录选择重读配置、覆盖未保存修改的问题，忽略过期搜索和读取结果
-    - 修复模型数组内的字段编辑、删除模型后的数值路径及空白数值被转换为零的问题
-    - 保存失败保留草稿供重试，切换文件时的过期序列化结果不会写入其他文件
-    - 补充原生字段保留、文件冲突、草稿所有权与记忆交互回归测试
+    - 修复记忆正文缺少 Markdown 样式、标题与列表退化为普通文本的问题
+    - 修复已有超长说明仍可点击保存却没有反馈的问题，明确标记错误并阻止按钮和快捷键提交
+    - 修复说明输入的 UTF-16 长度上限提前截断补充 Unicode 字符的问题，按字符数与后端保持一致
+    - 修复说明字段辅助提示被包含在无障碍名称中的问题；补充编辑器及只读预览标签
+    - 补充 Markdown 语义、自定义渲染、安全链接、说明长度与文件冲突回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Adds shared native OpenClaw fields and a JSON5 editor with one draft and save action.
-    - Separates memory search and preview from configuration loading, preserving drafts and rejecting stale results.
-    - Retains comments, credential references and extension fields, and checks original file contents before saving.
-    - Improves numeric validation, array edits, save-conflict recovery, bilingual documentation and screenshots.
+    - Unifies Markdown typography across instructions, memory and release notes, with shared task checkboxes and keyboard-focusable tables.
+    - Validates description limits before saving, handles supplementary Unicode characters and improves accessible field labels.
+    - Localizes conflict and file-error recovery without exposing internal details, and updates bilingual documentation and screenshots.
 
     ## 下载 / Download
 

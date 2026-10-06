@@ -1,16 +1,32 @@
 # 版本记录
 
-## 未发布
+## 1.7.10
 
 ### 新增 / 更新
 
-- 普通响应和失败流重试的计费写入改为独立任务，数据库操作在阻塞工作线程执行，响应和重试仍等待记账结果。
+- 普通响应、流结束和失败流重试的计费写入使用独立顺序线程，响应和重试仍等待记账结果。
 - 在请求前预留记账容量；客户端取消等待时，已经提交的写入任务继续执行并持有容量，限制待写任务积累。
+- 流结束和取消使用同一个顺序写入线程；数据库繁忙时关闭流不再等待数据库锁，已提交的写入可在异步运行时停止后完成。
+- 应用退出先停止新请求并快照活动流，等待已提交的记录写完及请求资源释放后再退出。
 
 ### 问题修复
 
 - 失败流的父记录写入失败时停止请求下一家供应商，避免把本次用量追加到旧的请求记录。
 - 记账时间在提交任务时捕获，避免数据库排队跨日改变记录日期；待写记录不携带请求认证头和请求正文覆盖内容。
+- 正常结束、客户端取消和应用关闭共用单次提交，避免关闭竞态重复记账；未读取的流也保留取消状态与已捕获用量。
+- 托盘退出使用统一退出入口，避免直接结束进程绕过待写记录保护。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Moves proxy accounting to a dedicated sequential writer that retains submitted records after client cancellation or async runtime teardown.
+- Reserves accounting capacity before upstream requests, captures submission dates, and avoids retaining authentication headers and body overrides in queued records.
+- Stops new requests and snapshots active streams before draining accounting on app exit, including tray exit; prevents duplicate submissions and retains observed usage for unread streams.
+- Stops provider retries after a failed parent-record write, and adds cancellation, shutdown, queue and runtime teardown regression coverage.
 
 ## 1.7.9
 

@@ -14,29 +14,30 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 价格设置冲突增加应用内核对窗口，对照最初载入、已保存设置、我的草稿及核对结果
-    - 不同模型的修改自动合并，同一模型的不同修改提供保留草稿或已保存设置的选择
-    - 模型更改支持搜索、冲突筛选和完整分页，更新中英文说明与实际组件演示截图
+    - 普通响应、流结束及失败流重试的计费写入使用独立顺序线程，数据库操作不再占用异步请求线程
+    - 请求发出前预留记账容量，客户端取消后已提交的记录继续写入；异步运行时停止后仍可完成已提交写入
+    - 应用退出先停止新请求并快照活动流，等待记账队列写完及请求资源释放后再退出
 
     ### 变更与安全
-    - 核对读取最新设置，应用结果后仍需保存；保存再次核对版本，期间再次变化时停止覆盖并保留草稿
-    - 读取失败保留草稿并提供安全重试，取消、重试及离开页面后忽略旧读取结果
-    - 合并超出选项上限时阻止应用，不静默截断选择
+    - 记账时间在任务提交时捕获，避免数据库排队跨日改变记录日期
+    - 待写记录不携带请求认证头和请求正文覆盖内容
+    - 正常结束、客户端取消及应用关闭共用单次提交，限制待写任务积累并避免关闭竞态重复记账
 
     ### 问题修复与打磨
-    - 设置冲突可以核对合并，不再只能放弃草稿后重载
-    - 核对窗口采用统一卡片、输入框、选择框与弹窗，窄窗口使用双列对照和完整高度布局
-    - 应用或取消后恢复编辑焦点；冲突筛选保留已解决条目，方便再次调整并避免操作控件消失
-    - 补充三方合并、读取所有权、冲突后保存、长标识分页与键盘选择回归测试
+    - 失败流的父记录写入失败时停止请求下一家供应商，避免把本次用量追加到旧记录
+    - 数据库繁忙时关闭流不再等待数据库锁；未读取的流也保留取消状态与已捕获用量
+    - 托盘退出使用统一退出入口，避免直接结束进程绕过待写记录保护
+    - 补充队列排空、运行时停止、流取消、关闭快照、实际写入次数及请求资源释放回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Adds pricing preference review with initial, saved, draft and resulting values; independent model changes merge automatically and conflicts require a choice.
-    - Supports search, conflict filtering and complete pagination, with shared controls and a compact comparison layout.
-    - Rechecks settings when saving, retains drafts after failures or repeated conflicts, rejects stale reads and oversized merges, and updates documentation, the screenshot and regression tests.
+    - Moves proxy accounting to a dedicated sequential writer; submitted records survive client cancellation and async runtime teardown.
+    - Reserves accounting capacity before upstream requests, captures submission dates, and avoids retaining authentication headers and body overrides in queued records.
+    - Stops new requests, snapshots active streams and drains accounting before app exit, including tray exit; prevents duplicate submissions and retains observed usage for unread streams.
+    - Stops provider retries after a failed parent-record write and adds queue, cancellation, shutdown and runtime teardown regression coverage.
 
     ## 下载 / Download
 

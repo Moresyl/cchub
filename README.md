@@ -227,6 +227,8 @@ Before committing stream headers, the proxy briefly inspects known initializatio
 
 Request details retain failed stream attempts separately, including their profile, model, status, reported tokens and estimated cost. These details survive SQL backup/restore and are removed with their parent request. Current usage summaries still describe the final request outcome; failed attempts are not added to those totals. If failure accounting cannot be retained, the proxy stops before asking another provider. The detail panel offers retry after a load failure, wraps long IDs/models, and ignores responses arriving after a different selection or closing the panel.
 
+Proxy accounting uses a dedicated sequential writer with capacity reserved before upstream requests. Submitted writes continue after a client cancels or the submitting async runtime stops. Normal replies and failed-stream retries wait for their accounting result; cancelling a stream does not wait for the database lock. App exit, including tray exit, stops new requests, snapshots observed stream usage and waits for queued records and request resources. Submission dates are captured before queueing. This protects orderly shutdown, not forced termination, power loss or permanent storage failure; usage not yet received from the provider cannot be reconstructed.
+
 请求明细可展开查看流式失败尝试的配置、模型、状态、已报告用量和估算费用。明细随 SQL 备份恢复，也随所属请求一起清理。当前用量汇总仍统计最终请求结果，未合并这些失败尝试；若失败用量无法保存，代理不会继续请求其他供应商。明细加载失败可直接重试，长 ID 和模型名自动换行，切换记录或关闭后，迟到的响应不会覆盖当前界面。
 
 ![CCHub request details and failed stream attempts](screenshots/stream-details.png)

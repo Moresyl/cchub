@@ -36,3 +36,4 @@ export {
 
 export { buildStructuredConfig } from "./builder";
 export { parseStructuredConfig } from "./parser";
+export { isNativeOpenCodeConfig } from "./nativeFormat";

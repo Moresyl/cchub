@@ -53,23 +53,7 @@ fn opencode_file_has_credentials(path: &std::path::Path) -> bool {
     let Ok(value) = crate::json_config::parse_json_object(&source) else {
         return false;
     };
-    if value
-        .pointer("/options/apiKey")
-        .is_some_and(credential_value)
-    {
-        return true;
-    }
-    if value
-        .get("provider")
-        .and_then(serde_json::Value::as_object)
-        .is_some_and(|providers| {
-            providers.values().any(|provider| {
-                provider
-                    .pointer("/options/apiKey")
-                    .is_some_and(credential_value)
-            })
-        })
-    {
+    if crate::opencode_profiles::connection::has_credentials(&value) {
         return true;
     }
     value.as_object().is_some_and(|providers| {

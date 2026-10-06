@@ -228,28 +228,14 @@ pub async fn extract_probe_target(
             Ok((base_url, headers))
         }
         "opencode" => {
-            let explicit_base_url = parsed
-                .get("options")
-                .and_then(|value| value.get("baseURL"))
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
+            let connection = crate::opencode_profiles::connection::from_profile(&parsed)?;
+            let explicit_base_url = connection.base_url();
             let base_url = if use_full_url {
                 explicit_base_url
             } else {
-                explicit_base_url.or_else(|| Some("https://api.anthropic.com".to_string()))
+                explicit_base_url.or_else(|| Some(connection.default_base_url()))
             };
-            let mut headers = Vec::new();
-            if let Some(token) = parsed
-                .get("options")
-                .and_then(|value| value.get("apiKey"))
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                headers.push(("authorization".to_string(), format!("Bearer {token}")));
-            }
+            let headers = connection.auth_headers().unwrap_or_default();
             Ok((base_url, headers))
         }
         _ => Ok((None, Vec::new())),
@@ -709,45 +695,25 @@ pub async fn extract_stream_check_request<R: tauri::Runtime>(
             })
         }
         "opencode" => {
-            let npm = parsed
-                .get("npm")
-                .and_then(|value| value.as_str())
-                .unwrap_or("@ai-sdk/openai-compatible");
-            let options = parsed
-                .get("options")
-                .and_then(|value| value.as_object())
-                .cloned()
-                .unwrap_or_default();
-            let explicit_base_url = options
-                .get("baseURL")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
+            let connection = crate::opencode_profiles::connection::from_profile(&parsed)?;
+            let npm = connection.package.as_str();
+            let explicit_base_url = connection.base_url();
             let base_url = if use_full_url {
                 explicit_base_url.ok_or_else(|| "No OpenCode baseURL configured".to_string())?
             } else {
-                explicit_base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string())
+                explicit_base_url.unwrap_or_else(|| connection.default_base_url())
             };
-            let token = options
-                .get("apiKey")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| "No OpenCode API key configured".to_string())?;
-            let model = parsed
-                .get("models")
-                .and_then(|value| value.as_object())
-                .and_then(|value| value.keys().next().cloned())
-                .unwrap_or_else(|| "gpt-5.6-sol".to_string());
+            let headers = connection.auth_headers()?;
+            let model = if connection.model.is_empty() {
+                "gpt-5.6-sol"
+            } else {
+                &connection.model
+            };
 
-            if npm.contains("anthropic") {
-                Ok(StreamCheckRequestSpec {
+            let mut request = if npm.contains("anthropic") {
+                Ok::<_, String>(StreamCheckRequestSpec {
                     endpoint: build_claude_messages_endpoint(&base_url, use_full_url),
-                    headers: vec![
-                        ("x-api-key".to_string(), token.to_string()),
-                        ("anthropic-version".to_string(), "2023-06-01".to_string()),
-                    ],
+                    headers,
                     body: serde_json::json!({
                         "model": model,
                         "max_tokens": 16,
@@ -760,7 +726,7 @@ pub async fn extract_stream_check_request<R: tauri::Runtime>(
             } else if npm.contains("google") {
                 Ok(StreamCheckRequestSpec {
                     endpoint: build_gemini_stream_endpoint(&base_url, &model, use_full_url),
-                    headers: vec![("x-goog-api-key".to_string(), token.to_string())],
+                    headers,
                     body: serde_json::json!({
                         "contents": [
                             {
@@ -773,10 +739,10 @@ pub async fn extract_stream_check_request<R: tauri::Runtime>(
                         }
                     }),
                 })
-            } else if npm == "@ai-sdk/openai" {
+            } else if connection.responses() {
                 Ok(StreamCheckRequestSpec {
                     endpoint: join_api_endpoint(&base_url, "responses", use_full_url),
-                    headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                    headers,
                     body: serde_json::json!({
                         "model": model,
                         "stream": true,
@@ -787,7 +753,7 @@ pub async fn extract_stream_check_request<R: tauri::Runtime>(
             } else {
                 Ok(StreamCheckRequestSpec {
                     endpoint: join_api_endpoint(&base_url, "chat/completions", use_full_url),
-                    headers: vec![("authorization".to_string(), format!("Bearer {token}"))],
+                    headers,
                     body: serde_json::json!({
                         "model": model,
                         "stream": true,
@@ -797,7 +763,9 @@ pub async fn extract_stream_check_request<R: tauri::Runtime>(
                         ],
                     }),
                 })
-            }
+            }?;
+            connection.apply_probe_body(&mut request.body);
+            Ok(request)
         }
         _ => Err("Stream check is not supported for this profile".to_string()),
     }

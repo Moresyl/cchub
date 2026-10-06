@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/rules-of-hooks */
-import { memo, useCallback, type ChangeEvent, type ReactNode } from "react";
+import { memo, useCallback, useId, type ChangeEvent, type ReactNode } from "react";
 import { Save } from "lucide-react";
 
 import ProfileFragmentCard from "../../components/ProfileFragmentCard";
@@ -90,10 +90,12 @@ const SectionTitle = memo(function SectionTitle({ children }: { children: ReactN
   return <h3 style={SECTION_TITLE_STYLE}>{children}</h3>;
 });
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, htmlFor }: { label: string; children: ReactNode; htmlFor?: string }) {
   return (
     <div style={FIELD_STACK_STYLE}>
-      <label className="field-label">{label}</label>
+      <label className="field-label" htmlFor={htmlFor}>
+        {label}
+      </label>
       {children}
     </div>
   );
@@ -134,12 +136,15 @@ export const ProfileBasicInfoSection = memo(function ProfileBasicInfoSection({
   onNameChange,
   onToggleDraftTargetTool,
 }: ProfileBasicInfoSectionProps) {
+  const toolId = useId();
+  const nameId = useId();
   return (
     <div>
       <SectionTitle>{locale === "zh" ? "基本信息" : "Basic Info"}</SectionTitle>
       <div style={TWO_COLUMN_GRID_STYLE}>
-        <Field label={locale === "zh" ? "工具" : "Tool"}>
+        <Field label={locale === "zh" ? "工具" : "Tool"} htmlFor={toolId}>
           <SimpleSelect
+            id={toolId}
             value={draftTool}
             disabled={syncTargetsLocked}
             onValueChange={onToolChange}
@@ -147,8 +152,9 @@ export const ProfileBasicInfoSection = memo(function ProfileBasicInfoSection({
             options={tools.map((tool) => ({ value: tool.id, label: tool.name }))}
           />
         </Field>
-        <Field label={locale === "zh" ? "配置名称" : "Name"}>
+        <Field label={locale === "zh" ? "配置名称" : "Name"} htmlFor={nameId}>
           <TextInput
+            id={nameId}
             placeholder={locale === "zh" ? "例如：官方 API、中转服务" : "e.g. Official API, Proxy Service"}
             value={draftName}
             onChange={onNameChange}
@@ -420,7 +426,13 @@ export const ProfilePlainConfigSection = memo(function ProfilePlainConfigSection
     <div>
       <SectionTitle>{locale === "zh" ? "配置内容" : "Configuration"}</SectionTitle>
       <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-        {locale === "zh" ? "直接编辑完整配置内容。" : "Edit the full configuration directly."}
+        {draftTool === "opencode"
+          ? locale === "zh"
+            ? "此配置使用新版原生格式，直接编辑可保留模型变体与扩展字段。保存时，其他工具的配置内容保持原样。"
+            : "Edit the native configuration to retain model variants and extensions. Saving updates this profile and preserves other shared profiles."
+          : locale === "zh"
+            ? "直接编辑完整配置内容。"
+            : "Edit the full configuration directly."}
       </div>
       {draftLoading ? (
         <LoadingState />

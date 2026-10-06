@@ -150,7 +150,8 @@ export default function ProfileEditorView(props: ProfileEditorViewProps) {
         draftName={draftName}
         isStructured={props.isStructured}
         syncTargetsLocked={
-          !!editingProfile && !(props.draftTargetTools.length > 1 || editingProfile.source_type === "shared")
+          !!editingProfile &&
+          (!props.isStructured || !(props.draftTargetTools.length > 1 || editingProfile.source_type === "shared"))
         }
         draftTargetTools={props.draftTargetTools}
         structuredInstalledTools={props.structuredInstalledTools}

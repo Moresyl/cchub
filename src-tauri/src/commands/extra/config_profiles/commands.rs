@@ -474,3 +474,7 @@ pub fn parse_toml_assignment(content: &str, key: &str) -> Option<String> {
         }
     })
 }
+
+#[cfg(test)]
+#[path = "commands_native_tests.rs"]
+mod native_tests;

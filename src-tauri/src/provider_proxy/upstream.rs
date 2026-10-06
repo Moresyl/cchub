@@ -41,7 +41,8 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
     let cost_multiplier = extract_cost_multiplier(&parsed);
     let use_full_url = extract_use_full_url(&parsed);
     let transport_headers = extract_transport_headers(&parsed);
-    let (request_header_overrides, request_body_override) = extract_local_proxy_overrides(&parsed);
+    let (request_header_overrides, mut request_body_override) =
+        extract_local_proxy_overrides(&parsed);
     let mut managed_principal = None;
 
     let target = match tool_id {
@@ -413,48 +414,12 @@ pub(super) async fn extract_upstream_target<R: tauri::Runtime>(
             })
         }
         "opencode" => {
-            let npm = parsed
-                .get("npm")
-                .and_then(|value| value.as_str())
-                .unwrap_or("@ai-sdk/openai-compatible");
-            let options = parsed
-                .get("options")
-                .and_then(|value| value.as_object())
-                .cloned()
-                .unwrap_or_default();
-            let base_url = options
-                .get("baseURL")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    if npm.contains("anthropic") {
-                        "https://api.anthropic.com".to_string()
-                    } else if npm.contains("google") {
-                        default_base_url_for_gemini()
-                    } else {
-                        default_base_url_for_codex()
-                    }
-                });
-            let token = options
-                .get("apiKey")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    format!("Provider {profile_name} does not define an OpenCode API key")
-                })?;
-            let headers = if npm.contains("anthropic") {
-                vec![
-                    ("x-api-key".to_string(), token.to_string()),
-                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
-                ]
-            } else if npm.contains("google") {
-                vec![("x-goog-api-key".to_string(), token.to_string())]
-            } else {
-                vec![("authorization".to_string(), format!("Bearer {token}"))]
-            };
+            let connection = crate::opencode_profiles::connection::from_profile(&parsed)?;
+            request_body_override = connection.body_override(request_body_override.take());
+            let base_url = connection
+                .base_url()
+                .unwrap_or_else(|| connection.default_base_url());
+            let headers = connection.auth_headers()?;
             Ok(UpstreamTarget {
                 profile_id,
                 profile_name,

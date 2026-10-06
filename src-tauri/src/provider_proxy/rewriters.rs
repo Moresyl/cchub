@@ -250,13 +250,27 @@ pub(super) fn rewrite_hermes_snapshot(snapshot: &str, port: u16) -> Result<Strin
     serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
 }
 
+fn clear_native_auth_headers(value: &mut Value) {
+    if let Some(headers) = value.get_mut("headers").and_then(Value::as_object_mut) {
+        headers.retain(|name, _| {
+            !matches!(
+                name.to_ascii_lowercase().as_str(),
+                "authorization" | "x-api-key" | "x-goog-api-key"
+            )
+        });
+    }
+}
+
 pub(super) fn rewrite_opencode_snapshot(snapshot: &str, port: u16) -> Result<String, String> {
-    let mut parsed: Value = serde_json::from_str(snapshot).map_err(|e| e.to_string())?;
+    let mut parsed: Value =
+        serde_json::from_str(&crate::opencode_profiles::normalize_profile(snapshot)?)
+            .map_err(|e| e.to_string())?;
+    let native = crate::opencode_profiles::is_native_profile(&parsed);
     let obj = parsed
         .as_object_mut()
         .ok_or_else(|| "Invalid OpenCode snapshot".to_string())?;
     let options = obj
-        .entry("options")
+        .entry(if native { "settings" } else { "options" })
         .or_insert_with(|| Value::Object(serde_json::Map::new()))
         .as_object_mut()
         .ok_or_else(|| "OpenCode options must be an object".to_string())?;
@@ -269,6 +283,35 @@ pub(super) fn rewrite_opencode_snapshot(snapshot: &str, port: u16) -> Result<Str
         "apiKey".to_string(),
         Value::String(LOCAL_PROVIDER_PROXY_TOKEN.to_string()),
     );
+    if native {
+        options.remove("authToken");
+        options.remove("baseUrl");
+        clear_native_auth_headers(&mut parsed);
+        let obj = parsed.as_object_mut().unwrap();
+        // Model and variant overlays must not bypass the local endpoint.
+        if let Some(models) = obj.get_mut("models").and_then(Value::as_object_mut) {
+            for model in models.values_mut() {
+                clear_native_auth_headers(model);
+                if let Some(settings) = model.get_mut("settings").and_then(Value::as_object_mut) {
+                    for key in ["baseURL", "baseUrl", "apiKey", "authToken"] {
+                        settings.remove(key);
+                    }
+                }
+                if let Some(variants) = model.get_mut("variants").and_then(Value::as_array_mut) {
+                    for variant in variants {
+                        clear_native_auth_headers(variant);
+                        if let Some(settings) =
+                            variant.get_mut("settings").and_then(Value::as_object_mut)
+                        {
+                            for key in ["baseURL", "baseUrl", "apiKey", "authToken"] {
+                                settings.remove(key);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
 }
@@ -276,6 +319,37 @@ pub(super) fn rewrite_opencode_snapshot(snapshot: &str, port: u16) -> Result<Str
 #[cfg(test)]
 mod tests {
     use super::{rewrite_claude_snapshot, rewrite_grok_snapshot};
+
+    #[test]
+    fn native_opencode_takeover_survives_real_write_without_model_credentials_bypassing_proxy() {
+        let document = serde_json::json!({"providers":{"local":{"settings":{"baseURL":"https://provider.test","authToken":"provider-secret"},"headers":{"Authorization":"Bearer header-secret","x-custom":"keep"},"models":{"m":{"settings":{"apiKey":"model-secret","baseURL":"https://model.test"},"headers":{"x-api-key":"model-header-secret"},"variants":[{"id":"fast","settings":{"baseURL":"https://variant.test","apiKey":"variant-secret"},"headers":{"Authorization":"Bearer variant-header-secret"}}]}}}},"model":"local/m#fast","mcp":{"keep":{}}});
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        std::fs::write(&path, document.to_string()).unwrap();
+        let profile = crate::opencode_profiles::read_profile(&path).unwrap();
+        let rewritten = super::rewrite_opencode_snapshot(&profile, 4567).unwrap();
+        crate::opencode_profiles::apply_profile(&path, &rewritten).unwrap();
+        let stored = crate::opencode_profiles::read_profile(&path).unwrap();
+        for secret in [
+            "provider-secret",
+            "header-secret",
+            "model-secret",
+            "variant-secret",
+        ] {
+            assert!(!stored.contains(secret));
+        }
+        let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        let connection = crate::opencode_profiles::connection::from_profile(&stored).unwrap();
+        assert_eq!(
+            connection.base_url().unwrap(),
+            "http://127.0.0.1:4567/proxy/opencode"
+        );
+        assert_eq!(connection.text("apiKey").unwrap(), "cchub-local-proxy");
+        assert_eq!(stored["headers"]["x-custom"], "keep");
+        let document: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(document["mcp"], serde_json::json!({"keep":{}}));
+    }
 
     #[test]
     fn managed_oauth_takeover_uses_auth_token_and_clears_stale_api_key() {

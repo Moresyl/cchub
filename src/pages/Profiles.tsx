@@ -9,6 +9,7 @@ import {
   createDefaultStructuredFields,
   getPresetCategories,
   supportsStructuredConfig,
+  isNativeOpenCodeConfig,
   type StructuredDraftFields,
 } from "../lib/configProfiles";
 import { showToast } from "../components/Toast";
@@ -55,6 +56,7 @@ import {
 import { useModelDiscovery } from "./profiles/modelDiscovery";
 import { useProfileOrdering } from "./profiles/useProfileOrdering";
 import { modelAliasSaveError } from "./profiles/modelAliasValidation";
+import { buildSharedSavePayload } from "./profiles/sharedSave";
 import ProfilesConfirmDialogs from "./profiles/Dialogs";
 import ProfileEditorView from "./profiles/EditorView";
 import ProfilesListView from "./profiles/ListView";
@@ -83,6 +85,7 @@ export default function Profiles() {
   const [draftTool, setDraftTool] = useState("claude");
   const [draftTargetTools, setDraftTargetTools] = useState<string[]>(["claude"]);
   const [draftContent, setDraftContent] = useState("");
+  const [nativeOpenCode, setNativeOpenCode] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftFields, setDraftFieldsState] = useState<StructuredDraftFields>(() =>
     createDefaultStructuredFields("claude"),
@@ -199,6 +202,7 @@ export default function Profiles() {
   );
   const resetStructuredDraft = useCallback(
     (toolId: string) => {
+      setNativeOpenCode(false);
       const defaults = createDefaultStructuredFields(toolId);
       setDraftFields(defaults);
       setDraftContent(buildStructuredConfig(toolId, defaults));
@@ -214,6 +218,7 @@ export default function Profiles() {
         return;
       }
       setEditingProfile(null);
+      setNativeOpenCode(false);
       setDraftName("");
       setDraftTool(selectedTool);
       setDraftTargetTools([selectedTool]);
@@ -264,11 +269,13 @@ export default function Profiles() {
         setDraftFields,
         setDraftLoading,
         resetStructuredDraft,
+        setNativeOpenCode,
       });
     },
     [profiles, resetStructuredDraft, setDraftFields],
   );
   const closeModal = useCallback(() => {
+    setNativeOpenCode(false);
     performCloseModal({
       setShowCreateModal,
       setEditingProfile,
@@ -319,13 +326,19 @@ export default function Profiles() {
     try {
       if (
         supportsStructuredConfig(draftTool) &&
+        (!nativeOpenCode || editingProfile?.source_type === "shared") &&
         (draftTargetTools.length > 1 || editingProfile?.source_type === "shared")
       ) {
         const targetTools = draftTargetTools.filter((toolId) => supportsStructuredConfig(toolId));
-        const profilesPayload = targetTools.map((toolId) => ({
-          toolId,
-          configSnapshot: buildStructuredConfig(toolId, buildCurrentFields()),
-        }));
+        const profilesPayload = buildSharedSavePayload(
+          targetTools,
+          buildCurrentFields(),
+          draftTool,
+          draftContent,
+          editingProfile,
+          profiles,
+          nativeOpenCode,
+        );
         const { data } = await saveSharedConfigProfilesMutation.mutateAsync({
           name: draftName.trim(),
           profiles: profilesPayload,
@@ -366,6 +379,8 @@ export default function Profiles() {
     draftName,
     draftTargetTools,
     draftTool,
+    nativeOpenCode,
+    profiles,
     editingProfile,
     locale,
     localeText,
@@ -692,6 +707,7 @@ export default function Profiles() {
   }, [handleSaveFragment]);
   const handleDraftToolChange = useCallback(
     async (toolId: string) => {
+      setNativeOpenCode(false);
       setDraftTool(toolId);
       setNewTool(toolId);
       setFetchingModels(false);
@@ -750,7 +766,7 @@ export default function Profiles() {
     return <ProfilesLoadState error={loadError} localeText={localeText} onRetry={() => void load({ force: true })} />;
   }
   const isEditing = showCreateModal || !!editingProfile;
-  const isStructured = supportsStructuredConfig(draftTool);
+  const isStructured = supportsStructuredConfig(draftTool) && !(draftTool === "opencode" && nativeOpenCode);
   if (isEditing) {
     const editorProps = buildEditorViewProps({
       locale,
@@ -791,7 +807,10 @@ export default function Profiles() {
       handleFetchModels,
       draftContent,
       draftLoading,
-      setDraftContent,
+      setDraftContent: (value) => {
+        setDraftContent(value);
+        if (draftTool === "opencode" && isNativeOpenCodeConfig(value)) setNativeOpenCode(true);
+      },
     });
     return <ProfileEditorView {...editorProps} />;
   }

@@ -10,6 +10,7 @@ import {
   createDefaultStructuredFields,
   parseStructuredConfig,
   supportsStructuredConfig,
+  isNativeOpenCodeConfig,
   type StructuredDraftFields,
 } from "../../lib/configProfiles";
 
@@ -201,6 +202,7 @@ export interface OpenEditModalContext {
   setDraftFields: (v: StructuredDraftFields) => void;
   setDraftLoading: (v: boolean) => void;
   resetStructuredDraft: (toolId: string) => void;
+  setNativeOpenCode: (value: boolean) => void;
 }
 
 export function performOpenEditModal(ctx: OpenEditModalContext): void {
@@ -214,6 +216,8 @@ export function performOpenEditModal(ctx: OpenEditModalContext): void {
   ctx.setShowCreateModal(false);
   ctx.setDraftName(profile.name);
   ctx.setDraftTool(profile.tool_id);
+  const native = profile.tool_id === "opencode" && isNativeOpenCodeConfig(profile.config_snapshot);
+  ctx.setNativeOpenCode(native);
   ctx.setDraftTargetTools(sharedProfiles.map((item) => item.tool_id));
   ctx.setDraftContent(prettyJson(profile.config_snapshot));
   ctx.setShowApiKey(false);
@@ -221,10 +225,14 @@ export function performOpenEditModal(ctx: OpenEditModalContext): void {
   ctx.setFetchedModels([]);
   ctx.setFetchedModelDetails([]);
   ctx.setModelFetchError(null);
-  if (supportsStructuredConfig(profile.tool_id)) {
+  if (supportsStructuredConfig(profile.tool_id) && !native) {
     let merged = createDefaultStructuredFields(profile.tool_id);
     for (const item of otherProfiles) {
-      if (!supportsStructuredConfig(item.tool_id)) continue;
+      if (
+        !supportsStructuredConfig(item.tool_id) ||
+        (item.tool_id === "opencode" && isNativeOpenCodeConfig(item.config_snapshot))
+      )
+        continue;
       merged = mergeSharedDraftFields(
         merged,
         item.tool_id,
@@ -241,7 +249,7 @@ export function performOpenEditModal(ctx: OpenEditModalContext): void {
     ctx.setDraftFields(merged);
     ctx.setDraftContent(buildStructuredConfig(profile.tool_id, merged));
   } else {
-    ctx.resetStructuredDraft("claude");
+    ctx.setDraftFields(createDefaultStructuredFields(profile.tool_id));
   }
   ctx.setDraftLoading(false);
 }

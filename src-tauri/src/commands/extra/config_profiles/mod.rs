@@ -35,3 +35,6 @@ pub use prefs::*;
 pub use skill_storage::*;
 pub use stream::*;
 pub use token_usage::*;
+
+#[cfg(test)]
+mod native_stream_tests;

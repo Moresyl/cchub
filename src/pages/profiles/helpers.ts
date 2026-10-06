@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Monitor, Code, Sparkles, Globe, Cat, Terminal } from "lucide-react";
 import { createDefaultStructuredFields, findTomlValue } from "../../lib/configProfiles";
+import { openCodeSummary } from "../../lib/configProfiles/opencodeSummary";
 import type {
   CodexWireApi,
   OpenClawApiProtocol,
@@ -261,14 +262,7 @@ export function extractConfigSummary(
       };
     }
     if (toolId === "opencode") {
-      const options = (parsed.options || {}) as Record<string, string>;
-      const modelsObj = (parsed.models || {}) as Record<string, unknown>;
-      const firstModelId = Object.keys(modelsObj)[0];
-      return {
-        baseUrl: options.baseURL,
-        model: firstModelId,
-        iconUrl: metadata.iconUrl,
-      };
+      return openCodeSummary(parsed);
     }
   } catch (error) {
     console.debug("Failed to extract config profile summary", error);

@@ -213,12 +213,18 @@ fn config_credentials(tool_id: &str, snapshot: &str) -> Result<(String, String),
             text(&["baseUrl"]).unwrap_or_default(),
             text(&["apiKey"]).unwrap_or_default(),
         )),
-        "opencode" => Ok((
-            text(&["options", "baseURL"])
-                .or_else(|| text(&["options", "baseUrl"]))
-                .unwrap_or_default(),
-            text(&["options", "apiKey"]).unwrap_or_default(),
-        )),
+        "opencode" => {
+            let connection = crate::opencode_profiles::connection::from_profile(&value)?;
+            Ok((
+                connection
+                    .base_url()
+                    .unwrap_or_else(|| connection.default_base_url()),
+                connection
+                    .text("apiKey")
+                    .or_else(|| connection.text("authToken"))
+                    .unwrap_or_default(),
+            ))
+        }
         "hermes" => {
             let base_url = text(&["config", "model", "base_url"]).unwrap_or_default();
             let env_name = text(&["metadata", "hermesApiKeyEnv"]);

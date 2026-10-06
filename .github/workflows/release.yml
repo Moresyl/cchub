@@ -14,29 +14,33 @@ env:
     ## 更新内容 / Highlights
 
     ### 新增 / 更新
-    - 托管账户配额显示上次成功读取时间和有效的重置时间，支持失败后单独重试
-    - 统一中等与加粗字重为 500 / 600，大号控件高度统一为 36px
+    - OpenCode 同时兼容新版 providers 与旧版 provider，支持原生设置、数组模型变体和对象模型选择
+    - 原生配置通过语法高亮编辑器保留扩展字段；卡片显示选中模型、变体和对应连接地址
+    - 更新中英文原生配置说明和编辑器演示截图
 
     ### 变更与安全
-    - 同一登录账户的配额刷新失败时保留并标记上次结果；切换账户或重新登录后清除旧结果，避免混用
-    - 代理规范化超过 64 个字符的工具调用标识，保持调用与结果关联，并保留其他历史内容
-    - 本次不新增第三方配置预设，不更改默认深色主题设置
+    - 保存前校验原生字段，共享组包含无效配置时停止入库，避免部分成员被保存
+    - 连接检查、用量凭据与代理转发统一解析选中模型和变体的设置、请求头与参数
+    - 代理接管清除模型和变体的地址、认证覆盖，避免绕过本地端点
+    - 最小流式检查保留测试模型、提示词和输出上限，避免配置覆盖放大测试请求
 
     ### 问题修复与打磨
-    - 修复下拉框长名称撑宽窄窗口的问题，保持选项换行、键盘选择和关闭后的焦点恢复
-    - 统一复选框尺寸、圆角、选中、混合和禁用状态，修复全局样式覆盖组件焦点提示的问题
-    - 修复 Prompt 名称输入框的标签关联，辅助说明独立作为无障碍描述
-    - 补充控件、配额刷新、账户隔离和代理调用配对的回归测试
+    - 修复原生配置被旧版表单重建后丢失变体与扩展字段的问题
+    - 编辑原生共享配置时保留其他工具的配置内容，失败草稿可继续重试
+    - 保留供应商 ID 原值，修复裁剪 ID 后产生重复条目的问题
+    - 修复有效原生条目的优先级、无效条目回退及被遮蔽旧配置的写入提示
+    - 关联配置名称与工具选择的无障碍标签，锁定已保存原生配置的工具类型
+    - 补充文件往返、实际数据库保存、四协议 HTTP 流式检查、代理接管和编辑交互回归测试
 
     ### 安装
     - Windows 推荐 NSIS 安装包，也可使用 MSI；macOS 提供 Intel 和 Apple Silicon，Linux 提供 deb、rpm 和 AppImage。
     - 可从应用内检查更新，或下载下方对应平台安装包。
 
     ## English Summary
-    - Refines checkbox states, typography and narrow-window select layout.
-    - Retains clearly marked last successful account quota results on refresh failure, with retry and account isolation.
-    - Repairs oversized tool-call identifiers while preserving call/result pairing and unrelated history bytes.
-    - Corrects the Prompt name field's accessible label and expands regression coverage.
+    - Supports native OpenCode settings, model variants and object model selection alongside legacy profiles.
+    - Preserves extensions and other shared tools' configuration contents during editing, with retained drafts on failure.
+    - Resolves selected-model connection overlays consistently and prevents overrides from bypassing local proxy takeover.
+    - Corrects exact provider IDs and accessible editor labels; updates documentation, screenshots and regression coverage.
 
     ## 下载 / Download
 

@@ -1,5 +1,40 @@
 # 版本记录
 
+## 1.7.3
+
+### 新增 / 更新
+
+- OpenCode 配置同时兼容新版 `providers` 与旧版 `provider`，支持原生设置、模型数组变体和对象形式的模型选择。
+- 原生配置使用语法高亮编辑器，保留扩展字段；配置卡片显示选中模型、变体及对应连接地址。
+- 更新中英文原生配置说明与配置编辑器演示截图。
+
+### 变更与安全
+
+- 保存前校验原生字段；共享组包含无效配置时停止入库，避免只保存部分成员。
+- 连接检查、用量凭据和代理转发统一解析选中模型与变体的设置、请求头和请求参数。
+- 代理接管清除模型与变体的地址和认证覆盖，避免绕过本地端点；最小流式检查保持测试模型、提示词及输出上限。
+
+### 问题修复与打磨
+
+- 修复原生配置被旧版表单重建后丢失模型变体与扩展字段的问题。
+- 修复编辑原生共享配置时覆盖其他工具配置内容的问题，保存失败后继续保留草稿供重试。
+- 修复原生供应商 ID 被裁剪后生成重复条目的问题，保留原 ID。
+- 修复有效原生条目的优先级、无效条目回退及被遮蔽旧配置的写入提示。
+- 为配置名称和工具选择关联无障碍标签，锁定已保存原生配置的工具类型。
+- 补充文件往返、数据库保存、四种协议流式请求、代理接管及编辑器交互回归测试。
+
+### 安装
+
+- Windows 提供 NSIS 和 MSI；macOS 提供 Apple Silicon 和 Intel；Linux 提供 deb、rpm 和 AppImage。
+- 可从应用内检查更新，或从对应版本的 Release 页面下载安装包。
+
+### English summary
+
+- Supports native OpenCode provider settings, model variants and object-based model selection alongside legacy profiles.
+- Preserves native extensions and other shared tools' configuration contents during editing.
+- Resolves selected-model connection overlays consistently and prevents native overrides from bypassing local proxy takeover.
+- Corrects exact provider ID handling and accessible editor labels; updates documentation, screenshots and regression coverage.
+
 ## 1.7.2
 
 ### 新增 / 更新
